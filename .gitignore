@@ -37,3 +37,6 @@ test_*_data/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# WorkBuddy local tool state
+.workbuddy/
