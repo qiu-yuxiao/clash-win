@@ -33,6 +33,26 @@ target_include_directories(clashwin_util PUBLIC
 )
 target_link_libraries(clashwin_util PUBLIC yaml-cpp nlohmann_json shell32)
 
+# config 配置体系（T03：持久化层 + serde 兼容序列化 + Draft + 迁移）
+add_library(clashwin_config STATIC
+  src/config/yaml_serde.cpp
+  src/config/verge.cpp
+  src/config/clash.cpp
+  src/config/profiles.cpp
+  src/config/prfitem.cpp
+  src/config/migrate.cpp
+  src/config/window_state.cpp
+  src/config/proxy_head_state.cpp
+  src/config/unlock_cache.cpp
+  src/config/config.cpp
+)
+target_include_directories(clashwin_config PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(clashwin_config PUBLIC clashwin_util shcore ws2_32)
+target_compile_options(clashwin_config PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
+
 add_executable(clashwin WIN32
   src/main.cpp
   src/app/app.cpp
@@ -41,6 +61,7 @@ add_executable(clashwin WIN32
 
 target_link_libraries(clashwin PRIVATE
   clashwin_util               # util + vendored 三件套（PUBLIC 传递）
+  clashwin_config             # T03 配置体系
   d2d1 user32 gdi32 ws2_32    # D2D / 窗口 / Winsock
 )
 
@@ -52,7 +73,7 @@ target_link_options(clashwin PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/MANIFEST:NO>)
 
 add_clashwin_copy_resources(clashwin)
 
-# ---------- 单测（T02 util） ----------
+# ---------- 单测（T02 util + T03 config） ----------
 add_executable(clashwin_test
   tests/test_main.cpp
   tests/test_base64.cpp
@@ -64,6 +85,13 @@ add_executable(clashwin_test
   tests/test_json_utils.cpp
   tests/test_yaml_utils.cpp
   tests/test_debounce.cpp
+  tests/test_config_template.cpp
+  tests/test_config_clash.cpp
+  tests/test_config_migrate.cpp
+  tests/test_config_profiles.cpp
+  tests/test_config_draft.cpp
+  tests/test_config_window_state.cpp
+  tests/test_config_states.cpp
 )
-target_link_libraries(clashwin_test PRIVATE clashwin_util)
+target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
