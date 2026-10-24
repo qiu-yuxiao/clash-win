@@ -35,6 +35,12 @@ void AppConfig::Init(const std::filesystem::path& app_dir) {
 
     std::filesystem::create_directories(app_dir_);
     LoadVergeConfig();
+
+    // 外部控制器秘钥：首次初始化时生成 32 位十六进制随机秘钥并持久化
+    if (api_secret_.empty()) {
+        api_secret_ = GenerateRandomSecret();
+        SaveVergeConfig();
+    }
 }
 
 bool AppConfig::LoadVergeConfig() {
@@ -64,8 +70,10 @@ bool AppConfig::LoadVergeConfig() {
         else if (key == "enable_ipv6") enable_ipv6_ = (val == "true");
         else if (key == "enable_auto_launch") enable_auto_launch_ = (val == "true");
         else if (key == "enable_silent_start") enable_silent_start_ = (val == "true");
+        else if (key == "enable_allow_lan") enable_allow_lan_ = (val == "true");
         else if (key == "auto_close_connection") auto_close_connection_ = (val == "true");
         else if (key == "verge_mixed_port") verge_mixed_port_ = static_cast<uint16_t>(std::stoul(val));
+        else if (key == "api_secret") api_secret_ = val;
         else if (key == "proxy_host") proxy_host_ = val;
     }
     return true;

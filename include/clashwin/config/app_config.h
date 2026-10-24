@@ -56,8 +56,14 @@ public:
     [[nodiscard]] bool IsSilentStartEnabled() const { return enable_silent_start_; }
     void SetSilentStartEnabled(bool enabled) { enable_silent_start_ = enabled; SaveVergeConfig(); }
 
+    [[nodiscard]] bool IsAllowLanEnabled() const { return enable_allow_lan_; }
+    void SetAllowLanEnabled(bool enabled) { enable_allow_lan_ = enabled; SaveVergeConfig(); }
+
     [[nodiscard]] uint16_t GetMixedPort() const { return verge_mixed_port_; }
     void SetMixedPort(uint16_t port) { verge_mixed_port_ = port; SaveVergeConfig(); }
+
+    // 外部控制器 Bearer 秘钥（首次初始化时生成并持久化，写入内核 config 的 secret）
+    [[nodiscard]] const std::string& GetSecret() const { return api_secret_; }
 
     [[nodiscard]] const std::wstring& GetSystemProxyBypass() const { return system_proxy_bypass_; }
     void SetSystemProxyBypass(const std::wstring& bypass) { system_proxy_bypass_ = bypass; SaveVergeConfig(); }
@@ -82,8 +88,10 @@ private:
     bool enable_ipv6_{false};
     bool enable_auto_launch_{false};
     bool enable_silent_start_{false};
+    bool enable_allow_lan_{false};
     bool auto_close_connection_{true};
     uint16_t verge_mixed_port_{10801};
+    std::string api_secret_;
     std::string proxy_host_{"127.0.0.1"};
     std::wstring system_proxy_bypass_{network::kDefaultProxyBypass};
 
