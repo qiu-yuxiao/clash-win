@@ -1,0 +1,60 @@
+#pragma once
+// 配置目录体系（← utils/dirs.rs 全函数移植）
+// app_home_dir：便携模式 = <exe>\.config\io.github.clash-mini.clash-mini
+//              （便携标记 = <exe>\.config\PORTABLE 文件存在）；
+//              否则 %APPDATA%\io.github.clash-mini.clash-mini。
+// 调试/测试覆盖（绝不动真实 %APPDATA%）：
+//   CLASHWIN_HOME_OVERRIDE      → 直接作为 app_home_dir 返回值
+//   CLASHWIN_PORTABLE_OVERRIDE  → "1" 强制便携分支 / "0" 强制非便携
+#include <string>
+
+namespace clashwin::util::dirs {
+
+// ← dirs.rs APP_ID（dev 分支 .dev 后缀不移植：C++ 侧无 verge-dev feature）
+inline constexpr const wchar_t* kAppId = L"io.github.clash-mini.clash-mini";
+inline constexpr const wchar_t* kClashConfig = L"config.yaml";
+inline constexpr const wchar_t* kVergeConfig = L"verge.yaml";
+inline constexpr const wchar_t* kProfileYaml = L"profiles.yaml";
+
+// ← dirs.rs::init_portable_flag：探测 <exe>\.config\PORTABLE，进程内缓存一次
+void init_portable_flag();
+bool is_portable();
+
+// 当前 exe 所在目录（GetModuleFileNameW 的父目录）
+std::wstring exe_dir();
+
+// 纯函数（可测）：给定 exe 目录时的便携 home
+std::wstring portable_home_for(const std::wstring& exe_directory);
+
+// ← dirs.rs::app_home_dir（含环境变量覆盖，见文件头）
+std::wstring app_home_dir();
+
+// ← dirs.rs 全函数逐个对应
+std::wstring app_resources_dir();      // <exe>\resources
+std::wstring app_profiles_dir();       // <home>\profiles
+std::wstring app_icons_dir();          // <home>\icons
+std::wstring app_logs_dir();           // <home>\logs
+std::wstring app_latest_log();         // <home>\logs\latest.log
+std::wstring clash_path();             // <home>\config.yaml
+std::wstring verge_path();             // <home>\verge.yaml
+std::wstring profiles_path();          // <home>\profiles.yaml
+std::wstring service_path();           // <resources>\clash-verge-service.exe
+std::wstring clash_mini_path();        // <home>\clash-mini.yaml（运行时生成）
+std::wstring clash_mini_check_path();  // <home>\clash-mini-check.yaml（校验用）
+std::wstring window_state_path();      // <home>\window_state.json
+std::wstring proxy_head_state_path();  // <home>\proxy_head_state.json
+std::wstring cores_dir();              // <home>\cores（内核热升级区）
+std::wstring ruleset_dir();            // <home>\ruleset（gfwlist 等规则集，实机存在）
+std::wstring sidecar_core_path();      // <exe>\mini-mihomo.exe（sidecar 兜底）
+
+// 以下两个会创建目录（← dirs.rs::sidecar_log_dir/service_log_dir）
+std::wstring sidecar_log_dir();        // <home>\logs\sidecar
+std::wstring service_log_dir();        // <home>\logs\service
+
+// ← dirs.rs::clash_latest_log：Service→service_latest.log，其余→sidecar_latest.log
+std::wstring clash_latest_log();
+
+// ← dirs.rs::ipc_path
+std::wstring ipc_path();  // \\.\pipe\mini-mihomo
+
+}  // namespace clashwin::util::dirs

@@ -1,9 +1,9 @@
 # third_party vendored 依赖注册（三项均为源码落库，无 vcpkg）
 
-# 1) nlohmann/json：单头接口库
+# 1) nlohmann/json：单头接口库（third_party/nlohmann/json.hpp → #include <nlohmann/json.hpp>）
 add_library(nlohmann_json INTERFACE)
 target_include_directories(nlohmann_json INTERFACE
-  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/nlohmann)
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 # 2) yaml-cpp：静态库（关闭测试/工具/安装）
 set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
