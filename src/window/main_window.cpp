@@ -74,18 +74,52 @@ bool MainWindow::Create(HINSTANCE hInstance, int nCmdShow) {
 
     RegisterClassExW(&wc);
 
-    // 3. 几何尺寸与位置读取 (严格对齐 Clash Mini 权威口径)
+    // 3. 几何尺寸与位置读取 (严格对齐 Clash Mini 权威口径与多屏防御)
     clashwin::WindowGeometry geom{};
     bool hasSavedGeom = clashwin::config::AppConfig::Instance().LoadWindowState(geom);
 
-    int initW = hasSavedGeom ? static_cast<int>(geom.width) : static_cast<int>(clashwin::geometry::kDefaultWidth);
-    int initH = hasSavedGeom ? static_cast<int>(geom.height) : static_cast<int>(clashwin::geometry::kDefaultHeight);
+    int initW = static_cast<int>(clashwin::geometry::kDefaultWidth);   // 默认严格 271px
+    int initH = static_cast<int>(clashwin::geometry::kDefaultHeight);  // 默认严格 680px
+    if (hasSavedGeom) {
+        initW = static_cast<int>(geom.width);
+        // 如果历史尺寸等于或超出最大高度 860，重置恢复为标准 680px 高度
+        if (geom.height > 126.0 && geom.height < 850.0) {
+            initH = static_cast<int>(geom.height);
+        }
+    }
+
+    // 钳制至权威合法范围 (271..640, 126..860)
+    initW = std::clamp(initW, static_cast<int>(clashwin::geometry::kMinimalWidth), static_cast<int>(clashwin::geometry::kMaxWidth));
+    initH = std::clamp(initH, static_cast<int>(clashwin::geometry::kMinimalHeight), static_cast<int>(clashwin::geometry::kMaxHeight));
+
+    // 获取主显示器工作区 (防御多屏拔插与坐标漂移越界)
+    RECT workArea{};
+    SystemParametersInfoW(SPI_GETWORKAREA, 0, &workArea, 0);
+    int screenW = workArea.right - workArea.left;
+    int screenH = workArea.bottom - workArea.top;
+    (void)screenW;
+
     int initX = (hasSavedGeom && geom.x.has_value()) ? static_cast<int>(*geom.x) : CW_USEDEFAULT;
     int initY = (hasSavedGeom && geom.y.has_value()) ? static_cast<int>(*geom.y) : CW_USEDEFAULT;
 
-    // 钳制至合法范围 (271..640, 126..860)
-    initW = std::clamp(initW, static_cast<int>(clashwin::geometry::kMinimalWidth), static_cast<int>(clashwin::geometry::kMaxWidth));
-    initH = std::clamp(initH, static_cast<int>(clashwin::geometry::kMinimalHeight), static_cast<int>(clashwin::geometry::kMaxHeight));
+    // 如果未保存位置或超出屏幕工作区，停靠在屏幕右侧 (Clash Mini 经典布局习惯)
+    if (initX == CW_USEDEFAULT || initX < workArea.left || initX + initW > workArea.right + 20) {
+        initX = workArea.right - initW - 24;
+    }
+    if (initY == CW_USEDEFAULT || initY < workArea.top || initY + initH > workArea.bottom + 20) {
+        initY = workArea.top + std::max(20, (screenH - initH) / 2);
+    }
+
+    m_dpiScale = 1.0f;
+    HDC hdcScreen = GetDC(nullptr);
+    if (hdcScreen) {
+        int dpiX = GetDeviceCaps(hdcScreen, LOGPIXELSX);
+        if (dpiX > 0) m_dpiScale = static_cast<float>(dpiX) / 96.0f;
+        ReleaseDC(nullptr, hdcScreen);
+    }
+
+    int physW = static_cast<int>(initW * m_dpiScale + 0.5f);
+    int physH = static_cast<int>(initH * m_dpiScale + 0.5f);
 
     m_hwnd = CreateWindowExW(
         WS_EX_APPWINDOW,
@@ -93,16 +127,16 @@ bool MainWindow::Create(HINSTANCE hInstance, int nCmdShow) {
         L"Clash Mini Ver.3.0.10",
         WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
         initX, initY,
-        initW, initH,
+        physW, physH,
         nullptr, nullptr, hInstance, this
     );
 
     if (!m_hwnd) return false;
 
     m_dpiScale = GetDpiScale();
-    int physW = static_cast<int>(initW * m_dpiScale);
-    int physH = static_cast<int>(initH * m_dpiScale);
-    SetWindowPos(m_hwnd, nullptr, 0, 0, physW, physH, SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED);
+    physW = static_cast<int>(initW * m_dpiScale + 0.5f);
+    physH = static_cast<int>(initH * m_dpiScale + 0.5f);
+    SetWindowPos(m_hwnd, nullptr, initX, initY, physW, physH, SWP_NOZORDER | SWP_FRAMECHANGED);
 
     m_renderer = std::make_unique<D2DRenderer>();
     if (!m_renderer->Initialize(m_hwnd)) {
@@ -111,6 +145,12 @@ bool MainWindow::Create(HINSTANCE hInstance, int nCmdShow) {
 
     InitTrayIcon();
     ResetIdleTimer();
+
+    m_trafficHistory.clear();
+    for (int i = 0; i < 30; ++i) {
+        m_trafficHistory.push_back({0, 0});
+    }
+    SetTimer(m_hwnd, TRAFFIC_TIMER_ID, TRAFFIC_POLL_INTERVAL_MS, nullptr);
 
     StartCoreIfConfigReady();
 
@@ -835,8 +875,34 @@ void MainWindow::OnLButtonUp(int, int) {
     }
 }
 
-void MainWindow::OnMouseMove(int x, int) {
+void MainWindow::OnMouseMove(int x, int y) {
     float fx = static_cast<float>(x);
+    float fy = static_cast<float>(y);
+
+    int newHover = 0;
+    if (fx >= m_closeBtnRect.left && fx <= m_closeBtnRect.right &&
+        fy >= m_closeBtnRect.top && fy <= m_closeBtnRect.bottom) {
+        newHover = 3;
+    } else if (fx >= m_maximizeBtnRect.left && fx <= m_maximizeBtnRect.right &&
+               fy >= m_maximizeBtnRect.top && fy <= m_maximizeBtnRect.bottom) {
+        newHover = 2;
+    } else if (fx >= m_minimizeBtnRect.left && fx <= m_minimizeBtnRect.right &&
+               fy >= m_minimizeBtnRect.top && fy <= m_minimizeBtnRect.bottom) {
+        newHover = 1;
+    }
+
+    if (newHover != m_hoveredWindowBtn) {
+        m_hoveredWindowBtn = newHover;
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+
+        TRACKMOUSEEVENT tme;
+        tme.cbSize = sizeof(TRACKMOUSEEVENT);
+        tme.dwFlags = TME_LEAVE;
+        tme.hwndTrack = m_hwnd;
+        tme.dwHoverTime = HOVER_DEFAULT;
+        TrackMouseEvent(&tme);
+    }
+
     if (m_isDraggingSlider1) {
         float trackX = m_slider1Rect.left + 75.0f;
         float trackW = (m_slider1Rect.right - m_slider1Rect.left) - 75.0f - 35.0f;
@@ -1053,8 +1119,34 @@ LRESULT MainWindow::HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) {
         } else if (wParam == CONN_TIMER_ID) {
             RefreshConnections();
             return 0;
+        } else if (wParam == TRAFFIC_TIMER_ID) {
+            uint64_t upSpd = clashwin::core::ConnectionManager::Instance().GetUploadSpeed();
+            uint64_t downSpd = clashwin::core::ConnectionManager::Instance().GetDownloadSpeed();
+            uint64_t upTot = clashwin::core::ConnectionManager::Instance().GetUploadTotal();
+            uint64_t downTot = clashwin::core::ConnectionManager::Instance().GetDownloadTotal();
+
+            m_upSpeed = upSpd;
+            m_downSpeed = downSpd;
+            m_upTotal = upTot;
+            m_downTotal = downTot;
+
+            if (m_trafficHistory.size() >= 30) {
+                m_trafficHistory.pop_front();
+            }
+            m_trafficHistory.push_back({ upSpd, downSpd });
+
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return 0;
         }
         break;
+    }
+
+    case WM_MOUSELEAVE: {
+        if (m_hoveredWindowBtn != 0) {
+            m_hoveredWindowBtn = 0;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+        }
+        return 0;
     }
 
     case WM_RBUTTONUP: {
@@ -1173,18 +1265,20 @@ void MainWindow::OnPaint() {
     float marginX = 8.0f * m_dpiScale;
     float contentW = width - marginX * 2;
 
-    // 2. 标题栏 (30px 对齐 Clash Mini `the_titlebar`)
+    // 2. 标题栏 (30px 对齐 Clash Mini `the_titlebar`，原汁原味纯平顶栏)
     if (!m_isStealthMode) {
         float titleH = 30.0f * m_dpiScale;
-        m_renderer->Draw3DCard(0, 0, width, titleH, theme.header_bg);
+        // 标题栏纯平底色与底部分割线
+        m_renderer->FillRect(0, 0, width, titleH, theme.header_bg);
+        m_renderer->DrawLine(0, titleH - 1.0f, width, titleH - 1.0f, theme.card_shadow);
 
         // 应用图标 (16x16)
-        m_renderer->DrawTextSimple(L"🐱", 8.0f * m_dpiScale, 0, 18.0f * m_dpiScale, titleH, theme.accent, 11.5f, false, DWRITE_TEXT_ALIGNMENT_CENTER);
+        m_renderer->DrawTextSimple(L"🐱", 10.0f * m_dpiScale, 0, 18.0f * m_dpiScale, titleH, theme.accent, 11.5f, false, DWRITE_TEXT_ALIGNMENT_CENTER);
 
         // 应用标题: "Clash Mini Ver.3.0.10"
-        m_renderer->DrawTextSimple(L"Clash Mini Ver.3.0.10", 28.0f * m_dpiScale, 0, 150.0f * m_dpiScale, titleH, theme.text_primary, 11.0f, true);
+        m_renderer->DrawTextSimple(L"Clash Mini Ver.3.0.10", 30.0f * m_dpiScale, 0, 150.0f * m_dpiScale, titleH, theme.text_primary, 11.0f, true);
 
-        // 右侧 WindowControls (最小化 —, 最大化 □/❐, 关闭 ✕) - 每个 28x28
+        // 右侧 WindowControls (最小化 —, 最大化 □/❐, 关闭 ✕) - 每个 28x28，纯平圆角微光/红底 hover
         float btnW = 28.0f * m_dpiScale;
         float btnH = 28.0f * m_dpiScale;
         float btnY = 1.0f * m_dpiScale;
@@ -1192,19 +1286,19 @@ void MainWindow::OnPaint() {
         // 最小化
         float minX = width - (btnW * 3 + 6.0f * m_dpiScale);
         m_minimizeBtnRect = D2D1::RectF(minX, btnY, minX + btnW, btnY + btnH);
-        m_renderer->Draw3DButton(minX, btnY, btnW, btnH, L"—");
+        m_renderer->DrawWindowCaptionButton(minX, btnY, btnW, btnH, L"—", 1, (m_hoveredWindowBtn == 1));
 
         // 最大化 / 还原
         float maxX = width - (btnW * 2 + 4.0f * m_dpiScale);
         m_maximizeBtnRect = D2D1::RectF(maxX, btnY, maxX + btnW, btnY + btnH);
-        m_renderer->Draw3DButton(maxX, btnY, btnW, btnH, m_isLargeMode ? L"❐" : L"□");
+        m_renderer->DrawWindowCaptionButton(maxX, btnY, btnW, btnH, m_isLargeMode ? L"❐" : L"□", 2, (m_hoveredWindowBtn == 2));
 
-        // 关闭 (点击隐藏至托盘)
+        // 关闭 (点击隐藏至托盘，悬浮高亮红底白叉)
         float closeX = width - (btnW + 2.0f * m_dpiScale);
         m_closeBtnRect = D2D1::RectF(closeX, btnY, closeX + btnW, btnY + btnH);
-        m_renderer->Draw3DButton(closeX, btnY, btnW, btnH, L"✕");
+        m_renderer->DrawWindowCaptionButton(closeX, btnY, btnW, btnH, L"✕", 3, (m_hoveredWindowBtn == 3));
 
-        yOffset = titleH + 2.0f * m_dpiScale;
+        yOffset = titleH;
     }
 
     // 微缩科学流量计模式（高度 <= 126px）
@@ -1212,8 +1306,9 @@ void MainWindow::OnPaint() {
     if (isMiniStatus) {
         float bottomBarH = height - yOffset;
         if (bottomBarH > 0) {
-            m_renderer->DrawTrafficBottomBar(0, yOffset, width, bottomBarH,
-                                             m_upSpeed, m_downSpeed, m_upTotal, m_downTotal);
+            m_renderer->DrawTrafficDashboard(0, yOffset, width, bottomBarH,
+                                             m_upSpeed, m_downSpeed, m_upTotal, m_downTotal,
+                                             m_trafficHistory, true);
         }
         m_renderer->EndDraw();
         return;
@@ -1226,18 +1321,18 @@ void MainWindow::OnPaint() {
     if (!m_isDrawerOpen) {
         // 右侧设置按钮 ⚙ (28x28)
         float drawerBtnX = width - marginX - actBtnW;
-        m_drawerToggleBtnRect = D2D1::RectF(drawerBtnX, yOffset, drawerBtnX + actBtnW, yOffset + actBtnH);
-        m_renderer->Draw3DButton(drawerBtnX, yOffset, actBtnW, actBtnH, L"⚙", false, false, false);
+        m_drawerToggleBtnRect = D2D1::RectF(drawerBtnX, yOffset + 1.0f * m_dpiScale, drawerBtnX + actBtnW, yOffset + 1.0f * m_dpiScale + actBtnH);
+        m_renderer->Draw3DButton(drawerBtnX, yOffset + 1.0f * m_dpiScale, actBtnW, actBtnH, L"⚙", false, false, false);
 
         // 右侧置顶按钮 📌 (28x28)
         float pinBtnX = drawerBtnX - actBtnW - 4.0f * m_dpiScale;
-        m_pinBtnRect = D2D1::RectF(pinBtnX, yOffset, pinBtnX + actBtnW, yOffset + actBtnH);
-        m_renderer->Draw3DButton(pinBtnX, yOffset, actBtnW, actBtnH, L"📌", false, false, m_isAlwaysOnTop);
+        m_pinBtnRect = D2D1::RectF(pinBtnX, yOffset + 1.0f * m_dpiScale, pinBtnX + actBtnW, yOffset + 1.0f * m_dpiScale + actBtnH);
+        m_renderer->Draw3DButton(pinBtnX, yOffset + 1.0f * m_dpiScale, actBtnW, actBtnH, L"📌", false, false, m_isAlwaysOnTop);
 
         // 左侧活跃节点卡片 (占据剩余全部宽度)
-        float cardW = (width - marginX * 2) - (actBtnW * 2 + 8.0f * m_dpiScale);
-        m_activeCardRect = D2D1::RectF(marginX, yOffset, marginX + cardW, yOffset + actBtnH);
-        m_activeDelayChipRect = D2D1::RectF(marginX + cardW - 55.0f * m_dpiScale, yOffset, marginX + cardW, yOffset + actBtnH);
+        float cardW = pinBtnX - marginX - 4.0f * m_dpiScale;
+        m_activeCardRect = D2D1::RectF(marginX, yOffset + 1.0f * m_dpiScale, marginX + cardW, yOffset + 1.0f * m_dpiScale + actBtnH);
+        m_activeDelayChipRect = D2D1::RectF(marginX + cardW - 55.0f * m_dpiScale, yOffset + 1.0f * m_dpiScale, marginX + cardW, yOffset + 1.0f * m_dpiScale + actBtnH);
 
         std::string currentProxy = clashwin::config::ProfileManager::Instance().GetCurrentActiveNode();
         std::wstring currentProxyW(currentProxy.begin(), currentProxy.end());
@@ -1254,16 +1349,16 @@ void MainWindow::OnPaint() {
             }
         }
 
-        m_renderer->DrawActiveNodeCard(marginX, yOffset, cardW, actBtnH,
+        m_renderer->DrawActiveNodeCard(marginX, yOffset + 1.0f * m_dpiScale, cardW, actBtnH,
                                        protoW, currentProxyW, 42, L"", m_isTestingDelay);
     } else {
         // 抽屉展开时，右上角单独渲染关闭设置按钮 ✕ (28x28 醒目高亮)
         float closeBtnX = width - marginX - actBtnW;
-        m_drawerCloseBtnRect = D2D1::RectF(closeBtnX, yOffset, closeBtnX + actBtnW, yOffset + actBtnH);
-        m_renderer->Draw3DButton(closeBtnX, yOffset, actBtnW, actBtnH, L"✕", false, false, true);
+        m_drawerCloseBtnRect = D2D1::RectF(closeBtnX, yOffset + 1.0f * m_dpiScale, closeBtnX + actBtnW, yOffset + 1.0f * m_dpiScale + actBtnH);
+        m_renderer->Draw3DButton(closeBtnX, yOffset + 1.0f * m_dpiScale, actBtnW, actBtnH, L"✕", false, false, true);
     }
 
-    yOffset += actBtnH + 4.0f * m_dpiScale;
+    yOffset += 30.0f * m_dpiScale;
 
     // 4. 设置抽屉面板 (若展开)
     if (m_isDrawerOpen) {
@@ -1474,14 +1569,17 @@ void MainWindow::OnPaint() {
         curY += card4H + 6.0f * m_dpiScale;
         yOffset = curY;
     } else {
-        // 5. ProxyHead 工具栏 (⚡ 测速 + ↕ 排序 + 🔍 搜索过滤框)
-        float headH = 24.0f * m_dpiScale;
-        m_headBoltBtnRect = D2D1::RectF(marginX, yOffset, marginX + headH, yOffset + headH);
-        m_headSortBtnRect = D2D1::RectF(marginX + headH + 4.0f * m_dpiScale, yOffset, marginX + (headH + 4.0f * m_dpiScale) * 2, yOffset + headH);
-        m_headSearchBoxRect = D2D1::RectF(marginX + (headH + 4.0f * m_dpiScale) * 2, yOffset, marginX + contentW, yOffset + headH);
+        // 5. ProxyHead 工具栏 (⚡ 测速 + ↕ 排序 + 🔍 搜索过滤框，全宽满铺，左右 12px 内边距)
+        float headH = 26.0f * m_dpiScale;
+        float btnSize = 24.0f * m_dpiScale;
+        float btnY = yOffset + (headH - btnSize) / 2.0f;
+        float padX = 12.0f * m_dpiScale;
+        m_headBoltBtnRect = D2D1::RectF(padX, btnY, padX + btnSize, btnY + btnSize);
+        m_headSortBtnRect = D2D1::RectF(padX + btnSize + 4.0f * m_dpiScale, btnY, padX + (btnSize + 4.0f * m_dpiScale) * 2, btnY + btnSize);
+        m_headSearchBoxRect = D2D1::RectF(padX + (btnSize + 4.0f * m_dpiScale) * 2, btnY, width - padX, btnY + btnSize);
 
-        m_renderer->DrawProxyHead(marginX, yOffset, contentW, headH, m_sortType, m_searchText, m_isTestingDelay, m_searchFocused);
-        yOffset += headH + 4.0f * m_dpiScale;
+        m_renderer->DrawProxyHead(0, yOffset, width, headH, m_sortType, m_searchText, m_isTestingDelay, m_searchFocused);
+        yOffset += headH;
 
         // 6. 节点列表过滤与排序 (对齐 use-filter-sort.ts)
         const auto& allNodes = clashwin::config::ProfileManager::Instance().GetNodes();
@@ -1509,20 +1607,20 @@ void MainWindow::OnPaint() {
             });
         }
 
-        float bottomBarH = 26.0f * m_dpiScale;
-        float availableListH = height - yOffset - bottomBarH - 2.0f * m_dpiScale;
+        float trafficPaneH = (logicalW > NARROW_BREAKPOINT) ? (TRAFFIC_PANE_HEIGHT_WIDE * m_dpiScale) : (TRAFFIC_PANE_HEIGHT_MINIMAL * m_dpiScale);
+        float availableListH = height - yOffset - trafficPaneH;
         m_nodeItemRects.clear();
 
         // 7. 节点列表渲染 (空状态 vs 实体节点列表)
         if (filteredNodes.empty()) {
             float emptyH = 90.0f * m_dpiScale;
-            m_renderer->Draw3DCard(marginX, yOffset, contentW, emptyH, theme.card_bg);
-            m_renderer->DrawTextSimple(L"🌐 暂无可用节点", marginX, yOffset + 12.0f * m_dpiScale, contentW, 20.0f * m_dpiScale, theme.text_secondary, 11.5f, false, DWRITE_TEXT_ALIGNMENT_CENTER);
+            m_renderer->Draw3DCard(marginX, yOffset + 8.0f * m_dpiScale, contentW, emptyH, theme.card_bg);
+            m_renderer->DrawTextSimple(L"🌐 暂无可用节点", marginX, yOffset + 20.0f * m_dpiScale, contentW, 20.0f * m_dpiScale, theme.text_secondary, 11.5f, false, DWRITE_TEXT_ALIGNMENT_CENTER);
             
             float addBtnW = contentW - 40.0f * m_dpiScale;
             float addBtnH = 28.0f * m_dpiScale;
             float addBtnX = marginX + 20.0f * m_dpiScale;
-            float addBtnY = yOffset + 42.0f * m_dpiScale;
+            float addBtnY = yOffset + 50.0f * m_dpiScale;
             m_emptyListAddBtnRect = D2D1::RectF(addBtnX, addBtnY, addBtnX + addBtnW, addBtnY + addBtnH);
             m_renderer->Draw3DButton(addBtnX, addBtnY, addBtnW, addBtnH, L"⚙ 打开设置导入订阅", false, false, true);
         } else {
@@ -1567,10 +1665,10 @@ void MainWindow::OnPaint() {
                     rightY += rowH + 2.0f * m_dpiScale;
                 }
             } else {
-                // 窄窗单列纵向 3 列网格排版 (55px 协议 | flex 1 节点名 | 65px 延迟)
+                // 窄窗单列纵向 3 列网格排版 (55px 协议 | flex 1 节点名 | 65px 延迟)，全宽满铺无边缘空白
                 float itemH = 24.0f * m_dpiScale;
                 for (size_t i = 0; i < filteredNodes.size(); ++i) {
-                    if (yOffset + itemH > height - bottomBarH - 2.0f * m_dpiScale) break;
+                    if (yOffset + itemH > height - trafficPaneH) break;
 
                     bool isSelected = (filteredNodes[i].name == currentProxy);
                     std::wstring nodeNameW(filteredNodes[i].name.begin(), filteredNodes[i].name.end());
@@ -1578,18 +1676,19 @@ void MainWindow::OnPaint() {
                     if (nodeTypeW.empty()) nodeTypeW = L"VMESS";
                     for (auto& c : nodeTypeW) c = towupper(c);
 
-                    m_renderer->DrawProxyItem3Col(marginX, yOffset, contentW, itemH,
+                    m_renderer->DrawProxyItem3Col(0, yOffset, width, itemH,
                                                   nodeTypeW, nodeNameW, 42, isSelected, (i % 2 != 0), false);
 
-                    m_nodeItemRects.push_back({D2D1::RectF(marginX, yOffset, marginX + contentW, yOffset + itemH), filteredNodes[i].name});
+                    m_nodeItemRects.push_back({D2D1::RectF(0, yOffset, width, yOffset + itemH), filteredNodes[i].name});
                     yOffset += itemH;
                 }
             }
         }
 
-        // 8. 底部实时流量指示栏 (对齐 MiniTrafficPanel)
-        m_renderer->DrawTrafficBottomBar(0, height - bottomBarH, width, bottomBarH,
-                                         m_upSpeed, m_downSpeed, m_upTotal, m_downTotal);
+        // 8. 底部实时流量波形图仪表盘 (对齐 MiniTrafficPanel 100px / 135px)
+        m_renderer->DrawTrafficDashboard(0, height - trafficPaneH, width, trafficPaneH,
+                                         m_upSpeed, m_downSpeed, m_upTotal, m_downTotal,
+                                         m_trafficHistory, (logicalW <= NARROW_BREAKPOINT));
     }
 
     m_renderer->EndDraw();

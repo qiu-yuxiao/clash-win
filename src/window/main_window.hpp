@@ -44,10 +44,14 @@ public:
     static constexpr int MIN_WIDTH = 271;          // 逻辑像素 (271x1.5=406.5px)
     static constexpr int MIN_HEIGHT = 126;         // 逻辑像素 (126x1.5=189px)
     static constexpr int NARROW_BREAKPOINT = 285;  // 双宽窄排版断点 (285px)
+    static constexpr float TRAFFIC_PANE_HEIGHT_MINIMAL = 100.0f; // 窄窗常驻流量面板高度 (100px)
+    static constexpr float TRAFFIC_PANE_HEIGHT_WIDE = 135.0f;    // 宽窗常驻流量面板高度 (135px)
     static constexpr UINT_PTR IDLE_TIMER_ID = 1001;
     static constexpr UINT IDLE_TIMEOUT_MS = 10000; // 10秒空闲自续期定时器
     static constexpr UINT_PTR CONN_TIMER_ID = 1002;
     static constexpr UINT CONN_POLL_INTERVAL_MS = 1500; // 连接面板轮询周期
+    static constexpr UINT_PTR TRAFFIC_TIMER_ID = 1003;
+    static constexpr UINT TRAFFIC_POLL_INTERVAL_MS = 1000; // 流量波形图 1s 采样周期
     static constexpr UINT WM_TRAYICON = WM_USER + 200;
 
     void OnWakeupVisible();
@@ -121,11 +125,13 @@ private:
     bool m_searchFocused = false;
     bool m_isTestingDelay = false;
 
-    // 实时流量统计
+    // 实时流量统计与 30 采样历史 (波形图)
     uint64_t m_upSpeed = 0;
     uint64_t m_downSpeed = 0;
     uint64_t m_upTotal = 0;
     uint64_t m_downTotal = 0;
+    std::deque<TrafficPoint> m_trafficHistory;
+    int m_hoveredWindowBtn = 0; // 0: none, 1: min, 2: max, 3: close
 
     // 状态提示与导入状态
     std::wstring m_statusMessage;

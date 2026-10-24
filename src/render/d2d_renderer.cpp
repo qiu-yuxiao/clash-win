@@ -32,6 +32,21 @@ bool D2DRenderer::Initialize(HWND hwnd) {
     return SUCCEEDED(CreateDeviceResources());
 }
 
+bool D2DRenderer::InitializeWithRenderTarget(ComPtr<ID2D1RenderTarget> target) {
+    if (!target) return false;
+    m_renderTarget = target;
+    m_renderTarget->GetFactory(m_d2dFactory.GetAddressOf());
+
+    HRESULT hr = DWriteCreateFactory(
+        DWRITE_FACTORY_TYPE_SHARED,
+        __uuidof(IDWriteFactory),
+        reinterpret_cast<IUnknown**>(m_dwriteFactory.GetAddressOf())
+    );
+    if (FAILED(hr)) return false;
+
+    return SUCCEEDED(m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), &m_solidBrush));
+}
+
 HRESULT D2DRenderer::CreateDeviceResources() {
     if (m_renderTarget) return S_OK;
 
@@ -39,16 +54,18 @@ HRESULT D2DRenderer::CreateDeviceResources() {
     GetClientRect(m_hwnd, &rc);
     D2D1_SIZE_U size = D2D1::SizeU(rc.right - rc.left, rc.bottom - rc.top);
 
+    ComPtr<ID2D1HwndRenderTarget> hwndRt;
     HRESULT hr = m_d2dFactory->CreateHwndRenderTarget(
         D2D1::RenderTargetProperties(
             D2D1_RENDER_TARGET_TYPE_DEFAULT,
             D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
         ),
         D2D1::HwndRenderTargetProperties(m_hwnd, size),
-        m_renderTarget.GetAddressOf()
+        hwndRt.GetAddressOf()
     );
 
     if (SUCCEEDED(hr)) {
+        m_renderTarget = hwndRt;
         hr = m_renderTarget->CreateSolidColorBrush(
             D2D1::ColorF(D2D1::ColorF::White),
             m_solidBrush.GetAddressOf()
@@ -65,7 +82,10 @@ void D2DRenderer::DiscardDeviceResources() {
 
 void D2DRenderer::Resize(UINT width, UINT height) {
     if (m_renderTarget) {
-        m_renderTarget->Resize(D2D1::SizeU(width, height));
+        ComPtr<ID2D1HwndRenderTarget> hwndRt;
+        if (SUCCEEDED(m_renderTarget.As(&hwndRt))) {
+            hwndRt->Resize(D2D1::SizeU(width, height));
+        }
     }
 }
 
@@ -91,6 +111,18 @@ void D2DRenderer::Clear(D2D1_COLOR_F color) {
     }
 }
 
+void D2DRenderer::FillRect(float x, float y, float w, float h, D2D1_COLOR_F color) {
+    if (!m_renderTarget) return;
+    m_solidBrush->SetColor(color);
+    m_renderTarget->FillRectangle(D2D1::RectF(x, y, x + w, y + h), m_solidBrush.Get());
+}
+
+void D2DRenderer::DrawLine(float x1, float y1, float x2, float y2, D2D1_COLOR_F color, float strokeWidth) {
+    if (!m_renderTarget) return;
+    m_solidBrush->SetColor(color);
+    m_renderTarget->DrawLine(D2D1::Point2F(x1, y1), D2D1::Point2F(x2, y2), m_solidBrush.Get(), strokeWidth);
+}
+
 void D2DRenderer::DrawTextSimple(const std::wstring& text, float x, float y, float w, float h,
                                 D2D1_COLOR_F color, float fontSize, bool bold,
                                 DWRITE_TEXT_ALIGNMENT align) {
@@ -111,6 +143,7 @@ void D2DRenderer::DrawTextSimple(const std::wstring& text, float x, float y, flo
     if (SUCCEEDED(hr)) {
         textFormat->SetTextAlignment(align);
         textFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        textFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
 
         m_solidBrush->SetColor(color);
         D2D1_RECT_F layoutRect = D2D1::RectF(x, y, x + w, y + h);
@@ -165,6 +198,29 @@ void D2DRenderer::Draw3DButton(float x, float y, float w, float h, const std::ws
 
     D2D1_COLOR_F textColor = isActive ? theme.accent : theme.text_primary;
     DrawTextSimple(label, x + textOffsetX, y + textOffsetY, w, h, textColor, 11.0f, isActive, DWRITE_TEXT_ALIGNMENT_CENTER);
+}
+
+void D2DRenderer::DrawWindowCaptionButton(float x, float y, float w, float h, const std::wstring& glyph, int btnType, bool isHovered) {
+    if (!m_renderTarget) return;
+
+    const auto& theme = ThemeManager::Instance().GetColors();
+    D2D1_ROUNDED_RECT rRect = D2D1::RoundedRect(D2D1::RectF(x, y, x + w, y + h), 4.0f, 4.0f);
+
+    D2D1_COLOR_F glyphColor = theme.text_primary;
+    if (isHovered) {
+        if (btnType == 3) {
+            // 关闭按钮悬浮：Windows 经典红色 #E81123，白色图标
+            m_solidBrush->SetColor(D2D1::ColorF(0.91f, 0.07f, 0.14f, 1.0f));
+            m_renderTarget->FillRoundedRectangle(rRect, m_solidBrush.Get());
+            glyphColor = D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f);
+        } else {
+            // 最小化/最大化悬浮：浅色微光背景
+            m_solidBrush->SetColor(D2D1::ColorF(theme.card_active_bg.r, theme.card_active_bg.g, theme.card_active_bg.b, 0.65f));
+            m_renderTarget->FillRoundedRectangle(rRect, m_solidBrush.Get());
+        }
+    }
+
+    DrawTextSimple(glyph, x, y, w, h, glyphColor, 11.5f, false, DWRITE_TEXT_ALIGNMENT_CENTER);
 }
 
 void D2DRenderer::DrawSegmentedControl(float x, float y, float w, float h,
@@ -379,23 +435,38 @@ void D2DRenderer::DrawConnectionRow(float x, float y, float w, float h,
 // Clash Mini 1:1 像素级精准对齐组件实现
 // =========================================================================
 
+std::wstring D2DRenderer::TrimNodeName(const std::wstring& name) {
+    if (name.length() >= 9) {
+        size_t len = name.length();
+        if (name[len - 1] == L')' && name[len - 8] == L'(' && name[len - 9] == L' ') {
+            bool allDigits = true;
+            for (size_t i = len - 7; i <= len - 2; ++i) {
+                if (name[i] < L'0' || name[i] > L'9') {
+                    allDigits = false;
+                    break;
+                }
+            }
+            if (allDigits) {
+                return name.substr(0, len - 9);
+            }
+        }
+    }
+    return name;
+}
+
 void D2DRenderer::DrawProxyItem3Col(float x, float y, float w, float h,
                                     const std::wstring& type, const std::wstring& name,
                                     int delay_ms, bool isSelected, bool isOdd, bool isHot) {
     if (!m_renderTarget) return;
 
     const auto& theme = ThemeManager::Instance().GetColors();
+    (void)isHot;
 
-    // 1. 背景色与斑马纹 (Zebra Striping)
-    D2D1_COLOR_F rowBg = theme.window_bg;
+    // 1. 斑马纹与选中背景 (对齐 Clash Mini: 奇数行淡色斑马纹，选中行主题色微光)
+    D2D1_COLOR_F rowBg = isOdd ? D2D1::ColorF(theme.card_active_bg.r, theme.card_active_bg.g, theme.card_active_bg.b, 0.35f)
+                               : D2D1::ColorF(theme.card_bg.r, theme.card_bg.g, theme.card_bg.b, 0.05f);
     if (isSelected) {
-        rowBg = theme.card_active_bg;
-    } else if (isHot) {
-        rowBg = theme.card_bg;
-    } else if (isOdd) {
-        rowBg.r = std::clamp(rowBg.r * 1.04f, 0.0f, 1.0f);
-        rowBg.g = std::clamp(rowBg.g * 1.04f, 0.0f, 1.0f);
-        rowBg.b = std::clamp(rowBg.b * 1.04f, 0.0f, 1.0f);
+        rowBg = D2D1::ColorF(theme.accent.r, theme.accent.g, theme.accent.b, 0.20f);
     }
 
     m_solidBrush->SetColor(rowBg);
@@ -412,21 +483,22 @@ void D2DRenderer::DrawProxyItem3Col(float x, float y, float w, float h,
     float nameColW = w - typeColW - delayColW;
 
     // 3. 第一列：协议类型 (55px，大写，右对齐，2px 分割线)
-    DrawTextSimple(type, x + 4.0f, y, typeColW - 8.0f, h, theme.text_secondary, 10.5f, false, DWRITE_TEXT_ALIGNMENT_TRAILING);
+    DrawTextSimple(type, x + 2.0f, y, typeColW - 6.0f, h, theme.text_secondary, 10.5f, false, DWRITE_TEXT_ALIGNMENT_TRAILING);
 
     // 第一列与第二列之间的 2px 竖向分割线
     m_solidBrush->SetColor(theme.card_shadow);
-    m_renderTarget->DrawLine(D2D1::Point2F(x + typeColW, y + 2.0f),
-                             D2D1::Point2F(x + typeColW, y + h - 2.0f),
+    m_renderTarget->DrawLine(D2D1::Point2F(x + typeColW, y),
+                             D2D1::Point2F(x + typeColW, y + h),
                              m_solidBrush.Get(), 1.0f);
 
-    // 4. 第二列：节点名称 (flex 1，左对齐，单行截断)
+    // 4. 第二列：节点名称 (flex 1，左对齐，单行截断，剥离 6 位时间戳)
+    std::wstring displayName = TrimNodeName(name);
     D2D1_COLOR_F nameColor = isSelected ? theme.accent : theme.text_primary;
-    DrawTextSimple(name, x + typeColW + 6.0f, y, nameColW - 12.0f, h, nameColor, 11.5f, isSelected, DWRITE_TEXT_ALIGNMENT_LEADING);
+    DrawTextSimple(displayName, x + typeColW + 8.0f, y, nameColW - 14.0f, h, nameColor, 11.5f, isSelected, DWRITE_TEXT_ALIGNMENT_LEADING);
 
     // 第二列与第三列之间的 2px 竖向分割线
-    m_renderTarget->DrawLine(D2D1::Point2F(x + typeColW + nameColW, y + 2.0f),
-                             D2D1::Point2F(x + typeColW + nameColW, y + h - 2.0f),
+    m_renderTarget->DrawLine(D2D1::Point2F(x + typeColW + nameColW, y),
+                             D2D1::Point2F(x + typeColW + nameColW, y + h),
                              m_solidBrush.Get(), 1.0f);
 
     // 5. 第三列：延迟数值 (65px，居中，带有主题速度色彩)
@@ -456,8 +528,8 @@ void D2DRenderer::DrawActiveNodeCard(float x, float y, float w, float h,
     float curX = x + 8.0f;
     float delayChipW = 50.0f;
 
-    // 1. 协议徽章 (窄窗 <= 260px 下隐藏，对齐 Clash Mini: max-width 480px 下 display: none)
-    if (w > 260.0f && !protocol.empty()) {
+    // 1. 协议徽章 (窄窗 <= 350px 下隐藏，严格对齐 Clash Mini: @media (max-width: 480px) display: none)
+    if (w > 350.0f && !protocol.empty()) {
         float protoW = 44.0f;
         float protoH = h - 8.0f;
         D2D1_ROUNDED_RECT protoRect = D2D1::RoundedRect(D2D1::RectF(curX, y + 4.0f, curX + protoW, y + 4.0f + protoH), 3.0f, 3.0f);
@@ -469,15 +541,16 @@ void D2DRenderer::DrawActiveNodeCard(float x, float y, float w, float h,
         curX += protoW + 6.0f;
     }
 
-    // 2. 节点名称 (可点击轮换下一个节点，带悬浮光)
+    // 2. 节点名称 (可点击轮换下一个节点，带悬浮光，剥离 6 位时间戳)
+    std::wstring displayName = TrimNodeName(name);
     float nameW = w - (curX - x) - delayChipW - 6.0f;
-    if (w > 320.0f && !addr.empty()) {
+    if (w > 450.0f && !addr.empty()) {
         float addrW = 85.0f;
-        DrawTextSimple(name, curX, y, nameW - addrW, h, theme.text_primary, 11.5f, true, DWRITE_TEXT_ALIGNMENT_LEADING);
+        DrawTextSimple(displayName, curX, y, nameW - addrW, h, theme.text_primary, 11.5f, true, DWRITE_TEXT_ALIGNMENT_LEADING);
         DrawTextSimple(L"(" + addr + L")", curX + nameW - addrW, y, addrW, h, theme.text_secondary, 9.5f, false, DWRITE_TEXT_ALIGNMENT_LEADING);
     } else {
         (void)addr;
-        DrawTextSimple(name, curX, y, nameW, h, theme.text_primary, 11.5f, true, DWRITE_TEXT_ALIGNMENT_LEADING);
+        DrawTextSimple(displayName, curX, y, nameW, h, theme.text_primary, 11.5f, true, DWRITE_TEXT_ALIGNMENT_LEADING);
     }
 
     // 3. 延迟测速徽章 (可点击触发单测速)
@@ -508,21 +581,24 @@ void D2DRenderer::DrawProxyHead(float x, float y, float w, float h,
 
     const auto& theme = ThemeManager::Instance().GetColors();
 
+    float padX = 12.0f;
+    float btnSize = 24.0f;
+    float btnY = y + (h - btnSize) / 2.0f;
+
     // 1. ⚡ 一键测速按钮 (24x24)
-    float btnSize = h;
-    D2D1_COLOR_F boltColor = isTesting ? theme.badge_medium : theme.text_primary;
-    Draw3DButton(x, y, btnSize, btnSize, L"⚡", false, false, isTesting);
+    Draw3DButton(x + padX, btnY, btnSize, btnSize, L"⚡", false, false, isTesting);
 
     // 2. ↕ 排序切换按钮 (24x24)
     std::wstring sortLabel = L"↕";
     if (sortType == 1) sortLabel = L"⏱";
     else if (sortType == 2) sortLabel = L"A-Z";
-    Draw3DButton(x + btnSize + 4.0f, y, btnSize, btnSize, sortLabel, false, false, (sortType != 0));
+    Draw3DButton(x + padX + btnSize + 4.0f, btnY, btnSize, btnSize, sortLabel, false, false, (sortType != 0));
 
     // 3. 🔍 实时输入搜索框 (Flex 1)
-    float searchX = x + (btnSize + 4.0f) * 2;
-    float searchW = w - searchX + x;
-    D2D1_ROUNDED_RECT sRect = D2D1::RoundedRect(D2D1::RectF(searchX, y, searchX + searchW, y + h), 3.0f, 3.0f);
+    float searchX = x + padX + (btnSize + 4.0f) * 2;
+    float searchW = w - (searchX - x) - padX;
+    float searchH = btnSize;
+    D2D1_ROUNDED_RECT sRect = D2D1::RoundedRect(D2D1::RectF(searchX, btnY, searchX + searchW, btnY + searchH), 3.0f, 3.0f);
 
     m_solidBrush->SetColor(theme.card_bg);
     m_renderTarget->FillRoundedRectangle(sRect, m_solidBrush.Get());
@@ -531,52 +607,190 @@ void D2DRenderer::DrawProxyHead(float x, float y, float w, float h,
     m_renderTarget->DrawRoundedRectangle(sRect, m_solidBrush.Get(), searchFocused ? 1.5f : 1.0f);
 
     // 放大镜图标
-    DrawTextSimple(L"🔍", searchX + 4.0f, y, 16.0f, h, theme.text_secondary, 9.5f, false, DWRITE_TEXT_ALIGNMENT_CENTER);
+    DrawTextSimple(L"🔍", searchX + 4.0f, btnY, 16.0f, searchH, theme.text_secondary, 9.5f, false, DWRITE_TEXT_ALIGNMENT_CENTER);
 
     // 输入内容或占位符
     if (searchText.empty()) {
-        DrawTextSimple(L"过滤节点...", searchX + 22.0f, y, searchW - 26.0f, h, theme.text_secondary, 10.5f, false);
+        DrawTextSimple(L"过滤节点...", searchX + 22.0f, btnY, searchW - 26.0f, searchH, theme.text_secondary, 10.5f, false);
     } else {
-        DrawTextSimple(searchText, searchX + 22.0f, y, searchW - 26.0f, h, theme.text_primary, 10.5f, false);
+        DrawTextSimple(searchText, searchX + 22.0f, btnY, searchW - 26.0f, searchH, theme.text_primary, 10.5f, false);
+    }
+
+    // 底部分割线 1px solid
+    m_solidBrush->SetColor(theme.card_shadow);
+    m_renderTarget->DrawLine(D2D1::Point2F(x, y + h - 1.0f), D2D1::Point2F(x + w, y + h - 1.0f), m_solidBrush.Get(), 1.0f);
+}
+
+void D2DRenderer::DrawTrafficDashboard(float x, float y, float w, float h,
+                                      uint64_t upSpeed, uint64_t downSpeed,
+                                      uint64_t upTotal, uint64_t downTotal,
+                                      const std::deque<TrafficPoint>& history,
+                                      bool isMinimalWidth) {
+    if (!m_renderTarget) return;
+
+    const auto& theme = ThemeManager::Instance().GetColors();
+
+    // 1. 顶部分割线
+    m_solidBrush->SetColor(theme.card_shadow);
+    m_renderTarget->DrawLine(D2D1::Point2F(x, y), D2D1::Point2F(x + w, y), m_solidBrush.Get(), 1.0f);
+
+    float padX = isMinimalWidth ? 6.0f : 12.0f;
+    float padTop = isMinimalWidth ? 3.0f : 8.0f;
+    float padBottom = isMinimalWidth ? 2.0f : 4.0f;
+
+    float cw = w - padX * 2.0f;
+    if (cw <= 10.0f) return;
+
+    // 格式化实时速率与总流量
+    auto FormatSpeed = [](uint64_t bytesPerSec) -> std::wstring {
+        if (bytesPerSec < 1024) return std::to_wstring(bytesPerSec) + L" B/s";
+        if (bytesPerSec < 1024 * 1024) {
+            std::wostringstream oss;
+            oss << std::fixed << std::setprecision(1) << (bytesPerSec / 1024.0) << L" KB/s";
+            return oss.str();
+        }
+        std::wostringstream oss;
+        oss << std::fixed << std::setprecision(1) << (bytesPerSec / (1024.0 * 1024.0)) << L" MB/s";
+        return oss.str();
+    };
+
+    auto FormatTotal = [](uint64_t totalBytes) -> std::wstring {
+        if (totalBytes < 1024 * 1024) return std::to_wstring(totalBytes / 1024) + L" KB";
+        if (totalBytes < 1024 * 1024 * 1024) {
+            std::wostringstream oss;
+            oss << std::fixed << std::setprecision(1) << (totalBytes / (1024.0 * 1024.0)) << L" MB";
+            return oss.str();
+        }
+        std::wostringstream oss;
+        oss << std::fixed << std::setprecision(2) << (totalBytes / (1024.0 * 1024.0 * 1024.0)) << L" GB";
+        return oss.str();
+    };
+
+    float metricsAreaH = isMinimalWidth ? 38.0f : 22.0f;
+    float graphH = h - padTop - padBottom - metricsAreaH - (isMinimalWidth ? 3.0f : 6.0f);
+    if (graphH < 20.0f) graphH = 20.0f;
+
+    float gx = x + padX;
+    float gy = y + padTop;
+    float gw = cw;
+
+    // 2. 绘制 7 层对数网格参考线 (0, 10, 100, 1K, 10K, 100K, 1M, 10M)
+    float dy = graphH / 7.0f;
+    m_solidBrush->SetColor(D2D1::ColorF(theme.card_shadow.r, theme.card_shadow.g, theme.card_shadow.b, 0.18f));
+    for (int k = 1; k <= 6; ++k) {
+        float lineY = gy + k * dy;
+        m_renderTarget->DrawLine(D2D1::Point2F(gx, lineY), D2D1::Point2F(gx + gw, lineY), m_solidBrush.Get(), 0.8f);
+    }
+
+    // 3. 绘制平滑对数流量波形曲线 (上行紫色 #9C27B0, 下行蓝色 #007AFF)
+    auto countY = [graphH, dy](uint64_t v) -> float {
+        if (v == 0) return graphH - 1.0f;
+        if (v <= 10) return graphH - (static_cast<float>(v) / 10.0f) * dy;
+        if (v <= 100) return graphH - (static_cast<float>(v) / 100.0f + 1.0f) * dy;
+        if (v <= 1024) return graphH - (static_cast<float>(v) / 1024.0f + 2.0f) * dy;
+        if (v <= 10240) return graphH - (static_cast<float>(v) / 10240.0f + 3.0f) * dy;
+        if (v <= 102400) return graphH - (static_cast<float>(v) / 102400.0f + 4.0f) * dy;
+        if (v <= 1048576) return graphH - (static_cast<float>(v) / 1048576.0f + 5.0f) * dy;
+        if (v <= 10485760) return graphH - (static_cast<float>(v) / 10485760.0f + 6.0f) * dy;
+        return 1.0f;
+    };
+
+    size_t nPoints = history.size();
+    if (nPoints >= 2) {
+        float dx = gw / 29.0f;
+
+        // A. 下行曲线 (Down: Clash Verge Blue / #007AFF)
+        ComPtr<ID2D1PathGeometry> downPath;
+        if (SUCCEEDED(m_d2dFactory->CreatePathGeometry(&downPath))) {
+            ComPtr<ID2D1GeometrySink> sink;
+            if (SUCCEEDED(downPath->Open(&sink))) {
+                float startX = gx + gw - static_cast<float>(nPoints - 1) * dx;
+                float startY = gy + countY(history[0].down);
+                sink->BeginFigure(D2D1::Point2F(startX, startY), D2D1_FIGURE_BEGIN_HOLLOW);
+
+                for (size_t i = 1; i < nPoints; ++i) {
+                    float px = gx + gw - static_cast<float>(nPoints - 1 - i) * dx;
+                    float py = gy + countY(history[i].down);
+                    sink->AddLine(D2D1::Point2F(px, py));
+                }
+                sink->EndFigure(D2D1_FIGURE_END_OPEN);
+                sink->Close();
+            }
+            m_solidBrush->SetColor(D2D1::ColorF(0.0f, 0.48f, 1.0f, 0.90f));
+            m_renderTarget->DrawGeometry(downPath.Get(), m_solidBrush.Get(), 2.2f);
+        }
+
+        // B. 上行曲线 (Up: Purple / #9C27B0)
+        ComPtr<ID2D1PathGeometry> upPath;
+        if (SUCCEEDED(m_d2dFactory->CreatePathGeometry(&upPath))) {
+            ComPtr<ID2D1GeometrySink> sink;
+            if (SUCCEEDED(upPath->Open(&sink))) {
+                float startX = gx + gw - static_cast<float>(nPoints - 1) * dx;
+                float startY = gy + countY(history[0].up);
+                sink->BeginFigure(D2D1::Point2F(startX, startY), D2D1_FIGURE_BEGIN_HOLLOW);
+
+                for (size_t i = 1; i < nPoints; ++i) {
+                    float px = gx + gw - static_cast<float>(nPoints - 1 - i) * dx;
+                    float py = gy + countY(history[i].up);
+                    sink->AddLine(D2D1::Point2F(px, py));
+                }
+                sink->EndFigure(D2D1_FIGURE_END_OPEN);
+                sink->Close();
+            }
+            m_solidBrush->SetColor(D2D1::ColorF(0.61f, 0.15f, 0.69f, 0.85f));
+            m_renderTarget->DrawGeometry(upPath.Get(), m_solidBrush.Get(), 2.2f);
+        }
+    }
+
+    // 4. 绘制 3D 拟物速率指示胶囊卡片
+    float metricsY = gy + graphH + (isMinimalWidth ? 3.0f : 6.0f);
+
+    std::wstring downSpdStr = FormatSpeed(downSpeed);
+    std::wstring downTotStr = FormatTotal(downTotal);
+    std::wstring upSpdStr = FormatSpeed(upSpeed);
+    std::wstring upTotStr = FormatTotal(upTotal);
+
+    if (isMinimalWidth) {
+        // 窄窗双行堆叠 (每行 17.5px)
+        float cardH = 17.5f;
+
+        // 行 1: 下行胶囊卡片 (Download)
+        Draw3DCard(gx, metricsY, gw, cardH, D2D1::ColorF(0.85f, 0.89f, 0.92f, 1.0f), false);
+        DrawTextSimple(L"↓ 下载:", gx + 6.0f, metricsY, 48.0f, cardH, D2D1::ColorF(0.0f, 0.45f, 0.75f, 1.0f), 9.5f, true, DWRITE_TEXT_ALIGNMENT_LEADING);
+        DrawTextSimple(downSpdStr, gx + 54.0f, metricsY, gw - 130.0f, cardH, theme.text_primary, 10.5f, true, DWRITE_TEXT_ALIGNMENT_LEADING);
+        DrawTextSimple(L"总计: " + downTotStr, gx + gw - 76.0f, metricsY, 72.0f, cardH, theme.text_secondary, 9.0f, false, DWRITE_TEXT_ALIGNMENT_TRAILING);
+
+        // 行 2: 上行胶囊卡片 (Upload)
+        float row2Y = metricsY + cardH + 3.0f;
+        Draw3DCard(gx, row2Y, gw, cardH, D2D1::ColorF(0.95f, 0.88f, 0.80f, 1.0f), false);
+        DrawTextSimple(L"↑ 上传:", gx + 6.0f, row2Y, 48.0f, cardH, D2D1::ColorF(0.85f, 0.40f, 0.05f, 1.0f), 9.5f, true, DWRITE_TEXT_ALIGNMENT_LEADING);
+        DrawTextSimple(upSpdStr, gx + 54.0f, row2Y, gw - 130.0f, cardH, theme.text_primary, 10.5f, true, DWRITE_TEXT_ALIGNMENT_LEADING);
+        DrawTextSimple(L"总计: " + upTotStr, gx + gw - 76.0f, row2Y, 72.0f, cardH, theme.text_secondary, 9.0f, false, DWRITE_TEXT_ALIGNMENT_TRAILING);
+    } else {
+        // 宽窗单行双列并排 (高度 22px)
+        float cardW = (gw - 8.0f) / 2.0f;
+        float cardH = 22.0f;
+
+        // 左列: 下行胶囊卡片 (Download)
+        Draw3DCard(gx, metricsY, cardW, cardH, D2D1::ColorF(0.85f, 0.89f, 0.92f, 1.0f), false);
+        DrawTextSimple(L"↓ 下载:", gx + 8.0f, metricsY, 48.0f, cardH, D2D1::ColorF(0.0f, 0.45f, 0.75f, 1.0f), 10.0f, true, DWRITE_TEXT_ALIGNMENT_LEADING);
+        DrawTextSimple(downSpdStr, gx + 58.0f, metricsY, cardW - 145.0f, cardH, theme.text_primary, 11.0f, true, DWRITE_TEXT_ALIGNMENT_LEADING);
+        DrawTextSimple(L"总计: " + downTotStr, gx + cardW - 85.0f, metricsY, 78.0f, cardH, theme.text_secondary, 9.5f, false, DWRITE_TEXT_ALIGNMENT_TRAILING);
+
+        // 右列: 上行胶囊卡片 (Upload)
+        float upCardX = gx + cardW + 8.0f;
+        Draw3DCard(upCardX, metricsY, cardW, cardH, D2D1::ColorF(0.95f, 0.88f, 0.80f, 1.0f), false);
+        DrawTextSimple(L"↑ 上传:", upCardX + 8.0f, metricsY, 48.0f, cardH, D2D1::ColorF(0.85f, 0.40f, 0.05f, 1.0f), 10.0f, true, DWRITE_TEXT_ALIGNMENT_LEADING);
+        DrawTextSimple(upSpdStr, upCardX + 58.0f, metricsY, cardW - 145.0f, cardH, theme.text_primary, 11.0f, true, DWRITE_TEXT_ALIGNMENT_LEADING);
+        DrawTextSimple(L"总计: " + upTotStr, upCardX + cardW - 85.0f, metricsY, 78.0f, cardH, theme.text_secondary, 9.5f, false, DWRITE_TEXT_ALIGNMENT_TRAILING);
     }
 }
 
 void D2DRenderer::DrawTrafficBottomBar(float x, float y, float w, float h,
                                        uint64_t upSpeed, uint64_t downSpeed,
                                        uint64_t upTotal, uint64_t downTotal) {
-    if (!m_renderTarget) return;
-
-    const auto& theme = ThemeManager::Instance().GetColors();
-
-    // 顶部分割线
-    m_solidBrush->SetColor(theme.card_shadow);
-    m_renderTarget->DrawLine(D2D1::Point2F(x, y), D2D1::Point2F(x + w, y), m_solidBrush.Get(), 1.0f);
-
-    // 格式化实时速率与总流量
-    auto FormatSpeed = [](uint64_t bytesPerSec) -> std::wstring {
-        if (bytesPerSec < 1024) return std::to_wstring(bytesPerSec) + L" B/s";
-        if (bytesPerSec < 1024 * 1024) return std::to_wstring(bytesPerSec / 1024) + L" KB/s";
-        std::wostringstream oss;
-        oss << std::fixed << std::setprecision(1) << (static_cast<double>(bytesPerSec) / (1024.0 * 1024.0)) << L" MB/s";
-        return oss.str();
-    };
-
-    auto FormatTotal = [](uint64_t totalBytes) -> std::wstring {
-        if (totalBytes < 1024 * 1024) return std::to_wstring(totalBytes / 1024) + L" K";
-        if (totalBytes < 1024 * 1024 * 1024) return std::to_wstring(totalBytes / (1024 * 1024)) + L" M";
-        std::wostringstream oss;
-        oss << std::fixed << std::setprecision(1) << (static_cast<double>(totalBytes) / (1024.0 * 1024.0 * 1024.0)) << L" G";
-        return oss.str();
-    };
-
-    std::wstring downText = L"↓ " + FormatSpeed(downSpeed);
-    std::wstring upText = L"↑ " + FormatSpeed(upSpeed);
-    std::wstring totalText = FormatTotal(downTotal) + L" / " + FormatTotal(upTotal);
-
-    float partW = w / 3.0f;
-    DrawTextSimple(downText, x + 6.0f, y + 1.0f, partW, h - 2.0f, theme.badge_fast, 10.0f, true, DWRITE_TEXT_ALIGNMENT_LEADING);
-    DrawTextSimple(upText, x + partW, y + 1.0f, partW, h - 2.0f, theme.accent, 10.0f, true, DWRITE_TEXT_ALIGNMENT_CENTER);
-    DrawTextSimple(totalText, x + partW * 2, y + 1.0f, partW - 6.0f, h - 2.0f, theme.text_secondary, 9.5f, false, DWRITE_TEXT_ALIGNMENT_TRAILING);
+    std::deque<TrafficPoint> dummy;
+    DrawTrafficDashboard(x, y, w, h, upSpeed, downSpeed, upTotal, downTotal, dummy, (w <= 285.0f));
 }
 
 } // namespace ClashWin
