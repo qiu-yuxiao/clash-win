@@ -53,6 +53,19 @@ target_include_directories(clashwin_config PUBLIC
 target_link_libraries(clashwin_config PUBLIC clashwin_util shcore ws2_32)
 target_compile_options(clashwin_config PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
+# mihomo 管道通信层（T04：HTTP/1.1 over named pipe + WS + clash-verge-service IPC）
+add_library(clashwin_mihomo STATIC
+  src/mihomo/pipe_http.cpp
+  src/mihomo/pipe_ws.cpp
+  src/mihomo/service_ipc.cpp
+)
+target_include_directories(clashwin_mihomo PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(clashwin_mihomo PUBLIC clashwin_util nlohmann_json)
+target_compile_options(clashwin_mihomo PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
+
 add_executable(clashwin WIN32
   src/main.cpp
   src/app/app.cpp
@@ -62,6 +75,7 @@ add_executable(clashwin WIN32
 target_link_libraries(clashwin PRIVATE
   clashwin_util               # util + vendored 三件套（PUBLIC 传递）
   clashwin_config             # T03 配置体系
+  clashwin_mihomo             # T04 管道通信层
   d2d1 user32 gdi32 ws2_32    # D2D / 窗口 / Winsock
 )
 
@@ -92,6 +106,9 @@ add_executable(clashwin_test
   tests/test_config_draft.cpp
   tests/test_config_window_state.cpp
   tests/test_config_states.cpp
+  tests/test_pipe_http.cpp
+  tests/test_pipe_ws.cpp
+  tests/test_service_ipc.cpp
 )
-target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config)
+target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config clashwin_mihomo)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
