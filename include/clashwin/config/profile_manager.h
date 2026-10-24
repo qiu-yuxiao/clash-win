@@ -37,6 +37,9 @@ public:
     // 删除指定的订阅
     bool DeleteProfile(const std::string& uid);
 
+    // 更新订阅元数据 (名称、链接、更新间隔)
+    bool UpdateProfileMeta(const std::string& uid, const std::string& name, const std::string& url, uint32_t interval);
+
     // 获取多订阅列表与当前激活项
     [[nodiscard]] const std::vector<ProfileItem>& GetProfileItems() const { return profile_items_; }
     [[nodiscard]] const std::string& GetCurrentProfileUid() const { return current_profile_uid_; }

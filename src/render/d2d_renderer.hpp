@@ -111,6 +111,13 @@ public:
                               uint64_t upSpeed, uint64_t downSpeed,
                               uint64_t upTotal, uint64_t downTotal);
 
+    // 模态弹窗与上下文菜单 (全套对话框体系: AddUrl / EditProfile / Guide / Logs / Update / Unlock / ContextMenu)
+    void DrawModalBackdrop(float w, float h);
+    void DrawModalDialogFrame(float x, float y, float w, float h, const std::wstring& title);
+    void DrawContextMenu(float x, float y, float w, float h,
+                         const std::vector<std::pair<std::wstring, bool>>& items,
+                         int hoveredIndex = -1);
+
     ID2D1RenderTarget* GetRenderTarget() const { return m_renderTarget.Get(); }
 
 private:

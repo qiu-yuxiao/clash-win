@@ -27,6 +27,41 @@ static std::string Trim(std::string_view s) {
     return std::string(s.substr(start, end - start + 1));
 }
 
+static std::string ExtractFieldFromFlow(std::string_view flow, std::string_view key) {
+    std::string needle1 = "\"" + std::string(key) + "\"";
+    size_t keyPos = flow.find(needle1);
+    size_t keyLen = needle1.size();
+    if (keyPos == std::string_view::npos) {
+        keyPos = flow.find(key);
+        keyLen = key.size();
+    }
+    if (keyPos == std::string_view::npos) return "";
+
+    size_t colon = flow.find(':', keyPos + keyLen);
+    if (colon == std::string_view::npos) return "";
+
+    size_t start = flow.find_first_not_of(" \t", colon + 1);
+    if (start == std::string_view::npos) return "";
+
+    if (flow[start] == '"' || flow[start] == '\'') {
+        char quote = flow[start];
+        size_t end = flow.find(quote, start + 1);
+        if (end == std::string_view::npos) return "";
+        return std::string(flow.substr(start + 1, end - start - 1));
+    } else {
+        size_t end = flow.find_first_of(",} \t\r\n", start);
+        if (end == std::string_view::npos) end = flow.size();
+        return std::string(flow.substr(start, end - start));
+    }
+}
+
+static std::string ExtractYamlVal(std::string_view s) {
+    size_t start = s.find_first_not_of(" \t\r\n\"'");
+    if (start == std::string_view::npos) return "";
+    size_t end = s.find_last_not_of(" \t\r\n\"'");
+    return std::string(s.substr(start, end - start + 1));
+}
+
 ProfileManager& ProfileManager::Instance() {
     static ProfileManager instance;
     return instance;
@@ -64,8 +99,27 @@ void ProfileManager::Init(const std::filesystem::path& app_dir) {
                     std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
                     ParseSubscriptionContent(content, nodes_);
                     current_active_node_ = item.selected_proxy;
-                    if (current_active_node_.empty() && !nodes_.empty()) {
-                        current_active_node_ = nodes_[0].name;
+
+                    // 规范化当前激活节点名称 (剥离时间戳)
+                    if (!current_active_node_.empty()) {
+                        size_t ts = current_active_node_.rfind(" (");
+                        if (ts != std::string::npos && current_active_node_.back() == ')') {
+                            current_active_node_ = current_active_node_.substr(0, ts);
+                        }
+                    }
+
+                    // 如果当前激活节点为空或未匹配，选列表第一个
+                    if (!nodes_.empty()) {
+                        bool found = false;
+                        for (const auto& n : nodes_) {
+                            if (n.name == current_active_node_) {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found) {
+                            current_active_node_ = nodes_[0].name;
+                        }
                     }
                 }
                 break;
@@ -142,7 +196,14 @@ bool ProfileManager::LoadProfilesYaml() {
                 else if (k == "name") current_item.name = v;
                 else if (k == "url") current_item.url = v;
                 else if (k == "file") current_item.file = v;
-                else if (k == "selected_proxy") current_item.selected_proxy = v;
+                else if (k == "selected_proxy" || k == "now") {
+                    std::string nodeName = v;
+                    size_t ts = nodeName.rfind(" (");
+                    if (ts != std::string::npos && nodeName.back() == ')') {
+                        nodeName = nodeName.substr(0, ts);
+                    }
+                    current_item.selected_proxy = nodeName;
+                }
                 else if (k == "updated") {
                     try { current_item.updated_at = std::stoll(v); } catch (...) {}
                 }
@@ -291,27 +352,67 @@ bool ProfileManager::ParseSubscriptionContent(const std::string& content, std::v
         std::istringstream iss(content);
         std::string line;
         bool in_proxies = false;
+        ProxyNode current_block_node;
+        bool in_block_node = false;
+
+        auto flush_block = [&]() {
+            if (in_block_node && !current_block_node.name.empty()) {
+                if (current_block_node.type.empty()) current_block_node.type = "vmess";
+                raw_nodes.push_back(current_block_node);
+            }
+            current_block_node = ProxyNode{};
+            in_block_node = false;
+        };
+
         while (std::getline(iss, line)) {
-            if (line.find("proxies:") != std::string::npos) {
+            std::string trimmed = Trim(line);
+            if (trimmed.starts_with("proxies:")) {
                 in_proxies = true;
                 continue;
             }
-            if (in_proxies && line.find("proxy-groups:") != std::string::npos) {
+            if (in_proxies && (trimmed.starts_with("proxy-groups:") || trimmed.starts_with("rules:") || trimmed.starts_with("rule-providers:"))) {
+                flush_block();
                 break;
             }
-            if (in_proxies && line.find("- name:") != std::string::npos) {
-                auto pos = line.find("- name:");
-                std::string name = line.substr(pos + 7);
-                name.erase(0, name.find_first_not_of(" \""));
-                name.erase(name.find_last_not_of(" \"") + 1);
+            if (!in_proxies) continue;
+
+            // 1. Flow-style 行内 JSON 映射: - { ... } 或 - {"name": ...}
+            if (trimmed.starts_with("- {") || (trimmed.starts_with("-") && trimmed.find('{') != std::string::npos && trimmed.find('}') != std::string::npos)) {
+                flush_block();
+                std::string name = ExtractFieldFromFlow(trimmed, "name");
+                std::string type = ExtractFieldFromFlow(trimmed, "type");
                 if (!name.empty()) {
                     ProxyNode n;
                     n.name = name;
-                    n.type = "yaml";
+                    n.type = type.empty() ? "vmess" : type;
                     raw_nodes.push_back(n);
+                }
+                continue;
+            }
+
+            // 2. Block-style 列表项，以 "- " 开头
+            if (trimmed.starts_with("- ") || trimmed == "-") {
+                flush_block();
+                in_block_node = true;
+                std::string rest = Trim(trimmed.substr(1));
+                if (rest.starts_with("name:")) {
+                    current_block_node.name = ExtractYamlVal(rest.substr(5));
+                } else if (rest.starts_with("type:")) {
+                    current_block_node.type = ExtractYamlVal(rest.substr(5));
+                }
+                continue;
+            }
+
+            // 3. Block-style 连续属性 (缩进于上一项)
+            if (in_block_node) {
+                if (trimmed.starts_with("name:")) {
+                    current_block_node.name = ExtractYamlVal(trimmed.substr(5));
+                } else if (trimmed.starts_with("type:")) {
+                    current_block_node.type = ExtractYamlVal(trimmed.substr(5));
                 }
             }
         }
+        flush_block();
     } else {
         std::vector<ParsedProxyNode> parsed_nodes = UniversalParser::ParseUriListToNodes(content);
         for (const auto& pn : parsed_nodes) {
@@ -558,6 +659,18 @@ bool ProfileManager::DeleteProfile(const std::string& uid) {
         }
         SaveProfilesYaml();
         return true;
+    }
+    return false;
+}
+
+bool ProfileManager::UpdateProfileMeta(const std::string& uid, const std::string& name, const std::string& url, uint32_t interval) {
+    (void)interval;
+    for (auto& item : profile_items_) {
+        if (item.uid == uid) {
+            item.name = name;
+            if (!url.empty()) item.url = url;
+            return SaveProfilesYaml();
+        }
     }
     return false;
 }

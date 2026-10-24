@@ -430,3 +430,36 @@ set_target_properties(test_phase5_acceptance PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin"
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin"
 )
+
+# UI Pixel-Perfect Preview Generator
+add_executable(generate_ui_preview
+    tools/generate_ui_preview.cpp
+    src/render/d2d_renderer.cpp
+    src/render/theme.cpp
+    ${COMMON_SOURCES}
+)
+
+target_include_directories(generate_ui_preview PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(generate_ui_preview PRIVATE
+    d2d1
+    dwrite
+    windowscodecs
+    ole32
+    shcore
+    winhttp
+    wininet
+    ws2_32
+    crypt32
+    advapi32
+    shell32
+)
+
+set_target_properties(generate_ui_preview PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin"
+)

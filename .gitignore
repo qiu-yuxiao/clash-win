@@ -30,6 +30,9 @@ Makefile
 # vcpkg
 vcpkg_installed/
 
+# Test residue (generated at runtime by test executables)
+test_*_data/
+
 # OS files
 Thumbs.db
 Desktop.ini

@@ -220,7 +220,53 @@ void D2DRenderer::DrawWindowCaptionButton(float x, float y, float w, float h, co
         }
     }
 
-    DrawTextSimple(glyph, x, y, w, h, glyphColor, 11.5f, false, DWRITE_TEXT_ALIGNMENT_CENTER);
+    // 采用 Direct2D 原生矢量几何绘制，彻底杜绝字体字形缺失或抗锯齿变形缺陷
+    m_solidBrush->SetColor(glyphColor);
+    float cx = std::floor(x + w * 0.5f);
+    float cy = std::floor(y + h * 0.5f);
+
+    if (btnType == 1) {
+        // 最小化 (Minimize): 10px 锐利水平横线 (对齐 Windows / MUI Minimize)
+        m_renderTarget->DrawLine(
+            D2D1::Point2F(cx - 5.0f, cy + 3.0f),
+            D2D1::Point2F(cx + 5.0f, cy + 3.0f),
+            m_solidBrush.Get(), 1.2f);
+    } else if (btnType == 2) {
+        // 最大化/还原 (Maximize/Restore): 对齐 Windows / MUI CropSquare & FilterNone
+        if (glyph == L"❐") {
+            // 还原状态 (FilterNone): 两个 8x8 错开 3px 的重叠方框
+            // 1. 后面方框 (右上)
+            m_renderTarget->DrawRectangle(
+                D2D1::RectF(cx - 2.0f, cy - 5.0f, cx + 5.0f, cy + 2.0f),
+                m_solidBrush.Get(), 1.0f);
+            // 2. 擦除背景避免前后方框透射重叠
+            D2D1_COLOR_F bgClr = isHovered ? D2D1::ColorF(theme.card_active_bg.r, theme.card_active_bg.g, theme.card_active_bg.b, 0.65f) : theme.header_bg;
+            m_solidBrush->SetColor(bgClr);
+            m_renderTarget->FillRectangle(D2D1::RectF(cx - 5.0f, cy - 2.0f, cx + 2.0f, cy + 5.0f), m_solidBrush.Get());
+            // 3. 前地方框 (左下)
+            m_solidBrush->SetColor(glyphColor);
+            m_renderTarget->DrawRectangle(
+                D2D1::RectF(cx - 5.0f, cy - 2.0f, cx + 2.0f, cy + 5.0f),
+                m_solidBrush.Get(), 1.0f);
+        } else {
+            // 单独最大化方框 (CropSquare): 10x10 居中空心矩形
+            m_renderTarget->DrawRectangle(
+                D2D1::RectF(cx - 5.0f, cy - 5.0f, cx + 5.0f, cy + 5.0f),
+                m_solidBrush.Get(), 1.0f);
+        }
+    } else if (btnType == 3) {
+        // 关闭按钮 (Close): 10x10 标准交叉矢量斜线 ✕
+        m_renderTarget->DrawLine(
+            D2D1::Point2F(cx - 4.5f, cy - 4.5f),
+            D2D1::Point2F(cx + 4.5f, cy + 4.5f),
+            m_solidBrush.Get(), 1.2f);
+        m_renderTarget->DrawLine(
+            D2D1::Point2F(cx + 4.5f, cy - 4.5f),
+            D2D1::Point2F(cx - 4.5f, cy + 4.5f),
+            m_solidBrush.Get(), 1.2f);
+    } else {
+        DrawTextSimple(glyph, x, y, w, h, glyphColor, 11.5f, false, DWRITE_TEXT_ALIGNMENT_CENTER);
+    }
 }
 
 void D2DRenderer::DrawSegmentedControl(float x, float y, float w, float h,
@@ -502,12 +548,15 @@ void D2DRenderer::DrawProxyItem3Col(float x, float y, float w, float h,
                              m_solidBrush.Get(), 1.0f);
 
     // 5. 第三列：延迟数值 (65px，居中，带有主题速度色彩)
-    if (delay_ms >= 0) {
-        D2D1_COLOR_F delayColor = (delay_ms <= 100) ? theme.badge_fast : ((delay_ms <= 300) ? theme.badge_medium : theme.badge_slow);
+    // 严格对齐 Clash Mini (proxy-item.tsx):
+    // 若 delay_ms <= 0 或 -1 (未测速)，完全留白，不绘制任何假数据或文字；
+    // 仅当实际产生延迟测速数值 (delay_ms > 0) 时，以毫秒呈现；>= 2000ms 判死显示 Timeout
+    if (delay_ms >= 2000) {
+        DrawTextSimple(L"Timeout", x + typeColW + nameColW, y, delayColW, h, theme.badge_slow, 9.5f, false, DWRITE_TEXT_ALIGNMENT_CENTER);
+    } else if (delay_ms > 0) {
+        D2D1_COLOR_F delayColor = (delay_ms < 250) ? theme.badge_fast : ((delay_ms < 600) ? theme.badge_medium : theme.badge_slow);
         std::wstring dText = std::to_wstring(delay_ms) + L"ms";
         DrawTextSimple(dText, x + typeColW + nameColW, y, delayColW, h, delayColor, 10.5f, true, DWRITE_TEXT_ALIGNMENT_CENTER);
-    } else if (delay_ms == -1) {
-        DrawTextSimple(L"TIMEOUT", x + typeColW + nameColW, y, delayColW, h, theme.badge_slow, 9.5f, false, DWRITE_TEXT_ALIGNMENT_CENTER);
     }
 
     // 6. 底部分割槽线 (2px solid divider)
@@ -563,14 +612,27 @@ void D2DRenderer::DrawActiveNodeCard(float x, float y, float w, float h,
         m_solidBrush->SetColor(D2D1::ColorF(1.0f, 0.8f, 0.2f, 0.25f));
         m_renderTarget->FillRoundedRectangle(chipRect, m_solidBrush.Get());
         DrawTextSimple(L"测速中...", chipX, chipY, delayChipW, chipH, theme.accent, 9.5f, true, DWRITE_TEXT_ALIGNMENT_CENTER);
-    } else {
-        D2D1_COLOR_F dClr = (delay_ms <= 100 && delay_ms > 0) ? theme.badge_fast : ((delay_ms <= 300 && delay_ms > 0) ? theme.badge_medium : theme.badge_slow);
+    } else if (delay_ms > 0 && delay_ms < 2000) {
+        D2D1_COLOR_F dClr = (delay_ms < 250) ? theme.badge_fast : ((delay_ms < 600) ? theme.badge_medium : theme.badge_slow);
         m_solidBrush->SetColor(D2D1::ColorF(dClr.r, dClr.g, dClr.b, 0.15f));
         m_renderTarget->FillRoundedRectangle(chipRect, m_solidBrush.Get());
         m_solidBrush->SetColor(dClr);
         m_renderTarget->DrawRoundedRectangle(chipRect, m_solidBrush.Get(), 1.0f);
-        std::wstring dStr = (delay_ms > 0) ? (std::to_wstring(delay_ms) + L"ms") : L"TEST";
+        std::wstring dStr = std::to_wstring(delay_ms) + L"ms";
         DrawTextSimple(dStr, chipX, chipY, delayChipW, chipH, dClr, 9.5f, true, DWRITE_TEXT_ALIGNMENT_CENTER);
+    } else if (delay_ms >= 2000) {
+        m_solidBrush->SetColor(D2D1::ColorF(theme.badge_slow.r, theme.badge_slow.g, theme.badge_slow.b, 0.15f));
+        m_renderTarget->FillRoundedRectangle(chipRect, m_solidBrush.Get());
+        m_solidBrush->SetColor(theme.badge_slow);
+        m_renderTarget->DrawRoundedRectangle(chipRect, m_solidBrush.Get(), 1.0f);
+        DrawTextSimple(L"Timeout", chipX, chipY, delayChipW, chipH, theme.badge_slow, 9.5f, true, DWRITE_TEXT_ALIGNMENT_CENTER);
+    } else {
+        // 未测速 (delay_ms <= 0 或 -1)
+        m_solidBrush->SetColor(theme.card_bg);
+        m_renderTarget->FillRoundedRectangle(chipRect, m_solidBrush.Get());
+        m_solidBrush->SetColor(theme.card_shadow);
+        m_renderTarget->DrawRoundedRectangle(chipRect, m_solidBrush.Get(), 1.0f);
+        DrawTextSimple(L"TEST", chipX, chipY, delayChipW, chipH, theme.text_secondary, 9.5f, false, DWRITE_TEXT_ALIGNMENT_CENTER);
     }
 }
 
@@ -791,6 +853,65 @@ void D2DRenderer::DrawTrafficBottomBar(float x, float y, float w, float h,
                                        uint64_t upTotal, uint64_t downTotal) {
     std::deque<TrafficPoint> dummy;
     DrawTrafficDashboard(x, y, w, h, upSpeed, downSpeed, upTotal, downTotal, dummy, (w <= 285.0f));
+}
+
+void D2DRenderer::DrawModalBackdrop(float w, float h) {
+    if (!m_renderTarget) return;
+    m_solidBrush->SetColor(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.50f));
+    m_renderTarget->FillRectangle(D2D1::RectF(0, 0, w, h), m_solidBrush.Get());
+}
+
+void D2DRenderer::DrawModalDialogFrame(float x, float y, float w, float h, const std::wstring& title) {
+    if (!m_renderTarget) return;
+    const auto& theme = ThemeManager::Instance().GetColors();
+
+    // 1. 拟物底板
+    D2D1_ROUNDED_RECT cardRect = D2D1::RoundedRect(D2D1::RectF(x, y, x + w, y + h), 6.0f, 6.0f);
+    m_solidBrush->SetColor(theme.card_bg);
+    m_renderTarget->FillRoundedRectangle(cardRect, m_solidBrush.Get());
+    m_solidBrush->SetColor(theme.card_shadow);
+    m_renderTarget->DrawRoundedRectangle(cardRect, m_solidBrush.Get(), 1.5f);
+
+    // 2. 标题文字
+    float titleH = 32.0f;
+    DrawTextSimple(title, x + 14.0f, y + 6.0f, w - 44.0f, titleH, theme.text_primary, 13.0f, true);
+
+    // 3. 右上角关闭按钮 (✕)
+    float closeBtnSize = 22.0f;
+    float closeX = x + w - closeBtnSize - 8.0f;
+    float closeY = y + 6.0f;
+    Draw3DButton(closeX, closeY, closeBtnSize, closeBtnSize, L"✕");
+
+    // 4. 标题底部分割线
+    m_solidBrush->SetColor(theme.card_shadow);
+    m_renderTarget->DrawLine(D2D1::Point2F(x + 2.0f, y + titleH + 2.0f),
+                             D2D1::Point2F(x + w - 2.0f, y + titleH + 2.0f),
+                             m_solidBrush.Get(), 1.0f);
+}
+
+void D2DRenderer::DrawContextMenu(float x, float y, float w, float h,
+                                 const std::vector<std::pair<std::wstring, bool>>& items,
+                                 int hoveredIndex) {
+    if (!m_renderTarget) return;
+    const auto& theme = ThemeManager::Instance().GetColors();
+
+    D2D1_ROUNDED_RECT menuRect = D2D1::RoundedRect(D2D1::RectF(x, y, x + w, y + h), 4.0f, 4.0f);
+    m_solidBrush->SetColor(theme.card_active_bg);
+    m_renderTarget->FillRoundedRectangle(menuRect, m_solidBrush.Get());
+    m_solidBrush->SetColor(theme.card_shadow);
+    m_renderTarget->DrawRoundedRectangle(menuRect, m_solidBrush.Get(), 1.0f);
+
+    float itemH = 26.0f;
+    float curY = y + 4.0f;
+    for (size_t i = 0; i < items.size(); ++i) {
+        if (static_cast<int>(i) == hoveredIndex) {
+            m_solidBrush->SetColor(D2D1::ColorF(theme.accent.r, theme.accent.g, theme.accent.b, 0.22f));
+            m_renderTarget->FillRectangle(D2D1::RectF(x + 2.0f, curY, x + w - 2.0f, curY + itemH), m_solidBrush.Get());
+        }
+        D2D1_COLOR_F textColor = items[i].second ? theme.text_primary : theme.text_secondary;
+        DrawTextSimple(items[i].first, x + 10.0f, curY, w - 20.0f, itemH, textColor, 11.0f, false);
+        curY += itemH;
+    }
 }
 
 } // namespace ClashWin

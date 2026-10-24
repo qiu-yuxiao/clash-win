@@ -7,6 +7,8 @@
 #include <vector>
 #include <optional>
 #include <algorithm>
+#include <mutex>
+#include <unordered_map>
 #include "render/d2d_renderer.hpp"
 #include "clashwin/ui/theme.h"
 #include "clashwin/common/types.h"
@@ -20,6 +22,19 @@
 #include "clashwin/system/service_manager.h"
 
 namespace ClashWin {
+
+enum class ModalType {
+    None,
+    AddUrl,
+    EditProfile,
+    FirstRunGuide,
+    LogsView,
+    CheckUpdate,
+    StreamingUnlock,
+    HelpMenu,
+    ProfileContextMenu,
+    ConnectionContextMenu
+};
 
 struct ActiveConnectionItem {
     std::string id;
@@ -88,6 +103,7 @@ private:
     void ToggleMaximize();
     void CycleToNextCandidateNode();
     void TriggerActiveNodeDelayTest();
+    void TriggerAllNodesDelayTest();
 
     // 设置抽屉 5 大功能卡片交互动作 (Slice 6)
     void TriggerDrawerImport();
@@ -105,6 +121,18 @@ private:
         std::string dest_ip;
     };
     void ShowConnectionContextMenu(int screenX, int screenY, const ConnectionItemClickArea& area);
+
+    // 模态弹窗与对话框系统 (全套 1:1 对话框体系)
+    void OpenModal(ModalType modal);
+    void CloseModal();
+    void OnModalLButtonDown(int x, int y);
+    void OnModalChar(wchar_t ch);
+    void OnModalKeyDown(WPARAM key);
+    void TriggerStreamingUnlockCheck();
+    void TriggerClientUpdateCheck();
+    void AddCustomRule(const std::wstring& rawInput, int policy);
+    void SaveProfileEdit();
+    void RefreshLogsCache();
 
     HWND m_hwnd = nullptr;
     HINSTANCE m_hInstance = nullptr;
@@ -124,6 +152,8 @@ private:
     std::wstring m_searchText;
     bool m_searchFocused = false;
     bool m_isTestingDelay = false;
+    std::unordered_map<std::string, int> m_nodeDelays;
+    std::mutex m_delayMutex;
 
     // 实时流量统计与 30 采样历史 (波形图)
     uint64_t m_upSpeed = 0;
@@ -200,6 +230,89 @@ private:
 
     // 连接项点击区域列表 (Slice 8)
     std::vector<ConnectionItemClickArea> m_connectionItemRects;
+
+    // 模态对话框与全套窗口体系状态
+    ModalType m_currentModal = ModalType::None;
+    D2D1_RECT_F m_modalCloseBtnRect{};
+
+    // AddUrl 对话框
+    std::wstring m_addUrlText{};
+    int m_addUrlPolicy = 1; // 0: DIRECT, 1: PROXY, 2: REJECT
+    D2D1_RECT_F m_modalAddUrlInputRect{};
+    D2D1_RECT_F m_modalAddUrlPasteBtnRect{};
+    D2D1_RECT_F m_modalAddUrlPolicyRect{};
+    D2D1_RECT_F m_modalAddUrlCancelBtnRect{};
+    D2D1_RECT_F m_modalAddUrlConfirmBtnRect{};
+    bool m_isAddUrlFocused = false;
+
+    // EditProfile 对话框
+    std::string m_editProfileUid{};
+    std::wstring m_editProfileName{};
+    std::wstring m_editProfileUrl{};
+    std::wstring m_editProfileIntervalText = L"24";
+    int m_editProfileFocusField = 0; // 0: name, 1: url, 2: interval
+    D2D1_RECT_F m_modalEditNameRect{};
+    D2D1_RECT_F m_modalEditUrlRect{};
+    D2D1_RECT_F m_modalEditIntervalRect{};
+    D2D1_RECT_F m_modalEditCancelBtnRect{};
+    D2D1_RECT_F m_modalEditSaveBtnRect{};
+
+    // FirstRunGuide 对话框
+    std::wstring m_guideUrlText{};
+    bool m_isGuideInputFocused = false;
+    D2D1_RECT_F m_modalGuideInputRect{};
+    D2D1_RECT_F m_modalGuidePasteBtnRect{};
+    D2D1_RECT_F m_modalGuideImportBtnRect{};
+    D2D1_RECT_F m_modalGuideWikiBtnRect{};
+    D2D1_RECT_F m_modalGuideLaterBtnRect{};
+
+    // LogsView 对话框
+    int m_logLevelFilter = 0; // 0: ALL, 1: INFO, 2: WARN, 3: ERROR
+    std::wstring m_logSearchText{};
+    bool m_isLogSearchFocused = false;
+    bool m_logPaused = false;
+    float m_logScrollY = 0.0f;
+    std::vector<std::wstring> m_cachedLogEntries;
+    D2D1_RECT_F m_modalLogLevelRect{};
+    D2D1_RECT_F m_modalLogSearchRect{};
+    D2D1_RECT_F m_modalLogPauseBtnRect{};
+    D2D1_RECT_F m_modalLogClearBtnRect{};
+
+    // CheckUpdate 对话框
+    bool m_isCheckingUpdate = false;
+    std::wstring m_updateStatusMsg = L"当前版本已是最新 (v3.0.10)";
+    D2D1_RECT_F m_modalUpdateCheckBtnRect{};
+    D2D1_RECT_F m_modalUpdateCloseBtnRect{};
+
+    // StreamingUnlock 对话框
+    bool m_isCheckingUnlock = false;
+    D2D1_RECT_F m_modalUnlockRecheckBtnRect{};
+
+    // HelpMenu 弹窗
+    D2D1_RECT_F m_modalHelpWikiBtnRect{};
+    D2D1_RECT_F m_modalHelpClientUpdateBtnRect{};
+    D2D1_RECT_F m_modalHelpCoreUpdateBtnRect{};
+    D2D1_RECT_F m_modalHelpUnlockBtnRect{};
+    D2D1_RECT_F m_modalHelpGuideBtnRect{};
+
+    // Profile 右键菜单
+    std::string m_contextProfileUid{};
+    float m_profileMenuX = 0.0f;
+    float m_profileMenuY = 0.0f;
+    int m_hoveredProfileMenuItem = -1;
+    std::vector<std::pair<D2D1_RECT_F, int>> m_profileMenuItemRects;
+
+    // Connection 右键菜单
+    ConnectionItemClickArea m_contextConnection{};
+    float m_connMenuX = 0.0f;
+    float m_connMenuY = 0.0f;
+    int m_hoveredConnMenuItem = -1;
+    std::vector<std::pair<D2D1_RECT_F, int>> m_connMenuItemRects;
+
+    // 抽屉底部快捷按钮
+    D2D1_RECT_F m_drawerAddUrlBtnRect{};
+    D2D1_RECT_F m_drawerHelpBtnRect{};
+    D2D1_RECT_F m_drawerLogsBtnRect{};
 };
 
 } // namespace ClashWin

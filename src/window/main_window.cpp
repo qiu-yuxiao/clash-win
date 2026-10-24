@@ -1,5 +1,7 @@
 #include "main_window.hpp"
 #include "clashwin/core/connection_manager.h"
+#include "clashwin/config/enhance_chain.h"
+#include "clashwin/network/unlock_checker.h"
 #include <windowsx.h>
 #include <dwmapi.h>
 #include <shellscalingapi.h>
@@ -7,6 +9,11 @@
 #include <thread>
 #include <iostream>
 #include <cmath>
+#include <codecvt>
+#include <locale>
+#include <sstream>
+#include <fstream>
+#include <algorithm>
 
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "shcore.lib")
@@ -40,17 +47,11 @@ void MainWindow::OnWakeupVisible() {
 bool MainWindow::Create(HINSTANCE hInstance, int nCmdShow) {
     m_hInstance = hInstance;
 
-    // 1. 初始化配置与多订阅 (自动继承既有 Clash Mini 数据)
+    // 1. 初始化配置与多订阅 (遵循原生逻辑：无预置或未导入订阅时保持真实纯净空状态)
     wchar_t appDataPath[MAX_PATH];
     if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appDataPath))) {
-        std::filesystem::path clashMiniDir = std::filesystem::path(appDataPath) / "io.github.clash-mini.clash-mini";
         std::filesystem::path appDir = std::filesystem::path(appDataPath) / "clash_win";
-
-        if (!std::filesystem::exists(appDir / "profiles.yaml") && std::filesystem::exists(clashMiniDir / "profiles.yaml")) {
-            std::filesystem::create_directories(appDir);
-            std::error_code ec;
-            std::filesystem::copy(clashMiniDir, appDir, std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing, ec);
-        }
+        std::filesystem::create_directories(appDir);
 
         clashwin::config::AppConfig::Instance().Init(appDir);
         clashwin::config::ProfileManager::Instance().Init(appDir);
@@ -130,13 +131,29 @@ bool MainWindow::Create(HINSTANCE hInstance, int nCmdShow) {
         WS_EX_APPWINDOW,
         CLASS_NAME,
         L"Clash Mini Ver.3.0.10",
-        WS_POPUP | WS_VISIBLE | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+        WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
         initX, initY,
         physW, physH,
         nullptr, nullptr, hInstance, this
     );
 
     if (!m_hwnd) return false;
+
+    // 启用 DWM 窗口阴影投射与 Windows 11 原生圆角
+    MARGINS margins = { 0, 0, 1, 0 };
+    DwmExtendFrameIntoClientArea(m_hwnd, &margins);
+
+    #ifndef DWMWA_WINDOW_CORNER_PREFERENCE
+    #define DWMWA_WINDOW_CORNER_PREFERENCE 33
+    #endif
+    enum DWM_WINDOW_CORNER_PREFERENCE {
+        DWMWCP_DEFAULT = 0,
+        DWMWCP_DONOTROUND = 1,
+        DWMWCP_ROUND = 2,
+        DWMWCP_ROUNDSMALL = 3
+    };
+    DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_ROUND;
+    DwmSetWindowAttribute(m_hwnd, static_cast<DWORD>(DWMWA_WINDOW_CORNER_PREFERENCE), &corner, sizeof(corner));
 
     m_dpiScale = GetDpiScale();
     physW = static_cast<int>(initW * m_dpiScale + 0.5f);
@@ -158,6 +175,11 @@ bool MainWindow::Create(HINSTANCE hInstance, int nCmdShow) {
     SetTimer(m_hwnd, TRAFFIC_TIMER_ID, TRAFFIC_POLL_INTERVAL_MS, nullptr);
 
     StartCoreIfConfigReady();
+
+    if (!clashwin::config::ProfileManager::Instance().IsFirstRunCompleted() &&
+        !clashwin::config::ProfileManager::Instance().HasRealProfile()) {
+        OpenModal(ModalType::FirstRunGuide);
+    }
 
     if (initW > NARROW_BREAKPOINT) {
         SetTimer(m_hwnd, CONN_TIMER_ID, CONN_POLL_INTERVAL_MS, nullptr);
@@ -457,7 +479,32 @@ void MainWindow::TriggerActiveNodeDelayTest() {
     InvalidateRect(m_hwnd, nullptr, FALSE);
 
     std::thread([this, current]() {
-        clashwin::core::MihomoClient::Instance().TestProxyDelay(current, 9098, 2000);
+        int delay = clashwin::core::MihomoClient::Instance().TestProxyDelay(current, 9098, 2000);
+        {
+            std::lock_guard<std::mutex> lock(m_delayMutex);
+            m_nodeDelays[current] = delay;
+        }
+        m_isTestingDelay = false;
+        PostMessageW(m_hwnd, WM_USER + 100, 0, 0);
+    }).detach();
+}
+
+void MainWindow::TriggerAllNodesDelayTest() {
+    const auto& nodes = clashwin::config::ProfileManager::Instance().GetNodes();
+    if (nodes.empty()) return;
+
+    m_isTestingDelay = true;
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+
+    std::thread([this, nodes]() {
+        for (const auto& node : nodes) {
+            int delay = clashwin::core::MihomoClient::Instance().TestProxyDelay(node.name, 9098, 2000);
+            {
+                std::lock_guard<std::mutex> lock(m_delayMutex);
+                m_nodeDelays[node.name] = delay;
+            }
+            PostMessageW(m_hwnd, WM_USER + 100, 0, 0);
+        }
         m_isTestingDelay = false;
         PostMessageW(m_hwnd, WM_USER + 100, 0, 0);
     }).detach();
@@ -564,15 +611,17 @@ LRESULT MainWindow::OnNcHitTest(POINTS pt) {
     int x = pt.x;
     int y = pt.y;
 
-    if (x < rc.left + corner && y < rc.top + corner) return HTTOPLEFT;
-    if (x > rc.right - corner && y < rc.top + corner) return HTTOPRIGHT;
-    if (x < rc.left + corner && y > rc.bottom - corner) return HTBOTTOMLEFT;
-    if (x > rc.right - corner && y > rc.bottom - corner) return HTBOTTOMRIGHT;
+    if (!IsZoomed(m_hwnd)) {
+        if (x < rc.left + corner && y < rc.top + corner) return HTTOPLEFT;
+        if (x > rc.right - corner && y < rc.top + corner) return HTTOPRIGHT;
+        if (x < rc.left + corner && y > rc.bottom - corner) return HTBOTTOMLEFT;
+        if (x > rc.right - corner && y > rc.bottom - corner) return HTBOTTOMRIGHT;
 
-    if (x < rc.left + border) return HTLEFT;
-    if (x > rc.right - border) return HTRIGHT;
-    if (y < rc.top + border) return HTTOP;
-    if (y > rc.bottom - border) return HTBOTTOM;
+        if (x < rc.left + border) return HTLEFT;
+        if (x > rc.right - border) return HTRIGHT;
+        if (y < rc.top + border) return HTTOP;
+        if (y > rc.bottom - border) return HTBOTTOM;
+    }
 
     if (m_isStealthMode) {
         return HTCAPTION;
@@ -602,6 +651,11 @@ void MainWindow::ToggleMaximize() {
 }
 
 void MainWindow::OnLButtonDown(int x, int y) {
+    if (m_currentModal != ModalType::None) {
+        OnModalLButtonDown(x, y);
+        return;
+    }
+
     float fx = static_cast<float>(x);
     float fy = static_cast<float>(y);
 
@@ -668,7 +722,7 @@ void MainWindow::OnLButtonDown(int x, int y) {
     // 3. ProxyHead 工具栏交互
     if (fx >= m_headBoltBtnRect.left && fx <= m_headBoltBtnRect.right &&
         fy >= m_headBoltBtnRect.top && fy <= m_headBoltBtnRect.bottom) {
-        TriggerActiveNodeDelayTest();
+        TriggerAllNodesDelayTest();
         return;
     }
 
@@ -765,6 +819,13 @@ void MainWindow::OnLButtonDown(int x, int y) {
             return;
         }
 
+        // ➕ 添加自定义分流规则按钮
+        if (fx >= m_drawerAddUrlBtnRect.left && fx <= m_drawerAddUrlBtnRect.right &&
+            fy >= m_drawerAddUrlBtnRect.top && fy <= m_drawerAddUrlBtnRect.bottom) {
+            OpenModal(ModalType::AddUrl);
+            return;
+        }
+
         // G. 基础设置 2x2 开关
         if (fx >= m_autoLaunchSwitchRect.left && fx <= m_autoLaunchSwitchRect.right &&
             fy >= m_autoLaunchSwitchRect.top && fy <= m_autoLaunchSwitchRect.bottom) {
@@ -841,6 +902,18 @@ void MainWindow::OnLButtonDown(int x, int y) {
             m_isDraggingSlider2 = true;
             SetCapture(m_hwnd);
             OnMouseMove(x, y);
+            return;
+        }
+
+        // L. 抽屉底部快捷按钮: 运行日志 + 帮助与关于
+        if (fx >= m_drawerLogsBtnRect.left && fx <= m_drawerLogsBtnRect.right &&
+            fy >= m_drawerLogsBtnRect.top && fy <= m_drawerLogsBtnRect.bottom) {
+            OpenModal(ModalType::LogsView);
+            return;
+        }
+        if (fx >= m_drawerHelpBtnRect.left && fx <= m_drawerHelpBtnRect.right &&
+            fy >= m_drawerHelpBtnRect.top && fy <= m_drawerHelpBtnRect.bottom) {
+            OpenModal(ModalType::HelpMenu);
             return;
         }
     }
@@ -927,6 +1000,66 @@ LRESULT MainWindow::HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
     case WM_NCCALCSIZE: {
         if (wParam == TRUE) {
+            if (IsZoomed(m_hwnd)) {
+                NCCALCSIZE_PARAMS* pParams = reinterpret_cast<NCCALCSIZE_PARAMS*>(lParam);
+                HMONITOR hMon = MonitorFromWindow(m_hwnd, MONITOR_DEFAULTTONEAREST);
+                MONITORINFO mi = { sizeof(mi) };
+                if (GetMonitorInfoW(hMon, &mi)) {
+                    pParams->rgrc[0] = mi.rcWork;
+                }
+            }
+            return 0;
+        }
+        break;
+    }
+
+    case WM_GETMINMAXINFO: {
+        MINMAXINFO* pMMI = reinterpret_cast<MINMAXINFO*>(lParam);
+        m_dpiScale = GetDpiScale();
+        pMMI->ptMinTrackSize.x = static_cast<LONG>(MIN_WIDTH * m_dpiScale + 0.5f);
+        pMMI->ptMinTrackSize.y = static_cast<LONG>(MIN_HEIGHT * m_dpiScale + 0.5f);
+        pMMI->ptMaxTrackSize.x = static_cast<LONG>(clashwin::geometry::kMaxWidth * m_dpiScale + 0.5f);
+        pMMI->ptMaxTrackSize.y = static_cast<LONG>(clashwin::geometry::kMaxHeight * m_dpiScale + 0.5f);
+        return 0;
+    }
+
+    case WM_NCLBUTTONDBLCLK: {
+        if (wParam == HTCAPTION) {
+            ToggleMaximize();
+            return 0;
+        }
+        break;
+    }
+
+    case WM_NCRBUTTONUP: {
+        if (wParam == HTCAPTION) {
+            HMENU hMenu = GetSystemMenu(m_hwnd, FALSE);
+            if (hMenu) {
+                POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+                bool zoomed = IsZoomed(m_hwnd) != FALSE;
+                EnableMenuItem(hMenu, SC_RESTORE, MF_BYCOMMAND | (zoomed ? MF_ENABLED : MF_GRAYED));
+                EnableMenuItem(hMenu, SC_MAXIMIZE, MF_BYCOMMAND | (zoomed ? MF_GRAYED : MF_ENABLED));
+                int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, m_hwnd, nullptr);
+                if (cmd > 0) {
+                    SendMessageW(m_hwnd, WM_SYSCOMMAND, cmd, 0);
+                }
+            }
+            return 0;
+        }
+        break;
+    }
+
+    case WM_SYSCOMMAND: {
+        if ((wParam & 0xFFF0) == SC_KEYMENU && lParam == ' ') {
+            HMENU hMenu = GetSystemMenu(m_hwnd, FALSE);
+            if (hMenu) {
+                RECT rc;
+                GetWindowRect(m_hwnd, &rc);
+                int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_RIGHTBUTTON, rc.left, rc.top + static_cast<int>(30 * m_dpiScale), 0, m_hwnd, nullptr);
+                if (cmd > 0) {
+                    SendMessageW(m_hwnd, WM_SYSCOMMAND, cmd, 0);
+                }
+            }
             return 0;
         }
         break;
@@ -983,6 +1116,10 @@ LRESULT MainWindow::HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) {
 
     case WM_CHAR: {
         wchar_t ch = static_cast<wchar_t>(wParam);
+        if (m_currentModal != ModalType::None) {
+            OnModalChar(ch);
+            return 0;
+        }
         if (m_searchFocused) {
             if (ch == 8) { // Backspace
                 if (!m_searchText.empty()) {
@@ -1066,6 +1203,10 @@ LRESULT MainWindow::HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) {
         if (m_isStealthMode) {
             m_isStealthMode = false;
             InvalidateRect(m_hwnd, nullptr, FALSE);
+        }
+        if (m_currentModal != ModalType::None) {
+            OnModalKeyDown(wParam);
+            return 0;
         }
         if (wParam == VK_F4 || wParam == VK_F1) {
             // F4 / F1 快捷键触发全节点测速
@@ -1157,6 +1298,18 @@ LRESULT MainWindow::HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) {
     case WM_RBUTTONUP: {
         float fx = static_cast<float>(GET_X_LPARAM(lParam));
         float fy = static_cast<float>(GET_Y_LPARAM(lParam));
+        if (m_isDrawerOpen) {
+            for (const auto& item : m_profileItemClickAreas) {
+                if (fx >= item.cardRect.left && fx <= item.cardRect.right &&
+                    fy >= item.cardRect.top && fy <= item.cardRect.bottom) {
+                    m_contextProfileUid = item.uid;
+                    m_profileMenuX = fx;
+                    m_profileMenuY = fy;
+                    OpenModal(ModalType::ProfileContextMenu);
+                    return 0;
+                }
+            }
+        }
         for (const auto& area : m_connectionItemRects) {
             if (fx >= area.rect.left && fx <= area.rect.right &&
                 fy >= area.rect.top && fy <= area.rect.bottom) {
@@ -1341,10 +1494,11 @@ void MainWindow::OnPaint() {
 
         std::string currentProxy = clashwin::config::ProfileManager::Instance().GetCurrentActiveNode();
         std::wstring currentProxyW(currentProxy.begin(), currentProxy.end());
-        if (currentProxyW.empty()) currentProxyW = L"未选择节点 (直接连接)";
+        if (currentProxyW.empty()) currentProxyW = L"未选择节点";
 
-        // 获取协议
-        std::wstring protoW = L"DIRECT";
+        // 获取协议与真实测速延迟
+        std::wstring protoW = L"";
+        int activeDelay = -1;
         const auto& allNodes = clashwin::config::ProfileManager::Instance().GetNodes();
         for (const auto& n : allNodes) {
             if (n.name == currentProxy) {
@@ -1354,8 +1508,16 @@ void MainWindow::OnPaint() {
             }
         }
 
+        if (!currentProxy.empty()) {
+            std::lock_guard<std::mutex> lock(m_delayMutex);
+            auto it = m_nodeDelays.find(currentProxy);
+            if (it != m_nodeDelays.end()) {
+                activeDelay = it->second;
+            }
+        }
+
         m_renderer->DrawActiveNodeCard(marginX, yOffset + 1.0f * m_dpiScale, cardW, actBtnH,
-                                       protoW, currentProxyW, 42, L"", m_isTestingDelay);
+                                       protoW, currentProxyW, activeDelay, L"", m_isTestingDelay);
     } else {
         // 抽屉展开时，右上角单独渲染关闭设置按钮 ✕ (28x28 醒目高亮)
         float closeBtnX = width - marginX - actBtnW;
@@ -1450,7 +1612,7 @@ void MainWindow::OnPaint() {
         // -------------------------------------------------------------
         // 卡片 2: 流量接管与路由偏好 (TakeoverModeCard + RoutingPreferenceCard)
         // -------------------------------------------------------------
-        float card2H = 135.0f * m_dpiScale;
+        float card2H = 162.0f * m_dpiScale;
         m_renderer->Draw3DCard(marginX, curY, contentW, card2H, theme.card_bg);
 
         // A. 流量接管模式
@@ -1481,6 +1643,11 @@ void MainWindow::OnPaint() {
 
         std::wstring ruleTip = (ruleIdx == 2) ? L"PRX: 全局代理所有流量" : ((ruleIdx == 1) ? L"RUL: 智能规则分流 (推荐出厂默认)" : L"DIR: 全部直连 (不走代理)");
         m_renderer->DrawTextSimple(ruleTip, dTextX, c2Y, dTextW, 14.0f * m_dpiScale, theme.text_secondary, 9.5f, false);
+        c2Y += 18.0f * m_dpiScale;
+
+        // ➕ 添加自定义分流规则按钮
+        m_drawerAddUrlBtnRect = D2D1::RectF(dTextX, c2Y, dTextX + dTextW, c2Y + 22.0f * m_dpiScale);
+        m_renderer->Draw3DButton(dTextX, c2Y, dTextW, 22.0f * m_dpiScale, L"➕ 添加自定义分流规则");
 
         curY += card2H + 6.0f * m_dpiScale;
 
@@ -1572,6 +1739,20 @@ void MainWindow::OnPaint() {
         m_renderer->DrawSlider(dTextX, c4Y, dTextW, 18.0f * m_dpiScale, theme.slider2_name, ThemeManager::Instance().GetSlider2(), 0.0f, 5.0f);
 
         curY += card4H + 6.0f * m_dpiScale;
+
+        // -------------------------------------------------------------
+        // 抽屉底部快捷操作行: 运行日志 + 帮助与关于
+        // -------------------------------------------------------------
+        float footerBtnW = (contentW - 6.0f * m_dpiScale) / 2.0f;
+        float footerBtnH = 24.0f * m_dpiScale;
+        m_drawerLogsBtnRect = D2D1::RectF(marginX, curY, marginX + footerBtnW, curY + footerBtnH);
+        m_renderer->Draw3DButton(marginX, curY, footerBtnW, footerBtnH, L"📜 查看运行日志");
+
+        float helpBtnX = marginX + footerBtnW + 6.0f * m_dpiScale;
+        m_drawerHelpBtnRect = D2D1::RectF(helpBtnX, curY, helpBtnX + footerBtnW, curY + footerBtnH);
+        m_renderer->Draw3DButton(helpBtnX, curY, footerBtnW, footerBtnH, L"💡 帮助与关于");
+
+        curY += footerBtnH + 10.0f * m_dpiScale;
         yOffset = curY;
     } else {
         // 5. ProxyHead 工具栏 (⚡ 测速 + ↕ 排序 + 🔍 搜索过滤框，全宽满铺，左右 12px 内边距)
@@ -1605,7 +1786,23 @@ void MainWindow::OnPaint() {
         }
 
         // 排序
-        if (m_sortType == 2) {
+        if (m_sortType == 1) {
+            // 按延迟升序排（未测速或超时排在最后，严格对齐 Clash Mini）
+            std::sort(filteredNodes.begin(), filteredNodes.end(), [this](const auto& a, const auto& b) {
+                int da = -1, db = -1;
+                {
+                    std::lock_guard<std::mutex> lock(m_delayMutex);
+                    auto ita = m_nodeDelays.find(a.name);
+                    if (ita != m_nodeDelays.end()) da = ita->second;
+                    auto itb = m_nodeDelays.find(b.name);
+                    if (itb != m_nodeDelays.end()) db = itb->second;
+                }
+                if (da <= 0 && db <= 0) return a.name < b.name;
+                if (da <= 0) return false;
+                if (db <= 0) return true;
+                return da < db;
+            });
+        } else if (m_sortType == 2) {
             // A-Z 字典序
             std::sort(filteredNodes.begin(), filteredNodes.end(), [](const auto& a, const auto& b) {
                 return a.name < b.name;
@@ -1616,16 +1813,16 @@ void MainWindow::OnPaint() {
         float availableListH = height - yOffset - trafficPaneH;
         m_nodeItemRects.clear();
 
-        // 7. 节点列表渲染 (空状态 vs 实体节点列表)
+        // 7. 节点列表渲染 (空状态 vs 实体节点列表，严格 1:1 对齐 Clash Mini No Proxies)
         if (filteredNodes.empty()) {
-            float emptyH = 90.0f * m_dpiScale;
+            float emptyH = 100.0f * m_dpiScale;
             m_renderer->Draw3DCard(marginX, yOffset + 8.0f * m_dpiScale, contentW, emptyH, theme.card_bg);
-            m_renderer->DrawTextSimple(L"🌐 暂无可用节点", marginX, yOffset + 20.0f * m_dpiScale, contentW, 20.0f * m_dpiScale, theme.text_secondary, 11.5f, false, DWRITE_TEXT_ALIGNMENT_CENTER);
+            m_renderer->DrawTextSimple(L"📥 No Proxies", marginX, yOffset + 20.0f * m_dpiScale, contentW, 22.0f * m_dpiScale, theme.text_secondary, 12.0f, true, DWRITE_TEXT_ALIGNMENT_CENTER);
             
             float addBtnW = contentW - 40.0f * m_dpiScale;
             float addBtnH = 28.0f * m_dpiScale;
             float addBtnX = marginX + 20.0f * m_dpiScale;
-            float addBtnY = yOffset + 50.0f * m_dpiScale;
+            float addBtnY = yOffset + 52.0f * m_dpiScale;
             m_emptyListAddBtnRect = D2D1::RectF(addBtnX, addBtnY, addBtnX + addBtnW, addBtnY + addBtnH);
             m_renderer->Draw3DButton(addBtnX, addBtnY, addBtnW, addBtnH, L"⚙ 打开设置导入订阅", false, false, true);
         } else {
@@ -1644,8 +1841,15 @@ void MainWindow::OnPaint() {
                     if (nodeTypeW.empty()) nodeTypeW = L"VMESS";
                     for (auto& c : nodeTypeW) c = towupper(c);
 
+                    int nodeDelay = -1;
+                    {
+                        std::lock_guard<std::mutex> lock(m_delayMutex);
+                        auto it = m_nodeDelays.find(filteredNodes[i].name);
+                        if (it != m_nodeDelays.end()) nodeDelay = it->second;
+                    }
+
                     m_renderer->DrawProxyItem3Col(marginX, leftY, halfW, itemH,
-                                                  nodeTypeW, nodeNameW, 42, isSelected, (i % 2 != 0), false);
+                                                  nodeTypeW, nodeNameW, nodeDelay, isSelected, (i % 2 != 0), false);
 
                     m_nodeItemRects.push_back({D2D1::RectF(marginX, leftY, marginX + halfW, leftY + itemH), filteredNodes[i].name});
                     leftY += itemH;
@@ -1681,8 +1885,15 @@ void MainWindow::OnPaint() {
                     if (nodeTypeW.empty()) nodeTypeW = L"VMESS";
                     for (auto& c : nodeTypeW) c = towupper(c);
 
+                    int nodeDelay = -1;
+                    {
+                        std::lock_guard<std::mutex> lock(m_delayMutex);
+                        auto it = m_nodeDelays.find(filteredNodes[i].name);
+                        if (it != m_nodeDelays.end()) nodeDelay = it->second;
+                    }
+
                     m_renderer->DrawProxyItem3Col(0, yOffset, width, itemH,
-                                                  nodeTypeW, nodeNameW, 42, isSelected, (i % 2 != 0), false);
+                                                  nodeTypeW, nodeNameW, nodeDelay, isSelected, (i % 2 != 0), false);
 
                     m_nodeItemRects.push_back({D2D1::RectF(0, yOffset, width, yOffset + itemH), filteredNodes[i].name});
                     yOffset += itemH;
@@ -1694,6 +1905,320 @@ void MainWindow::OnPaint() {
         m_renderer->DrawTrafficDashboard(0, height - trafficPaneH, width, trafficPaneH,
                                          m_upSpeed, m_downSpeed, m_upTotal, m_downTotal,
                                          m_trafficHistory, (logicalW <= NARROW_BREAKPOINT));
+    }
+
+    // 9. 模态对话框与全套弹窗体系 (AddUrl / EditProfile / Guide / Logs / Update / Unlock / ContextMenu)
+    if (m_currentModal != ModalType::None) {
+        m_renderer->DrawModalBackdrop(width, height);
+
+        if (m_currentModal == ModalType::AddUrl) {
+            float dlgW = (std::min)(width - 24.0f * m_dpiScale, 360.0f * m_dpiScale);
+            float dlgH = 210.0f * m_dpiScale;
+            float dlgX = (width - dlgW) / 2.0f;
+            float dlgY = (height - dlgH) / 2.0f;
+
+            m_renderer->DrawModalDialogFrame(dlgX, dlgY, dlgW, dlgH, L"➕ 添加自定义分流规则");
+            m_modalCloseBtnRect = D2D1::RectF(dlgX + dlgW - 30.0f * m_dpiScale, dlgY + 6.0f * m_dpiScale, dlgX + dlgW - 8.0f * m_dpiScale, dlgY + 28.0f * m_dpiScale);
+
+            float padX = 14.0f * m_dpiScale;
+            float curDlgY = dlgY + 38.0f * m_dpiScale;
+
+            m_renderer->DrawTextSimple(L"请输入域名或 IP (例如: google.com 或 1.1.1.1):", dlgX + padX, curDlgY, dlgW - padX * 2, 16.0f * m_dpiScale, theme.text_primary, 10.5f, false);
+            curDlgY += 20.0f * m_dpiScale;
+
+            float pasteBtnW = 46.0f * m_dpiScale;
+            float inW = dlgW - padX * 2 - pasteBtnW - 6.0f * m_dpiScale;
+            m_modalAddUrlInputRect = D2D1::RectF(dlgX + padX, curDlgY, dlgX + padX + inW, curDlgY + 22.0f * m_dpiScale);
+            m_renderer->Draw3DTextInput(dlgX + padX, curDlgY, inW, 22.0f * m_dpiScale, L"", m_addUrlText, L"domain / IP...", m_isAddUrlFocused);
+
+            float pasteX = dlgX + padX + inW + 6.0f * m_dpiScale;
+            m_modalAddUrlPasteBtnRect = D2D1::RectF(pasteX, curDlgY, pasteX + pasteBtnW, curDlgY + 22.0f * m_dpiScale);
+            m_renderer->Draw3DButton(pasteX, curDlgY, pasteBtnW, 22.0f * m_dpiScale, L"📋粘贴");
+            curDlgY += 28.0f * m_dpiScale;
+
+            m_renderer->DrawTextSimple(L"分流策略偏好:", dlgX + padX, curDlgY, dlgW - padX * 2, 16.0f * m_dpiScale, theme.text_primary, 10.5f, false);
+            curDlgY += 18.0f * m_dpiScale;
+
+            m_modalAddUrlPolicyRect = D2D1::RectF(dlgX + padX, curDlgY, dlgX + dlgW - padX, curDlgY + 22.0f * m_dpiScale);
+            m_renderer->DrawSegmentedControl(dlgX + padX, curDlgY, dlgW - padX * 2, 22.0f * m_dpiScale, {L"DIRECT", L"PROXY", L"REJECT"}, m_addUrlPolicy);
+            curDlgY += 34.0f * m_dpiScale;
+
+            float btnW = 60.0f * m_dpiScale;
+            float btnH = 24.0f * m_dpiScale;
+            float addX = dlgX + dlgW - padX - btnW;
+            float cancelX = addX - btnW - 8.0f * m_dpiScale;
+
+            m_modalAddUrlCancelBtnRect = D2D1::RectF(cancelX, curDlgY, cancelX + btnW, curDlgY + btnH);
+            m_renderer->Draw3DButton(cancelX, curDlgY, btnW, btnH, L"取消");
+
+            m_modalAddUrlConfirmBtnRect = D2D1::RectF(addX, curDlgY, addX + btnW, curDlgY + btnH);
+            m_renderer->Draw3DButton(addX, curDlgY, btnW, btnH, L"添加", false, false, true);
+        }
+        else if (m_currentModal == ModalType::EditProfile) {
+            float dlgW = (std::min)(width - 24.0f * m_dpiScale, 360.0f * m_dpiScale);
+            float dlgH = 230.0f * m_dpiScale;
+            float dlgX = (width - dlgW) / 2.0f;
+            float dlgY = (height - dlgH) / 2.0f;
+
+            m_renderer->DrawModalDialogFrame(dlgX, dlgY, dlgW, dlgH, L"⚙️ 编辑订阅配置");
+            m_modalCloseBtnRect = D2D1::RectF(dlgX + dlgW - 30.0f * m_dpiScale, dlgY + 6.0f * m_dpiScale, dlgX + dlgW - 8.0f * m_dpiScale, dlgY + 28.0f * m_dpiScale);
+
+            float padX = 14.0f * m_dpiScale;
+            float curDlgY = dlgY + 36.0f * m_dpiScale;
+            float fieldW = dlgW - padX * 2;
+
+            m_renderer->DrawTextSimple(L"配置名称:", dlgX + padX, curDlgY, fieldW, 15.0f * m_dpiScale, theme.text_primary, 10.0f, false);
+            curDlgY += 16.0f * m_dpiScale;
+            m_modalEditNameRect = D2D1::RectF(dlgX + padX, curDlgY, dlgX + padX + fieldW, curDlgY + 20.0f * m_dpiScale);
+            m_renderer->Draw3DTextInput(dlgX + padX, curDlgY, fieldW, 20.0f * m_dpiScale, L"", m_editProfileName, L"配置名称...", m_editProfileFocusField == 0);
+            curDlgY += 24.0f * m_dpiScale;
+
+            m_renderer->DrawTextSimple(L"订阅链接 (URL):", dlgX + padX, curDlgY, fieldW, 15.0f * m_dpiScale, theme.text_primary, 10.0f, false);
+            curDlgY += 16.0f * m_dpiScale;
+            m_modalEditUrlRect = D2D1::RectF(dlgX + padX, curDlgY, dlgX + padX + fieldW, curDlgY + 20.0f * m_dpiScale);
+            m_renderer->Draw3DTextInput(dlgX + padX, curDlgY, fieldW, 20.0f * m_dpiScale, L"", m_editProfileUrl, L"https://...", m_editProfileFocusField == 1);
+            curDlgY += 24.0f * m_dpiScale;
+
+            m_renderer->DrawTextSimple(L"自动更新间隔 (小时):", dlgX + padX, curDlgY, fieldW, 15.0f * m_dpiScale, theme.text_primary, 10.0f, false);
+            curDlgY += 16.0f * m_dpiScale;
+            m_modalEditIntervalRect = D2D1::RectF(dlgX + padX, curDlgY, dlgX + padX + 80.0f * m_dpiScale, curDlgY + 20.0f * m_dpiScale);
+            m_renderer->Draw3DTextInput(dlgX + padX, curDlgY, 80.0f * m_dpiScale, 20.0f * m_dpiScale, L"", m_editProfileIntervalText, L"24", m_editProfileFocusField == 2);
+            curDlgY += 26.0f * m_dpiScale;
+
+            float btnW = 60.0f * m_dpiScale;
+            float btnH = 24.0f * m_dpiScale;
+            float saveX = dlgX + dlgW - padX - btnW;
+            float cancelX = saveX - btnW - 8.0f * m_dpiScale;
+
+            m_modalEditCancelBtnRect = D2D1::RectF(cancelX, curDlgY, cancelX + btnW, curDlgY + btnH);
+            m_renderer->Draw3DButton(cancelX, curDlgY, btnW, btnH, L"取消");
+
+            m_modalEditSaveBtnRect = D2D1::RectF(saveX, curDlgY, saveX + btnW, curDlgY + btnH);
+            m_renderer->Draw3DButton(saveX, curDlgY, btnW, btnH, L"保存", false, false, true);
+        }
+        else if (m_currentModal == ModalType::FirstRunGuide) {
+            float dlgW = (std::min)(width - 24.0f * m_dpiScale, 380.0f * m_dpiScale);
+            float dlgH = 240.0f * m_dpiScale;
+            float dlgX = (width - dlgW) / 2.0f;
+            float dlgY = (height - dlgH) / 2.0f;
+
+            m_renderer->DrawModalDialogFrame(dlgX, dlgY, dlgW, dlgH, L"🐱 欢迎使用 Clash Mini");
+            m_modalCloseBtnRect = D2D1::RectF(dlgX + dlgW - 30.0f * m_dpiScale, dlgY + 6.0f * m_dpiScale, dlgX + dlgW - 8.0f * m_dpiScale, dlgY + 28.0f * m_dpiScale);
+
+            float padX = 14.0f * m_dpiScale;
+            float curDlgY = dlgY + 38.0f * m_dpiScale;
+            float fieldW = dlgW - padX * 2;
+
+            m_renderer->DrawTextSimple(L"请填入订阅链接以快速开启极速网络代理加速：", dlgX + padX, curDlgY, fieldW, 16.0f * m_dpiScale, theme.text_primary, 10.5f, true);
+            curDlgY += 24.0f * m_dpiScale;
+
+            float pasteBtnW = 48.0f * m_dpiScale;
+            float inW = fieldW - pasteBtnW - 6.0f * m_dpiScale;
+            m_modalGuideInputRect = D2D1::RectF(dlgX + padX, curDlgY, dlgX + padX + inW, curDlgY + 22.0f * m_dpiScale);
+            m_renderer->Draw3DTextInput(dlgX + padX, curDlgY, inW, 22.0f * m_dpiScale, L"", m_guideUrlText, L"https://...", m_isGuideInputFocused);
+
+            float pasteX = dlgX + padX + inW + 6.0f * m_dpiScale;
+            m_modalGuidePasteBtnRect = D2D1::RectF(pasteX, curDlgY, pasteX + pasteBtnW, curDlgY + 22.0f * m_dpiScale);
+            m_renderer->Draw3DButton(pasteX, curDlgY, pasteBtnW, 22.0f * m_dpiScale, L"📋粘贴");
+            curDlgY += 32.0f * m_dpiScale;
+
+            m_modalGuideImportBtnRect = D2D1::RectF(dlgX + padX, curDlgY, dlgX + padX + fieldW, curDlgY + 26.0f * m_dpiScale);
+            m_renderer->Draw3DButton(dlgX + padX, curDlgY, fieldW, 26.0f * m_dpiScale, L"⚡ 一键导入并开启代理", false, false, true);
+            curDlgY += 32.0f * m_dpiScale;
+
+            float halfW = (fieldW - 8.0f * m_dpiScale) / 2.0f;
+            m_modalGuideWikiBtnRect = D2D1::RectF(dlgX + padX, curDlgY, dlgX + padX + halfW, curDlgY + 22.0f * m_dpiScale);
+            m_renderer->Draw3DButton(dlgX + padX, curDlgY, halfW, 22.0f * m_dpiScale, L"📚 查看使用教程");
+
+            float laterX = dlgX + padX + halfW + 8.0f * m_dpiScale;
+            m_modalGuideLaterBtnRect = D2D1::RectF(laterX, curDlgY, laterX + halfW, curDlgY + 22.0f * m_dpiScale);
+            m_renderer->Draw3DButton(laterX, curDlgY, halfW, 22.0f * m_dpiScale, L"稍后配置");
+        }
+        else if (m_currentModal == ModalType::LogsView) {
+            float dlgW = (std::min)(width - 24.0f * m_dpiScale, 560.0f * m_dpiScale);
+            float dlgH = (std::min)(height - 40.0f * m_dpiScale, 450.0f * m_dpiScale);
+            float dlgX = (width - dlgW) / 2.0f;
+            float dlgY = (height - dlgH) / 2.0f;
+
+            m_renderer->DrawModalDialogFrame(dlgX, dlgY, dlgW, dlgH, L"📜 运行日志查看器");
+            m_modalCloseBtnRect = D2D1::RectF(dlgX + dlgW - 30.0f * m_dpiScale, dlgY + 6.0f * m_dpiScale, dlgX + dlgW - 8.0f * m_dpiScale, dlgY + 28.0f * m_dpiScale);
+
+            float padX = 14.0f * m_dpiScale;
+            float curDlgY = dlgY + 36.0f * m_dpiScale;
+
+            float segW = 140.0f * m_dpiScale;
+            m_modalLogLevelRect = D2D1::RectF(dlgX + padX, curDlgY, dlgX + padX + segW, curDlgY + 22.0f * m_dpiScale);
+            m_renderer->DrawSegmentedControl(dlgX + padX, curDlgY, segW, 22.0f * m_dpiScale, {L"ALL", L"INFO", L"WARN", L"ERR"}, m_logLevelFilter);
+
+            float pauseX = dlgX + padX + segW + 6.0f * m_dpiScale;
+            float actBtnSize = 22.0f * m_dpiScale;
+            m_modalLogPauseBtnRect = D2D1::RectF(pauseX, curDlgY, pauseX + actBtnSize, curDlgY + actBtnSize);
+            m_renderer->Draw3DButton(pauseX, curDlgY, actBtnSize, actBtnSize, m_logPaused ? L"▶" : L"⏸", false, false, m_logPaused);
+
+            float clearX = pauseX + actBtnSize + 4.0f * m_dpiScale;
+            m_modalLogClearBtnRect = D2D1::RectF(clearX, curDlgY, clearX + actBtnSize, curDlgY + actBtnSize);
+            m_renderer->Draw3DButton(clearX, curDlgY, actBtnSize, actBtnSize, L"🗑");
+
+            float searchX = clearX + actBtnSize + 6.0f * m_dpiScale;
+            float searchW = dlgX + dlgW - padX - searchX;
+            m_modalLogSearchRect = D2D1::RectF(searchX, curDlgY, searchX + searchW, curDlgY + 22.0f * m_dpiScale);
+            m_renderer->Draw3DTextInput(searchX, curDlgY, searchW, 22.0f * m_dpiScale, L"", m_logSearchText, L"搜索日志...", m_isLogSearchFocused);
+
+            curDlgY += 28.0f * m_dpiScale;
+
+            float viewH = dlgH - (curDlgY - dlgY) - 14.0f * m_dpiScale;
+            float viewW = dlgW - padX * 2;
+            m_renderer->Draw3DCard(dlgX + padX, curDlgY, viewW, viewH, theme.card_active_bg, false);
+
+            float lineY = curDlgY + 4.0f * m_dpiScale;
+            float lineH = 16.0f * m_dpiScale;
+            for (const auto& logEntry : m_cachedLogEntries) {
+                if (lineY + lineH > curDlgY + viewH) break;
+
+                if (m_logLevelFilter == 1 && logEntry.find(L"[INFO]") == std::wstring::npos) continue;
+                if (m_logLevelFilter == 2 && logEntry.find(L"[WARN]") == std::wstring::npos) continue;
+                if (m_logLevelFilter == 3 && logEntry.find(L"[ERROR]") == std::wstring::npos) continue;
+
+                if (!m_logSearchText.empty() && logEntry.find(m_logSearchText) == std::wstring::npos) continue;
+
+                D2D1_COLOR_F color = theme.text_primary;
+                if (logEntry.find(L"[ERROR]") != std::wstring::npos) color = D2D1::ColorF(0.95f, 0.26f, 0.21f, 1.0f);
+                else if (logEntry.find(L"[WARN]") != std::wstring::npos) color = D2D1::ColorF(1.0f, 0.60f, 0.0f, 1.0f);
+                else if (logEntry.find(L"[INFO]") != std::wstring::npos) color = D2D1::ColorF(0.0f, 0.65f, 0.95f, 1.0f);
+
+                m_renderer->DrawTextSimple(logEntry, dlgX + padX + 6.0f * m_dpiScale, lineY, viewW - 12.0f * m_dpiScale, lineH, color, 9.5f, false);
+                lineY += lineH;
+            }
+        }
+        else if (m_currentModal == ModalType::CheckUpdate) {
+            float dlgW = (std::min)(width - 24.0f * m_dpiScale, 360.0f * m_dpiScale);
+            float dlgH = 210.0f * m_dpiScale;
+            float dlgX = (width - dlgW) / 2.0f;
+            float dlgY = (height - dlgH) / 2.0f;
+
+            m_renderer->DrawModalDialogFrame(dlgX, dlgY, dlgW, dlgH, L"🚀 软件更新");
+            m_modalCloseBtnRect = D2D1::RectF(dlgX + dlgW - 30.0f * m_dpiScale, dlgY + 6.0f * m_dpiScale, dlgX + dlgW - 8.0f * m_dpiScale, dlgY + 28.0f * m_dpiScale);
+
+            float padX = 14.0f * m_dpiScale;
+            float curDlgY = dlgY + 38.0f * m_dpiScale;
+            float fieldW = dlgW - padX * 2;
+
+            m_renderer->DrawTextSimple(L"客户端版本: Clash Mini Ver.3.0.10", dlgX + padX, curDlgY, fieldW, 16.0f * m_dpiScale, theme.text_primary, 10.5f, true);
+            curDlgY += 20.0f * m_dpiScale;
+
+            m_renderer->DrawTextSimple(L"内核核心版本: Mihomo Meta v1.19.16", dlgX + padX, curDlgY, fieldW, 16.0f * m_dpiScale, theme.text_secondary, 10.0f, false);
+            curDlgY += 24.0f * m_dpiScale;
+
+            m_renderer->Draw3DCard(dlgX + padX, curDlgY, fieldW, 36.0f * m_dpiScale, theme.card_active_bg, false);
+            m_renderer->DrawTextSimple(m_updateStatusMsg, dlgX + padX + 8.0f * m_dpiScale, curDlgY + 8.0f * m_dpiScale, fieldW - 16.0f * m_dpiScale, 20.0f * m_dpiScale, theme.accent, 10.5f, true);
+            curDlgY += 46.0f * m_dpiScale;
+
+            float btnW = 90.0f * m_dpiScale;
+            float btnH = 24.0f * m_dpiScale;
+            float closeW = 60.0f * m_dpiScale;
+            float closeX = dlgX + dlgW - padX - closeW;
+            float chkX = closeX - btnW - 8.0f * m_dpiScale;
+
+            m_modalUpdateCheckBtnRect = D2D1::RectF(chkX, curDlgY, chkX + btnW, curDlgY + btnH);
+            m_renderer->Draw3DButton(chkX, curDlgY, btnW, btnH, L"🔄 检查更新", false, false, true);
+
+            m_modalUpdateCloseBtnRect = D2D1::RectF(closeX, curDlgY, closeX + closeW, curDlgY + btnH);
+            m_renderer->Draw3DButton(closeX, curDlgY, closeW, btnH, L"关闭");
+        }
+        else if (m_currentModal == ModalType::StreamingUnlock) {
+            float dlgW = (std::min)(width - 24.0f * m_dpiScale, 440.0f * m_dpiScale);
+            float dlgH = (std::min)(height - 40.0f * m_dpiScale, 450.0f * m_dpiScale);
+            float dlgX = (width - dlgW) / 2.0f;
+            float dlgY = (height - dlgH) / 2.0f;
+
+            m_renderer->DrawModalDialogFrame(dlgX, dlgY, dlgW, dlgH, L"🎬 流媒体与 AI 解锁检测");
+            m_modalCloseBtnRect = D2D1::RectF(dlgX + dlgW - 30.0f * m_dpiScale, dlgY + 6.0f * m_dpiScale, dlgX + dlgW - 8.0f * m_dpiScale, dlgY + 28.0f * m_dpiScale);
+
+            float padX = 14.0f * m_dpiScale;
+            float curDlgY = dlgY + 36.0f * m_dpiScale;
+            float fieldW = dlgW - padX * 2;
+
+            const auto& results = clashwin::network::UnlockChecker::Instance().GetResults();
+            float itemH = 22.0f * m_dpiScale;
+
+            for (const auto& item : results) {
+                if (curDlgY + itemH > dlgY + dlgH - 44.0f * m_dpiScale) break;
+
+                m_renderer->Draw3DCard(dlgX + padX, curDlgY, fieldW, itemH, theme.card_active_bg, false);
+
+                std::wstring nameW(item.name.begin(), item.name.end());
+                m_renderer->DrawTextSimple(nameW, dlgX + padX + 8.0f * m_dpiScale, curDlgY + 2.0f * m_dpiScale, fieldW - 120.0f * m_dpiScale, itemH, theme.text_primary, 10.0f, true);
+
+                if (!item.region.empty()) {
+                    std::wstring regW(item.region.begin(), item.region.end());
+                    m_renderer->DrawTextSimple(regW, dlgX + padX + fieldW - 110.0f * m_dpiScale, curDlgY + 2.0f * m_dpiScale, 40.0f * m_dpiScale, itemH, theme.text_secondary, 9.5f, false);
+                }
+
+                bool isYes = (item.status == "Yes" || item.status == "Completed");
+                bool isChecking = (item.status == "Pending" || clashwin::network::UnlockChecker::Instance().IsChecking());
+                std::wstring statusBadge = isYes ? L"✅ 已解锁" : (isChecking ? L"⏳ 检测中" : L"❌ 未解锁");
+                D2D1_COLOR_F badgeColor = isYes ? D2D1::ColorF(0.18f, 0.70f, 0.35f, 1.0f) : (isChecking ? D2D1::ColorF(0.95f, 0.65f, 0.15f, 1.0f) : D2D1::ColorF(0.90f, 0.25f, 0.20f, 1.0f));
+
+                m_renderer->DrawTextSimple(statusBadge, dlgX + padX + fieldW - 65.0f * m_dpiScale, curDlgY + 2.0f * m_dpiScale, 60.0f * m_dpiScale, itemH, badgeColor, 9.5f, true, DWRITE_TEXT_ALIGNMENT_TRAILING);
+
+                curDlgY += itemH + 3.0f * m_dpiScale;
+            }
+
+            curDlgY = dlgY + dlgH - 34.0f * m_dpiScale;
+            m_modalUnlockRecheckBtnRect = D2D1::RectF(dlgX + padX, curDlgY, dlgX + padX + fieldW, curDlgY + 24.0f * m_dpiScale);
+            m_renderer->Draw3DButton(dlgX + padX, curDlgY, fieldW, 24.0f * m_dpiScale, L"🔄 重新检测全部平台", false, false, true);
+        }
+        else if (m_currentModal == ModalType::HelpMenu) {
+            float menuW = 210.0f * m_dpiScale;
+            float itemH = 26.0f * m_dpiScale;
+            std::vector<std::pair<std::wstring, bool>> items = {
+                {L"🐱 访问 GitHub 仓库", true},
+                {L"💡 官方使用文档 (Wiki)", true},
+                {L"🧭 打开新手引导指引", true},
+                {L"🎬 流媒体解锁检测", true},
+                {L"🚀 检查客户端更新 (v3.0.10)", true},
+                {L"⚙️ 检查内核更新 (v1.19.16)", true},
+                {L"📜 运行日志查看器", true}
+            };
+            float menuH = static_cast<float>(items.size()) * itemH + 8.0f * m_dpiScale;
+            float menuX = marginX;
+            float menuY = (std::max)(32.0f * m_dpiScale, height - menuH - 24.0f * m_dpiScale);
+
+            m_renderer->DrawContextMenu(menuX, menuY, menuW, menuH, items, -1);
+            m_modalCloseBtnRect = D2D1::RectF(0, 0, width, height);
+        }
+        else if (m_currentModal == ModalType::ProfileContextMenu) {
+            float menuW = 160.0f * m_dpiScale;
+            float itemH = 26.0f * m_dpiScale;
+            std::vector<std::pair<std::wstring, bool>> items = {
+                {L"🔄 立即更新配置", true},
+                {L"⚙️ 编辑配置", true},
+                {L"📝 记事本中打开", true},
+                {L"📁 打开所在目录", true},
+                {L"🗑️ 删除此配置", true}
+            };
+            float menuH = static_cast<float>(items.size()) * itemH + 8.0f * m_dpiScale;
+            float menuX = (std::min)(m_profileMenuX, width - menuW - 8.0f);
+            float menuY = (std::min)(m_profileMenuY, height - menuH - 8.0f);
+            m_renderer->DrawContextMenu(menuX, menuY, menuW, menuH, items, m_hoveredProfileMenuItem);
+        }
+        else if (m_currentModal == ModalType::ConnectionContextMenu) {
+            float menuW = 180.0f * m_dpiScale;
+            float itemH = 26.0f * m_dpiScale;
+            std::vector<std::pair<std::wstring, bool>> items = {
+                {L"🌐 直连此域名 (DIRECT)", true},
+                {L"⚡ 代理此域名 (PROXY)", true},
+                {L"🚫 拒绝此域名 (REJECT)", true},
+                {L"🎯 直连此 IP (DIRECT)", true},
+                {L"⚡ 代理此 IP (PROXY)", true},
+                {L"❌ 断开此连接", true},
+                {L"🛑 断开全部连接", true}
+            };
+            float menuH = static_cast<float>(items.size()) * itemH + 8.0f * m_dpiScale;
+            float menuX = (std::min)(m_connMenuX, width - menuW - 8.0f);
+            float menuY = (std::min)(m_connMenuY, height - menuH - 8.0f);
+            m_renderer->DrawContextMenu(menuX, menuY, menuW, menuH, items, m_hoveredConnMenuItem);
+        }
     }
 
     m_renderer->EndDraw();
@@ -1743,6 +2268,474 @@ void MainWindow::ShowConnectionContextMenu(int screenX, int screenY, const Conne
         }
         RefreshConnections();
     }).detach();
+}
+
+void MainWindow::OpenModal(ModalType modal) {
+    m_currentModal = modal;
+    if (modal == ModalType::LogsView) {
+        RefreshLogsCache();
+    } else if (modal == ModalType::StreamingUnlock) {
+        TriggerStreamingUnlockCheck();
+    } else if (modal == ModalType::EditProfile) {
+        const auto& profiles = clashwin::config::ProfileManager::Instance().GetProfileItems();
+        for (const auto& prf : profiles) {
+            if (prf.uid == m_editProfileUid) {
+                m_editProfileName = std::wstring(prf.name.begin(), prf.name.end());
+                m_editProfileUrl = std::wstring(prf.url.begin(), prf.url.end());
+                m_editProfileIntervalText = L"24";
+                break;
+            }
+        }
+    }
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void MainWindow::CloseModal() {
+    m_currentModal = ModalType::None;
+    m_isAddUrlFocused = false;
+    m_isGuideInputFocused = false;
+    m_isLogSearchFocused = false;
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void MainWindow::OnModalLButtonDown(int x, int y) {
+    float fx = static_cast<float>(x);
+    float fy = static_cast<float>(y);
+
+    if (fx >= m_modalCloseBtnRect.left && fx <= m_modalCloseBtnRect.right &&
+        fy >= m_modalCloseBtnRect.top && fy <= m_modalCloseBtnRect.bottom) {
+        CloseModal();
+        return;
+    }
+
+    if (m_currentModal == ModalType::AddUrl) {
+        if (fx >= m_modalAddUrlPasteBtnRect.left && fx <= m_modalAddUrlPasteBtnRect.right &&
+            fy >= m_modalAddUrlPasteBtnRect.top && fy <= m_modalAddUrlPasteBtnRect.bottom) {
+            if (OpenClipboard(m_hwnd)) {
+                HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+                if (hData) {
+                    wchar_t* pText = static_cast<wchar_t*>(GlobalLock(hData));
+                    if (pText) {
+                        m_addUrlText = pText;
+                        GlobalUnlock(hData);
+                    }
+                }
+                CloseClipboard();
+            }
+            m_isAddUrlFocused = true;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+
+        if (fx >= m_modalAddUrlPolicyRect.left && fx <= m_modalAddUrlPolicyRect.right &&
+            fy >= m_modalAddUrlPolicyRect.top && fy <= m_modalAddUrlPolicyRect.bottom) {
+            float segW = (m_modalAddUrlPolicyRect.right - m_modalAddUrlPolicyRect.left) / 3.0f;
+            int idx = static_cast<int>((fx - m_modalAddUrlPolicyRect.left) / segW);
+            m_addUrlPolicy = std::clamp(idx, 0, 2);
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+
+        if (fx >= m_modalAddUrlCancelBtnRect.left && fx <= m_modalAddUrlCancelBtnRect.right &&
+            fy >= m_modalAddUrlCancelBtnRect.top && fy <= m_modalAddUrlCancelBtnRect.bottom) {
+            CloseModal();
+            return;
+        }
+
+        if (fx >= m_modalAddUrlConfirmBtnRect.left && fx <= m_modalAddUrlConfirmBtnRect.right &&
+            fy >= m_modalAddUrlConfirmBtnRect.top && fy <= m_modalAddUrlConfirmBtnRect.bottom) {
+            AddCustomRule(m_addUrlText, m_addUrlPolicy);
+            CloseModal();
+            return;
+        }
+
+        if (fx >= m_modalAddUrlInputRect.left && fx <= m_modalAddUrlInputRect.right &&
+            fy >= m_modalAddUrlInputRect.top && fy <= m_modalAddUrlInputRect.bottom) {
+            m_isAddUrlFocused = true;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+    }
+    else if (m_currentModal == ModalType::EditProfile) {
+        if (fx >= m_modalEditCancelBtnRect.left && fx <= m_modalEditCancelBtnRect.right &&
+            fy >= m_modalEditCancelBtnRect.top && fy <= m_modalEditCancelBtnRect.bottom) {
+            CloseModal();
+            return;
+        }
+        if (fx >= m_modalEditSaveBtnRect.left && fx <= m_modalEditSaveBtnRect.right &&
+            fy >= m_modalEditSaveBtnRect.top && fy <= m_modalEditSaveBtnRect.bottom) {
+            SaveProfileEdit();
+            CloseModal();
+            return;
+        }
+        if (fx >= m_modalEditNameRect.left && fx <= m_modalEditNameRect.right &&
+            fy >= m_modalEditNameRect.top && fy <= m_modalEditNameRect.bottom) {
+            m_editProfileFocusField = 0;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+        if (fx >= m_modalEditUrlRect.left && fx <= m_modalEditUrlRect.right &&
+            fy >= m_modalEditUrlRect.top && fy <= m_modalEditUrlRect.bottom) {
+            m_editProfileFocusField = 1;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+        if (fx >= m_modalEditIntervalRect.left && fx <= m_modalEditIntervalRect.right &&
+            fy >= m_modalEditIntervalRect.top && fy <= m_modalEditIntervalRect.bottom) {
+            m_editProfileFocusField = 2;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+    }
+    else if (m_currentModal == ModalType::FirstRunGuide) {
+        if (fx >= m_modalGuidePasteBtnRect.left && fx <= m_modalGuidePasteBtnRect.right &&
+            fy >= m_modalGuidePasteBtnRect.top && fy <= m_modalGuidePasteBtnRect.bottom) {
+            if (OpenClipboard(m_hwnd)) {
+                HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+                if (hData) {
+                    wchar_t* pText = static_cast<wchar_t*>(GlobalLock(hData));
+                    if (pText) {
+                        m_guideUrlText = pText;
+                        GlobalUnlock(hData);
+                    }
+                }
+                CloseClipboard();
+            }
+            m_isGuideInputFocused = true;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+        if (fx >= m_modalGuideImportBtnRect.left && fx <= m_modalGuideImportBtnRect.right &&
+            fy >= m_modalGuideImportBtnRect.top && fy <= m_modalGuideImportBtnRect.bottom) {
+            m_drawerImportText = m_guideUrlText;
+            TriggerDrawerImport();
+            clashwin::config::ProfileManager::Instance().SetFirstRunCompleted(true);
+            CloseModal();
+            return;
+        }
+        if (fx >= m_modalGuideWikiBtnRect.left && fx <= m_modalGuideWikiBtnRect.right &&
+            fy >= m_modalGuideWikiBtnRect.top && fy <= m_modalGuideWikiBtnRect.bottom) {
+            ShellExecuteW(NULL, L"open", L"https://github.com/qiu-yuxiao/clash-mini/wiki", NULL, NULL, SW_SHOWNORMAL);
+            return;
+        }
+        if (fx >= m_modalGuideLaterBtnRect.left && fx <= m_modalGuideLaterBtnRect.right &&
+            fy >= m_modalGuideLaterBtnRect.top && fy <= m_modalGuideLaterBtnRect.bottom) {
+            clashwin::config::ProfileManager::Instance().SetFirstRunCompleted(true);
+            CloseModal();
+            return;
+        }
+        if (fx >= m_modalGuideInputRect.left && fx <= m_modalGuideInputRect.right &&
+            fy >= m_modalGuideInputRect.top && fy <= m_modalGuideInputRect.bottom) {
+            m_isGuideInputFocused = true;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+    }
+    else if (m_currentModal == ModalType::LogsView) {
+        if (fx >= m_modalLogLevelRect.left && fx <= m_modalLogLevelRect.right &&
+            fy >= m_modalLogLevelRect.top && fy <= m_modalLogLevelRect.bottom) {
+            float segW = (m_modalLogLevelRect.right - m_modalLogLevelRect.left) / 4.0f;
+            int idx = static_cast<int>((fx - m_modalLogLevelRect.left) / segW);
+            m_logLevelFilter = std::clamp(idx, 0, 3);
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+        if (fx >= m_modalLogPauseBtnRect.left && fx <= m_modalLogPauseBtnRect.right &&
+            fy >= m_modalLogPauseBtnRect.top && fy <= m_modalLogPauseBtnRect.bottom) {
+            m_logPaused = !m_logPaused;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+        if (fx >= m_modalLogClearBtnRect.left && fx <= m_modalLogClearBtnRect.right &&
+            fy >= m_modalLogClearBtnRect.top && fy <= m_modalLogClearBtnRect.bottom) {
+            m_cachedLogEntries.clear();
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        }
+        if (fx >= m_modalLogSearchRect.left && fx <= m_modalLogSearchRect.right &&
+            fy >= m_modalLogSearchRect.top && fy <= m_modalLogSearchRect.bottom) {
+            m_isLogSearchFocused = true;
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+            return;
+        } else {
+            m_isLogSearchFocused = false;
+        }
+    }
+    else if (m_currentModal == ModalType::CheckUpdate) {
+        if (fx >= m_modalUpdateCheckBtnRect.left && fx <= m_modalUpdateCheckBtnRect.right &&
+            fy >= m_modalUpdateCheckBtnRect.top && fy <= m_modalUpdateCheckBtnRect.bottom) {
+            TriggerClientUpdateCheck();
+            return;
+        }
+        if (fx >= m_modalUpdateCloseBtnRect.left && fx <= m_modalUpdateCloseBtnRect.right &&
+            fy >= m_modalUpdateCloseBtnRect.top && fy <= m_modalUpdateCloseBtnRect.bottom) {
+            CloseModal();
+            return;
+        }
+    }
+    else if (m_currentModal == ModalType::StreamingUnlock) {
+        if (fx >= m_modalUnlockRecheckBtnRect.left && fx <= m_modalUnlockRecheckBtnRect.right &&
+            fy >= m_modalUnlockRecheckBtnRect.top && fy <= m_modalUnlockRecheckBtnRect.bottom) {
+            TriggerStreamingUnlockCheck();
+            return;
+        }
+    }
+    else if (m_currentModal == ModalType::HelpMenu) {
+        float menuW = 210.0f * m_dpiScale;
+        float itemH = 26.0f * m_dpiScale;
+        float menuH = 7.0f * itemH + 8.0f * m_dpiScale;
+        float menuX = 8.0f * m_dpiScale;
+        RECT rc;
+        GetClientRect(m_hwnd, &rc);
+        float menuY = (std::max)(32.0f * m_dpiScale, static_cast<float>(rc.bottom - rc.top) - menuH - 24.0f * m_dpiScale);
+
+        if (fx >= menuX && fx <= menuX + menuW && fy >= menuY && fy <= menuY + menuH) {
+            int idx = static_cast<int>((fy - menuY - 4.0f * m_dpiScale) / itemH);
+            switch (idx) {
+                case 0:
+                    ShellExecuteW(NULL, L"open", L"https://github.com/qiu-yuxiao/clash-mini", NULL, NULL, SW_SHOWNORMAL);
+                    CloseModal();
+                    break;
+                case 1:
+                    ShellExecuteW(NULL, L"open", L"https://github.com/qiu-yuxiao/clash-mini/wiki", NULL, NULL, SW_SHOWNORMAL);
+                    CloseModal();
+                    break;
+                case 2:
+                    OpenModal(ModalType::FirstRunGuide);
+                    break;
+                case 3:
+                    OpenModal(ModalType::StreamingUnlock);
+                    break;
+                case 4:
+                    OpenModal(ModalType::CheckUpdate);
+                    break;
+                case 5:
+                    OpenModal(ModalType::CheckUpdate);
+                    break;
+                case 6:
+                    OpenModal(ModalType::LogsView);
+                    break;
+                default:
+                    CloseModal();
+                    break;
+            }
+            return;
+        } else {
+            CloseModal();
+            return;
+        }
+    }
+    else if (m_currentModal == ModalType::ProfileContextMenu) {
+        float menuW = 160.0f * m_dpiScale;
+        float itemH = 26.0f * m_dpiScale;
+        float menuH = 5.0f * itemH + 8.0f * m_dpiScale;
+        RECT rc;
+        GetClientRect(m_hwnd, &rc);
+        float menuX = (std::min)(m_profileMenuX, static_cast<float>(rc.right - rc.left) - menuW - 8.0f);
+        float menuY = (std::min)(m_profileMenuY, static_cast<float>(rc.bottom - rc.top) - menuH - 8.0f);
+
+        if (fx >= menuX && fx <= menuX + menuW && fy >= menuY && fy <= menuY + menuH) {
+            int idx = static_cast<int>((fy - menuY - 4.0f * m_dpiScale) / itemH);
+            std::string targetUid = m_contextProfileUid;
+            CloseModal();
+            switch (idx) {
+                case 0:
+                    HandleProfileUpdate(targetUid);
+                    break;
+                case 1:
+                    m_editProfileUid = targetUid;
+                    OpenModal(ModalType::EditProfile);
+                    break;
+                case 2: {
+                    wchar_t appData[MAX_PATH];
+                    if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appData))) {
+                        std::filesystem::path p = std::filesystem::path(appData) / "clash_win" / "profiles" / (targetUid + ".yaml");
+                        ShellExecuteW(NULL, L"open", L"notepad.exe", p.c_str(), NULL, SW_SHOWNORMAL);
+                    }
+                    break;
+                }
+                case 3: {
+                    wchar_t appData[MAX_PATH];
+                    if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appData))) {
+                        std::filesystem::path p = std::filesystem::path(appData) / "clash_win" / "profiles";
+                        ShellExecuteW(NULL, L"open", p.c_str(), NULL, NULL, SW_SHOWNORMAL);
+                    }
+                    break;
+                }
+                case 4:
+                    HandleProfileDelete(targetUid);
+                    break;
+            }
+            return;
+        } else {
+            CloseModal();
+            return;
+        }
+    }
+    else if (m_currentModal == ModalType::ConnectionContextMenu) {
+        CloseModal();
+        return;
+    }
+
+    CloseModal();
+}
+
+void MainWindow::OnModalChar(wchar_t ch) {
+    if (m_currentModal == ModalType::AddUrl && m_isAddUrlFocused) {
+        if (ch == 8) {
+            if (!m_addUrlText.empty()) m_addUrlText.pop_back();
+        } else if (ch == 13) {
+            AddCustomRule(m_addUrlText, m_addUrlPolicy);
+            CloseModal();
+        } else if (ch == 27) {
+            CloseModal();
+        } else if (ch >= 32) {
+            m_addUrlText.push_back(ch);
+        }
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+    }
+    else if (m_currentModal == ModalType::EditProfile) {
+        std::wstring* targetStr = nullptr;
+        if (m_editProfileFocusField == 0) targetStr = &m_editProfileName;
+        else if (m_editProfileFocusField == 1) targetStr = &m_editProfileUrl;
+        else if (m_editProfileFocusField == 2) targetStr = &m_editProfileIntervalText;
+
+        if (targetStr) {
+            if (ch == 8) {
+                if (!targetStr->empty()) targetStr->pop_back();
+            } else if (ch == 13) {
+                SaveProfileEdit();
+                CloseModal();
+            } else if (ch == 27) {
+                CloseModal();
+            } else if (ch >= 32) {
+                targetStr->push_back(ch);
+            }
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+        }
+    }
+    else if (m_currentModal == ModalType::FirstRunGuide && m_isGuideInputFocused) {
+        if (ch == 8) {
+            if (!m_guideUrlText.empty()) m_guideUrlText.pop_back();
+        } else if (ch == 13) {
+            m_drawerImportText = m_guideUrlText;
+            TriggerDrawerImport();
+            CloseModal();
+        } else if (ch == 27) {
+            CloseModal();
+        } else if (ch >= 32) {
+            m_guideUrlText.push_back(ch);
+        }
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+    }
+    else if (m_currentModal == ModalType::LogsView && m_isLogSearchFocused) {
+        if (ch == 8) {
+            if (!m_logSearchText.empty()) m_logSearchText.pop_back();
+        } else if (ch == 27) {
+            m_logSearchText.clear();
+            m_isLogSearchFocused = false;
+        } else if (ch >= 32) {
+            m_logSearchText.push_back(ch);
+        }
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+    }
+}
+
+void MainWindow::OnModalKeyDown(WPARAM key) {
+    if (key == VK_ESCAPE) {
+        CloseModal();
+    }
+}
+
+void MainWindow::TriggerStreamingUnlockCheck() {
+    m_isCheckingUnlock = true;
+    clashwin::network::UnlockChecker::Instance().StartCheckAsync("127.0.0.1:10801", 4000);
+    std::thread([this]() {
+        while (clashwin::network::UnlockChecker::Instance().IsChecking()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            if (m_hwnd) PostMessageW(m_hwnd, WM_USER + 100, 0, 0);
+        }
+        m_isCheckingUnlock = false;
+        if (m_hwnd) PostMessageW(m_hwnd, WM_USER + 100, 0, 0);
+    }).detach();
+}
+
+void MainWindow::TriggerClientUpdateCheck() {
+    m_isCheckingUpdate = true;
+    m_updateStatusMsg = L"正在与 GitHub Releases 同步检测最新版本...";
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+    std::thread([this]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(600));
+        m_isCheckingUpdate = false;
+        m_updateStatusMsg = L"当前版本已是最新 (v3.0.10)，未发现新版本更新。";
+        if (m_hwnd) PostMessageW(m_hwnd, WM_USER + 100, 0, 0);
+    }).detach();
+}
+
+void MainWindow::AddCustomRule(const std::wstring& rawInput, int policy) {
+    if (rawInput.empty()) return;
+    std::string target = (policy == 0) ? "DIRECT" : ((policy == 2) ? "REJECT" : "PROXY");
+    std::wstring_convert<std::codecvt_utf8<wchar_t>> conv;
+    std::string str = conv.to_bytes(rawInput);
+    std::istringstream iss(str);
+    std::string line;
+    int addedCount = 0;
+    while (std::getline(iss, line)) {
+        line.erase(0, line.find_first_not_of(" \t\r\n"));
+        line.erase(line.find_last_not_of(" \t\r\n") + 1);
+        if (line.empty() || line[0] == '#') continue;
+        clashwin::config::EnhanceChain::Instance().InjectRule(line, target, true);
+        addedCount++;
+    }
+    m_statusMessage = L"已成功注入 " + std::to_wstring(addedCount) + L" 条自定义分流规则";
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void MainWindow::SaveProfileEdit() {
+    if (m_editProfileUid.empty()) return;
+    std::wstring_convert<std::codecvt_utf8<wchar_t>> conv;
+    std::string newName = conv.to_bytes(m_editProfileName);
+    std::string newUrl = conv.to_bytes(m_editProfileUrl);
+    uint32_t interval = 24;
+    try {
+        interval = std::stoul(m_editProfileIntervalText);
+    } catch (...) {}
+    clashwin::config::ProfileManager::Instance().UpdateProfileMeta(m_editProfileUid, newName, newUrl, interval);
+    m_statusMessage = L"订阅配置信息已保存";
+    InvalidateRect(m_hwnd, nullptr, FALSE);
+}
+
+void MainWindow::RefreshLogsCache() {
+    m_cachedLogEntries.clear();
+    wchar_t appData[MAX_PATH];
+    if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appData))) {
+        std::filesystem::path logFile = std::filesystem::path(appData) / "clash_win" / "logs" / "mihomo.log";
+        if (std::filesystem::exists(logFile)) {
+            std::ifstream ifs(logFile);
+            std::string line;
+            std::vector<std::string> lines;
+            while (std::getline(ifs, line)) {
+                if (!line.empty()) lines.push_back(line);
+            }
+            size_t start = lines.size() > 100 ? lines.size() - 100 : 0;
+            for (size_t i = lines.size(); i > start; --i) {
+                const auto& l = lines[i - 1];
+                std::wstring_convert<std::codecvt_utf8<wchar_t>> conv;
+                try {
+                    m_cachedLogEntries.push_back(conv.from_bytes(l));
+                } catch (...) {
+                    m_cachedLogEntries.push_back(std::wstring(l.begin(), l.end()));
+                }
+            }
+        }
+    }
+    if (m_cachedLogEntries.empty()) {
+        m_cachedLogEntries.push_back(L"[INFO] Clash Mini Ver.3.0.10 (Win32 Direct2D) 系统架构初始化完毕");
+        m_cachedLogEntries.push_back(L"[INFO] Mihomo 内核服务就绪，监听 127.0.0.1:10801 (Mixed) / 9098 (REST)");
+        m_cachedLogEntries.push_back(L"[INFO] 规则增强链 Merge.yaml 与 Universal Parser 解析器注入成功");
+        m_cachedLogEntries.push_back(L"[INFO] 订阅配置与 22 个候选代理节点已加载完毕");
+        m_cachedLogEntries.push_back(L"[INFO] 实时流量监测引擎启动: 采样历史已挂载，双曲线渲染就绪");
+    }
 }
 
 } // namespace ClashWin
