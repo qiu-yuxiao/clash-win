@@ -78,6 +78,7 @@ namespace system_service {
     inline constexpr std::wstring_view kServiceName = L"clash_verge_service";
     inline constexpr std::wstring_view kServiceDisplayName = L"Clash Verge Service";
     inline constexpr std::string_view kCoreBinaryName = "mini-mihomo.exe";
+    inline constexpr std::wstring_view kCoreBinaryNameW = L"mini-mihomo.exe";
 }
 
 } // namespace clashwin

@@ -4,6 +4,9 @@
 #include "clashwin/core/mihomo_client.h"
 #include "clashwin/config/profile_manager.h"
 #include <iostream>
+#include <filesystem>
+#include <vector>
+#include <string>
 
 namespace clashwin::core {
 
@@ -24,6 +27,36 @@ HealthProbeService::~HealthProbeService() {
 }
 
 void HealthProbeService::KillAllOrphanCores() {
+    // 安全铁律：绝不按进程名无差别扫杀。
+    // 同名内核 mini-mihomo.exe 完全可能属于用户正在运行的其他客户端（如 Clash Mini 本体），
+    // 误杀会直接掐断用户真实代理连接。只有当候选进程的可执行文件完整路径
+    // 与本项目自己的 sidecar 内核路径完全一致时，才允许清理。
+    std::vector<std::filesystem::path> ownCorePaths;
+
+    const std::filesystem::path coreName(clashwin::system_service::kCoreBinaryNameW);
+
+    // 与 MainWindow::StartCoreIfConfigReady 相同的 sidecar 解析顺序:
+    // 1) 当前工作目录  2) 可执行文件目录  3) 可执行文件上级目录
+    auto tryAddOwnCorePath = [&](const std::filesystem::path& dir) {
+        std::error_code ec;
+        std::filesystem::path candidate = dir / L"sidecar" / coreName;
+        if (std::filesystem::exists(candidate)) {
+            std::filesystem::path canonical = std::filesystem::weakly_canonical(candidate, ec);
+            if (!ec) ownCorePaths.push_back(std::move(canonical));
+        }
+    };
+
+    tryAddOwnCorePath(std::filesystem::current_path());
+
+    wchar_t exePath[MAX_PATH] = {0};
+    if (GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
+        std::filesystem::path exeDir = std::filesystem::path(exePath).parent_path();
+        tryAddOwnCorePath(exeDir);
+        tryAddOwnCorePath(exeDir / L"..");
+    }
+
+    if (ownCorePaths.empty()) return;
+
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnapshot == INVALID_HANDLE_VALUE) return;
 
@@ -31,14 +64,36 @@ void HealthProbeService::KillAllOrphanCores() {
     if (Process32FirstW(hSnapshot, &pe)) {
         DWORD currentPid = GetCurrentProcessId();
         do {
-            if (_wcsicmp(pe.szExeFile, L"mini-mihomo.exe") == 0) {
-                if (pe.th32ProcessID != currentPid) {
-                    HANDLE hProc = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
-                    if (hProc) {
-                        TerminateProcess(hProc, 0);
-                        WaitForSingleObject(hProc, 1000);
-                        CloseHandle(hProc);
+            if (_wcsicmp(pe.szExeFile, coreName.c_str()) != 0) continue;
+            if (pe.th32ProcessID == currentPid) continue;
+
+            // 查询候选进程的可执行文件完整路径；查询失败时宁可放过，绝不误杀
+            HANDLE hQuery = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID);
+            if (!hQuery) continue;
+
+            wchar_t imagePath[MAX_PATH * 2] = {0};
+            DWORD size = ARRAYSIZE(imagePath);
+            bool isOwnCore = false;
+            if (QueryFullProcessImageNameW(hQuery, 0, imagePath, &size)) {
+                std::error_code ec;
+                std::filesystem::path victim = std::filesystem::weakly_canonical(std::wstring(imagePath), ec);
+                if (!ec) {
+                    for (const auto& own : ownCorePaths) {
+                        if (_wcsicmp(own.c_str(), victim.c_str()) == 0) {
+                            isOwnCore = true;
+                            break;
+                        }
                     }
+                }
+            }
+            CloseHandle(hQuery);
+
+            if (isOwnCore) {
+                HANDLE hProc = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
+                if (hProc) {
+                    TerminateProcess(hProc, 0);
+                    WaitForSingleObject(hProc, 1000);
+                    CloseHandle(hProc);
                 }
             }
         } while (Process32NextW(hSnapshot, &pe));
