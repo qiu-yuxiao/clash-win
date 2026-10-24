@@ -20,76 +20,101 @@ SingleInstanceGuard::SingleInstanceGuard() {
 
 SingleInstanceGuard::~SingleInstanceGuard() {
     StopServer();
+    if (mutex_) {
+        CloseHandle(mutex_);
+        mutex_ = nullptr;
+    }
     WSACleanup();
 }
 
 bool SingleInstanceGuard::AcquireOrWakeExisting(int argc, wchar_t* argv[]) {
-    listen_socket_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (listen_socket_ == INVALID_SOCKET) {
+    // 1. 使用 Win32 互斥体精准判断 ClashWin 本身是否已有进程在运行
+    mutex_ = CreateMutexW(nullptr, FALSE, L"Local\\ClashWin_Native_Single_Instance_Mutex");
+    bool alreadyRunning = (GetLastError() == ERROR_ALREADY_EXISTS);
+
+    if (alreadyRunning) {
+        // 已有 ClashWin 实例在运行，执行向已有实例发通知唤醒
+        is_primary_ = false;
+
+        std::wstring scheme_param;
+        for (int i = 1; i < argc; ++i) {
+            if (wcsncmp(argv[i], L"clash:", 6) == 0) {
+                scheme_param = argv[i];
+                break;
+            }
+        }
+
+        std::wstring path = scheme_param.empty() 
+            ? L"/commands/visible" 
+            : (L"/commands/scheme?param=" + scheme_param);
+
+        auto SendWakeup = [&](uint16_t port) {
+            HINTERNET hSession = WinHttpOpen(L"ClashWin-Wakeup/1.0",
+                                             WINHTTP_ACCESS_TYPE_NO_PROXY,
+                                             WINHTTP_NO_PROXY_NAME,
+                                             WINHTTP_NO_PROXY_BYPASS, 0);
+            if (!hSession) return false;
+            bool ok = false;
+            HINTERNET hConnect = WinHttpConnect(hSession, L"127.0.0.1", port, 0);
+            if (hConnect) {
+                HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", path.c_str(),
+                                                       NULL, WINHTTP_NO_REFERER,
+                                                       WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
+                if (hRequest) {
+                    WinHttpSetTimeouts(hRequest, 300, 300, 300, 300);
+                    if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                                           WINHTTP_NO_REQUEST_DATA, 0, 0, 0)) {
+                        WinHttpReceiveResponse(hRequest, NULL);
+                        ok = true;
+                    }
+                    WinHttpCloseHandle(hRequest);
+                }
+                WinHttpCloseHandle(hConnect);
+            }
+            WinHttpCloseHandle(hSession);
+            return ok;
+        };
+
+        if (!SendWakeup(network::kSingletonPort)) {
+            SendWakeup(network::kSingletonPortFallback);
+        }
         return false;
     }
 
-    // 设置地址与端口重用
+    // 2. 当前为首个 ClashWin 实例，创建本地监听 socket
+    is_primary_ = true;
+    listen_socket_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (listen_socket_ == INVALID_SOCKET) {
+        return true;
+    }
+
     int opt = 1;
     setsockopt(listen_socket_, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
 
     sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-    addr.sin_port = htons(network::kSingletonPort);
 
-    // 尝试绑定
-    if (bind(listen_socket_, (sockaddr*)&addr, sizeof(addr)) == 0) {
-        // 绑定成功，当前为主实例
-        if (listen(listen_socket_, 16) == 0) {
-            is_primary_ = true;
+    // 优先绑定标准单实例端口 33335；若已被外部进程（如 Clash Mini）占用，平滑降级至 33336
+    addr.sin_port = htons(network::kSingletonPort);
+    active_port_ = network::kSingletonPort;
+
+    if (bind(listen_socket_, (sockaddr*)&addr, sizeof(addr)) != 0) {
+        addr.sin_port = htons(network::kSingletonPortFallback);
+        active_port_ = network::kSingletonPortFallback;
+        if (bind(listen_socket_, (sockaddr*)&addr, sizeof(addr)) != 0) {
+            closesocket(listen_socket_);
+            listen_socket_ = INVALID_SOCKET;
             return true;
         }
     }
 
-    // 绑定失败，说明已有主实例在运行，执行向已有实例发通知唤醒
-    closesocket(listen_socket_);
-    listen_socket_ = INVALID_SOCKET;
-    is_primary_ = false;
-
-    // 检查是否有 clash:// 格式参数
-    std::wstring scheme_param;
-    for (int i = 1; i < argc; ++i) {
-        if (wcsncmp(argv[i], L"clash:", 6) == 0) {
-            scheme_param = argv[i];
-            break;
-        }
+    if (listen(listen_socket_, 16) != 0) {
+        closesocket(listen_socket_);
+        listen_socket_ = INVALID_SOCKET;
     }
 
-    std::wstring path = scheme_param.empty() 
-        ? L"/commands/visible" 
-        : (L"/commands/scheme?param=" + scheme_param);
-
-    // 使用 WinHTTP 发起简短唤醒请求
-    HINTERNET hSession = WinHttpOpen(L"ClashWin-Wakeup/1.0",
-                                     WINHTTP_ACCESS_TYPE_NO_PROXY,
-                                     WINHTTP_NO_PROXY_NAME,
-                                     WINHTTP_NO_PROXY_BYPASS, 0);
-    if (hSession) {
-        HINTERNET hConnect = WinHttpConnect(hSession, L"127.0.0.1", network::kSingletonPort, 0);
-        if (hConnect) {
-            HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", path.c_str(),
-                                                   NULL, WINHTTP_NO_REFERER,
-                                                   WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
-            if (hRequest) {
-                // 500ms 超时
-                WinHttpSetTimeouts(hRequest, 500, 500, 500, 500);
-                WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                                   WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
-                WinHttpReceiveResponse(hRequest, NULL);
-                WinHttpCloseHandle(hRequest);
-            }
-            WinHttpCloseHandle(hConnect);
-        }
-        WinHttpCloseHandle(hSession);
-    }
-
-    return false; // 不是主实例
+    return true;
 }
 
 void SingleInstanceGuard::StartServer(std::function<void()> on_wake_visible,

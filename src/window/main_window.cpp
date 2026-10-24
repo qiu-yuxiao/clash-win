@@ -81,10 +81,15 @@ bool MainWindow::Create(HINSTANCE hInstance, int nCmdShow) {
     int initW = static_cast<int>(clashwin::geometry::kDefaultWidth);   // 默认严格 271px
     int initH = static_cast<int>(clashwin::geometry::kDefaultHeight);  // 默认严格 680px
     if (hasSavedGeom) {
-        initW = static_cast<int>(geom.width);
-        // 如果历史尺寸等于或超出最大高度 860，重置恢复为标准 680px 高度
-        if (geom.height > 126.0 && geom.height < 850.0) {
-            initH = static_cast<int>(geom.height);
+        // 如果保存的尺寸属于大窗展开模式 (>= 500px)，恢复大窗；其余一律恢复为经典的 271px × 680px 极简窄窗
+        if (geom.width >= 500.0 && geom.width <= 640.0) {
+            initW = static_cast<int>(clashwin::geometry::kMaxWidth);
+            initH = static_cast<int>(clashwin::geometry::kMaxHeight);
+            m_isLargeMode = true;
+        } else {
+            initW = static_cast<int>(clashwin::geometry::kDefaultWidth);
+            initH = static_cast<int>(clashwin::geometry::kDefaultHeight);
+            m_isLargeMode = false;
         }
     }
 
@@ -125,7 +130,7 @@ bool MainWindow::Create(HINSTANCE hInstance, int nCmdShow) {
         WS_EX_APPWINDOW,
         CLASS_NAME,
         L"Clash Mini Ver.3.0.10",
-        WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+        WS_POPUP | WS_VISIBLE | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
         initX, initY,
         physW, physH,
         nullptr, nullptr, hInstance, this
@@ -158,7 +163,7 @@ bool MainWindow::Create(HINSTANCE hInstance, int nCmdShow) {
         SetTimer(m_hwnd, CONN_TIMER_ID, CONN_POLL_INTERVAL_MS, nullptr);
     }
 
-    ShowWindow(m_hwnd, nCmdShow);
+    ShowWindow(m_hwnd, (nCmdShow == SW_HIDE || nCmdShow == 0) ? SW_SHOWNORMAL : nCmdShow);
     UpdateWindow(m_hwnd);
 
     return true;

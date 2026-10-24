@@ -24,6 +24,8 @@ public:
 
 private:
     SOCKET listen_socket_{INVALID_SOCKET};
+    HANDLE mutex_{nullptr};
+    uint16_t active_port_{33335};
     bool is_primary_{false};
     bool running_{false};
 };
