@@ -67,15 +67,25 @@ target_include_directories(clashwin_system PUBLIC
 target_link_libraries(clashwin_system PUBLIC clashwin_util winhttp)
 target_compile_options(clashwin_system PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
-# 通用 URI 解析器（T06：universal_parser.rs 全量移植）
+# 通用 URI 解析器（T06）+ enhance 配置流水线（T08：enhance/merge/seq/field/
+# chain/tun/mini_agreements/dns_defaults + QuickJS js_engine）
 add_library(clashwin_enhance STATIC
   src/enhance/uri_list.cpp
+  src/enhance/field.cpp
+  src/enhance/merge.cpp
+  src/enhance/seq.cpp
+  src/enhance/tun.cpp
+  src/enhance/chain.cpp
+  src/enhance/mini_agreements.cpp
+  src/enhance/dns_defaults.cpp
+  src/enhance/js_engine.cpp
+  src/enhance/enhance.cpp
 )
 target_include_directories(clashwin_enhance PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(clashwin_enhance PUBLIC clashwin_util)
+target_link_libraries(clashwin_enhance PUBLIC clashwin_util qjs nlohmann_json)
 target_compile_options(clashwin_enhance PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
 # mihomo 管道通信层（T04：HTTP/1.1 over named pipe + WS + clash-verge-service IPC；
@@ -158,6 +168,12 @@ add_executable(clashwin_test
   tests/test_uri_list.cpp
   tests/test_ssrf.cpp
   tests/test_net_http.cpp
+  tests/test_enhance_field.cpp
+  tests/test_enhance_seq_merge.cpp
+  tests/test_enhance_tun.cpp
+  tests/test_enhance_mini_agreements.cpp
+  tests/test_enhance_js_engine.cpp
+  tests/test_enhance_golden.cpp
   tests/test_core_commandline.cpp
   tests/test_core_kill.cpp
   tests/test_core_validate.cpp

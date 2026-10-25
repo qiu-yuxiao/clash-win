@@ -16,24 +16,17 @@ namespace clashwin::config::serde {
 
 namespace {
 
-// ---------- plain 标量合法性（保守实现：本配置域已知值全部 plain 合法） ----------
-bool needs_double_quote(const std::string& s) {
+// ---------- plain 标量合法性 ----------
+// 结构性不安全（YAML 指示符/空白/控制字符/": "/" #"；不含 reserved 字面量检查）
+bool structurally_unsafe(const std::string& s) {
   if (s.empty()) return true;
-  // YAML 会误读为 null/bool 的文本必须加引号（字符串语义时）
-  static const char* kReserved[] = {"null", "Null",  "NULL", "~",   "true",
-                                    "True", "TRUE",  "false", "False", "FALSE"};
-  for (const char* r : kReserved) {
-    if (s == r) return true;
-  }
-  // 首字符指示符（%-directive、@/` 保留、引号、集合指示符、锚点别名等）
   char c0 = s[0];
   if (c0 == '-' || c0 == '?' || c0 == ':') {
-    // "-" / "?"/ ":" 单独或后跟空白才是指示符；如 "-x"、"?:x" 可以 plain
+    // "-" / "?" / ":" 单独或后跟空白才是指示符；如 "-x"、"?:x" 可以 plain
     if (s.size() == 1 || s[1] == ' ') return true;
   }
   static const char* kLead = ",[]{}#&*!|>'\"%@`";
   if (std::strchr(kLead, c0) && c0 != '\0') return true;
-  // 内嵌 ": " 或 " #"、控制字符、前后空白 → 引号
   for (size_t i = 0; i < s.size(); ++i) {
     unsigned char ch = static_cast<unsigned char>(s[i]);
     if (ch < 0x20 && ch != '\t') return true;
@@ -43,6 +36,20 @@ bool needs_double_quote(const std::string& s) {
     } else if (ch == ':') {
       if (i + 1 == s.size() || s[i + 1] == ' ') return true;
     }
+  }
+  return false;
+}
+
+bool looks_like_bool_or_null(const std::string& s) {
+  return s == "true" || s == "false" || s == "True" || s == "False" ||
+         s == "TRUE" || s == "FALSE" || s == "null" || s == "Null" ||
+         s == "NULL" || s == "~";
+}
+
+bool has_control_chars(const std::string& s) {
+  for (char ch : s) {
+    unsigned char c = static_cast<unsigned char>(ch);
+    if (c < 0x20) return true;
   }
   return false;
 }
@@ -70,6 +77,21 @@ std::string quote_double(const std::string& s) {
   return out;
 }
 
+// libyaml/serde 的单引号风格（G3 实证：external-controller: ''、bind-address:
+// '*'、server: '1'、'*.lan' 均为单引号；仅控制字符不可表示时才双引号）
+std::string quote_single(const std::string& s) {
+  std::string out = "'";
+  for (char ch : s) {
+    if (ch == '\'') {
+      out += "''";
+    } else {
+      out += ch;
+    }
+  }
+  out += "'";
+  return out;
+}
+
 bool is_plain_number(const std::string& s) {
   if (s.empty()) return false;
   size_t i = (s[0] == '-' || s[0] == '+') ? 1 : 0;
@@ -89,24 +111,31 @@ bool is_plain_number(const std::string& s) {
   return digits;
 }
 
-bool looks_like_bool_or_null(const std::string& s) {
-  return s == "true" || s == "false" || s == "True" || s == "False" ||
-         s == "TRUE" || s == "FALSE" || s == "null" || s == "Null" ||
-         s == "NULL" || s == "~";
-}
-
-// 标量文本化：bool/数字/null 直接 plain（写读语义一致）；
-// 其余视为字符串：多行 → literal；plain 不安全 → 双引号
-std::string scalar_text(const std::string& s) {
-  if (looks_like_bool_or_null(s) || is_plain_number(s) || !needs_double_quote(s))
-    return s;
-  return quote_double(s);
+// 标量文本化（按节点 tag 还原 serde Value 类型语义）：
+//   tag "!" / "tag:yaml.org,2002:str"（引号加载或程序显式标注）→ 字符串语义：
+//     plain 重读等价 → plain；否则单引号（控制字符 → 双引号）
+//   tag 空（程序构造）→ 文本直出，结构性不安全则单引号
+//   tag "?"（plain 加载的数字/bool/null 语义）→ 文本直出（plain 原文本就安全）
+std::string scalar_text(const YAML::Node& n) {
+  const std::string& s = n.Scalar();
+  const std::string& tag = n.Tag();
+  auto quote = [&s]() {
+    return has_control_chars(s) ? quote_double(s) : quote_single(s);
+  };
+  bool string_semantics = (tag == "!" || tag == "tag:yaml.org,2002:str");
+  if (!string_semantics) {
+    return structurally_unsafe(s) ? quote() : s;
+  }
+  if (looks_like_bool_or_null(s) || is_plain_number(s) || structurally_unsafe(s)) {
+    return quote();
+  }
+  return s;
 }
 
 std::string indent_of(int n) { return std::string(static_cast<size_t>(n), ' '); }
 
-std::string key_text(const std::string& k) {
-  return needs_double_quote(k) ? quote_double(k) : k;
+std::string key_text(const YAML::Node& k) {
+  return scalar_text(k);
 }
 
 // 多行字符串 → literal 块；返回 "|\n..." / "|-\n..." 片段（键行由调用方拼）
@@ -146,7 +175,7 @@ std::string inline_scalar(const YAML::Node& n) {
   if (!n.IsScalar()) return "";
   const std::string& s = n.Scalar();
   if (s.find('\n') != std::string::npos) return "";
-  return scalar_text(s);
+  return scalar_text(n);
 }
 
 void emit_scalar_block(const YAML::Node& n, int indent, std::string& out) {
@@ -156,7 +185,7 @@ void emit_scalar_block(const YAML::Node& n, int indent, std::string& out) {
   }
   const std::string& s = n.Scalar();
   if (s.find('\n') == std::string::npos) {
-    out += scalar_text(s);
+    out += scalar_text(n);
     return;
   }
   out += literal_or_quoted(s, indent);
@@ -167,8 +196,7 @@ void emit_map(const YAML::Node& m, int indent, std::string& out) {
   for (const auto& kv : m) {
     if (!first) out += "\n";
     first = false;
-    std::string key =
-        kv.first.IsScalar() ? key_text(kv.first.Scalar()) : quote_double("?");
+    std::string key = kv.first.IsScalar() ? key_text(kv.first) : quote_double("?");
     out += indent_of(indent) + key + ":";
     emit_value(kv.second, indent, out);
   }
@@ -185,7 +213,7 @@ void emit_seq(const YAML::Node& s, int indent, std::string& out) {
     } else if (item.IsScalar()) {
       const std::string& v = item.Scalar();
       if (v.find('\n') == std::string::npos) {
-        out += " " + scalar_text(v);
+        out += " " + scalar_text(item);
       } else {
         out += " " + literal_or_quoted(v, indent + 2);
       }
