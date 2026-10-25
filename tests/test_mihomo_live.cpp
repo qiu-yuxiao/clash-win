@@ -69,15 +69,26 @@ struct LiveCore {
     wchar_t temp[MAX_PATH];
     GetTempPathW(MAX_PATH, temp);
 
-    // 复用模式：管道已就绪（外部拉起的内核）则直接使用，不杀不清理
+    // 复用模式：管道已就绪（外部拉起的内核）则直接使用，不杀不清理。
+    // 健全性校验（← T07 通报：强杀残留可能占用测试管道，收养后端口/配置不符）：
+    // get_base_config 端口必须等于 kTestPort，否则视为 stale，立即落入自启路径
+    // （start_sidecar 内 kill_all_mini_cores 清理残留）
     for (int i = 0; i < 10; ++i) {
       if (probe_pipe_open()) {
-        started = true;
-        external = true;
-        home_dir = std::wstring(temp) + L"clashwin-manual-home";  // 外部拉起脚本的 home
-        config_path = home_dir + L"\\config.yaml";
-        std::printf("  [live] reusing externally started core (pipe present)\n");
-        return true;
+        MihomoClient probe(kTestPipe, kTestSecret);
+        auto cfg = probe.get_base_config(2000);
+        if (cfg.is_ok() && cfg.value().mixed_port == kTestPort) {
+          started = true;
+          external = true;
+          home_dir = std::wstring(temp) + L"clashwin-manual-home";  // 外部拉起脚本的 home
+          config_path = home_dir + L"\\config.yaml";
+          std::printf("  [live] reusing externally started core (port %u verified)\n",
+                      cfg.value().mixed_port);
+          return true;
+        }
+        std::printf("  [live] stale core on test pipe (%s), falling back to spawn\n",
+                    cfg.is_ok() ? "port mismatch" : cfg.error().message.c_str());
+        break;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
