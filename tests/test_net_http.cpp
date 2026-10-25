@@ -66,7 +66,7 @@ struct MockHttp {
     for (size_t i = 0; i < canned.size(); ++i) {
       SOCKET c = accept(listener, nullptr, nullptr);
       if (c == INVALID_SOCKET) return;
-      DWORD tv = 5000;
+      DWORD tv = 30000;  // 负载下 recv 5s 会饿死（t06_net_http_post flaky 根修）
       setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
       // 读到 \r\n\r\n
       std::string req;

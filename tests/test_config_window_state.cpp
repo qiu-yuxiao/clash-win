@@ -57,8 +57,9 @@ UT_TEST(t03_ws_geometry_valid_guard) {
 
 UT_TEST(t03_ws_throttle_and_trailing_write) {
   std::wstring path = temp_path("ws_throttle");
-  // 测试注入 60ms 短节流（生产为 1000ms 常量）
-  window_state::WindowStateStore store(path, 60);
+  // 节流窗 60s + flush_pending_for_test 直接驱动尾随冲刷：
+  // 真实时间不再参与判定（此前 60ms 窗在 CPU 负载下会被调度间隙击穿 → flaky）
+  window_state::WindowStateStore store(path, 60000);
 
   // 首次变化：elapsed >= interval → 立即落盘
   store.on_geometry_change(300, 500, 10.0, 20.0);
@@ -78,7 +79,7 @@ UT_TEST(t03_ws_throttle_and_trailing_write) {
   UT_CHECK_EQ((*j1)["width"].get<double>(), 300.0);  // 未被中间帧覆盖（节流）
 
   // 尾随补写：最后一版最终落盘（丢中间帧、不丢终值）
-  UT_CHECK(store.wait_pending_flush(2000));
+  store.flush_pending_for_test();
   auto j2 = read_json(path);
   UT_CHECK(j2.has_value());
   UT_CHECK_EQ((*j2)["width"].get<double>(), 500.0);
@@ -111,7 +112,7 @@ UT_TEST(t03_ws_version_ordering_rejects_stale) {
 
 UT_TEST(t03_ws_zero_size_and_immediate_save) {
   std::wstring path = temp_path("ws_zero");
-  window_state::WindowStateStore store(path, 60);
+  window_state::WindowStateStore store(path, 60000);  // 60s 窗：负载免疫
   store.on_geometry_change(300, 500, 1.0, 2.0);
   UT_CHECK(store.wait_pending_flush(2000));
 

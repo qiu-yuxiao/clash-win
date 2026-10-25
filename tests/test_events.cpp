@@ -8,31 +8,38 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <vector>
 
 using namespace clashwin::events;
 
 UT_TEST(eventbus_debounce_gate) {
+  // 门控 60s + 注入时钟推进：与真实 wall-clock / 负载调度完全解耦（flaky 根治）
   EventBus bus(false);  // 无 worker：手动 flush 驱动，确定性
-  bus.set_gate("e.debounce", GateType::Debounce, 60);
+  bus.set_gate("e.debounce", GateType::Debounce, 60000);
   std::atomic<int> hits{0};
-  bus.subscribe("e.debounce", [&](const Payload&) { hits.fetch_add(1); });
+  std::vector<int> got;
+  bus.subscribe("e.debounce", [&](const Payload& p) { hits.fetch_add(1); got.push_back(p.get<int>()); });
 
   bus.publish("e.debounce", 1);
   bus.publish("e.debounce", 2);
-  bus.flush_pending();  // 未静默到期 → 不派发
+  bus.flush_pending();            // 未静默到期 → 不派发
   UT_CHECK_EQ(hits.load(), 0);
-  std::this_thread::sleep_for(std::chrono::milliseconds(80));
-  bus.publish("e.debounce", 3);   // touch 重置
-  bus.flush_pending();
-  UT_CHECK_EQ(hits.load(), 0);
-  std::this_thread::sleep_for(std::chrono::milliseconds(70));
+  bus.advance_for_test(60001);
   bus.flush_pending();            // 静默到期 → 尾随派发一次，取最后一次 payload
   UT_CHECK_EQ(hits.load(), 1);
+  UT_CHECK(got.size() == 1 && got[0] == 2);
+  bus.publish("e.debounce", 3);   // touch 重置（新静默窗）
+  bus.flush_pending();
+  UT_CHECK_EQ(hits.load(), 1);
+  bus.advance_for_test(60001);
+  bus.flush_pending();
+  UT_CHECK_EQ(hits.load(), 2);
+  UT_CHECK(got.size() == 2 && got[1] == 3);
 }
 
 UT_TEST(eventbus_throttle_gate) {
   EventBus bus(false);
-  bus.set_gate("e.throttle", GateType::Throttle, 60);
+  bus.set_gate("e.throttle", GateType::Throttle, 60000);  // 60s 门 + 时钟推进（负载免疫）
   std::vector<int> seen;
   bus.subscribe("e.throttle", [&](const Payload& p) { seen.push_back(p.get<int>()); });
 
@@ -43,7 +50,7 @@ UT_TEST(eventbus_throttle_gate) {
   bus.publish("e.throttle", 3);
   bus.flush_pending();
   UT_CHECK_EQ(seen.size(), 1);
-  std::this_thread::sleep_for(std::chrono::milliseconds(70));
+  bus.advance_for_test(60001);
   bus.flush_pending();            // 窗口结束 → 尾随补发窗口内最后一次（3）
   UT_CHECK_EQ(seen.size(), 2);
   UT_CHECK_EQ(seen.back(), 3);

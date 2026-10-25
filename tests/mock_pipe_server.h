@@ -201,6 +201,11 @@ class Server {
     stop_event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     for (int i = 0; i < instances_; ++i)
       threads_.emplace_back([this] { instance_loop(); });
+    // 【flaky 根修】等待首个管道实例真正创建（instance_loop 线程内才
+    // CreateNamedPipeW）。此前 start() 立即返回，客户端首请求可能撞上
+    // FILE_NOT_FOUND 窗口（重试 3 次即耗尽）——CPU 负载下呈 1/8 概率 flaky。
+    ready_count_ = 0;
+    for (int i = 0; i < 5000 && ready_count_.load() < 1; ++i) Sleep(1);
   }
 
   void stop() {
@@ -232,6 +237,7 @@ class Server {
         std::lock_guard lk(hmu_);
         live_handles_.push_back(h);
       }
+      ready_count_.fetch_add(1);
       // ConnectNamedPipe（等待客户端或停止）
       OVERLAPPED ov{};
       ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -279,6 +285,7 @@ class Server {
   std::mutex hmu_;
   std::vector<HANDLE> live_handles_;
   std::vector<std::thread> threads_;
+  std::atomic<int> ready_count_{0};
 };
 
 }  // namespace mockpipe

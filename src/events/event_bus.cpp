@@ -46,6 +46,9 @@ struct EventBus::Impl {
   // 分发线程（20ms tick；仅 flush 门控事件；Immediate 在 publish 内同步派发）
   std::thread worker;
   bool worker_run = false;
+  int64_t clock_offset = 0;  // 测试时钟推进
+
+  int64_t clock() const { return now_ms() + clock_offset; }
 
   GateEntry& gate_for(const std::string& name) {
     auto it = gates.find(name);
@@ -164,7 +167,7 @@ void EventBus::publish(const std::string& name, const Payload& payload) {
     auto& g = impl_->gate_for(name);
     auto sit = impl_->subs.find(name);
     if (sit != impl_->subs.end()) snapshot = sit->second;
-    const int64_t t = now_ms();
+    const int64_t t = impl_->clock();
     switch (g.type) {
       case GateType::Immediate:
         deliver_now = true;
@@ -190,7 +193,7 @@ void EventBus::publish(const std::string& name, const Payload& payload) {
 }
 
 void EventBus::flush_pending() {
-  const int64_t t = now_ms();
+  const int64_t t = impl_->clock();
   std::vector<std::pair<std::vector<Impl::Sub>, Payload>> due;
   {
     std::lock_guard<std::mutex> lock(impl_->mu);
@@ -210,6 +213,11 @@ void EventBus::flush_pending() {
   for (auto& [list, payload] : due) {
     impl_->dispatch_locked_list(list, payload);
   }
+}
+
+void EventBus::advance_for_test(int64_t ms) {
+  std::lock_guard<std::mutex> lock(impl_->mu);
+  impl_->clock_offset += ms;
 }
 
 void EventBus::set_lightweight_filter(bool on) {

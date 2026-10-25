@@ -57,6 +57,10 @@ class WindowStateStore {
   // 测试钩子：等待尾随补写任务完成（等待 pending 槽清空，最多 ms 超时）
   bool wait_pending_flush(int64_t timeout_ms);
 
+  // 测试钩子：立即冲刷待写槽（与 worker 到点的尾随补写同一路径 flush_pending，
+  // 但不经真实时间窗——节流用例据此与负载调度解耦，flaky 根治）
+  void flush_pending_for_test();
+
   int64_t last_save_ms() const { return last_save_ms_.load(); }
   uint64_t written_seq() const { return written_seq_.load(); }
 

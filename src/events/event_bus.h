@@ -55,6 +55,10 @@ class EventBus {
   // 立即冲刷所有待派发项（测试用；生产由内部分发线程驱动）
   void flush_pending();
 
+  // 注入时钟偏移（测试确定性驱动门控；生产恒 0）。
+  // 门控时间戳取 now+offset，与真实 wall-clock 解耦——负载/调度抖动不再影响判定。
+  void advance_for_test(int64_t ms);
+
   // 便捷发射器（← Handle::refresh_clash / refresh_verge / notify_profile_changed 等）
   static void refresh_clash();    // payload "yes"
   static void refresh_verge();    // payload "yes"

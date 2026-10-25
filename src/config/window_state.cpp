@@ -193,6 +193,8 @@ bool WindowStateStore::write_ordered(uint64_t seq, double w, double h,
   return true;
 }
 
+void WindowStateStore::flush_pending_for_test() { flush_pending(); }
+
 bool WindowStateStore::wait_pending_flush(int64_t timeout_ms) {
   int64_t start = now_ms();
   while (now_ms() - start < timeout_ms) {
