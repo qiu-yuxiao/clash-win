@@ -118,6 +118,27 @@ target_include_directories(clashwin_core PUBLIC
 target_link_libraries(clashwin_core PUBLIC clashwin_config clashwin_mihomo shell32)
 target_compile_options(clashwin_core PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
+# 事件总线 + CommandService 门面（T09：事件名/防抖节流/notice + 命令注册表 44 项）
+add_library(clashwin_cmd STATIC
+  src/events/event_bus.cpp
+  src/events/notice.cpp
+  src/cmd/cmd_support.cpp
+  src/cmd/command_service.cpp
+  src/cmd/cmd_profile.cpp
+  src/cmd/cmd_clash.cpp
+  src/cmd/cmd_verge.cpp
+  src/cmd/cmd_system.cpp
+  src/cmd/cmd_service.cpp
+  src/cmd/cmd_network.cpp
+  src/cmd/cmd_app.cpp
+)
+target_include_directories(clashwin_cmd PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(clashwin_cmd PUBLIC clashwin_core clashwin_enhance iphlpapi)
+target_compile_options(clashwin_cmd PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
+
 add_executable(clashwin WIN32
   src/main.cpp
   src/app/app.cpp
@@ -129,6 +150,7 @@ target_link_libraries(clashwin PRIVATE
   clashwin_config             # T03 配置体系
   clashwin_mihomo             # T04 管道通信层
   clashwin_core               # T07 内核生命周期
+  clashwin_cmd                # T09 事件总线 + 命令门面
   d2d1 user32 gdi32 ws2_32    # D2D / 窗口 / Winsock
 )
 
@@ -180,6 +202,9 @@ add_executable(clashwin_test
   tests/test_core_lifecycle.cpp
   tests/test_core_service.cpp
   tests/test_core_live.cpp
+  tests/test_events.cpp
+  tests/test_cmd_registry.cpp
+  tests/test_cmd_smoke.cpp
 )
-target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core)
+target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)

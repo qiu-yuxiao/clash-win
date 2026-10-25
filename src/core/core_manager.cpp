@@ -143,6 +143,12 @@ std::wstring locate_core_path() {
   // 兜底 exe 同级 sidecar（← current_exe().with_file_name("mini-mihomo.exe")）
   std::wstring sidecar = util::dirs::sidecar_core_path();
   if (fs::exists(sidecar)) return sidecar;
+  // 开发/测试布局兜底（copy_resources 落位 <exe>\sidecar\mini-mihomo.exe）
+  wchar_t self[MAX_PATH];
+  if (::GetModuleFileNameW(nullptr, self, MAX_PATH) > 0) {
+    std::wstring dev = (fs::path(self).parent_path() / L"sidecar\\mini-mihomo.exe").wstring();
+    if (fs::exists(dev)) return dev;
+  }
   return {};
 }
 
