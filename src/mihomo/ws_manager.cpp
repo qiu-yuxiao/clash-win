@@ -1,10 +1,15 @@
 // T05 WS 四通道订阅管理实现
 #include "mihomo/ws_manager.h"
 
+#include <nlohmann/json.hpp>
+
 #include "mihomo/pipe_ws.h"
 
+#include <algorithm>
 #include <chrono>
 #include <memory>
+#include <random>
+#include <set>
 #include <thread>
 #include <utility>
 
@@ -15,6 +20,134 @@ constexpr int kReconnectDelayMs = 1000;  // ← use-mihomo-ws-subscription.ts RE
                                           // （原版为固定 1s 重连，非指数退避）
 constexpr int kIdlePollMs = 200;          // 无订阅/空闲轮询步长
 constexpr int kOpenTimeoutMs = 5000;
+constexpr size_t kConnViewportMax = 100;  // ← mihomo.rs ws_connections viewport 分页
+constexpr uint64_t kSnapshotEvery = 100;  // 每 100 帧全量 snapshot 防漂移
+
+// ---------- connections 通道裸流 → snapshot/delta 转换器 ----------
+// ← mihomo.rs ws_connections_checked：内核 /connections WS 推的是全量 Connections
+// JSON，snapshot/delta 信封（04§2）由插件层生成：
+//   - epoch_id = 16 位 hex 随机；sequence_id 从 0 递增
+//   - viewport：活跃连接 >100 时按 upload+download 降序截取前 100
+//   - sequence_id==0 或 %100==0 → 全量 snapshot；其余 → delta（added/removed/
+//     updated 扁平步长3，仅 upload/download 变化的连接计入 updated）
+class ConnectionsTransformer {
+ public:
+  ConnectionsTransformer() {
+    std::random_device rd;
+    epoch_id_ = fmt_hex(rd()) + fmt_hex(rd());  // 64bit 随机 → 16 hex
+  }
+
+  // 返回待分发的 JSON 字符串；解析失败返回空串（丢弃，对齐原版 log+continue）
+  std::string process(const std::string& raw) {
+    nlohmann::json j = nlohmann::json::parse(raw, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) return {};
+    Connections frame = Connections::from_json(j);
+
+    // viewport 截断（← mihomo.rs：按活跃度 upload+download 降序取前 100）
+    std::vector<ConnectionItem> list = std::move(frame.connections);
+    if (list.size() > kConnViewportMax) {
+      std::stable_sort(list.begin(), list.end(), [](const ConnectionItem& a, const ConnectionItem& b) {
+        return (a.upload + a.download) > (b.upload + b.download);
+      });
+      list.resize(kConnViewportMax);
+    }
+
+    bool send_full = sequence_id_ == 0 || sequence_id_ % kSnapshotEvery == 0;
+    nlohmann::json data;
+    data["epochId"] = epoch_id_;
+    data["sequenceId"] = sequence_id_;
+    data["downloadTotal"] = frame.download_total;
+    data["uploadTotal"] = frame.upload_total;
+    data["memory"] = frame.memory;
+
+    nlohmann::json msg;
+    if (send_full) {
+      last_.clear();
+      nlohmann::json arr = nlohmann::json::array();
+      for (const auto& c : list) {
+        last_[c.id] = c;
+        arr.push_back(conn_to_json(c));
+      }
+      data["connections"] = std::move(arr);
+      msg["type"] = "snapshot";
+    } else {
+      nlohmann::json added = nlohmann::json::array();
+      nlohmann::json updated = nlohmann::json::array();
+      std::set<std::string> current_ids;
+      for (const auto& c : list) {
+        current_ids.insert(c.id);
+        auto it = last_.find(c.id);
+        if (it != last_.end()) {
+          if (it->second.upload != c.upload || it->second.download != c.download) {
+            updated.push_back(c.id);
+            updated.push_back(c.upload);
+            updated.push_back(c.download);
+            it->second.upload = c.upload;
+            it->second.download = c.download;
+          }
+        } else {
+          added.push_back(conn_to_json(c));
+          last_[c.id] = c;
+        }
+      }
+      nlohmann::json removed = nlohmann::json::array();
+      for (auto it = last_.begin(); it != last_.end();) {
+        if (!current_ids.count(it->first)) {
+          removed.push_back(it->first);
+          it = last_.erase(it);
+        } else {
+          ++it;
+        }
+      }
+      data["added"] = std::move(added);
+      data["removed"] = std::move(removed);
+      data["updated"] = std::move(updated);
+      msg["type"] = "delta";
+    }
+    msg["data"] = std::move(data);
+    ++sequence_id_;
+    return msg.dump();
+  }
+
+ private:
+  static std::string fmt_hex(uint64_t v) {
+    static const char* hex = "0123456789abcdef";
+    std::string s(16, '0');
+    for (int i = 15; i >= 0; --i) {
+      s[i] = hex[v & 0xF];
+      v >>= 4;
+    }
+    return s;
+  }
+
+  static nlohmann::json conn_to_json(const ConnectionItem& c) {
+    nlohmann::json j;
+    j["id"] = c.id;
+    const auto& m = c.metadata;
+    j["metadata"] = {{"network", m.network},
+                     {"type", m.type},
+                     {"sourceIP", m.source_ip},
+                     {"destinationIP", m.destination_ip},
+                     {"sourcePort", m.source_port},
+                     {"destinationPort", m.destination_port},
+                     {"host", m.host},
+                     {"dnsMode", m.dns_mode},
+                     {"process", m.process},
+                     {"processPath", m.process_path}};
+    j["upload"] = c.upload;
+    j["download"] = c.download;
+    j["start"] = c.start;
+    j["chains"] = c.chains;
+    j["rule"] = c.rule;
+    j["rulePayload"] = c.rule_payload;
+    return j;
+  }
+
+  std::string epoch_id_;
+  uint64_t sequence_id_ = 0;
+  std::map<std::string, ConnectionItem> last_;
+};
+
 }  // namespace
 
 struct WsManager::Channel {
@@ -25,6 +158,9 @@ struct WsManager::Channel {
   std::atomic<bool> reopen{false};     // configure() 后要求断开重连
   std::atomic<bool> running{false};
   std::thread worker;
+  // connections 通道专用：内核裸流 → snapshot/delta 信封（原版插件层职责）；
+  // 仅被该通道的 WS 读线程调用，无需加锁
+  std::unique_ptr<ConnectionsTransformer> transformer;
 };
 
 WsManager::WsManager() = default;
@@ -68,6 +204,10 @@ WsManager::Channel& WsManager::channel(const std::string& key, const std::string
   if (it == channels_.end()) {
     auto ch = std::make_unique<Channel>();
     ch->ws_path = ws_path;
+    if (ws_path == "/connections") {
+      // 插件层职责：内核裸流 → snapshot/delta 信封（04§2）
+      ch->transformer = std::make_unique<ConnectionsTransformer>();
+    }
     ch->running.store(true, std::memory_order_release);
     Channel* raw = ch.get();
     const std::string path = ws_path;
@@ -199,6 +339,12 @@ void WsManager::worker_loop(Channel* ch, WsManager* self, std::string ws_path) {
     PipeWsCallbacks cbs;
     cbs.on_message = [chp, selfp](const std::string& payload) {
       if (selfp->stopping_.load(std::memory_order_acquire)) return;
+      // connections 通道：内核裸流 → snapshot/delta 信封（← mihomo.rs ws_connections）
+      std::string payload2 = payload;
+      if (chp->transformer) {
+        payload2 = chp->transformer->process(payload);
+        if (payload2.empty()) return;
+      }
       // 锁内拷贝 handlers，锁外分发（回调中可安全 unsubscribe）
       std::vector<WsHandler> handlers;
       {
@@ -206,7 +352,7 @@ void WsManager::worker_loop(Channel* ch, WsManager* self, std::string ws_path) {
         handlers.reserve(chp->subs.size());
         for (auto& [id, h] : chp->subs) handlers.push_back(h);
       }
-      for (const auto& h : handlers) h(payload);
+      for (const auto& h : handlers) h(payload2);
     };
     cbs.on_error = [](const std::string&) {};
     cbs.on_close = [](uint16_t, const std::string&) {

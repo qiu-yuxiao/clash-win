@@ -179,25 +179,25 @@ UT_TEST(mihomo_mock_ws_channels) {
         if (fr.opcode == 0x8) return;
       }
     } else if (path.rfind("/connections", 0) == 0) {
-      const char* snapshot =
-          R"({"type":"snapshot","data":{"epochId":"000000000000abcd","sequenceId":0,)"
-          R"("uploadTotal":10,"downloadTotal":20,"memory":100,)"
+      // 真实内核发的是裸 Connections 全量帧（snapshot/delta 信封由 WsManager
+      // 转换器生成，← mihomo.rs ws_connections）：帧A 全量(c1)，帧B 差分(c1→c2)
+      const char* frame_a =
+          R"({"downloadTotal":20,"uploadTotal":10,"memory":100,)"
           R"("connections":[{"id":"c1","metadata":{"network":"tcp","type":"HTTP","host":"a.com"},)"
           R"("upload":1,"download":2,"start":"2026-05-25T00:00:00Z","chains":["PROXY"],)"
-          R"("rule":"MATCH","rulePayload":""}]}})";
-      const char* delta =
-          R"({"type":"delta","data":{"epochId":"000000000000abcd","sequenceId":1,)"
-          R"("uploadTotal":30,"downloadTotal":40,"memory":100,)"
-          R"("added":[{"id":"c2","metadata":{"network":"udp","type":"Socks5","host":"b.com"},)"
+          R"("rule":"MATCH","rulePayload":""}]})";
+      const char* frame_b =
+          R"({"downloadTotal":40,"uploadTotal":30,"memory":100,)"
+          R"("connections":[{"id":"c2","metadata":{"network":"udp","type":"Socks5","host":"b.com"},)"
           R"("upload":5,"download":6,"start":"2026-05-25T00:00:01Z","chains":[],"rule":"",)"
-          R"("rulePayload":""}],"removed":["c1"],"updated":["c2",7,8]}})";
-      std::string f1 = mockmihomo::ws_enc_frame(0x1, snapshot);
-      std::string f2 = mockmihomo::ws_enc_frame(0x1, delta);
+          R"("rulePayload":""}]})";
+      std::string f1 = mockmihomo::ws_enc_frame(0x1, frame_a);
+      std::string f2 = mockmihomo::ws_enc_frame(0x1, frame_b);
       mo_write(h, f1.data(), static_cast<DWORD>(f1.size()), 10000);
       Sleep(150);
       mo_write(h, f2.data(), static_cast<DWORD>(f2.size()), 10000);
       Sleep(300);
-      // 继续循环推 snapshot（重连验证时新连接也能收到）
+      // 继续推全量帧（重连验证时新连接也能收到）
       mo_write(h, f1.data(), static_cast<DWORD>(f1.size()), 10000);
       mockmihomo::WsFrame fr;
       while (mockmihomo::ws_read_frame(h, &fr, 2000)) {
@@ -242,7 +242,8 @@ UT_TEST(mihomo_mock_ws_channels) {
   }
   UT_CHECK(saw_total);
 
-  // connections：snapshot → delta（含 updated 扁平步长3）
+  // connections：裸流经 WsManager 转换器 → snapshot(seq0) → delta(seq1，
+  // added=c2 / removed=c1；updated 仅差分 upload/download，本序列无变化)
   Sink conn;
   ws->subscribe_connections([&](const std::string& p) { conn.push(p); });
   bool got_conn = conn.wait(2, 10000);
@@ -254,17 +255,20 @@ UT_TEST(mihomo_mock_ws_channels) {
     auto m2 = ConnectionMessage::from_json(nlohmann::json::parse(conn.msgs[1], nullptr, false));
     UT_CHECK_EQ(m1.type, std::string("snapshot"));
     UT_CHECK(m1.snapshot.has_value());
-    UT_CHECK_EQ(m1.snapshot->epoch_id, std::string("000000000000abcd"));
     UT_CHECK_EQ(m1.snapshot->sequence_id, 0u);
     UT_CHECK_EQ(m1.snapshot->connections.size(), size_t(1));
+    UT_CHECK_EQ(m1.snapshot->connections[0].id, std::string("c1"));
+    UT_CHECK_EQ(m1.snapshot->upload_total, 10u);
+    UT_CHECK_EQ(m1.snapshot->download_total, 20u);
     UT_CHECK_EQ(m2.type, std::string("delta"));
     UT_CHECK(m2.delta.has_value());
     UT_CHECK_EQ(m2.delta->sequence_id, 1u);
     UT_CHECK_EQ(m2.delta->added.size(), size_t(1));
+    UT_CHECK_EQ(m2.delta->added[0].id, std::string("c2"));
     UT_CHECK_EQ(m2.delta->removed, std::vector<std::string>{"c1"});
-    UT_CHECK_EQ(m2.delta->updated.size(), size_t(1));
-    UT_CHECK(std::get<0>(m2.delta->updated[0]) == "c2" && std::get<1>(m2.delta->updated[0]) == 7 &&
-             std::get<2>(m2.delta->updated[0]) == 8);
+    UT_CHECK_EQ(m2.delta->upload_total, 30u);
+    UT_CHECK_EQ(m2.delta->download_total, 40u);
+    UT_CHECK(m2.delta->updated.empty());
   }
 
   // logs（level=info 请求路径由 WsManager 构造）

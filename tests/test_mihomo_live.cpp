@@ -8,18 +8,19 @@
 #include "test_util.h"
 
 #include "clashwin/mihomo/models.h"
+#include "core/core_manager.h"
 #include "mihomo/mihomo_client.h"
 #include "mihomo/ws_manager.h"
 #include "util/utf.h"
 
 #include <windows.h>
-#include <tlhelp32.h>
 
 #include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <thread>
 
 using namespace clashwin;
@@ -32,11 +33,15 @@ constexpr const char* kTestSecret = "clashwin-test-secret";
 constexpr uint16_t kTestPort = 20801;
 
 // 测试内核生命周期（进程退出析构兜底清理）
+// ← T07 踩坑通报修正：此前 3 条 live 误 SKIP 的根因是 WaitNamedPipeW 对
+// mini-mihomo 管道探测不可靠（管道就绪后仍长时间不命中），并非沙箱拦截；
+// 探测统一改用 CreateFileW 真实打开。自启动改走 CoreManager::start_sidecar
+// （T07 已验证的沙箱内可行路径：排序环境块 + CREATE_UNICODE_ENVIRONMENT +
+// 日志重定向落盘），独立管道/端口/%TEMP% home，绝不触碰用户实机内核。
 struct LiveCore {
   std::wstring home_dir;
   std::wstring config_path;
-  std::wstring exe_path;
-  HANDLE process = nullptr;
+  std::unique_ptr<core::CoreManager> mgr;
   bool started = false;
   bool external = false;  // 复用外部已启动的内核（不杀不清理）
 
@@ -47,33 +52,16 @@ struct LiveCore {
     return core;
   }
 
-  // 清理本测试启动的残留内核（按命令行含 clashwin-test-mihomo 匹配；
-  // 用户内核走 \\.\pipe\mini-mihomo 命令行不含该串，绝不触碰）
-  static void kill_leftovers() {
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return;
-    PROCESSENTRY32W pe{};
-    pe.dwSize = sizeof(pe);
-    if (Process32FirstW(snap, &pe)) {
-      do {
-        if (wcscmp(pe.szExeFile, L"mini-mihomo.exe") != 0) continue;
-        HANDLE p = OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
-                               pe.th32ProcessID);
-        if (!p) continue;
-        // 安全策略：本测试的内核 exe 位于本仓库 build 输出目录
-        // （用户内核路径不同，绝不触碰）；据此清理历史孤儿
-        wchar_t path[MAX_PATH] = {};
-        DWORD path_len = MAX_PATH;
-        QueryFullProcessImageNameW(p, 0, path, &path_len);
-        if (wcsstr(path, L"ClashWin\\build\\bin\\Release\\sidecar") != nullptr) {
-          std::printf("  [live] killing leftover test core pid=%lu\n", pe.th32ProcessID);
-          TerminateProcess(p, 1);
-          WaitForSingleObject(p, 3000);
-        }
-        CloseHandle(p);
-      } while (Process32NextW(snap, &pe));
+  // 管道就绪探测：真实 CreateFileW 打开（← T07 踩坑通报：WaitNamedPipeW 对
+  // mini-mihomo 管道不可靠，管道就绪后仍可能长时间不命中）
+  static bool probe_pipe_open() {
+    HANDLE h = CreateFileW(kTestPipe, GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0,
+                           nullptr);
+    if (h != INVALID_HANDLE_VALUE) {
+      CloseHandle(h);
+      return true;
     }
-    CloseHandle(snap);
+    return false;
   }
 
   bool ensure(int attempt = 0) {
@@ -83,7 +71,7 @@ struct LiveCore {
 
     // 复用模式：管道已就绪（外部拉起的内核）则直接使用，不杀不清理
     for (int i = 0; i < 10; ++i) {
-      if (WaitNamedPipeW(kTestPipe, 200)) {
+      if (probe_pipe_open()) {
         started = true;
         external = true;
         home_dir = std::wstring(temp) + L"clashwin-manual-home";  // 外部拉起脚本的 home
@@ -94,20 +82,38 @@ struct LiveCore {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
-    kill_leftovers();
-
-    // %TEMP%\clashwin-test-mihomo-home（清理旧残留）
+    // 环境搭建：全部落 %TEMP%\clashwin-test-mihomo-home（绝不写真实 %APPDATA%）
     home_dir = std::wstring(temp) + L"clashwin-test-mihomo-home";
     std::error_code ec;
     std::filesystem::remove_all(home_dir, ec);
-    std::filesystem::create_directories(home_dir, ec);
+    std::filesystem::create_directories(home_dir + L"\\cores", ec);
     if (ec) {
-      std::printf("  [live] create home failed: %ls (%s)\n", home_dir.c_str(), ec.message().c_str());
+      std::printf("  [live] create home failed: %ls (%s)\n", home_dir.c_str(),
+                  ec.message().c_str());
       return false;
     }
+    _wputenv_s(L"CLASHWIN_HOME_OVERRIDE", home_dir.c_str());
     config_path = home_dir + L"\\config.yaml";
 
-    // 最小合法配置：独立 mixed-port + 独立管道 + secret（鉴权测试用）
+    // 内核定位（← locate_core_path：<home>\cores 优先）：拷 sidecar 件到 home\cores
+    {
+      wchar_t self[MAX_PATH];
+      GetModuleFileNameW(nullptr, self, MAX_PATH);
+      std::wstring src =
+          (std::filesystem::path(self).parent_path() / L"sidecar\\mini-mihomo.exe").wstring();
+      if (!std::filesystem::exists(src)) {
+        std::printf("  [live] sidecar not found: %ls\n", src.c_str());
+        return false;
+      }
+      std::filesystem::copy_file(src, home_dir + L"\\cores\\mini-mihomo.exe",
+                                 std::filesystem::copy_options::overwrite_existing, ec);
+      if (ec) {
+        std::printf("  [live] copy sidecar failed: %s\n", ec.message().c_str());
+        return false;
+      }
+    }
+
+    // 最小合法配置：独立 mixed-port + 独立管道 + secret
     {
       std::ofstream f(config_path, std::ios::binary);
       if (!f.is_open()) {
@@ -126,63 +132,22 @@ struct LiveCore {
       }
     }
 
-    // sidecar 拷贝件：<测试 exe 同目录>\sidecar\mini-mihomo.exe
-    wchar_t self[MAX_PATH];
-    GetModuleFileNameW(nullptr, self, MAX_PATH);
-    exe_path = std::filesystem::path(self).parent_path() / L"sidecar\\mini-mihomo.exe";
-    if (!std::filesystem::exists(exe_path)) {
-      std::printf("  [live] sidecar not found: %ls\n", exe_path.c_str());
-      return false;
-    }
-
-    std::wstring cmd = L"\"" + exe_path + L"\" -d \"" + home_dir +
-                       L"\" -f \"" + config_path +
-                       L"\" -ext-ctl-pipe " + kTestPipe;
-    std::printf("  [live] cmd: %ls\n", cmd.c_str());
-    {
-      // 环境诊断（T07 参考）：工具宿主沙箱内本进程为 Low IL + Job，
-      // Low IL 子内核无法完成初始化（挂死）且无法访问 Medium IL 管道；
-      // 正常终端（Medium IL）下直接 CreateProcessW 即可工作
-      BOOL is_ac = FALSE, in_job = FALSE;
-      DWORD ret_len = 0;
-      IsProcessInJob(GetCurrentProcess(), nullptr, &in_job);
-      HANDLE tok = nullptr;
-      if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &tok)) {
-        GetTokenInformation(tok, TokenIsAppContainer, &is_ac, sizeof(is_ac), &ret_len);
-        DWORD len = 0;
-        GetTokenInformation(tok, TokenIntegrityLevel, nullptr, 0, &len);
-        DWORD rid = 0;
-        if (len) {
-          auto* til = static_cast<TOKEN_MANDATORY_LABEL*>(malloc(len));
-          if (til && GetTokenInformation(tok, TokenIntegrityLevel, til, len, &ret_len)) {
-            rid = *GetSidSubAuthority(til->Label.Sid, 0);
-          }
-          free(til);
-        }
-        CloseHandle(tok);
-        std::printf("  [live] env: in_job=%d appcontainer=%d integrity_rid=0x%lx (%s)\n",
-                    in_job ? 1 : 0, is_ac ? 1 : 0, rid,
-                    rid >= 0x3000 ? "high+" : rid >= 0x2000 ? "medium" : "low");
+    if (!mgr) mgr = std::make_unique<core::CoreManager>();
+    auto launched = mgr->start_sidecar(config_path, kTestPipe);
+    if (launched.is_err()) {
+      std::printf("  [live] start_sidecar failed: %s\n", launched.error().message.c_str());
+      if (attempt < 2) {
+        stop();
+        std::printf("  [live] retrying (attempt %d)\n", attempt + 1);
+        return ensure(attempt + 1);
       }
-    }
-
-    STARTUPINFOW si{};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_SHOWMINNOACTIVE;
-    PROCESS_INFORMATION pi{};
-    if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr,
-                        nullptr, &si, &pi)) {
-      std::printf("  [live] CreateProcessW failed, gle=%lu\n", GetLastError());
       return false;
     }
-    process = pi.hProcess;  // 持有句柄用于 TerminateProcess（按 PID 精确清理）
-    CloseHandle(pi.hThread);
-    std::printf("  [live] core spawned directly, pid=%lu\n", GetProcessId(process));
+    std::printf("  [live] sidecar spawned, pid=%lu\n", mgr->sidecar_pid());
 
-    // 等管道就绪（重试上限 15s）
+    // 等管道就绪（重试上限 15s；CreateFileW 真实打开探测）
     for (int i = 0; i < 150; ++i) {
-      if (WaitForSingleObject(process, 0) != WAIT_TIMEOUT) {
+      if (!mgr->sidecar_alive()) {
         std::printf("  [live] core exited during startup (check config/ports)\n");
         if (attempt < 2) {
           stop();
@@ -191,33 +156,21 @@ struct LiveCore {
         }
         return false;
       }
-      if (WaitNamedPipeW(kTestPipe, 100)) {
+      if (probe_pipe_open()) {
         started = true;
-        std::printf("  [live] pipe ready after %d00ms, pid=%lu\n", i, GetProcessId(process));
+        std::printf("  [live] pipe ready after %d00ms, pid=%lu\n", i, mgr->sidecar_pid());
         return true;
       }
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-    std::printf("  [live] pipe not ready in 15s, pid=%lu\n", GetProcessId(process));
-    {
-      DWORD exit_code = 0;
-      GetExitCodeProcess(process, &exit_code);
-      std::printf("  [live] exit_code=%lu, core.log:\n", exit_code);
-      std::ifstream logf(home_dir + L"\\core.log");
-      std::string line;
-      while (std::getline(logf, line)) std::printf("  [core] %s\n", line.c_str());
-    }
+    std::printf("  [live] pipe not ready in 15s, pid=%lu\n", mgr->sidecar_pid());
     stop();
     return false;
   }
 
   void stop() {
     if (external) return;  // 外部内核不归本测试清理
-    if (process) {
-      TerminateProcess(process, 1);
-      WaitForSingleObject(process, 5000);
-      CloseHandle(process);
-      process = nullptr;
-    }
+    if (mgr) mgr->stop();  // TerminateProcess + kill_all 兜底（scope 内安全）
     started = false;
     if (!home_dir.empty()) {
       std::error_code ec;
@@ -252,8 +205,8 @@ void report(const char* name, const Result<T>& r) {
 // ---------- a+b+c：管道就绪 → REST 抽测 + Bearer 鉴权 ----------
 UT_TEST(live_mihomo_rest) {
   if (!LiveCore::get().ensure()) {
-    std::printf("  SKIP: core spawn unavailable in sandboxed env; "
-                "run from a normal terminal for live validation\n");
+    std::printf("  SKIP: test core failed to start (check build/bin/Release/sidecar "
+                "and port 20801); see [core] log lines above\n");
     return;
   }
 
@@ -378,8 +331,8 @@ bool validate_log(const std::string& s) {
 
 UT_TEST(live_mihomo_ws) {
   if (!LiveCore::get().ensure()) {
-    std::printf("  SKIP: core spawn unavailable in sandboxed env; "
-                "run from a normal terminal for live validation\n");
+    std::printf("  SKIP: test core failed to start (check build/bin/Release/sidecar "
+                "and port 20801); see [core] log lines above\n");
     return;
   }
 
@@ -453,8 +406,8 @@ UT_TEST(live_mihomo_ws) {
 // ---------- 引用计数共享 + 退订关闭 + 重订自动重连 ----------
 UT_TEST(live_mihomo_shared_ws) {
   if (!LiveCore::get().ensure()) {
-    std::printf("  SKIP: core spawn unavailable in sandboxed env; "
-                "run from a normal terminal for live validation\n");
+    std::printf("  SKIP: test core failed to start (check build/bin/Release/sidecar "
+                "and port 20801); see [core] log lines above\n");
     return;
   }
 
@@ -501,7 +454,7 @@ UT_TEST(live_mihomo_cleanup) {
     return;
   }
   // 验证测试管道已无服务端（用户内核的 mini-mihomo 管道不受影响）
-  UT_CHECK(!WaitNamedPipeW(kTestPipe, 200));
+  UT_CHECK(!LiveCore::probe_pipe_open());
   std::printf("  [live] cleanup done, test pipe closed\n");
 }
 
@@ -580,4 +533,7 @@ UT_TEST(live_mihomo_pipe_diag) {
     }
     if (n == 0) std::printf("  [diag] -h: (no output)\n");
   }
+  // 诊断临时文件清理（%TEMP% 零残留）
+  DeleteFileW((std::wstring(temp) + L"clashwin-diag-cmd.txt").c_str());
+  DeleteFileW((std::wstring(temp) + L"clashwin-diag-help.txt").c_str());
 }
