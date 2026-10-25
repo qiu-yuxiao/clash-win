@@ -95,6 +95,19 @@ target_include_directories(clashwin_mihomo PUBLIC
 target_link_libraries(clashwin_mihomo PUBLIC clashwin_util nlohmann_json)
 target_compile_options(clashwin_mihomo PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
+# 内核生命周期（T07：Sidecar 启停/残留清扫/重启恢复/热应用 + 服务模式 SCM/IPC + 校验）
+add_library(clashwin_core STATIC
+  src/core/core_manager.cpp
+  src/core/service_mode.cpp
+  src/core/validate.cpp
+)
+target_include_directories(clashwin_core PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(clashwin_core PUBLIC clashwin_config clashwin_mihomo shell32)
+target_compile_options(clashwin_core PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
+
 add_executable(clashwin WIN32
   src/main.cpp
   src/app/app.cpp
@@ -105,6 +118,7 @@ target_link_libraries(clashwin PRIVATE
   clashwin_util               # util + vendored 三件套（PUBLIC 传递）
   clashwin_config             # T03 配置体系
   clashwin_mihomo             # T04 管道通信层
+  clashwin_core               # T07 内核生命周期
   d2d1 user32 gdi32 ws2_32    # D2D / 窗口 / Winsock
 )
 
@@ -144,6 +158,12 @@ add_executable(clashwin_test
   tests/test_uri_list.cpp
   tests/test_ssrf.cpp
   tests/test_net_http.cpp
+  tests/test_core_commandline.cpp
+  tests/test_core_kill.cpp
+  tests/test_core_validate.cpp
+  tests/test_core_lifecycle.cpp
+  tests/test_core_service.cpp
+  tests/test_core_live.cpp
 )
-target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance)
+target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)

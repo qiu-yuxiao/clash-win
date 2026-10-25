@@ -19,6 +19,7 @@ class Result {
   static Result err(Error e) { return Result(std::in_place_index<1>, std::move(e)); }
 
   bool is_ok() const { return v_.index() == 0; }
+  bool is_err() const { return v_.index() != 0; }
   const T& value() const { return std::get<0>(v_); }
   T& value() { return std::get<0>(v_); }
   const Error& error() const { return std::get<1>(v_); }
@@ -43,6 +44,7 @@ class Result<void> {
   }
 
   bool is_ok() const { return ok_; }
+  bool is_err() const { return !ok_; }
   const Error& error() const { return e_; }
 
  private:
