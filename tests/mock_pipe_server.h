@@ -189,7 +189,10 @@ inline void mo_write_response(HANDLE h, const Response& r) {
 
 class Server {
  public:
-  Server(std::wstring name, int instances) : name_(std::move(name)), instances_(instances) {}
+  // threads：accept 线程数；max_instances：管道实例上限（REST+WS 共用同一管道名时
+  // 需大于 threads 总和，否则后创建的 handle 因超出 nMaxInstance 失败）
+  explicit Server(std::wstring name, int threads, int max_instances = -1)
+      : name_(std::move(name)), instances_(threads), max_instances_(max_instances) {}
   ~Server() { stop(); }
 
   void start(Handler handler) {
@@ -221,8 +224,9 @@ class Server {
       if (!running_.load()) break;
       HANDLE h = CreateNamedPipeW(
           name_.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-          PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, static_cast<DWORD>(instances_),
-          1 << 20, 1 << 20, 0, nullptr);
+          PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+          static_cast<DWORD>(max_instances_ < 0 ? instances_ : max_instances_), 1 << 20,
+          1 << 20, 0, nullptr);
       if (h == INVALID_HANDLE_VALUE) break;
       {
         std::lock_guard lk(hmu_);
@@ -267,7 +271,8 @@ class Server {
   }
 
   std::wstring name_;
-  int instances_;
+  int instances_;       // accept 线程数
+  int max_instances_;   // 管道实例上限（<0 取 instances_）
   Handler handler_;
   std::atomic<bool> running_{false};
   HANDLE stop_event_ = nullptr;

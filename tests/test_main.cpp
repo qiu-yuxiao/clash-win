@@ -5,6 +5,8 @@
 #include "test_util.h"
 
 int main(int argc, char** argv) {
+  // 无缓冲输出：崩溃/段错误时不丢失已完成用例的进度
+  setvbuf(stdout, nullptr, _IONBF, 0);
   const char* filter = argc > 1 ? argv[1] : nullptr;
   int total = 0;
   int failed_cases = 0;

@@ -53,11 +53,15 @@ target_include_directories(clashwin_config PUBLIC
 target_link_libraries(clashwin_config PUBLIC clashwin_util shcore ws2_32)
 target_compile_options(clashwin_config PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
-# mihomo 管道通信层（T04：HTTP/1.1 over named pipe + WS + clash-verge-service IPC）
+# mihomo 管道通信层（T04：HTTP/1.1 over named pipe + WS + clash-verge-service IPC；
+# T05：数据模型 + MihomoClient + WS 四通道订阅管理）
 add_library(clashwin_mihomo STATIC
   src/mihomo/pipe_http.cpp
   src/mihomo/pipe_ws.cpp
   src/mihomo/service_ipc.cpp
+  src/mihomo/models.cpp
+  src/mihomo/mihomo_client.cpp
+  src/mihomo/ws_manager.cpp
 )
 target_include_directories(clashwin_mihomo PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -109,6 +113,9 @@ add_executable(clashwin_test
   tests/test_pipe_http.cpp
   tests/test_pipe_ws.cpp
   tests/test_service_ipc.cpp
+  tests/test_mihomo_models.cpp
+  tests/test_mihomo_client_mock.cpp
+  tests/test_mihomo_live.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config clashwin_mihomo)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
