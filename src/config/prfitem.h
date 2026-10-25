@@ -27,3 +27,15 @@ Result<void> write_file_if_changed(const std::wstring& path,
                                    const std::string& content);
 
 }  // namespace clashwin::config::prfitem
+
+namespace clashwin::config {
+
+// ← prfitem.rs::parse_subscription_content：订阅内容三级回退解析
+//   ① data 本身是含 proxies/proxy-providers 的 YAML mapping →（mapping, 原文）
+//   ② Base64 解码后为该形态 YAML →（mapping, 解码文）
+//   ③ URI-list 解析 →（mapping, serde 序列化文）
+//   全部失败 → Error
+Result<std::pair<YAML::Node, std::string>> parse_subscription_content(
+    const std::string& data);
+
+}  // namespace clashwin::config

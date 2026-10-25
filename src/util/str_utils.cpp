@@ -271,4 +271,74 @@ Result<std::string> fix_dirty_url(std::string_view input) {
   return Result<std::string>::ok(std::move(result));
 }
 
+bool is_valid_utf8(std::string_view s) {
+  size_t i = 0;
+  const auto n = s.size();
+  auto cont = [&](size_t k) {
+    for (size_t j = 0; j < k; ++j) {
+      if (i >= n || (static_cast<unsigned char>(s[i]) & 0xC0) != 0x80) return false;
+      ++i;
+    }
+    return true;
+  };
+  while (i < n) {
+    const unsigned char c = static_cast<unsigned char>(s[i++]);
+    if (c < 0x80) continue;
+    if ((c & 0xE0) == 0xC0) {
+      if ((c & 0x1E) == 0) return false;  // 过长编码 C0/C1
+      if (!cont(1)) return false;
+    } else if ((c & 0xF0) == 0xE0) {
+      if (!cont(2)) return false;
+      size_t start = i - 3;
+      unsigned char b1 = static_cast<unsigned char>(s[start]);
+      unsigned char b2 = static_cast<unsigned char>(s[start + 1]);
+      if (b1 == 0xE0 && b2 < 0xA0) return false;
+      if (b1 == 0xED && b2 >= 0xA0) return false;
+    } else if ((c & 0xF8) == 0xF0) {
+      if (!cont(3)) return false;
+      size_t start = i - 4;
+      unsigned char b1 = static_cast<unsigned char>(s[start]);
+      unsigned char b2 = static_cast<unsigned char>(s[start + 1]);
+      if (b1 == 0xF0 && b2 < 0x90) return false;
+      if (b1 == 0xF4 && b2 >= 0x90) return false;
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::string encode_base64(const uint8_t* data, size_t len) {
+  static const char kTable[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string out;
+  out.reserve((len + 2) / 3 * 4);
+  size_t i = 0;
+  for (; i + 3 <= len; i += 3) {
+    uint32_t v = (data[i] << 16) | (data[i + 1] << 8) | data[i + 2];
+    out += kTable[(v >> 18) & 63];
+    out += kTable[(v >> 12) & 63];
+    out += kTable[(v >> 6) & 63];
+    out += kTable[v & 63];
+  }
+  const size_t rem = len - i;
+  if (rem == 1) {
+    uint32_t v = data[i] << 16;
+    out += kTable[(v >> 18) & 63];
+    out += kTable[(v >> 12) & 63];
+    out += "==";
+  } else if (rem == 2) {
+    uint32_t v = (data[i] << 16) | (data[i + 1] << 8);
+    out += kTable[(v >> 18) & 63];
+    out += kTable[(v >> 12) & 63];
+    out += kTable[(v >> 6) & 63];
+    out += "=";
+  }
+  return out;
+}
+
+std::string encode_base64(std::string_view s) {
+  return encode_base64(reinterpret_cast<const uint8_t*>(s.data()), s.size());
+}
+
 }  // namespace clashwin::util

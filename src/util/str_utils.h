@@ -42,4 +42,11 @@ std::string decode_subscription_url(std::string_view raw_url);
 // 注意：不重排 path（/../ 解析、默认端口剥离属 T06 网络层的完整 URL 解析器）。
 Result<std::string> fix_dirty_url(std::string_view input);
 
+// ← String::from_utf8 严格 UTF-8 校验（T06 共享：uri_list/net_http）
+bool is_valid_utf8(std::string_view s);
+
+// 标准 Base64 编码（含 '=' padding；net_http Basic 认证/测试用）
+std::string encode_base64(const uint8_t* data, size_t len);
+std::string encode_base64(std::string_view s);
+
 }  // namespace clashwin::util

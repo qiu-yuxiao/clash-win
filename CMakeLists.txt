@@ -26,20 +26,23 @@ add_library(clashwin_util STATIC
   src/util/speed.cpp
   src/util/json_utils.cpp
   src/util/yaml_utils.cpp
+  src/util/node.cpp
 )
 target_include_directories(clashwin_util PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(clashwin_util PUBLIC yaml-cpp nlohmann_json shell32)
+target_link_libraries(clashwin_util PUBLIC yaml-cpp nlohmann_json shell32 ws2_32)
 
-# config 配置体系（T03：持久化层 + serde 兼容序列化 + Draft + 迁移）
+# config 配置体系（T03：持久化层 + serde 兼容序列化 + Draft + 迁移；
+# T06 扩展：from_url 订阅下载 + from_url_direct 直连导入 + SSRF 校验）
 add_library(clashwin_config STATIC
   src/config/yaml_serde.cpp
   src/config/verge.cpp
   src/config/clash.cpp
   src/config/profiles.cpp
   src/config/prfitem.cpp
+  src/config/ssrf.cpp
   src/config/migrate.cpp
   src/config/window_state.cpp
   src/config/proxy_head_state.cpp
@@ -50,8 +53,30 @@ target_include_directories(clashwin_config PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(clashwin_config PUBLIC clashwin_util shcore ws2_32)
+target_link_libraries(clashwin_config PUBLIC clashwin_util clashwin_enhance clashwin_system shcore ws2_32)
 target_compile_options(clashwin_config PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
+
+# 网络层（T06：WinHTTP 同步 GET/POST + 代理三态 + 订阅头解析 + 轻量 URL 解析）
+add_library(clashwin_system STATIC
+  src/system/net_http.cpp
+)
+target_include_directories(clashwin_system PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(clashwin_system PUBLIC clashwin_util winhttp)
+target_compile_options(clashwin_system PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
+
+# 通用 URI 解析器（T06：universal_parser.rs 全量移植）
+add_library(clashwin_enhance STATIC
+  src/enhance/uri_list.cpp
+)
+target_include_directories(clashwin_enhance PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(clashwin_enhance PUBLIC clashwin_util)
+target_compile_options(clashwin_enhance PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
 # mihomo 管道通信层（T04：HTTP/1.1 over named pipe + WS + clash-verge-service IPC；
 # T05：数据模型 + MihomoClient + WS 四通道订阅管理）
@@ -116,6 +141,9 @@ add_executable(clashwin_test
   tests/test_mihomo_models.cpp
   tests/test_mihomo_client_mock.cpp
   tests/test_mihomo_live.cpp
+  tests/test_uri_list.cpp
+  tests/test_ssrf.cpp
+  tests/test_net_http.cpp
 )
-target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config clashwin_mihomo)
+target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)

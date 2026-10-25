@@ -200,11 +200,18 @@ struct PrfItem {
   static PrfItem from_script(std::optional<std::string> uid);
   static PrfItem from_rules();
   static PrfItem from_proxies();
-  // ← prfitem.rs::from_url：T03 仅占位（网络下载 + 三级解析 + SSRF 属 T06/T15）
+  // ← prfitem.rs::from_url：订阅下载（T06 实现：fix_dirty_url → SSRF 校验 →
+  //   net_http 下载 → 三级解析回退 → 落盘 R{uid}.yaml 由 append_item 承担）
   static Result<PrfItem> from_url(const std::string& url,
                                   const std::optional<std::string>& name,
                                   const std::optional<std::string>& desc,
                                   const std::optional<PrfOption>& option);
+  // ← prfitem.rs::from_url_direct：直连节点导入（非 http(s) 输入委托目标；
+  //   clear/clean 清空 L_Direct_Imports.yaml；URI-list 解析；按
+  //   name+server+port 去重合并）
+  static Result<PrfItem> from_url_direct(
+      const std::string& url, const std::optional<std::string>& name,
+      const std::optional<PrfOption>& option);
 
   // ← prfitem.rs::read_file / save_file（profiles/ 目录；CRLF 归一后跳过无变化写）
   Result<std::string> read_file() const;

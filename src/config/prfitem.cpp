@@ -2,15 +2,24 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
+#include <optional>
 
 #include "clashwin/config/constants.h"
+#include "clash.h"
+#include "config/ssrf.h"
+#include "enhance/uri_list.h"
 #include "profiles.h"
+#include "system/net_http.h"
+#include "util/base64.h"
 #include "util/dirs.h"
 #include "util/log.h"
+#include "util/str_utils.h"
 #include "util/utf.h"
 #include "util/uuid.h"
+#include "verge.h"
 #include "yaml_serde.h"
 
 namespace clashwin::config::prfitem {
@@ -222,18 +231,435 @@ PrfItem PrfItem::from_proxies() {
   return item;
 }
 
-// ---------- from_url（T03 占位：下载/SSRF/三级解析 → T06/T15） ----------
+// ---------- from_url / from_url_direct / parse_subscription_content（T06） ----------
+namespace {
+
+using clashwin::enhance::parse_uri_list;
+using clashwin::system::HttpOptions;
+using clashwin::system::ProxyType;
+using clashwin::system::parse_str_u64;
+
+// ← serde_yaml Value::as_u64().unwrap_or(0)：非数字/负数/浮点 → 0
+uint64_t yaml_port_u64(const YAML::Node& proxy) {
+  const YAML::Node v = proxy["port"];
+  if (!v || !v.IsScalar()) return 0;
+  const std::string& s = v.Scalar();
+  if (s.empty() || s.find_first_not_of("0123456789") != std::string::npos) {
+    return 0;
+  }
+  uint64_t val = 0;
+  bool overflow = false;
+  for (char c : s) {
+    uint64_t d = static_cast<uint64_t>(c - '0');
+    if (val > (UINT64_MAX - d) / 10) {
+      overflow = true;
+      break;
+    }
+    val = val * 10 + d;
+  }
+  return overflow ? 0 : val;
+}
+
+// ← p.get("name").and_then(|v| v.as_str()).unwrap_or("")
+std::string yaml_str_or_empty(const YAML::Node& proxy, const char* key) {
+  const YAML::Node v = proxy[key];
+  if (v && v.IsScalar()) return v.Scalar();
+  return "";
+}
+
+// ← chrono::Local::now().timestamp()
+// （now_timestamp 已提供；此处的写文件工具 ↓）
+Result<void> plain_write_file(const std::wstring& path,
+                              const std::string& content) {
+  // ← std::fs::write（无条件覆盖；父目录就近保证存在）
+  size_t slash = path.find_last_of(L"\\/");
+  if (slash != std::wstring::npos) {
+    std::wstring parent = path.substr(0, slash);
+    // 逐级创建（CreateDirectoryW 已存在无害）
+    for (size_t i = 0; i < parent.size(); ++i) {
+      if (parent[i] == L'\\' || parent[i] == L'/') {
+        CreateDirectoryW(parent.substr(0, i).c_str(), nullptr);
+      }
+    }
+    CreateDirectoryW(parent.c_str(), nullptr);
+  }
+  std::ofstream f(path, std::ios::binary | std::ios::trunc);
+  if (!f) {
+    Error e;
+    e.code = 10;
+    e.message =
+        "failed to write to file \"" + utf::utf16_to_utf8(path) + "\"";
+    return Result<void>::err(std::move(e));
+  }
+  f.write(content.data(), static_cast<std::streamsize>(content.size()));
+  if (!f) {
+    Error e;
+    e.code = 10;
+    e.message =
+        "failed to write to file \"" + utf::utf16_to_utf8(path) + "\"";
+    return Result<void>::err(std::move(e));
+  }
+  return Result<void>::ok();
+}
+
+// ← PrfOption { update_interval/merge/script/rules/proxies/groups/
+//   allow_auto_update, ..Default::default() }（危险选项不落盘）
+PrfOption clean_download_option(PrfOption opt) {
+  opt.user_agent = std::nullopt;
+  opt.with_proxy = std::nullopt;
+  opt.self_proxy = std::nullopt;
+  opt.timeout_seconds = std::nullopt;
+  opt.danger_accept_invalid_certs = std::nullopt;
+  return opt;
+}
+
+// ← ProxyType::Localhost 端口回退链：verge_mixed_port → clash mixed-port
+std::optional<uint16_t> resolve_localhost_mixed_port() {
+  auto v = verge::load();
+  if (v.is_ok() && v.value().verge_mixed_port) {
+    return *v.value().verge_mixed_port;
+  }
+  auto c = clash::load();
+  return c.get_mixed_port();
+}
+
+}  // namespace
+
+// ← prfitem.rs::from_url_direct（281-422）
+Result<PrfItem> PrfItem::from_url_direct(
+    const std::string& url, const std::optional<std::string>& name,
+    const std::optional<PrfOption>& option) {
+  namespace enhance = clashwin::enhance;
+  const std::string url_trimmed = util::trim(url);
+  const std::string uid_str = "L_Direct_Imports";
+  const std::string file_name = "L_Direct_Imports.yaml";
+  const std::wstring path =
+      prfitem::profiles_dir() + L"\\" + utf::utf8_to_utf16(file_name);
+
+  YAML::Node final_mapping(YAML::NodeType::Map);
+  final_mapping["proxies"] = YAML::Node(YAML::NodeType::Sequence);
+
+  auto enhanced = prfitem::ensure_enhance_items(option);
+  if (!enhanced.is_ok()) return Result<PrfItem>::err(enhanced.error());
+  PrfOption opt = clean_download_option(enhanced.value());
+
+  // clear / clean：无条件清空文件（← std::fs::write）
+  if (util::to_lower(url_trimmed) == "clear" ||
+      util::to_lower(url_trimmed) == "clean") {
+    std::string serialized = serde::dump(final_mapping);
+    auto w = plain_write_file(path, serialized);
+    if (!w.is_ok()) return Result<PrfItem>::err(w.error());
+
+    PrfItem item;
+    item.uid = uid_str;
+    item.set_type(PrfType::Local);
+    item.name = name.value_or("本地导入节点");
+    item.desc = "0";
+    item.file = file_name;
+    item.updated = prfitem::now_timestamp();
+    item.option = opt;
+    item.file_data = serialized;
+    return Result<PrfItem>::ok(std::move(item));
+  }
+
+  auto parsed = parse_uri_list(url);
+  if (!parsed) {
+    Error e;
+    e.code = 41;
+    e.message = "无法解析直接输入的节点配置，解析结果为空。请检查输入格式。";
+    return Result<PrfItem>::err(std::move(e));
+  }
+  final_mapping = *parsed;
+
+  // 与已有 L_Direct_Imports.yaml 按 name+server+port 去重合并
+  if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) {
+    std::ifstream f(path, std::ios::binary);
+    if (f) {
+      std::string content((std::istreambuf_iterator<char>(f)),
+                          std::istreambuf_iterator<char>());
+      YAML::Node existing_mapping;
+      try {
+        existing_mapping = YAML::Load(content);
+      } catch (const YAML::Exception&) {
+        existing_mapping = YAML::Node();
+      }
+      if (existing_mapping && existing_mapping.IsMap()) {
+        YAML::Node existing_proxies = existing_mapping["proxies"];
+        if (existing_proxies && existing_proxies.IsSequence()) {
+          YAML::Node new_proxies = final_mapping["proxies"];
+          if (new_proxies && new_proxies.IsSequence()) {
+            for (const auto& new_p : new_proxies) {
+              const std::string new_name = yaml_str_or_empty(new_p, "name");
+              const std::string new_server =
+                  yaml_str_or_empty(new_p, "server");
+              const uint64_t new_port = yaml_port_u64(new_p);
+
+              std::optional<size_t> existing_pos;
+              for (size_t i = 0; i < existing_proxies.size(); ++i) {
+                const YAML::Node& p = existing_proxies[i];
+                const std::string p_name = yaml_str_or_empty(p, "name");
+                const std::string p_server = yaml_str_or_empty(p, "server");
+                const uint64_t p_port = yaml_port_u64(p);
+                if (p_name == new_name && p_server == new_server &&
+                    p_port == new_port) {
+                  existing_pos = i;
+                  break;
+                }
+              }
+              if (existing_pos) {
+                existing_proxies[*existing_pos] = YAML::Node(new_p);
+              } else {
+                existing_proxies.push_back(YAML::Node(new_p));
+              }
+            }
+            final_mapping = existing_mapping;
+          }
+        }
+      }
+    }
+  }
+
+  std::string serialized = serde::dump(final_mapping);
+  uint64_t count = 0;
+  if (final_mapping["proxies"] && final_mapping["proxies"].IsSequence()) {
+    count = final_mapping["proxies"].size();
+  }
+
+  PrfItem item;
+  item.uid = uid_str;
+  item.set_type(PrfType::Local);
+  item.name = name.value_or("本地导入节点");
+  item.desc = std::to_string(count);
+  item.file = file_name;
+  item.updated = prfitem::now_timestamp();
+  item.option = opt;
+  item.file_data = serialized;
+  return Result<PrfItem>::ok(std::move(item));
+}
+
+// ← prfitem.rs::from_url（427-610）
 Result<PrfItem> PrfItem::from_url(const std::string& url,
                                   const std::optional<std::string>& name,
                                   const std::optional<std::string>& desc,
                                   const std::optional<PrfOption>& option) {
-  (void)name;
-  (void)desc;
-  (void)option;
+  // 直连节点输入（非 HTTP(S) URL）→ 委托给 from_url_direct
+  std::string url_lower =
+      util::to_lower(util::trim(url));
+  if (!util::starts_with(url_lower, "http://") &&
+      !util::starts_with(url_lower, "https://")) {
+    return from_url_direct(url, name, option);
+  }
+
+  const bool with_proxy =
+      option && option->with_proxy.value_or(false);
+  const bool self_proxy =
+      option && option->self_proxy.value_or(false);
+  const bool accept_invalid_certs =
+      option && option->danger_accept_invalid_certs.value_or(false);
+  const std::optional<bool> allow_auto_update =
+      option ? option->allow_auto_update : std::nullopt;
+  const std::optional<std::string> user_agent =
+      option ? option->user_agent : std::nullopt;
+  std::optional<uint64_t> update_interval =
+      option ? option->update_interval : std::nullopt;
+  const uint64_t timeout =
+      (option && option->timeout_seconds) ? *option->timeout_seconds : 20;
+
+  auto enhanced = prfitem::ensure_enhance_items(option);
+  if (!enhanced.is_ok()) return Result<PrfItem>::err(enhanced.error());
+  PrfOption opt = enhanced.value();
+  opt.allow_auto_update = allow_auto_update;
+  opt = clean_download_option(std::move(opt));
+
+  // 选择代理类型（← network.rs ProxyType）
+  ProxyType proxy_type = self_proxy ? ProxyType::Localhost
+                         : with_proxy ? ProxyType::System
+                                      : ProxyType::None;
+
+  // 修复脏 URL（query 参数误挂 path）
+  auto fixed = util::fix_dirty_url(url);
+  if (!fixed.is_ok()) return Result<PrfItem>::err(fixed.error());
+  const std::string fixed_url = fixed.value();
+
+  // SSRF 防护：禁止访问内网地址
+  auto parts = clashwin::system::parse_http_url(fixed_url);
+  if (!parts.is_ok()) return Result<PrfItem>::err(parts.error());
+  auto ssrf = clashwin::config::ssrf::validate_url_no_ssrf(parts.value());
+  if (!ssrf.is_ok()) return Result<PrfItem>::err(ssrf.error());
+
+  // 记录危险选项日志
+  if (accept_invalid_certs) {
+    CWLOG_WARN(
+        "⚠️ 订阅使用了危险选项 `danger_accept_invalid_certs=true`，TLS 证书验证"
+        "被跳过！");
+  }
+
+  HttpOptions http_opts;
+  http_opts.proxy_type = proxy_type;
+  http_opts.timeout_seconds = timeout;
+  if (user_agent) http_opts.user_agent = user_agent;
+  http_opts.accept_invalid_certs = accept_invalid_certs;
+  http_opts.localhost_mixed_port = resolve_localhost_mixed_port;
+
+  auto resp = clashwin::system::http_get(fixed_url, http_opts);
+  if (!resp.is_ok()) {
+    Sleep(100);  // ← tokio::time::sleep(Duration::from_millis(100))
+    Error e;
+    e.code = 42;
+    e.message = "failed to fetch remote profile: " + resp.error().message;
+    return Result<PrfItem>::err(std::move(e));
+  }
+  const clashwin::system::HttpResponse& r = resp.value();
+  if (!r.is_success()) {
+    Error e;
+    e.code = 43;
+    e.message = "failed to fetch remote profile with status " +
+                std::to_string(r.status);
+    return Result<PrfItem>::err(std::move(e));
+  }
+
+  // parse the Subscription UserInfo（兼容 x-amz-meta- 等前缀）
+  std::optional<PrfExtra> extra;
+  for (const auto& h : r.headers) {
+    std::string key_lower = util::to_lower(h.name);
+    if (!clashwin::system::is_subscription_userinfo_header(key_lower)) {
+      continue;
+    }
+    PrfExtra ex;
+    ex.upload = parse_str_u64(h.value, "upload").value_or(0);
+    ex.download = parse_str_u64(h.value, "download").value_or(0);
+    ex.total = parse_str_u64(h.value, "total").value_or(0);
+    ex.expire = parse_str_u64(h.value, "expire").value_or(0);
+    extra = ex;
+    break;
+  }
+
+  // parse the Content-Disposition
+  std::optional<std::string> filename;
+  if (const std::string* cd = r.header("Content-Disposition")) {
+    filename =
+        clashwin::system::parse_content_disposition_filename(*cd);
+  } else {
+    // ← 无 Content-Disposition：URL 末段解码（help.rs::get_last_part_and_decode
+    //   恒返回 Some，可能为空串）
+    filename = clashwin::system::get_last_part_and_decode(fixed_url);
+  }
+
+  // profile-update-interval：时 → 分（option 值优先）
+  if (!update_interval) {
+    if (const std::string* v = r.header("profile-update-interval")) {
+      update_interval =
+          clashwin::system::parse_profile_update_interval(*v);
+    }
+  }
+  opt.update_interval = update_interval;
+
+  std::optional<std::string> home;
+  if (const std::string* v = r.header("profile-web-page-url")) {
+    home = *v;
+  }
+
+  const std::string uid = prfitem::gen_uid_prefixed("R");
+  const std::string file = uid + ".yaml";
+  const std::string final_name =
+      name ? *name
+           : (filename ? *filename : std::string("Remote File"));
+
+  // process the charset "UTF-8 with BOM"（反复剥前导 U+FEFF）
+  std::string data = r.body;
+  while (data.size() >= 3 &&
+         static_cast<unsigned char>(data[0]) == 0xEF &&
+         static_cast<unsigned char>(data[1]) == 0xBB &&
+         static_cast<unsigned char>(data[2]) == 0xBF) {
+    data.erase(0, 3);
+  }
+
+  // YAML 大小限制防止 DoS
+  if (data.size() > consts::kSubscriptionMaxBytes) {
+    Error e;
+    e.code = 44;
+    e.message = "subscription content exceeds maximum allowed size (50MB)";
+    return Result<PrfItem>::err(std::move(e));
+  }
+
+  auto sub = parse_subscription_content(data);
+  if (!sub.is_ok()) return Result<PrfItem>::err(sub.error());
+
+  // groups is skipped to prevent creating dead g*.yaml files
+  PrfItem item;
+  item.uid = uid;
+  item.set_type(PrfType::Remote);
+  item.name = final_name;
+  item.desc = desc;
+  item.file = file;
+  item.url = fixed_url;
+  item.extra = extra;
+  item.updated = prfitem::now_timestamp();
+  item.option = opt;
+  item.home = home;
+  item.file_data = sub.value().second;
+  return Result<PrfItem>::ok(std::move(item));
+}
+
+// ← prfitem.rs::parse_subscription_content（752-785）
+Result<std::pair<YAML::Node, std::string>> parse_subscription_content(
+    const std::string& data) {
+  namespace enhance = clashwin::enhance;
+  auto contains_proxies_key = [](const YAML::Node& y) {
+    return y && y.IsMap() &&
+           (static_cast<bool>(y["proxies"]) ||
+            static_cast<bool>(y["proxy-providers"]));
+  };
+
+  // 整体先做 Base64 解码（UTF-8 合法才可用）
+  std::optional<std::string> decoded_str_opt;
+  if (auto decoded = clashwin::util::decode_base64_robust(data)) {
+    std::string s(reinterpret_cast<const char*>(decoded->data()),
+                  decoded->size());
+    if (clashwin::util::is_valid_utf8(s)) decoded_str_opt = std::move(s);
+  }
+
+  // ① data 本身是含 proxies/proxy-providers 的 YAML mapping
+  {
+    YAML::Node y;
+    try {
+      y = YAML::Load(data);
+    } catch (const YAML::Exception&) {
+      y = YAML::Node();
+    }
+    if (contains_proxies_key(y)) {
+      return Result<std::pair<YAML::Node, std::string>>::ok({y, data});
+    }
+  }
+
+  // ② Base64 解码后为该形态 YAML
+  if (decoded_str_opt) {
+    YAML::Node y;
+    try {
+      y = YAML::Load(*decoded_str_opt);
+    } catch (const YAML::Exception&) {
+      y = YAML::Node();
+    }
+    if (contains_proxies_key(y)) {
+      return Result<std::pair<YAML::Node, std::string>>::ok(
+          {y, *decoded_str_opt});
+    }
+  }
+
+  // ③ URI-list
+  const std::string& parse_content =
+      decoded_str_opt ? *decoded_str_opt : data;
+  if (auto parsed = enhance::parse_uri_list(parse_content)) {
+    std::string serialized = serde::dump(*parsed);
+    return Result<std::pair<YAML::Node, std::string>>::ok(
+        {*parsed, std::move(serialized)});
+  }
+
   Error e;
-  e.code = 20;
-  e.message = "from_url requires network layer (T06/T15), url: " + url;
-  return Result<PrfItem>::err(std::move(e));
+  e.code = 45;
+  e.message =
+      "订阅链接内容格式错误，既不是合法的 YAML 配置文件，也无法解析为节点链接列表";
+  return Result<std::pair<YAML::Node, std::string>>::err(std::move(e));
 }
 
 // ---------- read_file / save_file_data（← prfitem.rs:682-716） ----------
