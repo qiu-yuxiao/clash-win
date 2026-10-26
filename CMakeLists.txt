@@ -184,6 +184,7 @@ add_library(clashwin_ui STATIC
   src/ui/scenes/node_list.cpp
   src/ui/scenes/profile_import_card.cpp
   src/ui/scenes/traffic_pane.cpp
+  src/ui/scenes/settings_drawer.cpp
   src/ui/breakpoints.cpp
   src/ui/title_bar.cpp
   src/ui/main_scene.cpp
@@ -211,7 +212,7 @@ target_link_libraries(clashwin PRIVATE
   clashwin_cmd                # T09 事件总线 + 命令门面
   clashwin_i18n               # T10 i18n
   clashwin_ui                 # T10 UI 渲染核心
-  d2d1 dwrite windowscodecs user32 gdi32 ws2_32  # D2D/DWrite/WIC / 窗口 / Winsock
+  d2d1 dwrite windowscodecs user32 gdi32 ws2_32 shell32  # D2D/DWrite/WIC / 窗口 / Winsock / Shell
 )
 
 # 本项目源码用 /W4（第三方保持全局 /W3）
@@ -282,7 +283,8 @@ add_executable(clashwin_test
   tests/test_scene_traffic.cpp
   tests/test_t15_profile.cpp
   tests/test_t16_delay.cpp
+  tests/test_t17_drawer.cpp
 )
-target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n)
+target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 add_clashwin_copy_locales(clashwin_test)

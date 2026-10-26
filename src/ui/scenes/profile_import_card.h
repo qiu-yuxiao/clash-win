@@ -5,6 +5,7 @@
 //   置顶）经回调接口暴露，菜单位于 Profile 卡（React ContextMenu 语义）。
 // 数据对接：import_profile 命令（ValidationOutcome 四分类通知由命令链路发）。
 #include <functional>
+#include <optional>
 #include <string>
 
 #include "../button.h"
@@ -42,6 +43,8 @@ class ProfileImportCard : public Widget {
 
   TextField* url_field() const { return url_field_; }
   TextField* name_field() const { return name_field_; }
+  // 标题色覆盖（缺省跟随主题 primary_text；抽屉场景设橙——T17）
+  void set_title_color(const Color4f& c) { title_color_ = c; }
 
  private:
   void do_import();
@@ -52,6 +55,7 @@ class ProfileImportCard : public Widget {
   Label* title_ = nullptr;
   Label* message_ = nullptr;
   bool msg_error_ = false;
+  std::optional<Color4f> title_color_;
 };
 
 }  // namespace clashwin::ui::scene

@@ -29,6 +29,7 @@
 #include "scenes/connection_data.h"
 #include "scenes/connections_view.h"
 #include "scenes/node_data.h"
+#include "scenes/settings_drawer.h"
 #include "scenes/node_list.h"
 #include "scenes/quick_bar.h"
 #include "scenes/traffic_pane.h"
@@ -213,6 +214,8 @@ class MainWindow {
   scene::TrafficPane* traffic_pane_ = nullptr;
   std::unique_ptr<scene::ConnectionData> conn_data_;
   scene::ConnectionsView* conn_view_ = nullptr;
+  scene::SettingsDrawer* settings_drawer_ = nullptr;
+  bool drawer_mounted_ = false;
   bool conn_view_mounted_ = false;
   std::unique_ptr<mihomo::WsManager> ws_;  // T14：traffic/connections WS
   uint64_t ws_sub_traffic_ = 0, ws_sub_conn_ = 0;

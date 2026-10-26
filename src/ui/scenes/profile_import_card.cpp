@@ -114,7 +114,8 @@ void ProfileImportCard::on_paint(IRenderTarget& rt) {
   const auto& svc = ThemeService::instance();
   Brush bg{svc.vars().theme_panel_bg};
   rt.round_rect(bounds(), 6, {svc.vars().theme_border, 1}, &bg);
-  title_->style.color = svc.palette().primary_text;
+  title_->style.color =
+      title_color_.value_or(svc.palette().primary_text);  // 抽屉可覆盖为橙
   // message 色由 set_message 维护
 }
 

@@ -76,6 +76,10 @@ class TitleBar : public Row {
   void set_large_mode(bool large);  // 切换 □/restore 字形
   void set_version(const std::wstring& v);
 
+  // 齿轮键（T17：设置抽屉入口；宿主 set on_settings）
+  std::function<void()> on_settings;
+  TitleBarButton* btn_settings() const { return btn_settings_; }
+
   void on_paint(IRenderTarget& rt) override;  // 背景 + divider 底边
 
   // 按钮（测试/宿主触发交互用）
@@ -85,6 +89,7 @@ class TitleBar : public Row {
 
  private:
   Label* title_label_ = nullptr;
+  TitleBarButton* btn_settings_ = nullptr;
   TitleBarButton* btn_min_ = nullptr;
   TitleBarButton* btn_large_ = nullptr;
   TitleBarButton* btn_close_ = nullptr;

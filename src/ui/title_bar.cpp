@@ -32,12 +32,16 @@ TitleBar::TitleBar(MainWindow* owner) {
   spring->flex_weight = 1;
   add_child(std::move(spring));
 
-  // 三键 28×28 gap 2（← WindowControls；glyph ← icon_w 映射）
+  // 四键 28×28 gap 2（← WindowControls；glyph ← icon_w 映射）
   auto mkbtn = [&](wchar_t g, bool close_red) {
     auto b = std::make_unique<TitleBarButton>(g);
     b->close_red_ = close_red;
     return b;
   };
+  auto bset = mkbtn(L'\uE713', false);   // Setting（T17 抽屉入口）
+  bset->on_click = [this] { if (on_settings) on_settings(); };
+  btn_settings_ = bset.get();
+  add_child(std::move(bset));
   auto bmin = mkbtn(L'\uE921', false);   // ChromeMinimize
   bmin->on_click = [owner] { if (owner) owner->minimize(); };
   btn_min_ = bmin.get();

@@ -3,6 +3,7 @@
 #include "main_window.h"
 
 #include <windowsx.h>
+#include <shellapi.h>  // ShellExecuteW（T17 打开日志目录/帮助）
 
 #include <cmath>
 #include <filesystem>
@@ -105,6 +106,17 @@ bool MainWindow::create(bool show_immediately) {
     scene_->set_narrow(bp_.is_narrow());
     // T14：Mini → 流量条占满上栏空间（census 极小窗布局）
     if (traffic_pane_) traffic_pane_->set_mini(bp_.state() == WinState::Mini);
+    // T17：皮肤条高≤830 隐藏（census 口径；窗口客户区逻辑高）
+    if (settings_drawer_ && hwnd_) {
+      RECT rc{};
+      GetClientRect(hwnd_, &rc);
+      UINT dpi = GetDpiForWindow(hwnd_);
+      double logical_h =
+          dpi ? (rc.bottom - rc.top) * 96.0 / static_cast<double>(dpi) : 0;
+      bool show_skin = logical_h > 830.0;
+      for (auto* b : settings_drawer_->theme_card()->skin_buttons_)
+        b->set_visible(show_skin);
+    }
     // T14：连接面板仅 Large 挂载（census：宽≤285 不挂载）
     if (cur == WinState::Large && !conn_view_mounted_ && scene_->list_slot()) {
       auto cv = std::make_unique<scene::ConnectionsView>();
@@ -187,7 +199,7 @@ bool MainWindow::init_render() {
 }
 
 void MainWindow::build_widget_tree() {
-  // root = Column{ titlebar(30), scene(撑满) }
+  // root = Stack{ titlebar(30), scene(撑满), drawer(全屏覆盖) }
   auto tb = std::make_unique<TitleBar>(this);
   title_bar_ = tb.get();
   title_bar_->set_version(L"3.0.10");  // ← tauri.conf.json version 3.0.10
@@ -196,6 +208,11 @@ void MainWindow::build_widget_tree() {
   scene_ = scene.get();
   scene_->flex_weight = 1;
   root_.add_child(std::move(scene));
+  // T17：设置抽屉（全屏覆盖层；Stack 铺满语义，最后挂=绘制/命中最上层）
+  auto drawer = std::make_unique<scene::SettingsDrawer>();
+  settings_drawer_ = drawer.get();
+  drawer_mounted_ = true;
+  root_.add_child(std::move(drawer));
 }
 
 void MainWindow::build_scene() {
@@ -256,6 +273,53 @@ void MainWindow::build_scene() {
   };
 
   build_ws_pipes();
+
+  // ---------- T17：设置抽屉命令链接线 ----------
+  if (settings_drawer_) {
+    // patch_verge 键 → patch_verge_config；clash 键 → patch_clash_config
+    settings_drawer_->on_patch_verge =
+        [this](const std::string& k, const nlohmann::json& v) {
+          auto& svc = cmd::CommandService::instance();
+          if (k == "clash_allow_lan") {
+            svc.invoke("patch_clash_config",
+                       nlohmann::json::object({{"allow-lan", v}}));
+            return;
+          }
+          if (k == "clash_ipv6") {
+            svc.invoke("patch_clash_config", nlohmann::json::object({{"ipv6", v}}));
+            return;
+          }
+          svc.invoke("patch_verge_config", nlohmann::json::object({{k, v}}));
+        };
+    settings_drawer_->on_patch_clash_mode = [](const std::string& mode) {
+      cmd::CommandService::instance().invoke(
+          "patch_clash_mode", nlohmann::json::object({{"mode", mode}}));
+    };
+    settings_drawer_->on_import_profile =
+        [](const std::string& url, const std::string& name) {
+          nlohmann::json args = nlohmann::json::object({{"url", url}});
+          if (!name.empty()) args["name"] = name;
+          return cmd::CommandService::instance()
+              .invoke("import_profile", args)
+              .is_ok();
+        };
+    settings_drawer_->on_open_logs = [this] {
+      // ← 原版 open logs：打开日志目录（不存在则静默）
+      std::wstring dir = app_dir_ + L"\\logs";
+      if (fs::exists(dir))
+        ShellExecuteW(hwnd_, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    };
+    settings_drawer_->on_open_help = [] {
+      // ← help-menu-button.tsx:131（帮助指南 Wiki）
+      ShellExecuteW(nullptr, L"open", L"https://github.com/qiu-yuxiao/clash-mini/wiki",
+                    nullptr, nullptr, SW_SHOWNORMAL);
+    };
+    // 齿轮 → 打开抽屉
+    title_bar_->on_settings = [this] { settings_drawer_->set_open(true); };
+    settings_drawer_->wire_callbacks();
+    // 恢复上次皮肤/因子（clashwin-skin.json）
+    settings_drawer_->restore_prefs();
+  }
 }
 
 void MainWindow::build_ws_pipes() {
