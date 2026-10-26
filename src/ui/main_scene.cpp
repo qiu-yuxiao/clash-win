@@ -76,18 +76,17 @@ void MainScene::mount_upper() {
 
 void MainScene::on_arrange(const RectF& area) {
   // content 布局：上栏撑满剩余（flex 1），下栏固定 135/100（← TRAFFIC_PANE_*）
+  // 【坐标约定】子 layout_tree 传本 widget 局部坐标（x 从 0 起）
   set_bounds(area);
-  RectF content{area.x, area.y, area.w, area.h};
   int traffic_h = narrow_ ? kTrafficPaneMinimal : kTrafficPaneWide;
+  float w = area.w;
   for (size_t i = 0; i < child_count(); ++i) {
     Widget* c = child(i);
     if (c == traffic_) {
-      c->layout_tree({content.x, content.bottom() - traffic_h, content.w,
+      c->layout_tree({0, area.h - static_cast<float>(traffic_h), w,
                       static_cast<float>(traffic_h)});
     } else {
-      // 上栏（或卸载态的其他子）：撑满流量条上方
-      c->layout_tree({content.x, content.y, content.w,
-                      content.h - static_cast<float>(traffic_h)});
+      c->layout_tree({0, 0, w, area.h - static_cast<float>(traffic_h)});
     }
   }
 }

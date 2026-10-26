@@ -20,7 +20,11 @@ SizeF CanvasGraph::on_measure(float max_w, float max_h) {
 
 void CanvasGraph::draw_series(IRenderTarget& rt, const std::vector<float>& data,
                               const Color4f& c) {
-  if (data.size() < 2 || bounds().w <= 0 || bounds().h <= 0) return;
+  if (data.size() < 2 || bounds().w <= 0 || bounds().h <= 0) {
+    std::printf("dbg ds skip: n=%zu w=%f h=%f\n", data.size(), bounds().w,
+                bounds().h);
+    return;
+  }
   const size_t n = data.size();
   const float w = bounds().w, h = bounds().h;
   const float step_x = w / static_cast<float>(kMaxPoint - 1);

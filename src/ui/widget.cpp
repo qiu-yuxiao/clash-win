@@ -152,10 +152,12 @@ void Widget::paint(IRenderTarget& rt, const RectF& clip) {
   RectF g = global_bounds();
   RectF visible = g.intersect(clip);
   if (visible.is_empty()) return;
-  rt.push_clip(visible);
   // on_paint 约定局部坐标 {0,0,w,h}：把绘制原点切到本 widget 全局原点
   PointF prev_origin = rt.origin();
   rt.set_origin({g.x, g.y});
+  // clip 随 origin 局部化（visible 是全局矩形；push 在新 transform 下
+  // 才不会错位——嵌套时旧实现会把内容裁光）
+  rt.push_clip({visible.x - g.x, visible.y - g.y, visible.w, visible.h});
   on_paint(rt);
   // 绘制顺序：z_order 升序稳定（同序按加入顺序 → 后加者在上）
   std::vector<Widget*> ordered;
@@ -165,7 +167,9 @@ void Widget::paint(IRenderTarget& rt, const RectF& clip) {
                    [](const Widget* a, const Widget* b) {
                      return a->z_order_ < b->z_order_;
                    });
-  for (Widget* c : ordered) c->paint(rt, visible);
+  for (Widget* c : ordered) {
+    c->paint(rt, visible);
+  }
   rt.set_origin(prev_origin);
   rt.pop_clip();
 }

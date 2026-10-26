@@ -12,6 +12,8 @@
 #include "events/event_names.h"
 #include "theme/theme.h"
 #include "ui/ui_postbox.h"
+#include "mihomo/ws_manager.h"
+#include "util/dirs.h"
 #include "util/log.h"
 #include "util/utf.h"
 #include <format>
@@ -101,6 +103,22 @@ bool MainWindow::create(bool show_immediately) {
     title_bar_->set_large_mode(bp_.is_large());
     scene_->apply_state(prev, cur);
     scene_->set_narrow(bp_.is_narrow());
+    // T14：Mini → 流量条占满上栏空间（census 极小窗布局）
+    if (traffic_pane_) traffic_pane_->set_mini(bp_.state() == WinState::Mini);
+    // T14：连接面板仅 Large 挂载（census：宽≤285 不挂载）
+    if (cur == WinState::Large && !conn_view_mounted_ && scene_->list_slot()) {
+      auto cv = std::make_unique<scene::ConnectionsView>();
+      conn_view_ = cv.get();
+      conn_view_->bind(conn_data_.get());
+      conn_view_->close_connection = [this](const std::string& id) {
+        auto r = cmd::mihomo();
+        return r.is_ok() &&
+               static_cast<bool>(r.value()->close_connection(id).is_ok());
+      };
+      conn_view_->on_clear_closed = [this] { conn_data_->clear_closed(); };
+      scene_->attach_node_list(std::move(cv));
+      conn_view_mounted_ = true;
+    }
   });
   stealth_.subscribe([this](bool hidden) {
     title_bar_->set_visible(!hidden);  // 隐藏时整栏不挂载（内容顶满）
@@ -216,6 +234,45 @@ void MainWindow::build_scene() {
         node_data_->load();
         quick_bar_->set_node_text(utf::utf8_to_utf16(
             node_data_->now().empty() ? "-" : node_data_->now()));
+      });
+
+  // T14：流量面板挂 traffic_slot；连接面板 Large 模式挂载（census：宽≤285
+  // 时不挂载）
+  auto tp = std::make_unique<scene::TrafficPane>();
+  traffic_pane_ = tp.get();
+  traffic_pane_->set_now_ms([] {
+    return static_cast<int64_t>(GetTickCount64());
+  });
+  if (auto* slot = scene_->traffic_slot()) {
+    slot->add_child(std::move(tp));  // 所有权移交场景树
+  } else {
+    traffic_pane_holder_ = std::move(tp);  // 无 slot 兜底持有
+    traffic_pane_->set_visible(false);
+  }
+
+  conn_data_ = std::make_unique<scene::ConnectionData>(300);
+  conn_data_->on_resync = [] {
+    CWLOG_WARN("conn resync：等待下一个 snapshot 帧（WS 自动重连）");
+  };
+
+  build_ws_pipes();
+}
+
+void MainWindow::build_ws_pipes() {
+  // T14：WS 订阅 → UiPostbox 转投 UI 线程（复用 T13 范式）
+  ws_ = std::make_unique<mihomo::WsManager>();
+  ws_->configure(clashwin::util::dirs::ipc_path(),
+                 clashwin::config::consts::kDefaultSecret);
+  ws_sub_traffic_ = ws_->subscribe_traffic([this](const std::string& payload) {
+    UiPostbox::instance().post([this, payload] {
+      if (traffic_pane_) traffic_pane_->on_traffic_payload(payload);
+    });
+  });
+  ws_sub_conn_ = ws_->subscribe_connections(
+      [this](const std::string& payload) {
+        UiPostbox::instance().post([this, payload] {
+          if (conn_data_) conn_data_->consume(payload);
+        });
       });
 }
 
@@ -478,6 +535,11 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
         stealth_.tick(now_ms());  // 到点隐藏（自续期 = 下一秒再 tick）
       }
       return 0;
+
+    case WM_ACTIVATE:
+      // T14 卡⑤：失焦停采开关
+      if (traffic_pane_) traffic_pane_->set_enabled(LOWORD(wp) != WA_INACTIVE);
+      break;
 
     case WM_MOUSEMOVE:
     case WM_KEYDOWN:

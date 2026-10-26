@@ -103,8 +103,10 @@ SizeF Column::on_measure(float max_w, float max_h) {
 }
 
 void Column::on_arrange(const RectF& area) {
-  RectF content{area.x + padding().l, area.y + padding().t,
-                area.w - padding().h(), area.h - padding().v()};
+  // 【坐标约定】area 为父局部坐标；子 layout_tree 传本 widget 局部坐标
+  //（global_bounds 由父链累加求全局，禁止在此叠加 area.x/y）
+  RectF content{padding().l, padding().t, area.w - padding().h(),
+                area.h - padding().v()};
   std::vector<Widget*> kids;
   for (size_t i = 0; i < child_count(); ++i)
     if (child(i)->visible()) kids.push_back(child(i));
@@ -144,8 +146,9 @@ SizeF Row::on_measure(float max_w, float max_h) {
 }
 
 void Row::on_arrange(const RectF& area) {
-  RectF content{area.x + padding().l, area.y + padding().t,
-                area.w - padding().h(), area.h - padding().v()};
+  // 【坐标约定】同 Column：子布局一律本 widget 局部坐标
+  RectF content{padding().l, padding().t, area.w - padding().h(),
+                area.h - padding().v()};
   std::vector<Widget*> kids;
   for (size_t i = 0; i < child_count(); ++i)
     if (child(i)->visible()) kids.push_back(child(i));
@@ -180,8 +183,9 @@ SizeF Stack::on_measure(float max_w, float max_h) {
 
 void Stack::on_arrange(const RectF& area) {
   // AbsoluteOverlay：全部铺满内容区（覆盖层/弹窗宿主语义）
-  RectF content{area.x + padding().l, area.y + padding().t,
-                area.w - padding().h(), area.h - padding().v()};
+  // 【坐标约定】子 layout_tree 传本 widget 局部坐标
+  RectF content{padding().l, padding().t, area.w - padding().h(),
+                area.h - padding().v()};
   for (size_t i = 0; i < child_count(); ++i)
     if (child(i)->visible()) child(i)->layout_tree(content);
 }

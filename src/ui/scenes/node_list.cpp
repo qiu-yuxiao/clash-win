@@ -268,11 +268,11 @@ void NodeList::sync_list() {
 
 void NodeList::on_arrange(const RectF& area) {
   set_bounds(area);
-  // 上过滤条 34px 固定，列表撑满
+  // 【坐标约定】子布局局部坐标
   float list_h = area.h - kFilterBarH;
   if (list_h < 0) list_h = 0;
-  child(0)->layout_tree({area.x, area.y, area.w, kFilterBarH});
-  list_->layout_tree({area.x, area.y + kFilterBarH, area.w, list_h});
+  child(0)->layout_tree({0, 0, area.w, kFilterBarH});
+  list_->layout_tree({0, kFilterBarH, area.w, list_h});
 }
 
 void NodeList::on_paint(IRenderTarget& rt) {

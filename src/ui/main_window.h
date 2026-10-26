@@ -26,9 +26,13 @@
 #include "widget.h"
 #include "container.h"
 #include "main_scene.h"
+#include "scenes/connection_data.h"
+#include "scenes/connections_view.h"
 #include "scenes/node_data.h"
 #include "scenes/node_list.h"
 #include "scenes/quick_bar.h"
+#include "scenes/traffic_pane.h"
+#include "mihomo/ws_manager.h"
 
 namespace clashwin::ui::win {
 
@@ -179,7 +183,8 @@ class MainWindow {
   bool create_hwnd();
   bool init_render();
   void build_widget_tree();
-  void build_scene();     // T13：场景装配 + 数据事件订阅
+  void build_scene();     // T13/T14：场景装配 + 数据事件订阅
+  void build_ws_pipes();  // T14：WS 订阅 → UiPostbox 转投
   void apply_geometry_restore();  // window_state.json 恢复（含脱屏居中）
 
   void on_client_resized(int cw, int ch);          // WM_SIZE
@@ -203,6 +208,14 @@ class MainWindow {
   std::unique_ptr<scene::NodeData> node_data_;
   scene::QuickBar* quick_bar_ = nullptr;
   scene::NodeList* node_list_ = nullptr;
+  // T14 场景
+  std::unique_ptr<scene::TrafficPane> traffic_pane_holder_;
+  scene::TrafficPane* traffic_pane_ = nullptr;
+  std::unique_ptr<scene::ConnectionData> conn_data_;
+  scene::ConnectionsView* conn_view_ = nullptr;
+  bool conn_view_mounted_ = false;
+  std::unique_ptr<mihomo::WsManager> ws_;  // T14：traffic/connections WS
+  uint64_t ws_sub_traffic_ = 0, ws_sub_conn_ = 0;
 
   Breakpoints bp_;
   StealthController stealth_;
