@@ -2,6 +2,8 @@
 #include "cmd/cmd_install.h"
 
 #include "cmd/cmd_support.h"
+#include "core/delay_manager.h"
+#include "util/node.h"
 #include "cmd/command_service.h"
 #include "config/config.h"
 #include "core/validate.h"
@@ -246,6 +248,35 @@ void install_cmd_clash(CommandService& svc) {
            return CmdResult::ok(Json(kDelayErrorValue));
          }
          return CmdResult::ok(Json(r.value()));
+       },
+       consts::kTimeoutHeavy});
+
+  // ---- test_group_delay（T16：全组测速——DelayManager testing 中间态 →
+  //      测量组群测 → backend-delay-results 批量注入；显式子集不缓存复用）----
+  svc.register_command(
+      "test_group_delay",
+      {[](const Json& args) -> CmdResult {
+         ensure_t16_hooks();
+         std::vector<std::string> nodes;
+         if (const Json* nn = find_arg(args, {"node_names"});
+             nn && nn->is_array()) {
+           for (const auto& n : *nn) nodes.push_back(n.get<std::string>());
+         }
+         if (nodes.empty()) {
+           // 未传子集 → PROXY 全量（剔除 dummy）
+           auto client = mihomo();
+           if (client.is_err()) return CmdResult::err(client.error());
+           auto g = client.value()->get_group_by_name("PROXY");
+           if (g.is_err() || !g.value().all.has_value())
+             return CmdResult::err({errs::kCoreDown, "PROXY group missing"});
+           for (const auto& n : *g.value().all)
+             if (!clashwin::util::is_dummy_node(n)) nodes.push_back(n);
+         }
+         auto out = core::DelayManager::instance().test_group(
+             "PROXY", nodes, /*allow_cache_reuse=*/false);
+         Json arr = Json::array();
+         for (auto& [name, delay] : out.display) arr.push_back({name, delay});
+         return CmdResult::ok(arr);
        },
        consts::kTimeoutHeavy});
 

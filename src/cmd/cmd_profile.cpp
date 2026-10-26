@@ -2,12 +2,15 @@
 #include "cmd/cmd_support.h"
 
 #include "core/switching_lock.h"
+#include "core/auto_select.h"
 #include "core/timer.h"
 #include "cmd/command_service.h"
 #include "cmd/cmd_install.h"
 
 #include "config/config.h"
 #include "config/profiles.h"
+#include "config/proxy_head_state.h"
+#include "util/node.h"
 #include "config/prfitem.h"
 #include "core/validate.h"
 #include "enhance/enhance.h"
@@ -29,6 +32,7 @@ struct SwitchGuard {
   explicit SwitchGuard(std::atomic<bool>& l) : lock(l) { lock.store(true); }
   ~SwitchGuard() { lock.store(false); }
 };
+
 
 // 生成/校验/应用（30s 超时口径 ← cmd/profile.rs perform_config_update）
 core::validate::ValidationOutcome update_config_forced() {
@@ -60,6 +64,102 @@ void notify_invalid(const core::validate::ValidationOutcome& o) {
   events::EventBus::notice_message("config_validate::error", o.message);
 }
 }  // namespace
+
+// T16：DelayManager/AutoSelect 生产 hooks（首次调用绑定；mock 测试自注入；
+// cmd_clash test_group_delay 复用。声明在 cmd_install.h）
+void ensure_t16_hooks() {
+  static bool done = false;
+  if (done) return;
+  done = true;
+  auto get_client = []() -> mihomo::MihomoClient* {
+    auto r = mihomo();
+    return r.is_ok() ? r.value() : nullptr;
+  };
+
+  core::DelayProbeHooks dh;
+  dh.group_probe = [get_client](const std::string& metrics_group)
+      -> std::optional<std::map<std::string, uint32_t>> {
+    auto* c = get_client();
+    if (!c) return std::nullopt;
+    std::string url = "https://cp.cloudflare.com/generate_204";
+    try {
+      const auto& verge = *config::Config::instance().verge().latest_arc();
+      url = verge.default_latency_test.value_or(url);
+    } catch (...) {}
+    auto r = c->delay_group(metrics_group, url, core::kNodeDelayMaxMs, 5000);
+    if (!r.is_ok()) return std::nullopt;
+    return r.value();
+  };
+  dh.fresh_history = [get_client]() -> std::map<std::string, uint32_t> {
+    std::map<std::string, uint32_t> out;
+    auto* c = get_client();
+    if (!c) return out;
+    auto px = c->get_proxies();
+    if (!px.is_ok()) return out;
+    for (const auto& [name, p] : px.value().proxies) {
+      if (!p.alive || p.history.empty()) continue;
+      out[name] = p.history.back().delay;
+    }
+    return out;
+  };
+  dh.emit_results = [](const std::string& group,
+                       const std::vector<std::pair<std::string, uint32_t>>& r) {
+    events::EventBus::backend_delay_results(group, r);
+  };
+  core::DelayManager::instance().set_hooks(std::move(dh));
+
+  core::AutoSelectHooks ah;
+  ah.current_uid = []() -> std::optional<std::string> {
+    auto latest = config::Config::instance().profiles().latest_arc();
+    if (!latest) return std::nullopt;
+    return latest->current;
+  };
+  ah.filter_text = [] {
+    auto st = config::proxy_head_state::load();
+    return st.value("filter_text", std::string());
+  };
+  ah.is_dummy = [](const std::string& name) {
+    return clashwin::util::is_dummy_node(name);
+  };
+  ah.select_node = [get_client](const std::string& group,
+                                const std::string& node) {
+    auto* c = get_client();
+    return c && c->select_node_for_group(group, node).is_ok();
+  };
+  ah.write_selected = [](const std::string& uid, const std::string& node) {
+    auto& profiles = config::Config::instance().profiles();
+    bool ok = false;
+    profiles.edit_draft([&](config::IProfiles& d) {
+      for (auto& it : d.items.value_or(std::vector<config::PrfItem>{})) {
+        if (it.uid && *it.uid == uid) {
+          // 单组架构：selected 只含 PROXY 一项（← monitor.rs:1080 注释）
+          it.selected = std::vector<config::PrfSelected>{
+              config::PrfSelected{"PROXY", node}};
+          ok = true;
+          break;
+        }
+      }
+    });
+    if (ok) (void)profiles.data_arc()->save_file();
+    return ok;
+  };
+  ah.read_selected = [](const std::string& uid) -> std::optional<std::string> {
+    auto latest = config::Config::instance().profiles().latest_arc();
+    if (!latest) return std::nullopt;
+    const config::PrfItem* it = latest->get_item(uid);
+    if (!it || !it->selected || it->selected->empty()) return std::nullopt;
+    for (const auto& sel : *it->selected)
+      if (sel.name && *sel.name == "PROXY") return sel.now;
+    return std::nullopt;
+  };
+  ah.failed_servers = [] {
+    return std::vector<std::string>{};
+  };  // T19 健康检测接入
+  ah.node_server_map = [] {
+    return std::map<std::string, std::string>{};
+  };
+  core::AutoSelect::instance().set_hooks(std::move(ah));
+}
 
 void install_cmd_profile(CommandService& svc) {
   // ---- get_profiles（← profile.rs:43-49）----
@@ -369,6 +469,41 @@ void install_cmd_profile(CommandService& svc) {
            if (profiles.latest_arc()->current) {
              events::EventBus::notify_profile_changed(*profiles.latest_arc()->current);
            }
+           // T16：激活校准防线（← use-profiles activateSelected：持久
+           // selected 越界过滤词子集 → 不写回内核、回写内核实际节点 now）
+           if (auto client = mihomo(); client.is_ok()) {
+             auto g = client.value()->get_group_by_name("PROXY");
+             if (g.is_ok() && g.value().now.has_value() &&
+                 profiles.latest_arc()->current) {
+               auto st = config::proxy_head_state::load();
+               core::AutoSelect::calibrate_selected(
+                   *profiles.latest_arc()->current,
+                   st.value("filter_text", std::string()),
+                   *g.value().now,
+                   [](const std::string& uid) -> std::optional<std::string> {
+                     auto l = config::Config::instance().profiles().latest_arc();
+                     if (!l) return std::nullopt;
+                     const config::PrfItem* it = l->get_item(uid);
+                     if (!it || !it->selected) return std::nullopt;
+                     for (const auto& sel : *it->selected)
+                       if (sel.name && *sel.name == "PROXY") return sel.now;
+                     return std::nullopt;
+                   },
+                   [](const std::string& uid, const std::string& node) {
+                     auto& profiles = config::Config::instance().profiles();
+                     bool ok = false;
+                     profiles.edit_draft([&](config::IProfiles& d) {
+                       if (config::PrfItem* it2 = d.get_item_mut(uid)) {
+                         it2->selected = std::vector<config::PrfSelected>{
+                             config::PrfSelected{"PROXY", node}};
+                         ok = true;
+                       }
+                     });
+                     if (ok) (void)profiles.data_arc()->save_file();
+                     return ok;
+                   });
+             }
+           }
            return CmdResult::ok(validation_outcome_to_json(outcome));
          }
          if (outcome.status == core::validate::ValidationStatus::Busy) {
@@ -386,43 +521,32 @@ void install_cmd_profile(CommandService& svc) {
        },
        consts::kTimeoutConfig});
 
-  // ---- trigger_auto_select（← cmd/proxy.rs:13-25；后端群发测速+择优。
-  //      T09 简版：delay_group 全组测速→择优→可选切换；T22 接 monitor 状态机）----
+  // ---- trigger_auto_select（← cmd/proxy.rs:13-25 + monitor.rs:745-1090；
+  //      T16 转正：AutoSelect 全流程——testing 中间态/择优/避让/双重校验/
+  //      回写 selected 子集校验/AUTO_SELECT_BUSY）----
+  ensure_t16_hooks();
   svc.register_command(
       "trigger_auto_select",
       {[](const Json& args) -> CmdResult {
-         auto client = mihomo();
-         if (client.is_err()) return CmdResult::err(client.error());
+         const Json* uid = find_arg(args, {"profile_uid"});
+         if (!uid || !uid->is_string())
+           return CmdResult::err({errs::kBadArgs, "profile_uid required"});
          bool select = arg_or(args, {"select"}, Json(false)) == true;
-         std::string url;
-         try {
-           const auto& verge = *config::Config::instance().verge().latest_arc();
-           url = verge.default_latency_test.value_or("https://cp.cloudflare.com/generate_204");
-         } catch (...) {
-           url = "https://cp.cloudflare.com/generate_204";
+         int sort_type = 1;
+         if (const Json* st = find_arg(args, {"sort_type"}); st && st->is_number())
+           sort_type = st->get<int>();
+         std::optional<std::vector<std::string>> nodes;
+         if (const Json* nn = find_arg(args, {"node_names"});
+             nn && nn->is_array() && !nn->empty()) {
+           nodes = std::vector<std::string>();
+           for (const auto& n : *nn) nodes->push_back(n.get<std::string>());
          }
-         auto group = client.value()->get_group_by_name("PROXY");
-         if (group.is_err()) return CmdResult::err(group.error());
-         if (!group.value().all.has_value()) {
-           return CmdResult::err({errs::kCoreDown, "PROXY group missing"});
-         }
-         auto delays = client.value()->delay_group("PROXY", url, 2000, 5000);
-         std::vector<std::pair<std::string, uint32_t>> results;
-         std::pair<std::string, uint32_t> best{"", UINT32_MAX};
-         if (delays.is_ok()) {
-           for (const auto& [name, delay] : delays.value()) {
-             // 判死口径（附录常量：<30ms 或 ≥2000ms）不参与择优
-             bool alive = delay >= 30 && delay < 2000;
-             results.push_back({name, delay});
-             if (alive && delay < best.second) best = {name, delay};
-           }
-         }
-         if (select && !best.first.empty()) {
-           client.value()->select_node_for_group("PROXY", best.first);
-         }
-         events::EventBus::backend_delay_results("PROXY", results);
+         auto outcome = core::AutoSelect::instance().trigger(
+             uid->get<std::string>(), nodes, sort_type, select);
+         if (outcome.busy)
+           return CmdResult::err({errs::kBadArgs, "AUTO_SELECT_BUSY"});
          Json arr = Json::array();
-         for (auto& [name, delay] : results) arr.push_back({name, delay});
+         for (auto& [name, delay] : outcome.display) arr.push_back({name, delay});
          return CmdResult::ok(arr);
        },
        consts::kTimeoutHeavy});

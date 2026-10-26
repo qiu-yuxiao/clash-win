@@ -111,6 +111,8 @@ add_library(clashwin_core STATIC
   src/core/service_mode.cpp
   src/core/validate.cpp
   src/core/timer.cpp
+  src/core/delay_manager.cpp
+  src/core/auto_select.cpp
 )
 target_include_directories(clashwin_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -279,6 +281,7 @@ add_executable(clashwin_test
   tests/test_scene_node.cpp
   tests/test_scene_traffic.cpp
   tests/test_t15_profile.cpp
+  tests/test_t16_delay.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
