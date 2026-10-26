@@ -168,6 +168,33 @@ struct LiveCore {
         return false;
       }
       if (probe_pipe_open()) {
+        // b92abd9 规范②：管道就绪 ≠ 配置装载完成（单发 API 抽测偶发
+        // /proxies 不含 DIRECT、mixed-port 非 kTestPort）。与复用模式的
+        // stale 探测同款一致性门禁：端口必须等于 kTestPort 且 /proxies
+        // 含内建 DIRECT；轮询 ≤15s×100ms，超时按环境重试/降级。
+        bool consistent = false;
+        for (int k = 0; k < 150 && mgr->sidecar_alive(); ++k) {
+          MihomoClient probe(kTestPipe, kTestSecret);
+          auto c = probe.get_base_config(2000);
+          auto p = probe.get_proxies(2000);
+          if (c.is_ok() && c.value().mixed_port == kTestPort && p.is_ok() &&
+              p.value().proxies.count("DIRECT") > 0) {
+            consistent = true;
+            break;
+          }
+          std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        if (!consistent) {
+          std::printf("  [live] core API inconsistent after pipe ready "
+                      "(port/proxies mismatch), pid=%lu\n",
+                      mgr->sidecar_pid());
+          if (attempt < 2) {
+            stop();
+            std::printf("  [live] retrying (attempt %d)\n", attempt + 1);
+            return ensure(attempt + 1);
+          }
+          return false;
+        }
         started = true;
         std::printf("  [live] pipe ready after %d00ms, pid=%lu\n", i, mgr->sidecar_pid());
         return true;

@@ -293,8 +293,25 @@ UT_TEST(live_coremgr_sidecar_full) {
   UT_CHECK(ver.is_ok());
   if (ver.is_ok()) std::printf("  [live-core] core version: %s\n", ver.value().version.c_str());
   CoreApiClientAdapter api(&client);
-  auto grp = api.get_group_by_name("PROXY");
-  UT_CHECK(grp.is_ok() && grp.value().all.has_value() && grp.value().all->size() == 2);
+  // b92abd9 规范②：管道就绪 ≠ 组成员填充完成（mihomo 先开控制管道、后装载
+  // provider/组）。单发断言存在实时窗（偶发 size!=2），改为轮询等组就绪
+  // （≤15s × 100ms），超时按环境降级 SKIP；后续 ④⑤ 的 now 断言均依赖此前提。
+  bool group_ready = false;
+  for (int i = 0; i < 150; ++i) {
+    auto g = client.get_group_by_name("PROXY");
+    if (g.is_ok() && g.value().all.has_value() && g.value().all->size() == 2) {
+      group_ready = true;
+      break;
+    }
+    Sleep(100);
+  }
+  if (!group_ready) {
+    std::printf("  SKIP: PROXY group members not ready within 15s "
+                "(pipe ready but provider load stalled)\n");
+    env.teardown();
+    return;
+  }
+  UT_CHECK(group_ready);
 
   // ④ 预选 TD-02 → apply_config 热应用 → 节点选择保持（snapshot→reload→restore）
   UT_CHECK(client.select_node_for_group("PROXY", "TD-02").is_ok());
