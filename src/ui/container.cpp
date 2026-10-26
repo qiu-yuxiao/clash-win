@@ -23,6 +23,7 @@ void distribute_main_axis(const std::vector<Widget*>& kids, float avail_main,
   float fixed_sum = 0, flex_weight_sum = 0;
   std::vector<SizeF> want(n);
   for (size_t i = 0; i < n; ++i) {
+    if (!kids[i]->visible()) { want[i] = {}; continue; }
     float max_main = is_row ? avail_main : 1e6f;
     float max_cross = is_row ? 1e6f : avail_main;
     want[i] = kids[i]->measure(max_main, max_cross);
@@ -32,7 +33,11 @@ void distribute_main_axis(const std::vector<Widget*>& kids, float avail_main,
       fixed_sum += is_row ? want[i].w : want[i].h;
     }
   }
-  float spacing_total = spacing * static_cast<float>(n > 0 ? n - 1 : 0);
+  int visible_cnt = 0;
+  for (size_t i = 0; i < n; ++i)
+    if (kids[i]->visible()) ++visible_cnt;
+  float spacing_total =
+      spacing * static_cast<float>(visible_cnt > 0 ? visible_cnt - 1 : 0);
   float free_space = avail_main - fixed_sum - spacing_total;
   if (free_space < 0) free_space = 0;
 
@@ -81,10 +86,12 @@ void distribute_main_axis(const std::vector<Widget*>& kids, float avail_main,
 SizeF Column::on_measure(float max_w, float max_h) {
   const size_t n = child_count();
   float total_h = padding().v(), max_want = 0;
+  bool any_visible = false;
   for (size_t i = 0; i < n; ++i) {
+    if (!child(i)->visible()) continue;
     SizeF s = child(i)->measure(max_w - padding().h(), 1e6f);
-    total_h += s.h;
-    if (i > 0) total_h += spacing;
+    total_h += s.h + (any_visible ? spacing : 0.0f);
+    any_visible = true;
     if (s.w > max_want) max_want = s.w;
   }
   // flex 子至少占一份自由空间（max_h 未知时给 0 尺寸是不对的——期望值即
@@ -99,7 +106,8 @@ void Column::on_arrange(const RectF& area) {
   RectF content{area.x + padding().l, area.y + padding().t,
                 area.w - padding().h(), area.h - padding().v()};
   std::vector<Widget*> kids;
-  for (size_t i = 0; i < child_count(); ++i) kids.push_back(child(i));
+  for (size_t i = 0; i < child_count(); ++i)
+    if (child(i)->visible()) kids.push_back(child(i));
   std::vector<Slot> slots;
   distribute_main_axis(kids, content.h, spacing, main_align, false, slots);
   for (size_t i = 0; i < kids.size(); ++i) {
@@ -121,10 +129,12 @@ void Column::on_arrange(const RectF& area) {
 SizeF Row::on_measure(float max_w, float max_h) {
   const size_t n = child_count();
   float total_w = padding().h(), max_want = 0;
+  bool any_visible = false;
   for (size_t i = 0; i < n; ++i) {
+    if (!child(i)->visible()) continue;
     SizeF s = child(i)->measure(1e6f, max_h - padding().v());
-    total_w += s.w;
-    if (i > 0) total_w += spacing;
+    total_w += s.w + (any_visible ? spacing : 0.0f);
+    any_visible = true;
     if (s.h > max_want) max_want = s.h;
   }
   SizeF out{total_w, max_want + padding().v()};
@@ -137,7 +147,8 @@ void Row::on_arrange(const RectF& area) {
   RectF content{area.x + padding().l, area.y + padding().t,
                 area.w - padding().h(), area.h - padding().v()};
   std::vector<Widget*> kids;
-  for (size_t i = 0; i < child_count(); ++i) kids.push_back(child(i));
+  for (size_t i = 0; i < child_count(); ++i)
+    if (child(i)->visible()) kids.push_back(child(i));
   std::vector<Slot> slots;
   distribute_main_axis(kids, content.w, spacing, main_align, true, slots);
   for (size_t i = 0; i < kids.size(); ++i) {
@@ -159,6 +170,7 @@ void Row::on_arrange(const RectF& area) {
 SizeF Stack::on_measure(float max_w, float max_h) {
   float mw = 0, mh = 0;
   for (size_t i = 0; i < child_count(); ++i) {
+    if (!child(i)->visible()) continue;
     SizeF s = child(i)->measure(max_w, max_h);
     if (s.w > mw) mw = s.w;
     if (s.h > mh) mh = s.h;
@@ -170,7 +182,8 @@ void Stack::on_arrange(const RectF& area) {
   // AbsoluteOverlay：全部铺满内容区（覆盖层/弹窗宿主语义）
   RectF content{area.x + padding().l, area.y + padding().t,
                 area.w - padding().h(), area.h - padding().v()};
-  for (size_t i = 0; i < child_count(); ++i) child(i)->layout_tree(content);
+  for (size_t i = 0; i < child_count(); ++i)
+    if (child(i)->visible()) child(i)->layout_tree(content);
 }
 
 }  // namespace clashwin::ui

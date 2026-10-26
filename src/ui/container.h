@@ -16,6 +16,19 @@ namespace clashwin::ui {
 enum class MainAlign { Start, End, Center, SpaceBetween };
 enum class CrossAlign { Start, Center, End, Stretch };
 
+// Box：带背景/圆角的最简容器（子铺满内容区）
+class Box : public Widget {
+ public:
+  explicit Box(Widget* parent = nullptr) : Widget(parent) {}
+  Brush background{Color4f(0, 0, 0, 0)};
+  Pen border{Color4f(0, 0, 0, 0), 0};
+  float corner_radius = 0;
+  void on_paint(IRenderTarget& rt) override {
+    if (background.color.a > 0 || border.width > 0)
+      rt.round_rect(bounds(), corner_radius, border, &background);
+  }
+};
+
 class Column : public Widget {
  public:
   explicit Column(Widget* parent = nullptr) : Widget(parent) {}

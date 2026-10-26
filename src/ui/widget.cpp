@@ -32,6 +32,14 @@ void Widget::add_child(std::unique_ptr<Widget> w) {
   on_child_added(children_.back().get());
 }
 
+void Widget::insert_child(size_t index, std::unique_ptr<Widget> w) {
+  w->parent_ = this;
+  index = std::min(index, children_.size());
+  children_.insert(children_.begin() + static_cast<long>(index),
+                   std::move(w));
+  on_child_added(children_[index].get());
+}
+
 std::unique_ptr<Widget> Widget::remove_child(Widget* w) {
   for (auto it = children_.begin(); it != children_.end(); ++it) {
     if (it->get() == w) {

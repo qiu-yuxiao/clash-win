@@ -14,6 +14,9 @@ inline constexpr const char* kWindowState = "window_state.json";
 inline constexpr const char* kProxyHeadState = "proxy_head_state.json";
 inline constexpr const char* kUnlockCache = "unlock_cache.json";
 
+// ---------- 应用（T11：版本显示 ← tauri.conf.json version 3.0.10） ----------
+inline constexpr const char* kAppVersion = "3.0.10";
+
 // ---------- 端口（← constants.rs::network::ports，附录速查） ----------
 inline constexpr uint16_t kDefaultMixed = 10801;
 inline constexpr uint16_t kDefaultSocks = 10802;

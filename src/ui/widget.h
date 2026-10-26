@@ -57,6 +57,7 @@ class Widget {
   size_t child_count() const { return children_.size(); }
   Widget* child(size_t i) const { return children_[i].get(); }
   void add_child(std::unique_ptr<Widget> w);          // 尾部 = 最上层
+  void insert_child(size_t index, std::unique_ptr<Widget> w);  // 保序挂载
   std::unique_ptr<Widget> remove_child(Widget* w);    // 卸载（React unmount 等价）
   // 绘制顺序 = z_order 升序稳定（同序按加入顺序，后加者在上）
   int z_order() const { return z_order_; }
