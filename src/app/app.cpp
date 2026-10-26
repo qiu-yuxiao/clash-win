@@ -1,5 +1,6 @@
 #include "app/app.h"
 
+#include "cmd/command_service.h"
 #include "config/config.h"
 #include "config/prfitem.h"
 #include "core/timer.h"
