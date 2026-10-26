@@ -12,6 +12,7 @@ TitleBar::TitleBar(MainWindow* owner) {
   spacing = 8;  // ← gap 8px
   set_padding(10, 0, 8, 0);  // ← padding 0 8px 0 10px
   flex_weight = 0;
+  cross_align = CrossAlign::Center;  // 28×28 键在 30px 栏内垂直居中（y=1）
 
   // 左：AppIcon 16×16（位图由 T12 icon_store 登记 draw_bitmap；骨架期占位框）
   auto icon = std::make_unique<Widget>();

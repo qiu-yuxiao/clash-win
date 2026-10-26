@@ -79,9 +79,10 @@ PanelCard::PanelCard(const std::wstring& title, Widget* parent)
 
 void PanelCard::on_paint(IRenderTarget& rt) {
   const auto& svc = ThemeService::instance();
-  // 卡片底（← 截图浅灰面板 + 圆角）
+  // 卡片底（← 截图浅灰面板 + 圆角）；on_paint 局部坐标 {0,0,w,h}
   Brush bg{svc.vars().theme_panel_bg};
-  rt.round_rect(bounds(), 6, {svc.vars().theme_border, 1}, &bg);
+  rt.round_rect({0, 0, bounds().w, bounds().h}, 6,
+                {svc.vars().theme_border, 1}, &bg);
   title_->style.color = Color4f::hex(0xE8890C);  // ← 截图橙标题
 }
 
@@ -480,11 +481,11 @@ std::wstring SettingsDrawer::fmt_factor(float v) {
 
 void SettingsDrawer::on_paint(IRenderTarget& rt) {
   if (open_) {
-    // 遮罩（半透明黑）
-    rt.fill_rect(bounds(), Brush{Color4f(0, 0, 0, 0.45f)});
+    // 遮罩（半透明黑）；on_paint 局部坐标 {0,0,w,h}
+    rt.fill_rect({0, 0, bounds().w, bounds().h}, Brush{Color4f(0, 0, 0, 0.45f)});
     // 面板底（← 截图浅灰）
     const auto& svc = ThemeService::instance();
-    rt.fill_rect({bounds().x, bounds().y + 30, bounds().w, bounds().h - 30},
+    rt.fill_rect({0, 30, bounds().w, bounds().h - 30},
                  Brush{svc.vars().theme_panel_bg});
   }
 }

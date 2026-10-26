@@ -93,7 +93,10 @@ void MainScene::on_arrange(const RectF& area) {
 
 void MainScene::on_paint(IRenderTarget& rt) {
   // 占位底色：tauri 背景色口径（← dt.background_color，T13 场景填充后替换）
-  rt.fill_rect(bounds(), Brush{theme::ThemeService::instance()
+  // 【T17-fix】on_paint 局部坐标约定：画 {0,0,w,h}（画 bounds() 会在
+  //   scene 不从 y=0 起时双重偏移——root 改 Column 流式后 scene y=30 暴露）
+  rt.fill_rect({0, 0, bounds().w, bounds().h},
+               Brush{theme::ThemeService::instance()
                                    .palette()
                                    .background_color});
 }

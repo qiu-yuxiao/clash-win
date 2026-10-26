@@ -202,7 +202,8 @@ class MainWindow {
   D2dRenderTarget rt_{ctx_};
   FrameClock clock_;
 
-  Stack root_;            // Widget 树根（客户区）
+  Stack root_;            // Widget 树根（客户区；overlay 宿主）
+  Column* flow_ = nullptr;  // root_ 内流式层：Column{titlebar(30), scene(flex)}
   TitleBar* title_bar_ = nullptr;
   MainScene* scene_ = nullptr;
   // T13 场景

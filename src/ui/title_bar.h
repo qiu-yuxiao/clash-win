@@ -73,6 +73,13 @@ class TitleBar : public Row {
   explicit TitleBar(MainWindow* owner);
   ~TitleBar() override;
 
+  // 标题栏固定 30px（← customTitlebar 高度；Row::on_measure 只算出 28 键高）
+  SizeF on_measure(float max_w, float max_h) override {
+    SizeF s = Row::on_measure(max_w, max_h);
+    s.h = 30;
+    return s;
+  }
+
   void set_large_mode(bool large);  // 切换 □/restore 字形
   void set_version(const std::wstring& v);
 

@@ -199,16 +199,27 @@ bool MainWindow::init_render() {
 }
 
 void MainWindow::build_widget_tree() {
-  // root = Stack{ titlebar(30), scene(撑满), drawer(全屏覆盖) }
+  // root = Stack{ flow = Column{ titlebar(30), scene(flex 撑满) },
+  //               drawer(全屏 overlay，最上层) }
+  // 【T17-fix 根治】此前 root_ 直接挂 titlebar/scene——Stack::on_arrange
+  //   铺满语义使两者 bounds 均为全窗（30px 只是 titlebar 绘制假设，scene
+  //   从 y=0 盖过标题栏），真窗仅靠 WM 层 NCHITTEST 硬撑。现流式布局收进
+  //   flow Column（titlebar measure 固定 30 + scene flex 撑满剩余），
+  //   Stack 只承担 overlay（抽屉覆盖、hit 最上层）。
+  auto flow = std::make_unique<Column>();
+  flow_ = flow.get();
+  root_.add_child(std::move(flow));
+
   auto tb = std::make_unique<TitleBar>(this);
   title_bar_ = tb.get();
   title_bar_->set_version(L"3.0.10");  // ← tauri.conf.json version 3.0.10
-  root_.add_child(std::move(tb));
+  flow_->add_child(std::move(tb));
   auto scene = std::make_unique<MainScene>();
   scene_ = scene.get();
   scene_->flex_weight = 1;
-  root_.add_child(std::move(scene));
-  // T17：设置抽屉（全屏覆盖层；Stack 铺满语义，最后挂=绘制/命中最上层）
+  flow_->add_child(std::move(scene));
+
+  // T17：设置抽屉（全屏覆盖层；Stack 后挂=绘制/命中最上层）
   auto drawer = std::make_unique<scene::SettingsDrawer>();
   settings_drawer_ = drawer.get();
   drawer_mounted_ = true;

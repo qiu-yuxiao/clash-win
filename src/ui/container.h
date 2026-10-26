@@ -24,8 +24,10 @@ class Box : public Widget {
   Pen border{Color4f(0, 0, 0, 0), 0};
   float corner_radius = 0;
   void on_paint(IRenderTarget& rt) override {
+    // on_paint 局部坐标约定：画 {0,0,w,h}（画 bounds() 会在非零 bounds 时偏移）
     if (background.color.a > 0 || border.width > 0)
-      rt.round_rect(bounds(), corner_radius, border, &background);
+      rt.round_rect({0, 0, bounds().w, bounds().h}, corner_radius, border,
+                    &background);
   }
 };
 

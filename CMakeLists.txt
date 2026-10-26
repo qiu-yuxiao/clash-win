@@ -284,6 +284,7 @@ add_executable(clashwin_test
   tests/test_t15_profile.cpp
   tests/test_t16_delay.cpp
   tests/test_t17_drawer.cpp
+  tests/test_root_layout.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)

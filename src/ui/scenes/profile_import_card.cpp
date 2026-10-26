@@ -110,10 +110,11 @@ void ProfileImportCard::on_arrange(const RectF& area) {
 }
 
 void ProfileImportCard::on_paint(IRenderTarget& rt) {
-  // 卡片底（← get3DCardStyle default 近似：浅底 + 圆角）
+  // 卡片底（← get3DCardStyle default 近似：浅底 + 圆角）；局部坐标 {0,0,w,h}
   const auto& svc = ThemeService::instance();
   Brush bg{svc.vars().theme_panel_bg};
-  rt.round_rect(bounds(), 6, {svc.vars().theme_border, 1}, &bg);
+  rt.round_rect({0, 0, bounds().w, bounds().h}, 6,
+                {svc.vars().theme_border, 1}, &bg);
   title_->style.color =
       title_color_.value_or(svc.palette().primary_text);  // 抽屉可覆盖为橙
   // message 色由 set_message 维护
