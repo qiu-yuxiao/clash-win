@@ -9,13 +9,17 @@
 
 #include "clashwin/config/constants.h"
 #include "cmd/command_service.h"
+#include "events/event_names.h"
 #include "theme/theme.h"
+#include "ui/ui_postbox.h"
 #include "util/log.h"
+#include "util/utf.h"
 #include <format>
 
 namespace clashwin::ui::win {
 
 namespace fs = std::filesystem;
+namespace utf = clashwin::utf;
 using config::window_state::WindowStateStore;
 using config::window_state::SavedWindowState;
 
@@ -108,6 +112,8 @@ bool MainWindow::create(bool show_immediately) {
   GetClientRect(hwnd_, &rc);
   on_client_resized(rc.right - rc.left, rc.bottom - rc.top);
 
+  build_scene();
+
   SetTimer(hwnd_, kTimerFrame, FrameClock::kFrameIntervalMs, nullptr);
   SetTimer(hwnd_, kTimerIdle, 1000, nullptr);
   if (show_immediately) show_and_activate();
@@ -172,6 +178,45 @@ void MainWindow::build_widget_tree() {
   scene_ = scene.get();
   scene_->flex_weight = 1;
   root_.add_child(std::move(scene));
+}
+
+void MainWindow::build_scene() {
+  // T13：场景装配——数据（production hooks）→ 快捷条/节点列表挂载 → 事件订阅
+  node_data_ = std::make_unique<scene::NodeData>(scene::NodeData::production_hooks());
+
+  auto qb = std::make_unique<scene::QuickBar>();
+  quick_bar_ = qb.get();
+  qb->on_test_group = [this] { node_data_->test_group(); };
+  scene_->attach_quick_bar(std::move(qb));
+
+  auto nl = std::make_unique<scene::NodeList>();
+  node_list_ = nl.get();
+  node_list_->bind(node_data_.get());
+  // 点击节点 → select_node_for_group（失败回弹：NodeData::select 内处理）
+  node_list_->select_node = [this](const std::string& node) {
+    return node_data_->select(node);
+  };
+  scene_->attach_node_list(std::move(nl));
+
+  // 数据初始加载（内核未就绪静默；刷新事件再拉）
+  node_data_->load();
+  quick_bar_->set_node_text(
+      utf::utf8_to_utf16(node_data_->now().empty() ? "-" : node_data_->now()));
+
+  // 延迟结果事件：局部刷新（← backend-delay-results {group, results}）
+  UiPostbox::instance().subscribe_ui(
+      events::names::kBackendDelayResults, [this](const nlohmann::json& p) {
+        node_data_->apply_delay_results(p);
+        quick_bar_->set_node_text(utf::utf8_to_utf16(
+            node_data_->now().empty() ? "-" : node_data_->now()));
+      });
+  // 配置/代理刷新事件：全量重载
+  UiPostbox::instance().subscribe_ui(
+      events::names::kRefreshClash, [this](const nlohmann::json&) {
+        node_data_->load();
+        quick_bar_->set_node_text(utf::utf8_to_utf16(
+            node_data_->now().empty() ? "-" : node_data_->now()));
+      });
 }
 
 void MainWindow::apply_geometry_restore() {

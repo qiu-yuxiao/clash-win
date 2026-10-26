@@ -42,6 +42,7 @@ wchar_t IconW::glyph_for(const std::string& mui_name) {
       {"chevronleft", 0xE76B},
       {"check", 0xE73E},
       {"sync", 0xE777},
+      {"bolt", 0xE945},         // LightningBolt 近似（原版 ⚡ 组测速）
       {"play", 0xE768},
       {"pause", 0xE769},
   };
@@ -87,6 +88,21 @@ void IconW::on_paint(IRenderTarget& rt) {
   ts.align_h = AlignH::Center;
   ts.align_v = AlignV::Center;
   rt.draw_text(std::wstring(1, glyph_), {0, 0, bounds().w, bounds().h}, ts);
+}
+
+bool IconW::on_mouse(const MouseEvent& e) {
+  if (!on_click) return false;
+  switch (e.type) {
+    case MouseEventType::Enter: hover_ = true; invalidate(); return true;
+    case MouseEventType::Leave: hover_ = false; pressed_ = false; invalidate(); return true;
+    case MouseEventType::Down: pressed_ = true; invalidate(); return true;
+    case MouseEventType::Up:
+      if (pressed_ && bounds().contains(e.pos.x, e.pos.y) && on_click) on_click();
+      pressed_ = false;
+      invalidate();
+      return true;
+    default: return false;
+  }
 }
 
 }  // namespace clashwin::ui

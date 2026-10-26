@@ -26,6 +26,9 @@
 #include "widget.h"
 #include "container.h"
 #include "main_scene.h"
+#include "scenes/node_data.h"
+#include "scenes/node_list.h"
+#include "scenes/quick_bar.h"
 
 namespace clashwin::ui::win {
 
@@ -176,6 +179,7 @@ class MainWindow {
   bool create_hwnd();
   bool init_render();
   void build_widget_tree();
+  void build_scene();     // T13：场景装配 + 数据事件订阅
   void apply_geometry_restore();  // window_state.json 恢复（含脱屏居中）
 
   void on_client_resized(int cw, int ch);          // WM_SIZE
@@ -195,6 +199,10 @@ class MainWindow {
   Stack root_;            // Widget 树根（客户区）
   TitleBar* title_bar_ = nullptr;
   MainScene* scene_ = nullptr;
+  // T13 场景
+  std::unique_ptr<scene::NodeData> node_data_;
+  scene::QuickBar* quick_bar_ = nullptr;
+  scene::NodeList* node_list_ = nullptr;
 
   Breakpoints bp_;
   StealthController stealth_;

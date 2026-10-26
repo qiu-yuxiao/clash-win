@@ -27,6 +27,10 @@ class MainScene : public Widget {
   Widget* list_slot();
   Widget* traffic_slot();
   Widget* quickbar_slot();  // 顶栏 30px 快捷条挂载点（T13）
+  // T13 场景挂载（所有权留在宿主；Mini 卸载随 upper_ 整体 remove_child）
+  void attach_quick_bar(Widget* w) { if (quickbar_) quickbar_->add_child(std::unique_ptr<Widget>(w)); }
+  void attach_quick_bar(std::unique_ptr<Widget> w) { if (quickbar_) quickbar_->add_child(std::move(w)); }
+  void attach_node_list(std::unique_ptr<Widget> w) { if (list_slot_) list_slot_->add_child(std::move(w)); }
 
   void on_paint(IRenderTarget& rt) override;
   void on_arrange(const RectF& area) override;

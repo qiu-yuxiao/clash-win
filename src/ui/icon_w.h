@@ -23,9 +23,13 @@ class IconW : public Widget {
   float size_ = 16;                            // 字号=图标边长（逻辑 px）
   Color4f color_{0, 0, 0, 1};
   bool font_fallback_ = false;  // true = Segoe MDL2 Assets（旧系统）
+  // 点击支持（T13 快捷条图钉/齿轮；bool hover_/pressed_ 状态）
+  std::function<void()> on_click;
+  bool hover_ = false, pressed_ = false;
 
   SizeF on_measure(float max_w, float max_h) override;
   void on_paint(IRenderTarget& rt) override;
+  bool on_mouse(const MouseEvent& e) override;
 
  private:
   wchar_t glyph_ = 0;
