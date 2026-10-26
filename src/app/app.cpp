@@ -4,6 +4,7 @@
 #include "ui/main_window.h"
 #include "util/log.h"
 
+#include <map>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <thread>
@@ -46,6 +47,42 @@ bool App::init() {
 
   // T12：主题服务初始化（缺省 retro-3d/light；皮肤/亮暗切换 T17 接 verge）
   ui::theme::ThemeService::instance().init();
+
+  // T15：订阅定时更新（默认 1440min/过期补跑/失败 2min 重试/切换互斥）
+  {
+    auto& timer = core::ProfileTimer::instance();
+    timer.set_intervals_provider([] {
+      std::map<std::string, std::pair<uint64_t, int64_t>> m;
+      auto latest = config::Config::instance().profiles().latest_arc();
+      if (latest && latest->items) {
+        for (const auto& it : *latest->items) {
+          if (!it.uid) continue;
+          uint64_t interval = 1440;
+          if (it.option && it.option->update_interval)
+            interval = *it.option->update_interval;
+          // next = updated(Unix 秒)×1000 + interval×60k；无 updated → 0 补跑
+          int64_t next =
+              it.updated ? *it.updated * 1000 +
+                                static_cast<int64_t>(interval) * 60000
+                         : 0;
+          m[*it.uid] = {interval, next};
+        }
+      }
+      return m;
+    });
+    timer.set_update_fn([](const std::string& uid) {
+      auto r = cmd::CommandService::instance().invoke(
+          "update_profile", {{"index", uid}});
+      return r.is_ok();
+    });
+    timer.set_event_emitter([](const std::string& uid, bool is_start) {
+      events::EventBus::instance().publish(
+          is_start ? events::names::kProfileUpdateStarted
+                   : events::names::kProfileUpdateCompleted,
+          uid);
+    });
+    timer.start();
+  }
 
   // T11：窗口壳移交 MainWindow（无框窗 + 标题栏 + 钳制 + Widget 树）
   main_window_ = new ui::win::MainWindow();

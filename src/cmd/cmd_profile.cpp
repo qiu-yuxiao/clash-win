@@ -1,9 +1,13 @@
 // T09 cmd_profile（← cmd/profile.rs + cmd/save_profile.rs 逐命令对照）
 #include "cmd/cmd_support.h"
+
+#include "core/switching_lock.h"
+#include "core/timer.h"
 #include "cmd/command_service.h"
 #include "cmd/cmd_install.h"
 
 #include "config/config.h"
+#include "config/profiles.h"
 #include "config/prfitem.h"
 #include "core/validate.h"
 #include "enhance/enhance.h"
@@ -16,11 +20,9 @@
 namespace clashwin::cmd {
 
 namespace {
-// ← feat::CURRENT_SWITCHING_PROFILE：导入/更新/删除/切换互斥
-std::atomic<bool>& switching_lock() {
-  static std::atomic<bool> lock{false};
-  return lock;
-}
+// ← feat::CURRENT_SWITCHING_PROFILE：导入/更新/删除/切换/定时互斥。
+// T15：锁实现上移 core/switching_lock.h（timer 同一把，跨层互斥）
+std::atomic<bool>& switching_lock() { return core::profile_switching_lock(); }
 
 struct SwitchGuard {
   std::atomic<bool>& lock;
@@ -98,25 +100,33 @@ void install_cmd_profile(CommandService& svc) {
          if (const Json* op = find_arg(args, {"option"}); op && op->is_object()) {
            option = prf_option_from_json(*op);
          }
-         auto item = config::PrfItem::from_url(url->get<std::string>(), std::nullopt, std::nullopt,
-                                               option);
-         if (item.is_err()) {
-           return CmdResult::err({errs::kIo, "导入订阅失败: " + item.error().message});
-         }
          auto& profiles = config::Config::instance().profiles();
-         profiles.edit_draft([&item](config::IProfiles& d) {
-           auto r = d.append_item(item.value());
-           (void)r;
+         std::optional<config::PrfItem> item_opt;
+         profiles.edit_draft([&](config::IProfiles& d) {
+           config::profiles::set_profiles_instance(&d);
+           auto item = config::PrfItem::from_url(url->get<std::string>(),
+                                                 std::nullopt, std::nullopt,
+                                                 option);
+           config::profiles::set_profiles_instance(nullptr);
+           if (item.is_ok()) {
+             auto r = d.append_item(item.value());
+             (void)r;
+             item_opt = item.value();
+           }
          });
+         if (!item_opt) {
+           return CmdResult::err({errs::kIo, "导入订阅失败（下载/解析失败或被拒）"});
+         }
          auto save = profiles.data_arc()->save_file();
          if (!save.is_ok()) {
            return CmdResult::err({errs::kIo, "导入订阅失败: " + save.error().message});
          }
          auto latest = profiles.latest_arc();
          bool became_current =
-             latest->current.has_value() && item.value().uid &&
-             *latest->current == *item.value().uid;
-         if (item.value().uid) events::EventBus::notify_profile_changed(*item.value().uid);
+             latest->current.has_value() && item_opt->uid &&
+             *latest->current == *item_opt->uid;
+         if (item_opt->uid)
+           events::EventBus::notify_profile_changed(*item_opt->uid);
          if (became_current) {
            // ← profile.rs:132-146：首个导入自动激活
            auto outcome = update_config_forced();
@@ -145,16 +155,26 @@ void install_cmd_profile(CommandService& svc) {
          if (const Json* op = find_arg(args, {"option"}); op && op->is_object()) {
            option = prf_option_from_json(*op);
          }
-         auto item = config::PrfItem::from_url(*old->url, old->name, old->desc, option);
-         if (item.is_err()) return CmdResult::err({errs::kIo, item.error().message});
-         item.value().uid = old->uid;  // 同 uid → append_item 更新元数据 + 覆写文件
          auto& profiles = config::Config::instance().profiles();
+         std::optional<config::PrfItem> item_opt;
          bool touched_current = false;
          profiles.edit_draft([&](config::IProfiles& d) {
-           touched_current = d.current.has_value() && old->uid && *d.current == *old->uid;
+           touched_current =
+               d.current.has_value() && old->uid && *d.current == *old->uid;
+           config::profiles::set_profiles_instance(&d);
+           auto item = config::PrfItem::from_url(*old->url, old->name,
+                                                 old->desc, option);
+           config::profiles::set_profiles_instance(nullptr);
+           // ← 失败保留原文：from_url 失败时 append_item 不执行，
+           //   profiles/原文件均不变（错误上抛通知）
+           if (item.is_err()) return;
+           item.value().uid = old->uid;  // 同 uid → 更新元数据 + 覆写文件
            auto r = d.append_item(item.value());
-           (void)r;
+           if (r.is_ok()) item_opt = item.value();
          });
+         if (!item_opt) {
+           return CmdResult::err({errs::kIo, "更新订阅失败（原文已保留）"});
+         }
          if (auto save = profiles.data_arc()->save_file(); !save.is_ok()) {
            return CmdResult::err({errs::kIo, save.error().message});
          }
@@ -407,12 +427,101 @@ void install_cmd_profile(CommandService& svc) {
        },
        consts::kTimeoutHeavy});
 
-  // ---- get_next_update_time（← profile.rs:438-443；Timer 归 T15 → 桩）----
+  // ---- create_profile（← profile.rs:175-196：新建本地/merge/script 条目）----
+  svc.register_command(
+      "create_profile",
+      {[](const Json& args) -> CmdResult {
+         if (switching_lock().exchange(true)) {
+           return CmdResult::err({errs::kBadArgs, "当前正在切换或更新配置，请稍候再试"});
+         }
+         SwitchGuard guard(switching_lock());
+         const Json* item_j = find_arg(args, {"item"});
+         if (!item_j || !item_j->is_object())
+           return CmdResult::err({errs::kBadArgs, "item required"});
+         // ← PrfItem 前端只传 itype/name/desc/url 等；构造走对应 from_*
+         std::string itype = item_j->value("type", item_j->value("itype", "local"));
+         std::string name = item_j->value("name", "");
+         std::string desc = item_j->value("desc", "");
+         std::optional<std::string> file_data;
+         if (const Json* fd = find_arg(args, {"file_data"}); fd && fd->is_string())
+           file_data = fd->get<std::string>();
+
+         auto& profiles = config::Config::instance().profiles();
+         config::PrfItem item;
+         // from_local/from_url 内部 ensure_enhance_items 挂子项经
+         // append_item_safe → 必须在装配期实例注册区内构造（config.cpp
+         // needs_items 分支同款）
+         profiles.edit_draft([&](config::IProfiles& d) {
+           config::profiles::set_profiles_instance(&d);
+           if (itype == "local") {
+             auto r = config::PrfItem::from_local(name, desc, file_data, std::nullopt);
+             if (r.is_ok()) item = r.value();
+           } else if (itype == "merge") {
+             item = config::PrfItem::from_merge(std::nullopt);
+           } else if (itype == "script") {
+             item = config::PrfItem::from_script(std::nullopt);
+           }
+           if (!item.uid) {
+             config::profiles::set_profiles_instance(nullptr);
+             return;
+           }
+           if (!name.empty()) item.name = name;
+           if (!desc.empty()) item.desc = desc;
+           if (file_data && itype != "local") item.file_data = file_data;
+           auto r = d.append_item(item);
+           config::profiles::set_profiles_instance(nullptr);
+           (void)r;
+         });
+         if (!item.uid) {
+           return CmdResult::err({errs::kBadArgs, "unsupported itype: " + itype});
+         }
+         if (auto save = profiles.data_arc()->save_file(); !save.is_ok())
+           return CmdResult::err({errs::kIo, "add profile error: " + save.error().message});
+         if (item.uid) events::EventBus::notify_profile_changed(*item.uid);
+         return CmdResult::ok(Json::object());
+       },
+       consts::kTimeoutHeavy});
+
+  // ---- reorder_profile（← profile.rs:154-170：拖拽排序 active→over 位置）----
+  svc.register_command(
+      "reorder_profile",
+      {[](const Json& args) -> CmdResult {
+         if (switching_lock().exchange(true)) {
+           return CmdResult::err({errs::kBadArgs, "当前正在切换或更新配置，请稍候再试"});
+         }
+         SwitchGuard guard(switching_lock());
+         const Json* active = find_arg(args, {"active_id"});
+         const Json* over = find_arg(args, {"over_id"});
+         if (!active || !over || !active->is_string() || !over->is_string())
+           return CmdResult::err({errs::kBadArgs, "active_id/over_id required"});
+         auto& profiles = config::Config::instance().profiles();
+         bool reorder_ok = true;
+         std::string reorder_err;
+         profiles.edit_draft([&](config::IProfiles& d) {
+           auto r = d.reorder(active->get<std::string>(), over->get<std::string>());
+           reorder_ok = r.is_ok();
+           if (!r.is_ok()) reorder_err = r.error().message;
+         });
+         if (!reorder_ok)
+           return CmdResult::err({errs::kIo, "重新排序配置文件失败: " + reorder_err});
+         if (auto save = profiles.data_arc()->save_file(); !save.is_ok())
+           return CmdResult::err({errs::kIo, save.error().message});
+         events::EventBus::refresh_verge();  // 顺序落盘后通知（列表重渲染）
+         return CmdResult::ok(Json::object());
+       },
+       consts::kTimeoutConfig});
+
+  // ---- get_next_update_time（← profile.rs:438-443；T15 Timer 转正）----
   svc.register_command(
       "get_next_update_time",
-      {[](const Json&) -> CmdResult {
-         return CmdResult::err({errs::kNotImplemented,
-                                "get_next_update_time: not implemented (T15 timer)"});
+      {[](const Json& args) -> CmdResult {
+         const Json* index = find_arg(args, {"index"});
+         if (!index || !index->is_string())
+           return CmdResult::err({errs::kBadArgs, "index required"});
+         auto t = core::ProfileTimer::instance().get_next_update_time(
+             index->get<std::string>());
+         if (!t) return CmdResult::err({errs::kBadArgs, "no timer task"});
+         return CmdResult::ok(Json(*t));
        },
        consts::kTimeoutProbe});
 }

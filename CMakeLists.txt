@@ -110,6 +110,7 @@ add_library(clashwin_core STATIC
   src/core/core_manager.cpp
   src/core/service_mode.cpp
   src/core/validate.cpp
+  src/core/timer.cpp
 )
 target_include_directories(clashwin_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -179,6 +180,7 @@ add_library(clashwin_ui STATIC
   src/ui/scenes/node_data.cpp
   src/ui/scenes/quick_bar.cpp
   src/ui/scenes/node_list.cpp
+  src/ui/scenes/profile_import_card.cpp
   src/ui/scenes/traffic_pane.cpp
   src/ui/breakpoints.cpp
   src/ui/title_bar.cpp
@@ -276,6 +278,7 @@ add_executable(clashwin_test
   tests/test_theme_widgets.cpp
   tests/test_scene_node.cpp
   tests/test_scene_traffic.cpp
+  tests/test_t15_profile.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
