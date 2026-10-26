@@ -75,8 +75,8 @@ bool App::init_logger() {
 // ---------- 单实例（← utils/server.rs 行为桩） ----------
 
 bool App::bind_singleton() {
-  // ← 02附录：单例 33335（dev 33336）。开发/测试时可用环境变量覆盖端口，
-  // 避免与本机真实 Clash Mini 实例冲突；正式运行固定 33335。
+  // 单实例端口 33336（与实机 Clash Mini 的 33335 错开，允许共存——迁移期并行
+  // 对比是常态，共用端口曾导致实机无法启动）。开发/测试时可用环境变量覆盖。
   uint16_t port = consts::kSingletonPort;
   if (const char* env = getenv("CLASHWIN_SINGLETON_PORT")) {
     int p = atoi(env);
