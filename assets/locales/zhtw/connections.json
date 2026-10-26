@@ -1,0 +1,53 @@
+{
+  "page": {
+    "title": "連線"
+  },
+  "notices": {
+    "copied": "已複製: {{address}}"
+  },
+  "components": {
+    "fields": {
+      "host": "主機",
+      "dlSpeed": "下載速度",
+      "ulSpeed": "上傳速度",
+      "chains": "鏈路",
+      "rule": "規則",
+      "process": "處理程序",
+      "time": "連線時間",
+      "source": "來源位址",
+      "destination": "目標位址",
+      "destinationPort": "目標連接埠",
+      "type": "類型",
+      "actions": "Actions"
+    },
+    "order": {
+      "default": "預設",
+      "uploadSpeed": "上傳速度",
+      "downloadSpeed": "下載速度"
+    },
+    "actions": {
+      "active": "活躍",
+      "closed": "已關閉",
+      "closeConnection": "關閉連線"
+    },
+    "miniTable": {
+      "hostColumn": "連線目標",
+      "chainsColumn": "路由",
+      "chainsDirect": "直連",
+      "chainsReject": "封鎖",
+      "chainsProxy": "代理"
+    },
+    "contextMenu": {
+      "setDirect": "設為全域直連",
+      "setProxy": "設為代理分流",
+      "setReject": "封鎖它 (REJECT)",
+      "disconnect": "中斷此連線",
+      "copyAddress": "複製連線地址",
+      "viewDetail": "檢視詳細資訊"
+    },
+    "columnManager": {
+      "title": "欄位設定",
+      "dragHandle": "拖曳以移動"
+    }
+  }
+}

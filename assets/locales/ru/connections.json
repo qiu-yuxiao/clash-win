@@ -1,0 +1,53 @@
+{
+  "page": {
+    "title": "Соединения"
+  },
+  "notices": {
+    "copied": "Скопировано: {{address}}"
+  },
+  "components": {
+    "fields": {
+      "host": "Хост",
+      "dlSpeed": "Скорость скачивания",
+      "ulSpeed": "Скорость загрузки",
+      "chains": "Цепочки",
+      "rule": "Правило",
+      "process": "Процесс",
+      "time": "Время подключения",
+      "source": "Исходный адрес",
+      "destination": "IP-адрес назначения",
+      "destinationPort": "Порт назначения",
+      "type": "Тип",
+      "actions": "Actions"
+    },
+    "order": {
+      "default": "По умолчанию",
+      "uploadSpeed": "Скорость загрузки",
+      "downloadSpeed": "Скорость скачивания"
+    },
+    "actions": {
+      "active": "Активные",
+      "closed": "Закрытые",
+      "closeConnection": "Закрыть соединение"
+    },
+    "miniTable": {
+      "hostColumn": "Цель",
+      "chainsColumn": "Маршрут",
+      "chainsDirect": "Напрямую",
+      "chainsReject": "Заблокировано",
+      "chainsProxy": "Через прокси"
+    },
+    "contextMenu": {
+      "setDirect": "Сделать глобальное прямое подключение",
+      "setProxy": "Направить через прокси",
+      "setReject": "Заблокировать (REJECT)",
+      "disconnect": "Разорвать соединение",
+      "copyAddress": "Копировать адрес соединения",
+      "viewDetail": "Подробная информация"
+    },
+    "columnManager": {
+      "title": "Столбцы",
+      "dragHandle": "Маркер перетаскивания"
+    }
+  }
+}

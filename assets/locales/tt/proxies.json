@@ -1,0 +1,80 @@
+{
+  "page": {
+    "modes": {
+      "rule": "Rule",
+      "global": "Global",
+      "direct": "Direct"
+    },
+    "actions": {
+      "connect": "Connect",
+      "disconnect": "Disconnect",
+      "connecting": "Connecting..."
+    },
+    "provider": {
+      "title": "Прокси провайдеры",
+      "actions": {
+        "updateAll": "Барысын да яңарту",
+        "update": "Яңарту"
+      }
+    },
+    "rules": {
+      "title": "Proxy Rules",
+      "select": "Select Rules"
+    },
+    "a11y": {
+      "nodelist": "Прокси төеннәренең исемлеге"
+    },
+    "labels": {
+      "proxyCount": "Proxy Count",
+      "delayCheckReset": "Беркетелгәнне гамәлдән чыгару өчен задержканы тикшерү"
+    },
+    "tooltips": {
+      "locate": "Урын",
+      "delayCheck": "Задержканы тикшерү",
+      "sortDefault": "Башлангыч итеп сортлау",
+      "sortDelay": "Задержка буенча сортлау",
+      "sortName": "Исем буенча сортлау",
+      "delayCheckUrl": "Задержканы тикшерү URL-ы",
+      "showBasic": "Прокси турында кыскача мәгълүмат",
+      "showDetail": "Прокси турында тулы мәгълүмат",
+      "filter": "Фильтр"
+    },
+    "placeholders": {
+      "delayCheckUrl": "Задержканы тикшерү URL-ы"
+    },
+    "messages": {
+      "directMode": "Туры режим"
+    },
+    "title": {
+      "default": "Прокси төркемнәре"
+    }
+  },
+  "feedback": {
+    "notifications": {
+      "provider": {
+        "updateSuccess": "{{name}} updated successfully",
+        "updateFailed": "Failed to update {{name}}: {{message}}",
+        "genericError": "Update failed: {{message}}",
+        "none": "No providers available to update",
+        "allUpdated": "All providers updated successfully"
+      }
+    }
+  },
+  "components": {
+    "enums": {
+      "strategies": {
+        "select": "Проксины кулдан сайлау",
+        "url-test": "URL-тест задержкасына карап прокси сайлау",
+        "fallback": "Хата булган очракта башка проксига күчү",
+        "load-balance": "Трафикны баланслау нигезендә прокси тарату",
+        "relay": "Билгеле прокси чылбыры аша тапшыру"
+      },
+      "policies": {
+        "DIRECT": "Туры чыгу",
+        "REJECT": "Сорауларны тоткарлау",
+        "REJECT-DROP": "Сорауларны кире кагу",
+        "PASS": "Туры килсә дә, бу кагыйдәне урап узу"
+      }
+    }
+  }
+}

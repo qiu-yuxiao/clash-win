@@ -1,0 +1,120 @@
+{
+  "components": {
+    "firstRun": {
+      "title": "مرحبًا بك في Clash Mini",
+      "intro": "يبدو أن هذه أول مرة ولا توجد اشتراكات بعد. الصق رابط الاشتراك أدناه — سيتم تحليل العقد وقياس السرعة والتحكم بالشبكة تلقائيًا.",
+      "paste": "لصق من الحافظة",
+      "enterHint": "تلميح: اضغط Enter للاستيراد",
+      "importAndStart": "استيراد وتشغيل",
+      "later": "الإعداد يدويًا لاحقًا",
+      "errEmpty": "يرجى إدخال أو لصق رابط الاشتراك",
+      "errScheme": "يجب أن يبدأ الرابط بـ http:// أو https://",
+      "errImport": "فشل الاستيراد. تحقق من الرابط وأعد المحاولة",
+      "readyTitle": "تم استيراد الاشتراك",
+      "imported": "تم استيراد الاشتراك وتنشيطه",
+      "checking": "يتم التحقق من اتصال العقدة…",
+      "readyOk": "الوكيل جاهز والشبكة تعمل",
+      "readyUnconfirmed": "لم يتم قياس زمن استجابة العقدة بعد — ربما ما زال الاختبار جاريًا أو أن العقدة غير متاحة",
+      "sysProxyOff": "وكيل النظام غير مفعّل. فعّله من الإعدادات ثم أعد المحاولة",
+      "wikiHint": "افتح Wiki للتحقق من الاتصال ومعرفة المزيد.",
+      "openWiki": "فتح Wiki للاختبار",
+      "finish": "تم"
+    },
+    "helpMenu": {
+      "github": "صفحة GitHub",
+      "wiki": "دليل المساعدة (Wiki)",
+      "firstRunGuide": "دليل البدء",
+      "exportDiagnostics": "تصدير التشخيص",
+      "generatingDiagnostics": "جارٍ إنشاء التشخيص، انتظر…",
+      "diagnosticsExported": "تم تصدير التشخيص: {{path}}",
+      "checkAppUpdate": "التحقق من تحديثات التطبيق",
+      "checkCoreUpdate": "التحقق من تحديثات النواة",
+      "buttonAriaLabel": "المساعدة والأدوات"
+    },
+    "dialogs": {
+      "editProfile": {
+        "title": "تعديل الملف التعريفي",
+        "nameLabel": "اسم الملف التعريفي",
+        "urlLabel": "عنوان الاشتراك",
+        "intervalLabel": "فترة التحديث (بالساعات، 0 للتعطيل)"
+      },
+      "update": {
+        "currentVersion": "الإصدار الحالي: {{version}}",
+        "latestVersion": "أحدث إصدار: {{version}}",
+        "unknown": "غير معروف",
+        "updating": "جارٍ التحديث...",
+        "upToDate": "محدَّث بالفعل",
+        "updateNow": "تحديث الآن"
+      },
+      "client": {
+        "title": "تحديث التطبيق",
+        "changelog": "سجل التغييرات:",
+        "changelogEmpty": "لا يوجد سجل تغييرات مفصل بعد",
+        "prepareRestart": "جارٍ التحضير لإعادة التشغيل"
+      },
+      "core": {
+        "title": "تحديث نواة Mihomo",
+        "fetching": "جارٍ الجلب...",
+        "updateDone": "اكتمل التحديث"
+      },
+      "progress": {
+        "coreStarting": "جارٍ بدء مهمة ترقية النواة...",
+        "coreStartFailed": "فشل البدء: {{message}}",
+        "clientDownloading": "جارٍ تنزيل التحديث...",
+        "clientDownloadStarted": "بدأ تنزيل حزمة تحديث التطبيق...",
+        "clientDownloadProgress": "تم تنزيل {{percent}}% ({{downloaded}} MB / {{total}} MB)",
+        "clientDownloadProgressNoTotal": "تم تنزيل {{downloaded}} MB",
+        "clientDownloadFinished": "اكتمل التنزيل، جارٍ التحضير للتثبيت وإعادة التشغيل..."
+      }
+    },
+    "navigation": {
+      "tabs": {
+        "home": "Home",
+        "proxies": "الوكلاء",
+        "profiles": "الملفات الشخصية",
+        "connections": "الاتصالات",
+        "rules": "القواعد",
+        "logs": "السجلات",
+        "unlock": "Test",
+        "settings": "الإعدادات"
+      },
+      "menu": {
+        "reorderMode": "Menu reorder mode",
+        "restoreDefaultOrder": "Restore default order",
+        "unlock": "Unlock menu order",
+        "lock": "Lock menu order",
+        "collapseNavBar": "Collapse navigation bar",
+        "expandNavBar": "Expand navigation bar"
+      }
+    }
+  },
+  "notices": {
+    "adjustingProxyMode": "جارٍ تعديل وضع البروكسي، يرجى الانتظار…",
+    "adjusting": "جارٍ التعديل، يرجى الانتظار…",
+    "updatingSubscription": "جارٍ تحديث الاشتراك...",
+    "subscriptionUpdated": "تم تحديث الاشتراك بنجاح",
+    "profileLinkCopied": "تم نسخ الرابط إلى الحافظة",
+    "copyFailed": "فشل النسخ",
+    "profileSaved": "تم حفظ تعديلات الإعدادات بنجاح",
+    "switchedToManualMode": "تم التبديل إلى الوضع اليدوي",
+    "systemProxyEnabled": "تم تفعيل بروكسي النظام",
+    "tunServiceConfigFailed": "فشل إعداد خدمة وضع TUN. جرّب التشغيل بصلاحيات المسؤول.",
+    "tunModeEnabled": "تم تفعيل وضع TUN",
+    "coreUpdateSuccess": "تم تحديث نواة Mihomo بنجاح",
+    "coreUpdateFailed": "فشل تحديث النواة: {{message}}",
+    "coreUpToDate": "النواة محدَّثة بالفعل",
+    "coreCheckFailed": "فشل التحقق من تحديثات النواة: {{message}}",
+    "coreUpgradeStartFailed": "فشل بدء ترقية النواة: {{message}}",
+    "clientUpToDate": "لديك بالفعل أحدث إصدار",
+    "clientCheckFailed": "فشل التحقق من التحديثات: {{message}}",
+    "clientInstallCompleted": "تم تثبيت التحديث. أعد تشغيل التطبيق لتطبيق التغييرات.",
+    "clientUpdateFailed": "فشل التحديث: {{message}}"
+  },
+  "a11y": {
+    "pinWindow": "تثبيت النافذة في الأعلى",
+    "openSettings": "فتح الإعدادات",
+    "closeSettings": "إغلاق الإعدادات",
+    "closeLogsDialog": "إغلاق مربع حوار السجلات",
+    "selectLanguage": "اختر اللغة"
+  }
+}

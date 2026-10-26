@@ -1,0 +1,53 @@
+{
+  "page": {
+    "title": "Bağlantılar"
+  },
+  "notices": {
+    "copied": "Kopyalandı: {{address}}"
+  },
+  "components": {
+    "fields": {
+      "host": "Ana Bilgisayar",
+      "dlSpeed": "İndirme Hızı",
+      "ulSpeed": "Yükleme Hızı",
+      "chains": "Zincirler",
+      "rule": "Kural",
+      "process": "İşlem",
+      "time": "Zaman",
+      "source": "Kaynak",
+      "destination": "Hedef",
+      "destinationPort": "Hedef Port",
+      "type": "Tip",
+      "actions": "Actions"
+    },
+    "order": {
+      "default": "Default",
+      "uploadSpeed": "Yükleme Hızı",
+      "downloadSpeed": "İndirme Hızı"
+    },
+    "actions": {
+      "active": "Active",
+      "closed": "Closed",
+      "closeConnection": "Bağlantıyı Kapat"
+    },
+    "miniTable": {
+      "hostColumn": "Hedef",
+      "chainsColumn": "Rota",
+      "chainsDirect": "Doğrudan",
+      "chainsReject": "Engellendi",
+      "chainsProxy": "Proxy"
+    },
+    "contextMenu": {
+      "setDirect": "Genel doğrudan bağlantı olarak ayarla",
+      "setProxy": "Proxy yönlendirmesi olarak ayarla",
+      "setReject": "Engelle (REJECT)",
+      "disconnect": "Bu bağlantıyı kes",
+      "copyAddress": "Bağlantı adresini kopyala",
+      "viewDetail": "Ayrıntıları görüntüle"
+    },
+    "columnManager": {
+      "title": "Sütunlar",
+      "dragHandle": "Drag handle"
+    }
+  }
+}

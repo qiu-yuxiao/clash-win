@@ -45,3 +45,11 @@ inline int& failures() {
       std::printf("  FAIL %s:%d: %s == %s\n", __FILE__, __LINE__, #a, #b); \
     }                                                                    \
   } while (0)
+
+#define UT_CHECK_MSG(cond, msg)                               \
+  do {                                                        \
+    if (!(cond)) {                                            \
+      ++testfw::failures();                                   \
+      std::printf("  FAIL %s:%d: %s (%s)\n", __FILE__, __LINE__, #cond, msg); \
+    }                                                         \
+  } while (0)

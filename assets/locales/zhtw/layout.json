@@ -1,0 +1,120 @@
+{
+  "components": {
+    "firstRun": {
+      "title": "歡迎使用 Clash Mini",
+      "intro": "偵測到您是首次使用，尚未新增訂閱。請在下方填入代理訂閱連結，我們將自動完成節點解析、測速與網路接管：",
+      "paste": "一鍵貼上剪貼簿連結",
+      "enterHint": "提示：按 Enter 鍵即可匯入",
+      "importAndStart": "立即匯入並開啟",
+      "later": "稍後手動設定",
+      "errEmpty": "請輸入或貼上訂閱連結",
+      "errScheme": "訂閱連結必須以 http:// 或 https:// 開頭",
+      "errImport": "訂閱匯入失敗，請檢查連結是否有效後重試",
+      "readyTitle": "訂閱已匯入",
+      "imported": "訂閱設定已成功匯入並啟用",
+      "checking": "正在確認節點連線狀態…",
+      "readyOk": "代理已就緒，網路通暢",
+      "readyUnconfirmed": "暫未測出節點延遲，可能仍在測速或該節點暫不可用",
+      "sysProxyOff": "系統代理未開啟，請在設定中開啟後再試",
+      "wikiHint": "你可以開啟 Wiki 首頁驗證連線，也順便了解進階玩法。",
+      "openWiki": "開啟 Wiki 首頁測試",
+      "finish": "完成並進入主介面"
+    },
+    "helpMenu": {
+      "github": "GitHub 主頁",
+      "wiki": "幫助指南 (Wiki)",
+      "firstRunGuide": "新手引導",
+      "exportDiagnostics": "匯出診斷包",
+      "generatingDiagnostics": "正在產生診斷包，請稍候…",
+      "diagnosticsExported": "診斷包已匯出：{{path}}",
+      "checkAppUpdate": "檢查軟體更新",
+      "checkCoreUpdate": "檢查核心更新",
+      "buttonAriaLabel": "說明與工具"
+    },
+    "dialogs": {
+      "editProfile": {
+        "title": "編輯設定檔",
+        "nameLabel": "設定檔名稱",
+        "urlLabel": "訂閱地址",
+        "intervalLabel": "更新週期 (單位: 小時, 設為 0 停用)"
+      },
+      "update": {
+        "currentVersion": "目前版本: {{version}}",
+        "latestVersion": "最新版本: {{version}}",
+        "unknown": "未知",
+        "updating": "更新中...",
+        "upToDate": "已是最新",
+        "updateNow": "立即更新"
+      },
+      "client": {
+        "title": "軟體本體更新",
+        "changelog": "更新日誌:",
+        "changelogEmpty": "暫無詳細更新日誌",
+        "prepareRestart": "準備重新啟動"
+      },
+      "core": {
+        "title": "Mihomo 核心更新",
+        "fetching": "取得中...",
+        "updateDone": "更新完成"
+      },
+      "progress": {
+        "coreStarting": "正在啟動核心升級任務...",
+        "coreStartFailed": "啟動失敗: {{message}}",
+        "clientDownloading": "正在下載更新...",
+        "clientDownloadStarted": "開始下載軟體更新套件...",
+        "clientDownloadProgress": "已下載 {{percent}}% ({{downloaded}} MB / {{total}} MB)",
+        "clientDownloadProgressNoTotal": "已下載 {{downloaded}} MB",
+        "clientDownloadFinished": "下載完成，正在準備安裝並重新啟動..."
+      }
+    },
+    "navigation": {
+      "tabs": {
+        "home": "首 頁",
+        "proxies": "代 理",
+        "profiles": "訂 閱",
+        "connections": "連 線",
+        "rules": "規 則",
+        "logs": "日 誌",
+        "unlock": "解 鎖",
+        "settings": "設 定"
+      },
+      "menu": {
+        "reorderMode": "選單排序模式",
+        "restoreDefaultOrder": "恢復預設排序",
+        "unlock": "解鎖選單排序",
+        "lock": "鎖定選單排序",
+        "collapseNavBar": "收起導覽列",
+        "expandNavBar": "展開導覽列"
+      }
+    }
+  },
+  "notices": {
+    "adjustingProxyMode": "正在調整代理模式，請稍候…",
+    "adjusting": "正在調整，請稍候…",
+    "updatingSubscription": "正在更新訂閱...",
+    "subscriptionUpdated": "訂閱更新成功",
+    "profileLinkCopied": "連結已複製到剪貼簿",
+    "copyFailed": "複製失敗",
+    "profileSaved": "設定修改成功",
+    "switchedToManualMode": "已切換至手動模式",
+    "systemProxyEnabled": "已開啟系統代理",
+    "tunServiceConfigFailed": "TUN 模式服務設定失敗，請嘗試以系統管理員身份執行。",
+    "tunModeEnabled": "已開啟 TUN 模式",
+    "coreUpdateSuccess": "Mihomo 核心更新成功",
+    "coreUpdateFailed": "核心更新失敗: {{message}}",
+    "coreUpToDate": "目前核心已是最新版本",
+    "coreCheckFailed": "檢查核心更新失敗: {{message}}",
+    "coreUpgradeStartFailed": "啟動核心升級失敗: {{message}}",
+    "clientUpToDate": "目前已是最新版本",
+    "clientCheckFailed": "檢查更新失敗: {{message}}",
+    "clientInstallCompleted": "更新安裝完成，請重新啟動應用程式以套用變更",
+    "clientUpdateFailed": "更新失敗: {{message}}"
+  },
+  "a11y": {
+    "pinWindow": "置頂窗口",
+    "openSettings": "打開設置",
+    "closeSettings": "關閉設置",
+    "closeLogsDialog": "關閉日誌對話框",
+    "selectLanguage": "選擇語言"
+  }
+}

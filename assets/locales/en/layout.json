@@ -1,0 +1,120 @@
+{
+  "components": {
+    "firstRun": {
+      "title": "Welcome to Clash Mini",
+      "intro": "Looks like this is your first launch and no subscription has been added yet. Paste your subscription link below — node parsing, speed testing and network takeover are handled automatically.",
+      "paste": "Paste from clipboard",
+      "enterHint": "Tip: press Enter to import",
+      "importAndStart": "Import and enable",
+      "later": "Configure manually later",
+      "errEmpty": "Please enter or paste a subscription link",
+      "errScheme": "The link must start with http:// or https://",
+      "errImport": "Import failed. Check the link and try again",
+      "readyTitle": "Subscription imported",
+      "imported": "Subscription imported and activated",
+      "checking": "Checking node connectivity…",
+      "readyOk": "Proxy is ready, network is up",
+      "readyUnconfirmed": "No node latency measured yet — testing may still be running, or the node is unavailable",
+      "sysProxyOff": "System proxy is off. Enable it in Settings and try again",
+      "wikiHint": "Open the Wiki to verify connectivity and learn more.",
+      "openWiki": "Open Wiki to test",
+      "finish": "Done"
+    },
+    "helpMenu": {
+      "github": "GitHub Home",
+      "wiki": "Help Guide (Wiki)",
+      "firstRunGuide": "Getting Started",
+      "exportDiagnostics": "Export Diagnostics",
+      "generatingDiagnostics": "Generating diagnostics, please wait…",
+      "diagnosticsExported": "Diagnostics exported: {{path}}",
+      "checkAppUpdate": "Check App Updates",
+      "checkCoreUpdate": "Check Core Updates",
+      "buttonAriaLabel": "Help and tools"
+    },
+    "dialogs": {
+      "editProfile": {
+        "title": "Edit Profile",
+        "nameLabel": "Profile Name",
+        "urlLabel": "Subscription URL",
+        "intervalLabel": "Update interval (in hours, set 0 to disable)"
+      },
+      "update": {
+        "currentVersion": "Current version: {{version}}",
+        "latestVersion": "Latest version: {{version}}",
+        "unknown": "Unknown",
+        "updating": "Updating...",
+        "upToDate": "Up to date",
+        "updateNow": "Update now"
+      },
+      "client": {
+        "title": "App Update",
+        "changelog": "Changelog:",
+        "changelogEmpty": "No detailed changelog yet",
+        "prepareRestart": "Restarting soon"
+      },
+      "core": {
+        "title": "Mihomo Core Update",
+        "fetching": "Fetching...",
+        "updateDone": "Update completed"
+      },
+      "progress": {
+        "coreStarting": "Starting core upgrade task...",
+        "coreStartFailed": "Start failed: {{message}}",
+        "clientDownloading": "Downloading update...",
+        "clientDownloadStarted": "Starting app update package download...",
+        "clientDownloadProgress": "Downloaded {{percent}}% ({{downloaded}} MB / {{total}} MB)",
+        "clientDownloadProgressNoTotal": "Downloaded {{downloaded}} MB",
+        "clientDownloadFinished": "Download complete, preparing to install and restart..."
+      }
+    },
+    "navigation": {
+      "tabs": {
+        "home": "Home",
+        "proxies": "Proxies",
+        "profiles": "Profiles",
+        "connections": "Connections",
+        "rules": "Rules",
+        "logs": "Logs",
+        "unlock": "Test",
+        "settings": "Settings"
+      },
+      "menu": {
+        "reorderMode": "Menu reorder mode",
+        "restoreDefaultOrder": "Restore default order",
+        "unlock": "Unlock menu order",
+        "lock": "Lock menu order",
+        "collapseNavBar": "Collapse navigation bar",
+        "expandNavBar": "Expand navigation bar"
+      }
+    }
+  },
+  "notices": {
+    "adjustingProxyMode": "Adjusting proxy mode, please wait…",
+    "adjusting": "Adjusting, please wait…",
+    "updatingSubscription": "Updating subscription...",
+    "subscriptionUpdated": "Subscription updated successfully",
+    "profileLinkCopied": "Link copied to clipboard",
+    "copyFailed": "Copy failed",
+    "profileSaved": "Profile saved successfully",
+    "switchedToManualMode": "Switched to manual mode",
+    "systemProxyEnabled": "System proxy enabled",
+    "tunServiceConfigFailed": "TUN mode service configuration failed. Please try running as administrator.",
+    "tunModeEnabled": "TUN mode enabled",
+    "coreUpdateSuccess": "Mihomo core updated successfully",
+    "coreUpdateFailed": "Core update failed: {{message}}",
+    "coreUpToDate": "Core is already up to date",
+    "coreCheckFailed": "Failed to check for core updates: {{message}}",
+    "coreUpgradeStartFailed": "Failed to start core upgrade: {{message}}",
+    "clientUpToDate": "Already the latest version",
+    "clientCheckFailed": "Failed to check for updates: {{message}}",
+    "clientInstallCompleted": "Update installed. Please restart the app to apply changes.",
+    "clientUpdateFailed": "Update failed: {{message}}"
+  },
+  "a11y": {
+    "pinWindow": "Pin window on top",
+    "openSettings": "Open settings",
+    "closeSettings": "Close settings",
+    "closeLogsDialog": "Close logs dialog",
+    "selectLanguage": "Select language"
+  }
+}

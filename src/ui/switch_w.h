@@ -1,0 +1,41 @@
+#pragma once
+// SwitchW（T10）：开关——开/关/拖动中三态 + 动画进度（anim_ 0..1）。
+// 对照 MUI Switch：单击切换；拖动时 thumb 跟随 x，松开按进度≥0.5 判定。
+#include <functional>
+
+#include "widget.h"
+
+namespace clashwin::ui {
+
+class SwitchW : public Widget {
+ public:
+  explicit SwitchW(Widget* parent = nullptr) : Widget(parent) {}
+
+  bool checked() const { return checked_; }
+  bool dragging() const { return dragging_; }
+  float anim() const { return anim_; }  // 测试检查点
+  // fire=false 时只改状态不触发回调（恢复内核实际值用）
+  bool set_checked(bool v, bool fire = true);
+
+  std::function<void(bool)> on_change;
+
+  // 绘制参数（T12 皮肤覆盖）
+  Color4f track_on_ = Color4f::hex(0x007AFF);
+  Color4f track_off_ = Color4f::hex(0x000000, 0.25f);
+  Color4f thumb_ = Color4f::hex(0xFFFFFF);
+  float width_ = 36, height_ = 20;  // iOS 风
+
+  SizeF on_measure(float max_w, float max_h) override;
+  bool on_mouse(const MouseEvent& e) override;
+  void on_paint(IRenderTarget& rt) override;
+
+ private:
+  void update_drag(float local_x);
+  bool checked_ = false;
+  bool dragging_ = false;
+  bool drag_moved_ = false;  // Down 后有超过阈值的位移 = 拖动（否则单击）
+  float press_x_ = 0;
+  float anim_ = 0;
+};
+
+}  // namespace clashwin::ui

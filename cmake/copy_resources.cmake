@@ -8,3 +8,12 @@ function(add_clashwin_copy_resources TARGET)
     COMMENT "拷贝 sidecar/ resources/ 到输出目录"
   )
 endfunction()
+
+# T10 i18n：assets/locales/（13 语言 JSON）拷到输出目录（exe 同级 locales/）
+function(add_clashwin_copy_locales TARGET)
+  add_custom_command(TARGET ${TARGET} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/locales" "$<TARGET_FILE_DIR:${TARGET}>/locales"
+    COMMENT "拷贝 locales/ 到输出目录"
+  )
+endfunction()

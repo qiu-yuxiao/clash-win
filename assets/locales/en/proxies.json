@@ -1,0 +1,80 @@
+{
+  "page": {
+    "modes": {
+      "rule": "Rule",
+      "global": "Global",
+      "direct": "Direct"
+    },
+    "actions": {
+      "connect": "Connect",
+      "disconnect": "Disconnect",
+      "connecting": "Connecting..."
+    },
+    "provider": {
+      "title": "Proxy Provider",
+      "actions": {
+        "updateAll": "Update All",
+        "update": "Update"
+      }
+    },
+    "rules": {
+      "title": "Proxy Rules",
+      "select": "Select Rules"
+    },
+    "a11y": {
+      "nodelist": "Proxy node list"
+    },
+    "labels": {
+      "proxyCount": "Proxy Count",
+      "delayCheckReset": "Delay check to cancel fixed"
+    },
+    "tooltips": {
+      "locate": "locate",
+      "delayCheck": "Delay check",
+      "sortDefault": "Sort by default",
+      "sortDelay": "Sort by delay",
+      "sortName": "Sort by name",
+      "delayCheckUrl": "Delay check URL",
+      "showBasic": "Proxy basic",
+      "showDetail": "Proxy detail",
+      "filter": "Filter"
+    },
+    "placeholders": {
+      "delayCheckUrl": "Delay check URL"
+    },
+    "messages": {
+      "directMode": "Direct Mode"
+    },
+    "title": {
+      "default": "Proxy Groups"
+    }
+  },
+  "feedback": {
+    "notifications": {
+      "provider": {
+        "updateSuccess": "{{name}} updated successfully",
+        "updateFailed": "Failed to update {{name}}: {{message}}",
+        "genericError": "Update failed: {{message}}",
+        "none": "No providers available to update",
+        "allUpdated": "All providers updated successfully"
+      }
+    }
+  },
+  "components": {
+    "enums": {
+      "strategies": {
+        "select": "Select proxy manually",
+        "url-test": "Select proxy based on URL test delay",
+        "fallback": "Switch to another proxy on error",
+        "load-balance": "Distribute proxy based on load balancing",
+        "relay": "Pass through the defined proxy chain"
+      },
+      "policies": {
+        "DIRECT": "Data goes directly outbound (DIRECT)",
+        "REJECT": "Intercepts requests (REJECT)",
+        "REJECT-DROP": "Discards requests (REJECT-DROP)",
+        "PASS": "Skips this rule when matched (PASS)"
+      }
+    }
+  }
+}

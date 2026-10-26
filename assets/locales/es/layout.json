@@ -1,0 +1,120 @@
+{
+  "components": {
+    "firstRun": {
+      "title": "Bienvenido a Clash Mini",
+      "intro": "Parece que es tu primer inicio y aún no hay ninguna suscripción. Pega el enlace abajo: el análisis de nodos, la prueba de velocidad y la toma de red se harán automáticamente.",
+      "paste": "Pegar del portapapeles",
+      "enterHint": "Consejo: pulsa Enter para importar",
+      "importAndStart": "Importar y activar",
+      "later": "Configurar manualmente más tarde",
+      "errEmpty": "Introduce o pega un enlace de suscripción",
+      "errScheme": "El enlace debe empezar por http:// o https://",
+      "errImport": "Error al importar. Revisa el enlace e inténtalo de nuevo",
+      "readyTitle": "Suscripción importada",
+      "imported": "Suscripción importada y activada",
+      "checking": "Comprobando la conectividad del nodo…",
+      "readyOk": "El proxy está listo, la red funciona",
+      "readyUnconfirmed": "Aún no se ha medido la latencia del nodo; puede que el test siga en curso o que el nodo no esté disponible",
+      "sysProxyOff": "El proxy del sistema está desactivado. Actívalo en Ajustes e inténtalo de nuevo",
+      "wikiHint": "Abre el Wiki para comprobar la conexión y ver más funciones.",
+      "openWiki": "Abrir el Wiki para probar",
+      "finish": "Listo"
+    },
+    "helpMenu": {
+      "github": "Página de GitHub",
+      "wiki": "Guía de ayuda (Wiki)",
+      "firstRunGuide": "Guía de inicio",
+      "exportDiagnostics": "Exportar diagnóstico",
+      "generatingDiagnostics": "Generando diagnóstico, espere…",
+      "diagnosticsExported": "Diagnóstico exportado: {{path}}",
+      "checkAppUpdate": "Buscar actualizaciones de la app",
+      "checkCoreUpdate": "Buscar actualizaciones del núcleo",
+      "buttonAriaLabel": "Ayuda y herramientas"
+    },
+    "dialogs": {
+      "editProfile": {
+        "title": "Editar perfil",
+        "nameLabel": "Nombre del perfil",
+        "urlLabel": "URL de suscripción",
+        "intervalLabel": "Intervalo de actualización (en horas, 0 para desactivar)"
+      },
+      "update": {
+        "currentVersion": "Versión actual: {{version}}",
+        "latestVersion": "Última versión: {{version}}",
+        "unknown": "Desconocido",
+        "updating": "Actualizando...",
+        "upToDate": "Ya está actualizado",
+        "updateNow": "Actualizar ahora"
+      },
+      "client": {
+        "title": "Actualización de la aplicación",
+        "changelog": "Registro de cambios:",
+        "changelogEmpty": "Aún no hay registro de cambios detallado",
+        "prepareRestart": "Preparando reinicio"
+      },
+      "core": {
+        "title": "Actualización del núcleo Mihomo",
+        "fetching": "Obteniendo...",
+        "updateDone": "Actualización completada"
+      },
+      "progress": {
+        "coreStarting": "Iniciando la tarea de actualización del núcleo...",
+        "coreStartFailed": "Error al iniciar: {{message}}",
+        "clientDownloading": "Descargando actualización...",
+        "clientDownloadStarted": "Comenzando la descarga del paquete de actualización...",
+        "clientDownloadProgress": "Descargado {{percent}}% ({{downloaded}} MB / {{total}} MB)",
+        "clientDownloadProgressNoTotal": "Descargado {{downloaded}} MB",
+        "clientDownloadFinished": "Descarga completada, preparando instalación y reinicio..."
+      }
+    },
+    "navigation": {
+      "tabs": {
+        "home": "Hogar",
+        "proxies": "Proxies",
+        "profiles": "Perfiles",
+        "connections": "Conexiones",
+        "rules": "Normas",
+        "logs": "Registros",
+        "unlock": "Descubrir",
+        "settings": "Ajustes"
+      },
+      "menu": {
+        "reorderMode": "Menu reorder mode",
+        "restoreDefaultOrder": "Restore default order",
+        "unlock": "Unlock menu order",
+        "lock": "Lock menu order",
+        "collapseNavBar": "Collapse navigation bar",
+        "expandNavBar": "Expand navigation bar"
+      }
+    }
+  },
+  "notices": {
+    "adjustingProxyMode": "Ajustando el modo proxy, espere…",
+    "adjusting": "Ajustando, espere…",
+    "updatingSubscription": "Actualizando suscripción...",
+    "subscriptionUpdated": "Suscripción actualizada correctamente",
+    "profileLinkCopied": "Enlace copiado al portapapeles",
+    "copyFailed": "Error al copiar",
+    "profileSaved": "Configuración modificada correctamente",
+    "switchedToManualMode": "Cambiado a modo manual",
+    "systemProxyEnabled": "Proxy del sistema activado",
+    "tunServiceConfigFailed": "Error al configurar el servicio del modo TUN. Intente ejecutar como administrador.",
+    "tunModeEnabled": "Modo TUN activado",
+    "coreUpdateSuccess": "Núcleo Mihomo actualizado correctamente",
+    "coreUpdateFailed": "Error al actualizar el núcleo: {{message}}",
+    "coreUpToDate": "El núcleo ya está actualizado",
+    "coreCheckFailed": "Error al buscar actualizaciones del núcleo: {{message}}",
+    "coreUpgradeStartFailed": "Error al iniciar la actualización del núcleo: {{message}}",
+    "clientUpToDate": "Ya tiene la última versión",
+    "clientCheckFailed": "Error al buscar actualizaciones: {{message}}",
+    "clientInstallCompleted": "Actualización instalada. Reinicie la aplicación para aplicar los cambios.",
+    "clientUpdateFailed": "Error al actualizar: {{message}}"
+  },
+  "a11y": {
+    "pinWindow": "Fijar ventana arriba",
+    "openSettings": "Abrir configuración",
+    "closeSettings": "Cerrar configuración",
+    "closeLogsDialog": "Cerrar diálogo de registros",
+    "selectLanguage": "Seleccionar idioma"
+  }
+}

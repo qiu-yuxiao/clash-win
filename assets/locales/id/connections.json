@@ -1,0 +1,53 @@
+{
+  "page": {
+    "title": "Koneksi"
+  },
+  "notices": {
+    "copied": "Tersalin: {{address}}"
+  },
+  "components": {
+    "fields": {
+      "host": "Host",
+      "dlSpeed": "Kecepatan Unduh",
+      "ulSpeed": "Kecepatan Unggah",
+      "chains": "Rantai",
+      "rule": "Aturan",
+      "process": "Proses",
+      "time": "Waktu",
+      "source": "Sumber",
+      "destination": "IP Tujuan",
+      "destinationPort": "Port Tujuan",
+      "type": "Jenis",
+      "actions": "Actions"
+    },
+    "order": {
+      "default": "Default",
+      "uploadSpeed": "Kecepatan Unggah",
+      "downloadSpeed": "Kecepatan Unduh"
+    },
+    "actions": {
+      "active": "Active",
+      "closed": "Closed",
+      "closeConnection": "Tutup Koneksi"
+    },
+    "miniTable": {
+      "hostColumn": "Tujuan",
+      "chainsColumn": "Rute",
+      "chainsDirect": "Langsung",
+      "chainsReject": "Diblokir",
+      "chainsProxy": "Proksi"
+    },
+    "contextMenu": {
+      "setDirect": "Jadikan koneksi langsung global",
+      "setProxy": "Jadikan perutean proksi",
+      "setReject": "Blokir (REJECT)",
+      "disconnect": "Putuskan koneksi ini",
+      "copyAddress": "Salin alamat koneksi",
+      "viewDetail": "Lihat detail"
+    },
+    "columnManager": {
+      "title": "Kolom",
+      "dragHandle": "Drag handle"
+    }
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "page": {
+    "modes": {
+      "rule": "Правила",
+      "global": "Глобальный",
+      "direct": "Прямой"
+    },
+    "actions": {
+      "connect": "Подключиться",
+      "disconnect": "Отключиться",
+      "connecting": "Подключение..."
+    },
+    "provider": {
+      "title": "Провайдеры прокси",
+      "actions": {
+        "updateAll": "Обновить все",
+        "update": "Обновить"
+      }
+    },
+    "rules": {
+      "title": "Правила прокси",
+      "select": "Выбрать правила"
+    },
+    "a11y": {
+      "nodelist": "Список прокси-узлов"
+    },
+    "labels": {
+      "proxyCount": "Количество прокси",
+      "delayCheckReset": "Сброс проверки задержки"
+    },
+    "tooltips": {
+      "locate": "Местоположение",
+      "delayCheck": "Проверка задержки",
+      "sortDefault": "Сортировать по умолчанию",
+      "sortDelay": "Сортировать по задержке",
+      "sortName": "Сортировать по названию",
+      "delayCheckUrl": "URL для проверки задержки",
+      "showBasic": "Показывать меньше информации о прокси",
+      "showDetail": "Показывать больше информации о прокси",
+      "filter": "Фильтр"
+    },
+    "placeholders": {
+      "delayCheckUrl": "URL для проверки задержки"
+    },
+    "messages": {
+      "directMode": "Прямой режим"
+    },
+    "title": {
+      "default": "Группы прокси"
+    }
+  },
+  "feedback": {
+    "notifications": {
+      "provider": {
+        "updateSuccess": "{{name}} успешно обновлён",
+        "updateFailed": "Не удалось обновить {{name}}: {{message}}",
+        "genericError": "Ошибка обновления: {{message}}",
+        "none": "Нет доступных провайдеров для обновления",
+        "allUpdated": "Все провайдеры успешно обновлены"
+      }
+    }
+  },
+  "components": {
+    "enums": {
+      "strategies": {
+        "select": "select",
+        "url-test": "url-test",
+        "fallback": "fallback",
+        "load-balance": "load-balance",
+        "relay": "relay"
+      },
+      "policies": {
+        "DIRECT": "DIRECT",
+        "REJECT": "REJECT",
+        "REJECT-DROP": "REJECT-DROP",
+        "PASS": "PASS"
+      }
+    }
+  }
+}

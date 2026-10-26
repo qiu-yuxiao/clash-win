@@ -1,0 +1,53 @@
+{
+  "page": {
+    "title": "الاتصالات"
+  },
+  "notices": {
+    "copied": "تم النسخ: {{address}}"
+  },
+  "components": {
+    "fields": {
+      "host": "المضيف",
+      "dlSpeed": "سرعة التنزيل",
+      "ulSpeed": "سرعة الرفع",
+      "chains": "السلاسل",
+      "rule": "قاعدة",
+      "process": "عملية",
+      "time": "الوقت",
+      "source": "المصدر",
+      "destination": "عنوان IP الوجهة",
+      "destinationPort": "ميناء الوجهة",
+      "type": "النوع",
+      "actions": "Actions"
+    },
+    "order": {
+      "default": "Default",
+      "uploadSpeed": "سرعة الرفع",
+      "downloadSpeed": "سرعة التنزيل"
+    },
+    "actions": {
+      "active": "Active",
+      "closed": "Closed",
+      "closeConnection": "إغلاق الاتصال"
+    },
+    "miniTable": {
+      "hostColumn": "الوجهة",
+      "chainsColumn": "المسار",
+      "chainsDirect": "مباشر",
+      "chainsReject": "محجوب",
+      "chainsProxy": "بروكسي"
+    },
+    "contextMenu": {
+      "setDirect": "تعيين كاتصال مباشر عام",
+      "setProxy": "تعيين كتوجيه عبر البروكسي",
+      "setReject": "حجبه (REJECT)",
+      "disconnect": "قطع هذا الاتصال",
+      "copyAddress": "نسخ عنوان الاتصال",
+      "viewDetail": "عرض التفاصيل"
+    },
+    "columnManager": {
+      "title": "الأعمدة",
+      "dragHandle": "Drag handle"
+    }
+  }
+}

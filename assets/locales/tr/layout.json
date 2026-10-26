@@ -1,0 +1,120 @@
+{
+  "components": {
+    "firstRun": {
+      "title": "Clash Mini'ye hoş geldiniz",
+      "intro": "İlk açılış gibi görünüyor ve henüz abonelik yok. Abonelik bağlantını aşağıya yapıştır — düğüm ayrıştırma, hız testi ve ağ devralma otomatik yapılır.",
+      "paste": "Panodan yapıştır",
+      "enterHint": "İpucu: içe aktarmak için Enter'a basın",
+      "importAndStart": "İçe aktar ve etkinleştir",
+      "later": "Daha sonra elle yapılandır",
+      "errEmpty": "Lütfen bir abonelik bağlantısı gir veya yapıştır",
+      "errScheme": "Bağlantı http:// veya https:// ile başlamalı",
+      "errImport": "İçe aktarma başarısız. Bağlantıyı kontrol edip tekrar dene",
+      "readyTitle": "Abonelik içe aktarıldı",
+      "imported": "Abonelik içe aktarıldı ve etkinleştirildi",
+      "checking": "Düğüm bağlantısı kontrol ediliyor…",
+      "readyOk": "Proxy hazır, ağ çalışıyor",
+      "readyUnconfirmed": "Düğüm gecikmesi henüz ölçülmedi — test sürüyor olabilir ya da düğüm kullanılamıyor",
+      "sysProxyOff": "Sistem proxy'si kapalı. Ayarlardan açıp tekrar dene",
+      "wikiHint": "Bağlantıyı doğrulamak ve daha fazlasını görmek için Wiki'yi aç.",
+      "openWiki": "Test için Wiki'yi aç",
+      "finish": "Bitti"
+    },
+    "helpMenu": {
+      "github": "GitHub Sayfası",
+      "wiki": "Yardım Rehberi (Wiki)",
+      "firstRunGuide": "Başlangıç Rehberi",
+      "exportDiagnostics": "Tanılama Dışa Aktar",
+      "generatingDiagnostics": "Tanılama oluşturuluyor, lütfen bekleyin…",
+      "diagnosticsExported": "Tanılama dışa aktarıldı: {{path}}",
+      "checkAppUpdate": "Uygulama Güncellemelerini Denetle",
+      "checkCoreUpdate": "Çekirdek Güncellemelerini Denetle",
+      "buttonAriaLabel": "Yardım ve araçlar"
+    },
+    "dialogs": {
+      "editProfile": {
+        "title": "Profili Düzenle",
+        "nameLabel": "Profil Adı",
+        "urlLabel": "Abonelik Adresi",
+        "intervalLabel": "Güncelleme aralığı (saat cinsinden, devre dışı bırakmak için 0)"
+      },
+      "update": {
+        "currentVersion": "Mevcut sürüm: {{version}}",
+        "latestVersion": "En son sürüm: {{version}}",
+        "unknown": "Bilinmiyor",
+        "updating": "Güncelleniyor...",
+        "upToDate": "Zaten güncel",
+        "updateNow": "Şimdi güncelle"
+      },
+      "client": {
+        "title": "Uygulama Güncellemesi",
+        "changelog": "Değişiklik günlüğü:",
+        "changelogEmpty": "Henüz ayrıntılı değişiklik günlüğü yok",
+        "prepareRestart": "Yeniden başlatmaya hazırlanıyor"
+      },
+      "core": {
+        "title": "Mihomo Çekirdeği Güncellemesi",
+        "fetching": "Alınıyor...",
+        "updateDone": "Güncelleme tamamlandı"
+      },
+      "progress": {
+        "coreStarting": "Çekirdek yükseltme görevi başlatılıyor...",
+        "coreStartFailed": "Başlatma başarısız: {{message}}",
+        "clientDownloading": "Güncelleme indiriliyor...",
+        "clientDownloadStarted": "Uygulama güncelleme paketi indirmesi başlıyor...",
+        "clientDownloadProgress": "İndirildi: %{{percent}} ({{downloaded}} MB / {{total}} MB)",
+        "clientDownloadProgressNoTotal": "İndirildi: {{downloaded}} MB",
+        "clientDownloadFinished": "İndirme tamamlandı, kurulum ve yeniden başlatma hazırlanıyor..."
+      }
+    },
+    "navigation": {
+      "tabs": {
+        "home": "Ana Sayfa",
+        "proxies": "Vekil'ler",
+        "profiles": "Profiller",
+        "connections": "Bağlantılar",
+        "rules": "Kurallar",
+        "logs": "Günlükler",
+        "unlock": "Test",
+        "settings": "Ayarlar"
+      },
+      "menu": {
+        "reorderMode": "Menu reorder mode",
+        "restoreDefaultOrder": "Restore default order",
+        "unlock": "Unlock menu order",
+        "lock": "Lock menu order",
+        "collapseNavBar": "Collapse navigation bar",
+        "expandNavBar": "Expand navigation bar"
+      }
+    }
+  },
+  "notices": {
+    "adjustingProxyMode": "Proxy modu ayarlanıyor, lütfen bekleyin…",
+    "adjusting": "Ayarlanıyor, lütfen bekleyin…",
+    "updatingSubscription": "Abonelik güncelleniyor...",
+    "subscriptionUpdated": "Abonelik başarıyla güncellendi",
+    "profileLinkCopied": "Bağlantı panoya kopyalandı",
+    "copyFailed": "Kopyalama başarısız",
+    "profileSaved": "Yapılandırma başarıyla değiştirildi",
+    "switchedToManualMode": "Manuel moda geçildi",
+    "systemProxyEnabled": "Sistem proxy'si etkinleştirildi",
+    "tunServiceConfigFailed": "TUN modu hizmet yapılandırması başarısız oldu. Yönetici olarak çalıştırmayı deneyin.",
+    "tunModeEnabled": "TUN modu etkinleştirildi",
+    "coreUpdateSuccess": "Mihomo çekirdeği başarıyla güncellendi",
+    "coreUpdateFailed": "Çekirdek güncellemesi başarısız: {{message}}",
+    "coreUpToDate": "Çekirdek zaten en son sürümde",
+    "coreCheckFailed": "Çekirdek güncellemesi kontrol edilemedi: {{message}}",
+    "coreUpgradeStartFailed": "Çekirdek yükseltmesi başlatılamadı: {{message}}",
+    "clientUpToDate": "Zaten en son sürümdesiniz",
+    "clientCheckFailed": "Güncellemeler kontrol edilemedi: {{message}}",
+    "clientInstallCompleted": "Güncelleme kuruldu. Değişiklikleri uygulamak için uygulamayı yeniden başlatın.",
+    "clientUpdateFailed": "Güncelleme başarısız: {{message}}"
+  },
+  "a11y": {
+    "pinWindow": "Pencereyi üstte sabitle",
+    "openSettings": "Ayarları aç",
+    "closeSettings": "Ayarları kapat",
+    "closeLogsDialog": "Günlük iletişim kutusunu kapat",
+    "selectLanguage": "Dil seç"
+  }
+}

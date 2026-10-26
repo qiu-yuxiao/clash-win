@@ -139,6 +139,48 @@ target_include_directories(clashwin_cmd PUBLIC
 target_link_libraries(clashwin_cmd PUBLIC clashwin_core clashwin_enhance iphlpapi)
 target_compile_options(clashwin_cmd PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
+# i18n（T10：13 语言加载 / fallback=zh / 归一 / 插值 / 热切换）
+add_library(clashwin_i18n STATIC
+  src/i18n/i18n.cpp
+)
+target_include_directories(clashwin_i18n PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(clashwin_i18n PUBLIC clashwin_util nlohmann_json)
+target_compile_options(clashwin_i18n PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
+
+# UI 渲染核心（T10：D2D 双后端 / Widget 树 / 容器 / 控件族 / UiPostbox）
+add_library(clashwin_ui STATIC
+  src/ui/d2d_context.cpp
+  src/ui/widget.cpp
+  src/ui/container.cpp
+  src/ui/label.cpp
+  src/ui/button.cpp
+  src/ui/icon_w.cpp
+  src/ui/segmented.cpp
+  src/ui/switch_w.cpp
+  src/ui/textfield.cpp
+  src/ui/slider.cpp
+  src/ui/dropdown.cpp
+  src/ui/checkbox_w.cpp
+  src/ui/scroll_list.cpp
+  src/ui/context_menu.cpp
+  src/ui/modal.cpp
+  src/ui/snackbar_w.cpp
+  src/ui/tooltip_w.cpp
+  src/ui/canvas_graph.cpp
+  src/ui/text_viewer.cpp
+  src/ui/ui_postbox.cpp
+)
+target_include_directories(clashwin_ui PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(clashwin_ui PUBLIC clashwin_util clashwin_cmd clashwin_i18n
+  d2d1 dwrite windowscodecs user32)
+target_compile_options(clashwin_ui PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
+
 add_executable(clashwin WIN32
   src/main.cpp
   src/app/app.cpp
@@ -151,7 +193,9 @@ target_link_libraries(clashwin PRIVATE
   clashwin_mihomo             # T04 管道通信层
   clashwin_core               # T07 内核生命周期
   clashwin_cmd                # T09 事件总线 + 命令门面
-  d2d1 user32 gdi32 ws2_32    # D2D / 窗口 / Winsock
+  clashwin_i18n               # T10 i18n
+  clashwin_ui                 # T10 UI 渲染核心
+  d2d1 dwrite windowscodecs user32 gdi32 ws2_32  # D2D/DWrite/WIC / 窗口 / Winsock
 )
 
 # 本项目源码用 /W4（第三方保持全局 /W3）
@@ -161,6 +205,7 @@ target_compile_options(clashwin_util PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 target_link_options(clashwin PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/MANIFEST:NO>)
 
 add_clashwin_copy_resources(clashwin)
+add_clashwin_copy_locales(clashwin)
 
 # ---------- 单测（T02 util + T03 config） ----------
 add_executable(clashwin_test
@@ -205,6 +250,15 @@ add_executable(clashwin_test
   tests/test_events.cpp
   tests/test_cmd_registry.cpp
   tests/test_cmd_smoke.cpp
+  tests/test_ui_layout.cpp
+  tests/test_ui_widgets.cpp
+  tests/test_ui_hit.cpp
+  tests/test_ui_dirty.cpp
+  tests/test_ui_scroll.cpp
+  tests/test_ui_offscreen.cpp
+  tests/test_ui_postbox.cpp
+  tests/test_i18n.cpp
 )
-target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd)
+target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
+add_clashwin_copy_locales(clashwin_test)

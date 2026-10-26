@@ -1,0 +1,53 @@
+{
+  "page": {
+    "title": "Connections"
+  },
+  "notices": {
+    "copied": "Copied: {{address}}"
+  },
+  "components": {
+    "fields": {
+      "host": "Host",
+      "dlSpeed": "DL Speed",
+      "ulSpeed": "UL Speed",
+      "chains": "Chains",
+      "rule": "Rule",
+      "process": "Process",
+      "time": "Time",
+      "source": "Source",
+      "destination": "Destination",
+      "destinationPort": "Destination Port",
+      "type": "Type",
+      "actions": "Actions"
+    },
+    "order": {
+      "default": "Default",
+      "uploadSpeed": "Upload Speed",
+      "downloadSpeed": "Download Speed"
+    },
+    "actions": {
+      "active": "Active",
+      "closed": "Closed",
+      "closeConnection": "Close Connection"
+    },
+    "miniTable": {
+      "hostColumn": "Destination",
+      "chainsColumn": "Route",
+      "chainsDirect": "Direct",
+      "chainsReject": "Blocked",
+      "chainsProxy": "Proxied"
+    },
+    "contextMenu": {
+      "setDirect": "Set as global direct",
+      "setProxy": "Set as proxied routing",
+      "setReject": "Block it (REJECT)",
+      "disconnect": "Disconnect",
+      "copyAddress": "Copy connection address",
+      "viewDetail": "View details"
+    },
+    "columnManager": {
+      "title": "Columns",
+      "dragHandle": "Drag handle"
+    }
+  }
+}

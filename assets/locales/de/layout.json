@@ -1,0 +1,120 @@
+{
+  "components": {
+    "firstRun": {
+      "title": "Willkommen bei Clash Mini",
+      "intro": "Sieht aus, als wäre dies der erste Start und es ist noch kein Abonnement vorhanden. Füge unten deinen Abo-Link ein – Knotenanalyse, Geschwindigkeitstest und Netzwerkübernahme laufen automatisch.",
+      "paste": "Aus Zwischenablage einfügen",
+      "enterHint": "Tipp: mit Enter importieren",
+      "importAndStart": "Importieren und aktivieren",
+      "later": "Später manuell einrichten",
+      "errEmpty": "Bitte Abo-Link eingeben oder einfügen",
+      "errScheme": "Der Link muss mit http:// oder https:// beginnen",
+      "errImport": "Import fehlgeschlagen. Link prüfen und erneut versuchen",
+      "readyTitle": "Abonnement importiert",
+      "imported": "Abonnement importiert und aktiviert",
+      "checking": "Knotenverbindung wird geprüft…",
+      "readyOk": "Proxy ist bereit, Netzwerk läuft",
+      "readyUnconfirmed": "Noch keine Knotenlatenz gemessen – evtl. läuft der Test noch oder der Knoten ist nicht verfügbar",
+      "sysProxyOff": "Systemproxy ist aus. In den Einstellungen aktivieren und erneut versuchen",
+      "wikiHint": "Öffne das Wiki, um die Verbindung zu prüfen und mehr zu erfahren.",
+      "openWiki": "Wiki zum Testen öffnen",
+      "finish": "Fertig"
+    },
+    "helpMenu": {
+      "github": "GitHub-Seite",
+      "wiki": "Hilfe (Wiki)",
+      "firstRunGuide": "Erste-Schritte-Guide",
+      "exportDiagnostics": "Diagnose exportieren",
+      "generatingDiagnostics": "Diagnose wird erstellt, bitte warten…",
+      "diagnosticsExported": "Diagnose exportiert: {{path}}",
+      "checkAppUpdate": "App-Updates prüfen",
+      "checkCoreUpdate": "Core-Updates prüfen",
+      "buttonAriaLabel": "Hilfe und Werkzeuge"
+    },
+    "dialogs": {
+      "editProfile": {
+        "title": "Profil bearbeiten",
+        "nameLabel": "Profilname",
+        "urlLabel": "Abo-URL",
+        "intervalLabel": "Aktualisierungsintervall (in Stunden, 0 = deaktiviert)"
+      },
+      "update": {
+        "currentVersion": "Aktuelle Version: {{version}}",
+        "latestVersion": "Neueste Version: {{version}}",
+        "unknown": "Unbekannt",
+        "updating": "Aktualisierung...",
+        "upToDate": "Bereits aktuell",
+        "updateNow": "Jetzt aktualisieren"
+      },
+      "client": {
+        "title": "App-Update",
+        "changelog": "Änderungsprotokoll:",
+        "changelogEmpty": "Kein detailliertes Änderungsprotokoll vorhanden",
+        "prepareRestart": "Neustart wird vorbereitet"
+      },
+      "core": {
+        "title": "Mihomo-Core-Update",
+        "fetching": "Wird abgerufen...",
+        "updateDone": "Update abgeschlossen"
+      },
+      "progress": {
+        "coreStarting": "Core-Aktualisierung wird gestartet...",
+        "coreStartFailed": "Start fehlgeschlagen: {{message}}",
+        "clientDownloading": "Update wird heruntergeladen...",
+        "clientDownloadStarted": "Download des App-Update-Pakets gestartet...",
+        "clientDownloadProgress": "{{percent}} % heruntergeladen ({{downloaded}} MB / {{total}} MB)",
+        "clientDownloadProgressNoTotal": "{{downloaded}} MB heruntergeladen",
+        "clientDownloadFinished": "Download abgeschlossen, Installation und Neustart werden vorbereitet..."
+      }
+    },
+    "navigation": {
+      "tabs": {
+        "home": "Startseite",
+        "proxies": "Proxy",
+        "profiles": "Abonnement",
+        "connections": "Verbindungen",
+        "rules": "Regeln",
+        "logs": "Protokolle",
+        "unlock": "Testen",
+        "settings": "Einstellungen"
+      },
+      "menu": {
+        "reorderMode": "Menu reorder mode",
+        "restoreDefaultOrder": "Restore default order",
+        "unlock": "Unlock menu order",
+        "lock": "Lock menu order",
+        "collapseNavBar": "Collapse navigation bar",
+        "expandNavBar": "Expand navigation bar"
+      }
+    }
+  },
+  "notices": {
+    "adjustingProxyMode": "Proxy-Modus wird angepasst, bitte warten…",
+    "adjusting": "Anpassung läuft, bitte warten…",
+    "updatingSubscription": "Abo wird aktualisiert...",
+    "subscriptionUpdated": "Abo erfolgreich aktualisiert",
+    "profileLinkCopied": "Link in die Zwischenablage kopiert",
+    "copyFailed": "Kopieren fehlgeschlagen",
+    "profileSaved": "Konfiguration erfolgreich gespeichert",
+    "switchedToManualMode": "Zu manuellem Modus gewechselt",
+    "systemProxyEnabled": "Systemproxy aktiviert",
+    "tunServiceConfigFailed": "Konfiguration des TUN-Modus-Dienstes fehlgeschlagen. Bitte als Administrator ausführen.",
+    "tunModeEnabled": "TUN-Modus aktiviert",
+    "coreUpdateSuccess": "Mihomo-Core erfolgreich aktualisiert",
+    "coreUpdateFailed": "Core-Update fehlgeschlagen: {{message}}",
+    "coreUpToDate": "Der Core ist bereits aktuell",
+    "coreCheckFailed": "Core-Update-Prüfung fehlgeschlagen: {{message}}",
+    "coreUpgradeStartFailed": "Core-Update konnte nicht gestartet werden: {{message}}",
+    "clientUpToDate": "Bereits die neueste Version",
+    "clientCheckFailed": "Update-Prüfung fehlgeschlagen: {{message}}",
+    "clientInstallCompleted": "Update installiert. Bitte App neu starten, um die Änderungen zu übernehmen.",
+    "clientUpdateFailed": "Update fehlgeschlagen: {{message}}"
+  },
+  "a11y": {
+    "pinWindow": "Fenster oben anheften",
+    "openSettings": "Einstellungen öffnen",
+    "closeSettings": "Einstellungen schließen",
+    "closeLogsDialog": "Protokolldialog schließen",
+    "selectLanguage": "Sprache auswählen"
+  }
+}

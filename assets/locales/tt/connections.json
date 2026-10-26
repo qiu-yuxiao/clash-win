@@ -1,0 +1,53 @@
+{
+  "page": {
+    "title": "Тоташулар"
+  },
+  "notices": {
+    "copied": "Күчерелде: {{address}}"
+  },
+  "components": {
+    "fields": {
+      "host": "Хост",
+      "dlSpeed": "Йөкләү тизл.",
+      "ulSpeed": "Чыгару тизл.",
+      "chains": "Чылбырлар",
+      "rule": "Кагыйдә",
+      "process": "Процесс",
+      "time": "Тоташу вакыты",
+      "source": "Чыганак адресы",
+      "destination": "Максат IP-адресы",
+      "destinationPort": "Барасы порты",
+      "type": "Төр",
+      "actions": "Actions"
+    },
+    "order": {
+      "default": "Default",
+      "uploadSpeed": "Йөкләү (чыгару) тизлеге",
+      "downloadSpeed": "Йөкләү тизлеге"
+    },
+    "actions": {
+      "active": "Active",
+      "closed": "Closed",
+      "closeConnection": "Тоташуны ябу"
+    },
+    "miniTable": {
+      "hostColumn": "Максат",
+      "chainsColumn": "Юнәлеш",
+      "chainsDirect": "Директ",
+      "chainsReject": "Блокланган",
+      "chainsProxy": "Прокси"
+    },
+    "contextMenu": {
+      "setDirect": "Гомуми директ тоташу итеп билгеләү",
+      "setProxy": "Прокси юнәлеше итеп билгеләү",
+      "setReject": "Блоклау (REJECT)",
+      "disconnect": "Бу тоташуны өзү",
+      "copyAddress": "Тоташу адресын күчерү",
+      "viewDetail": "Детальләрне карау"
+    },
+    "columnManager": {
+      "title": "Баганалар",
+      "dragHandle": "Drag handle"
+    }
+  }
+}

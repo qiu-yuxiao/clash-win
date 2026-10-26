@@ -1,0 +1,80 @@
+{
+  "page": {
+    "modes": {
+      "rule": "Rule",
+      "global": "Global",
+      "direct": "Direct"
+    },
+    "actions": {
+      "connect": "Connect",
+      "disconnect": "Disconnect",
+      "connecting": "Connecting..."
+    },
+    "provider": {
+      "title": "تأمین‌کننده پروکسی",
+      "actions": {
+        "updateAll": "به‌روزرسانی همه",
+        "update": "به‌روزرسانی"
+      }
+    },
+    "rules": {
+      "title": "Proxy Rules",
+      "select": "Select Rules"
+    },
+    "a11y": {
+      "nodelist": "فهرست گره‌های پروکسی"
+    },
+    "labels": {
+      "proxyCount": "Proxy Count",
+      "delayCheckReset": "بررسی تأخیر برای لغو ثابت"
+    },
+    "tooltips": {
+      "locate": "موقعیت",
+      "delayCheck": "بررسی تأخیر",
+      "sortDefault": "مرتب‌سازی بر اساس پیش‌فرض",
+      "sortDelay": "مرتب‌سازی بر اساس تأخیر",
+      "sortName": "مرتب‌سازی بر اساس نام",
+      "delayCheckUrl": "آدرس بررسی تأخیر",
+      "showBasic": "پراکسی پایه",
+      "showDetail": "جزئیات پراکسی",
+      "filter": "فیلتر"
+    },
+    "placeholders": {
+      "delayCheckUrl": "آدرس بررسی تأخیر"
+    },
+    "messages": {
+      "directMode": "حالت مستقیم"
+    },
+    "title": {
+      "default": "گروه‌های پراکسی"
+    }
+  },
+  "feedback": {
+    "notifications": {
+      "provider": {
+        "updateSuccess": "{{name}} updated successfully",
+        "updateFailed": "Failed to update {{name}}: {{message}}",
+        "genericError": "Update failed: {{message}}",
+        "none": "No providers available to update",
+        "allUpdated": "All providers updated successfully"
+      }
+    }
+  },
+  "components": {
+    "enums": {
+      "strategies": {
+        "select": "انتخاب پروکسی به صورت دستی",
+        "url-test": "انتخاب پروکسی بر اساس تأخیر آزمایش URL",
+        "fallback": "تعویض به پروکسی دیگر در صورت بروز خطا",
+        "load-balance": "توزیع پراکسی بر اساس توازن بار",
+        "relay": "عبور از زنجیره پروکسی تعریف شده"
+      },
+      "policies": {
+        "DIRECT": "داده‌ها به صورت مستقیم خروجی می‌شوند",
+        "REJECT": "درخواست‌ها را متوقف می‌کند",
+        "REJECT-DROP": "درخواست‌ها را نادیده می‌گیرد",
+        "PASS": "این قانون را در صورت تطابق نادیده می‌گیرد"
+      }
+    }
+  }
+}

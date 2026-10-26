@@ -1,0 +1,80 @@
+{
+  "page": {
+    "modes": {
+      "rule": "Rule",
+      "global": "Global",
+      "direct": "Direct"
+    },
+    "actions": {
+      "connect": "Connect",
+      "disconnect": "Disconnect",
+      "connecting": "Connecting..."
+    },
+    "provider": {
+      "title": "Penyedia Proksi",
+      "actions": {
+        "updateAll": "Perbarui Semua",
+        "update": "Perbarui"
+      }
+    },
+    "rules": {
+      "title": "Proxy Rules",
+      "select": "Select Rules"
+    },
+    "a11y": {
+      "nodelist": "Daftar node proxy"
+    },
+    "labels": {
+      "proxyCount": "Proxy Count",
+      "delayCheckReset": "Periksa keterlambatan untuk membatalkan tetap"
+    },
+    "tooltips": {
+      "locate": "Lokasi",
+      "delayCheck": "Periksa Keterlambatan",
+      "sortDefault": "Urutkan secara default",
+      "sortDelay": "Urutkan berdasarkan keterlambatan",
+      "sortName": "Urutkan berdasarkan nama",
+      "delayCheckUrl": "URL Periksa Keterlambatan",
+      "showBasic": "Dasar Proksi",
+      "showDetail": "Detail Proksi",
+      "filter": "Filter"
+    },
+    "placeholders": {
+      "delayCheckUrl": "URL Periksa Keterlambatan"
+    },
+    "messages": {
+      "directMode": "Mode Langsung"
+    },
+    "title": {
+      "default": "Grup Proksi"
+    }
+  },
+  "feedback": {
+    "notifications": {
+      "provider": {
+        "updateSuccess": "{{name}} updated successfully",
+        "updateFailed": "Failed to update {{name}}: {{message}}",
+        "genericError": "Update failed: {{message}}",
+        "none": "No providers available to update",
+        "allUpdated": "All providers updated successfully"
+      }
+    }
+  },
+  "components": {
+    "enums": {
+      "strategies": {
+        "select": "Pilih proksi secara manual",
+        "url-test": "Pilih proksi berdasarkan keterlambatan tes URL",
+        "fallback": "Beralih ke proksi lain saat terjadi kesalahan",
+        "load-balance": "Distribusikan proksi berdasarkan penyeimbangan beban",
+        "relay": "Lewatkan melalui rantai proksi yang ditentukan"
+      },
+      "policies": {
+        "DIRECT": "Data langsung keluar",
+        "REJECT": "Mencegat permintaan",
+        "REJECT-DROP": "Membuang permintaan",
+        "PASS": "Lewati aturan ini saat cocok"
+      }
+    }
+  }
+}

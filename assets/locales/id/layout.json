@@ -1,0 +1,120 @@
+{
+  "components": {
+    "firstRun": {
+      "title": "Selamat datang di Clash Mini",
+      "intro": "Sepertinya ini peluncuran pertama dan belum ada langganan. Tempel tautan di bawah — penguraian node, uji kecepatan, dan pengambilalihan jaringan dilakukan otomatis.",
+      "paste": "Tempel dari papan klip",
+      "enterHint": "Tips: tekan Enter untuk mengimpor",
+      "importAndStart": "Impor dan aktifkan",
+      "later": "Atur manual nanti",
+      "errEmpty": "Masukkan atau tempel tautan langganan",
+      "errScheme": "Tautan harus diawali http:// atau https://",
+      "errImport": "Gagal mengimpor. Periksa tautan lalu coba lagi",
+      "readyTitle": "Langganan diimpor",
+      "imported": "Langganan berhasil diimpor dan diaktifkan",
+      "checking": "Memeriksa konektivitas node…",
+      "readyOk": "Proksi siap, jaringan lancar",
+      "readyUnconfirmed": "Latensi node belum terukur — mungkin masih diuji atau node tidak tersedia",
+      "sysProxyOff": "Proksi sistem mati. Aktifkan di Pengaturan lalu coba lagi",
+      "wikiHint": "Buka Wiki untuk memeriksa koneksi dan melihat fitur lanjutan.",
+      "openWiki": "Buka Wiki untuk menguji",
+      "finish": "Selesai"
+    },
+    "helpMenu": {
+      "github": "Beranda GitHub",
+      "wiki": "Panduan Bantuan (Wiki)",
+      "firstRunGuide": "Panduan Awal",
+      "exportDiagnostics": "Ekspor Diagnostik",
+      "generatingDiagnostics": "Sedang membuat diagnostik, mohon tunggu…",
+      "diagnosticsExported": "Diagnostik diekspor: {{path}}",
+      "checkAppUpdate": "Cek Pembaruan Aplikasi",
+      "checkCoreUpdate": "Cek Pembaruan Core",
+      "buttonAriaLabel": "Bantuan dan alat"
+    },
+    "dialogs": {
+      "editProfile": {
+        "title": "Edit Profil",
+        "nameLabel": "Nama Profil",
+        "urlLabel": "URL Langganan",
+        "intervalLabel": "Interval pembaruan (satuan jam, isi 0 untuk menonaktifkan)"
+      },
+      "update": {
+        "currentVersion": "Versi saat ini: {{version}}",
+        "latestVersion": "Versi terbaru: {{version}}",
+        "unknown": "Tidak diketahui",
+        "updating": "Memperbarui...",
+        "upToDate": "Sudah terbaru",
+        "updateNow": "Perbarui sekarang"
+      },
+      "client": {
+        "title": "Pembaruan Aplikasi",
+        "changelog": "Catatan perubahan:",
+        "changelogEmpty": "Belum ada catatan perubahan terperinci",
+        "prepareRestart": "Bersiap memulai ulang"
+      },
+      "core": {
+        "title": "Pembaruan Inti Mihomo",
+        "fetching": "Mengambil...",
+        "updateDone": "Pembaruan selesai"
+      },
+      "progress": {
+        "coreStarting": "Memulai tugas peningkatan inti...",
+        "coreStartFailed": "Gagal memulai: {{message}}",
+        "clientDownloading": "Mengunduh pembaruan...",
+        "clientDownloadStarted": "Mulai mengunduh paket pembaruan aplikasi...",
+        "clientDownloadProgress": "Terunduh {{percent}}% ({{downloaded}} MB / {{total}} MB)",
+        "clientDownloadProgressNoTotal": "Terunduh {{downloaded}} MB",
+        "clientDownloadFinished": "Unduhan selesai, menyiapkan pemasangan dan mulai ulang..."
+      }
+    },
+    "navigation": {
+      "tabs": {
+        "home": "Home",
+        "proxies": "Proksi",
+        "profiles": "Profil",
+        "connections": "Koneksi",
+        "rules": "Aturan",
+        "logs": "Log",
+        "unlock": "Test",
+        "settings": "Pengaturan"
+      },
+      "menu": {
+        "reorderMode": "Menu reorder mode",
+        "restoreDefaultOrder": "Restore default order",
+        "unlock": "Unlock menu order",
+        "lock": "Lock menu order",
+        "collapseNavBar": "Collapse navigation bar",
+        "expandNavBar": "Expand navigation bar"
+      }
+    }
+  },
+  "notices": {
+    "adjustingProxyMode": "Menyesuaikan mode proksi, mohon tunggu…",
+    "adjusting": "Menyesuaikan, mohon tunggu…",
+    "updatingSubscription": "Memperbarui langganan...",
+    "subscriptionUpdated": "Langganan berhasil diperbarui",
+    "profileLinkCopied": "Tautan disalin ke papan klip",
+    "copyFailed": "Gagal menyalin",
+    "profileSaved": "Konfigurasi berhasil diubah",
+    "switchedToManualMode": "Beralih ke mode manual",
+    "systemProxyEnabled": "Proksi sistem diaktifkan",
+    "tunServiceConfigFailed": "Konfigurasi layanan mode TUN gagal. Coba jalankan sebagai administrator.",
+    "tunModeEnabled": "Mode TUN diaktifkan",
+    "coreUpdateSuccess": "Inti Mihomo berhasil diperbarui",
+    "coreUpdateFailed": "Gagal memperbarui inti: {{message}}",
+    "coreUpToDate": "Inti sudah versi terbaru",
+    "coreCheckFailed": "Gagal memeriksa pembaruan inti: {{message}}",
+    "coreUpgradeStartFailed": "Gagal memulai peningkatan inti: {{message}}",
+    "clientUpToDate": "Sudah versi terbaru",
+    "clientCheckFailed": "Gagal memeriksa pembaruan: {{message}}",
+    "clientInstallCompleted": "Pembaruan terpasang. Silakan mulai ulang aplikasi untuk menerapkan perubahan.",
+    "clientUpdateFailed": "Gagal memperbarui: {{message}}"
+  },
+  "a11y": {
+    "pinWindow": "Sematkan jendela di atas",
+    "openSettings": "Buka pengaturan",
+    "closeSettings": "Tutup pengaturan",
+    "closeLogsDialog": "Tutup dialog log",
+    "selectLanguage": "Pilih bahasa"
+  }
+}

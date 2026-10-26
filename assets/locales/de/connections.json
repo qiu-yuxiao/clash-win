@@ -1,0 +1,53 @@
+{
+  "page": {
+    "title": "Verbindungen"
+  },
+  "notices": {
+    "copied": "Kopiert: {{address}}"
+  },
+  "components": {
+    "fields": {
+      "host": "Host",
+      "dlSpeed": "Download-Geschwindigkeit",
+      "ulSpeed": "Upload-Geschwindigkeit",
+      "chains": "Ketten",
+      "rule": "Regel",
+      "process": "Prozess",
+      "time": "Verbindungszeit",
+      "source": "Quelladresse",
+      "destination": "Zieladresse",
+      "destinationPort": "Zielport",
+      "type": "Typ",
+      "actions": "Actions"
+    },
+    "order": {
+      "default": "Default",
+      "uploadSpeed": "Upload-Geschwindigkeit",
+      "downloadSpeed": "Download-Geschwindigkeit"
+    },
+    "actions": {
+      "active": "Active",
+      "closed": "Closed",
+      "closeConnection": "Verbindung schließen"
+    },
+    "miniTable": {
+      "hostColumn": "Ziel",
+      "chainsColumn": "Route",
+      "chainsDirect": "Direkt",
+      "chainsReject": "Blockiert",
+      "chainsProxy": "Über Proxy"
+    },
+    "contextMenu": {
+      "setDirect": "Als global direkt festlegen",
+      "setProxy": "Als Proxy-Weiterleitung festlegen",
+      "setReject": "Blockieren (REJECT)",
+      "disconnect": "Verbindung trennen",
+      "copyAddress": "Verbindungsadresse kopieren",
+      "viewDetail": "Details anzeigen"
+    },
+    "columnManager": {
+      "title": "Spalten",
+      "dragHandle": "Drag handle"
+    }
+  }
+}

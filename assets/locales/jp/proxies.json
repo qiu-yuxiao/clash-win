@@ -1,0 +1,80 @@
+{
+  "page": {
+    "modes": {
+      "rule": "Rule",
+      "global": "Global",
+      "direct": "Direct"
+    },
+    "actions": {
+      "connect": "Connect",
+      "disconnect": "Disconnect",
+      "connecting": "Connecting..."
+    },
+    "provider": {
+      "title": "プロキシプロバイダー",
+      "actions": {
+        "updateAll": "すべて更新",
+        "update": "更新"
+      }
+    },
+    "rules": {
+      "title": "Proxy Rules",
+      "select": "Select Rules"
+    },
+    "a11y": {
+      "nodelist": "プロキシノード一覧"
+    },
+    "labels": {
+      "proxyCount": "ノード数",
+      "delayCheckReset": "遅延テストを実行して固定を解除する"
+    },
+    "tooltips": {
+      "locate": "現在のノード",
+      "delayCheck": "遅延テスト",
+      "sortDefault": "デフォルトでソート",
+      "sortDelay": "遅延でソート",
+      "sortName": "名前でソート",
+      "delayCheckUrl": "遅延テストURL",
+      "showBasic": "ノードの詳細を隠す",
+      "showDetail": "ノードの詳細を表示する",
+      "filter": "ノードをフィルタリング"
+    },
+    "placeholders": {
+      "delayCheckUrl": "遅延テストURL"
+    },
+    "messages": {
+      "directMode": "直接接続モード"
+    },
+    "title": {
+      "default": "プロキシグループ"
+    }
+  },
+  "feedback": {
+    "notifications": {
+      "provider": {
+        "updateSuccess": "{{name}} updated successfully",
+        "updateFailed": "Failed to update {{name}}: {{message}}",
+        "genericError": "Update failed: {{message}}",
+        "none": "No providers available to update",
+        "allUpdated": "All providers updated successfully"
+      }
+    }
+  },
+  "components": {
+    "enums": {
+      "strategies": {
+        "select": "手動でプロキシを選択",
+        "url-test": "URLテストによる遅延でプロキシを選択",
+        "fallback": "利用不可の場合は別のプロキシに切り替える",
+        "load-balance": "負荷分散によりプロキシを割り当てる",
+        "relay": "定義されたプロキシチェーンに沿って転送する"
+      },
+      "policies": {
+        "DIRECT": "直接接続",
+        "REJECT": "リクエストを拒否",
+        "REJECT-DROP": "リクエストを破棄",
+        "PASS": "このルールをスキップ"
+      }
+    }
+  }
+}
