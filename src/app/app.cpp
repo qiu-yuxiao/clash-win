@@ -1,5 +1,10 @@
 #include "app/app.h"
 
+#include "config/config.h"
+#include "config/prfitem.h"
+#include "core/timer.h"
+#include "events/event_bus.h"
+#include "events/event_names.h"
 #include "ui/theme/theme.h"
 #include "ui/main_window.h"
 #include "util/log.h"
