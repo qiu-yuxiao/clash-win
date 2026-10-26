@@ -1,0 +1,201 @@
+#---------------------------------------------------#
+## 更新：2026-10-26 01:04:55
+## 链接：https://jf88.co/link/9d8GUDeZrGag0dRL?clash=1
+#---------------------------------------------------#
+mixed-port: 7892
+allow-lan: false
+bind-address: '*'
+mode: rule
+log-level: info
+ipv6: false
+find-process-mode: strict
+external-controller: '127.0.0.1:9090'
+profile:
+  store-selected: true
+  store-fake-ip: true
+unified-delay: true
+tcp-concurrent: true
+ntp:
+  enable: true
+  write-to-system: false
+  server: ntp.aliyun.com
+  port: 123
+  interval: 30
+sniffer:
+  enable: true
+  force-dns-mapping: true
+  parse-pure-ip: true
+dns:
+  enable: true
+  listen: ':53'
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter-mode: blacklist
+  prefer-h3: false
+  respect-rules: true
+  use-hosts: false
+  use-system-hosts: false
+  ipv6: true
+  fake-ip-filter:
+    - '*.lan'
+    - '*.local'
+    - '*.arpa'
+    - 'time.*.com'
+    - 'ntp.*.com'
+    - +.market.xiaomi.com
+    - localhost.ptlogin2.qq.com
+    - '*.msftncsi.com'
+    - www.msftconnecttest.com
+  default-nameserver:
+    - system
+    - 223.6.6.6
+    - 8.8.8.8
+    - '2400:3200::1'
+    - '2001:4860:4860::8888'
+  nameserver:
+    - 'https://doh.pub/dns-query'
+    - 'https://dns.alidns.com/dns-query'
+    - 8.8.8.8
+  direct-nameserver:
+    - 'https://doh.pub/dns-query'
+    - 'https://dns.alidns.com/dns-query'
+    - 223.5.5.5
+    - 119.29.29.29
+  direct-nameserver-follow-policy: true
+  fallback:
+    - 'https://1.1.1.1/dns-query'
+    - 'https://8.8.8.8/dns-query'
+    - 'https://dns.google/dns-query'
+  fallback-filter:
+    geoip: true
+    geoip-code: CN
+    ipcidr:
+      - 240.0.0.0/4
+      - 0.0.0.0/32
+    domain:
+      - +.google.com
+      - +.facebook.com
+      - +.youtube.com
+      - +.twitter.com
+      - +.github.com
+  proxy-server-nameserver:
+    - 'https://doh.pub/dns-query'
+    - 'https://dns.alidns.com/dns-query'
+    - 'tls://223.5.5.5'
+tun:
+  enable: false
+  stack: system
+  auto-route: true
+  auto-detect-interface: true
+  strict-route: true
+  dns-hijack:
+    - 'any:53'
+  device: Mihomo
+  mtu: 1500
+  endpoint-independent-nat: true
+
+proxies:
+  - {"name":"网址：https://a4.jfyfind.net","type":"ss","server":"jf88.co","port":10086,"cipher":"chacha20-ietf-poly1305","password":"qgrbxti42rr"}
+  - {"name":"剩余流量：61.66GB","type":"ss","server":"jf88.co","port":10086,"cipher":"chacha20-ietf-poly1305","password":"qgrbxti42rr"}
+  - {"name":"过期时间：2026-12-30","type":"ss","server":"jf88.co","port":10086,"cipher":"chacha20-ietf-poly1305","password":"qgrbxti42rr"}
+  - {"name":"v0-网址:a03.jiffdl.net","type":"vmess","server":"1","port":443,"uuid":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","alterId":0,"cipher":"auto","udp":true}
+  - {"name":"新加坡aw5","server":"sgaw5-fensh5.awo-link.com","port":14104,"type":"hysteria2","password":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","sni":"sgaw5-fensh5.awo-link.com","skip-cert-verify":false,"up":500,"down":500,"ports":"45001-46666","obfs":"salamander","obfs-password":"XBvVbvzQCq6Ovbnh"}
+  - {"name":"香港aw5","server":"hkaw5-bbqp0e.awo-link.com","port":14104,"type":"hysteria2","password":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","sni":"hkaw5-bbqp0e.awo-link.com","skip-cert-verify":false,"up":500,"down":500,"ports":"45001-46666","obfs":"salamander","obfs-password":"XBvVbvzQCq6Ovbnh"}
+  - {"name":"直连-日本-anytls","type":"anytls","server":"djjc3a-95yicb.awo-link.com","port":15404,"password":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","udp":true,"sni":"djjc3a-95yicb.awo-link.com","skip-cert-verify":false}
+  - {"name":"直连-日本-hy2","server":"djjc3a-95yicb.awo-link.com","port":15304,"type":"hysteria2","password":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","sni":"djjc3a-95yicb.awo-link.com","skip-cert-verify":false,"up":500,"down":500,"ports":"45001-46666","obfs":"salamander","obfs-password":"XBvVbvzQCq6Ovbnh"}
+  - {"name":"直连-美国-anytls","type":"anytls","server":"djuc3a-ypskk6.awo-link.com","port":15204,"password":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","udp":true,"sni":"djuc3a-ypskk6.awo-link.com","skip-cert-verify":false}
+  - {"name":"直连-美国-hy2","server":"djuc3a-ypskk6.awo-link.com","port":15104,"type":"hysteria2","password":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","sni":"djuc3a-ypskk6.awo-link.com","skip-cert-verify":false,"up":500,"down":500,"ports":"45001-46666","obfs":"salamander","obfs-password":"XBvVbvzQCq6Ovbnh"}
+  - {"name":"中转线路1-台湾01","type":"vless","server":"212.189.51.64","port":6608,"uuid":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","alterId":0,"cipher":"auto","udp":true,"flow":"xtls-rprx-vision","tls":true,"skip-cert-verify":false,"servername":"cdnjs.cloudflare.com","reality-opts":{"public-key":"JrWOojSFwFA93YjsiQkDydTItQzNAsXsHU24HuWGWjA","short-id":"bc8e3658db7d1323"},"client-fingerprint":"chrome"}
+  - {"name":"中转线路1-台湾02","type":"vless","server":"212.189.51.64","port":6610,"uuid":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","alterId":0,"cipher":"auto","udp":true,"flow":"xtls-rprx-vision","tls":true,"skip-cert-verify":false,"servername":"cdnjs.cloudflare.com","reality-opts":{"public-key":"JrWOojSFwFA93YjsiQkDydTItQzNAsXsHU24HuWGWjA","short-id":"bc8e3658db7d1323"},"client-fingerprint":"chrome"}
+  - {"name":"中转线路1-台湾03","type":"vless","server":"212.189.51.64","port":6612,"uuid":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","alterId":0,"cipher":"auto","udp":true,"flow":"xtls-rprx-vision","tls":true,"skip-cert-verify":false,"servername":"cdnjs.cloudflare.com","reality-opts":{"public-key":"JrWOojSFwFA93YjsiQkDydTItQzNAsXsHU24HuWGWjA","short-id":"bc8e3658db7d1323"},"client-fingerprint":"chrome"}
+  - {"name":"中转线路1-新加坡01","type":"vless","server":"212.189.51.64","port":6103,"uuid":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","alterId":0,"cipher":"auto","udp":true,"flow":"xtls-rprx-vision","tls":true,"skip-cert-verify":false,"servername":"cdnjs.cloudflare.com","reality-opts":{"public-key":"JrWOojSFwFA93YjsiQkDydTItQzNAsXsHU24HuWGWjA","short-id":"bc8e3658db7d1323"},"client-fingerprint":"chrome"}
+  - {"name":"中转线路1-新加坡02","type":"vless","server":"212.189.51.64","port":6113,"uuid":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","alterId":0,"cipher":"auto","udp":true,"flow":"xtls-rprx-vision","tls":true,"skip-cert-verify":false,"servername":"cdnjs.cloudflare.com","reality-opts":{"public-key":"JrWOojSFwFA93YjsiQkDydTItQzNAsXsHU24HuWGWjA","short-id":"bc8e3658db7d1323"},"client-fingerprint":"chrome"}
+  - {"name":"中转线路1-日本01","type":"vless","server":"212.189.51.64","port":6403,"uuid":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","alterId":0,"cipher":"auto","udp":true,"flow":"xtls-rprx-vision","tls":true,"skip-cert-verify":false,"servername":"cdnjs.cloudflare.com","reality-opts":{"public-key":"JrWOojSFwFA93YjsiQkDydTItQzNAsXsHU24HuWGWjA","short-id":"bc8e3658db7d1323"},"client-fingerprint":"chrome"}
+  - {"name":"中转线路1-法国01","type":"vless","server":"212.189.51.64","port":6804,"uuid":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","alterId":0,"cipher":"auto","udp":true,"flow":"xtls-rprx-vision","tls":true,"skip-cert-verify":false,"servername":"cdnjs.cloudflare.com","reality-opts":{"public-key":"JrWOojSFwFA93YjsiQkDydTItQzNAsXsHU24HuWGWjA","short-id":"bc8e3658db7d1323"},"client-fingerprint":"chrome"}
+  - {"name":"中转线路1-韩国01","type":"vless","server":"212.189.51.64","port":6503,"uuid":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","alterId":0,"cipher":"auto","udp":true,"flow":"xtls-rprx-vision","tls":true,"skip-cert-verify":false,"servername":"cdnjs.cloudflare.com","reality-opts":{"public-key":"JrWOojSFwFA93YjsiQkDydTItQzNAsXsHU24HuWGWjA","short-id":"bc8e3658db7d1323"},"client-fingerprint":"chrome"}
+  - {"name":"中转线路1-香港00","type":"vless","server":"212.189.51.64","port":6764,"uuid":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","alterId":0,"cipher":"auto","udp":true,"flow":"xtls-rprx-vision","tls":true,"skip-cert-verify":false,"servername":"cdnjs.cloudflare.com","reality-opts":{"public-key":"JrWOojSFwFA93YjsiQkDydTItQzNAsXsHU24HuWGWjA","short-id":"bc8e3658db7d1323"},"client-fingerprint":"chrome"}
+  - {"name":"中转线路1-香港01","type":"vless","server":"212.189.51.64","port":6704,"uuid":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","alterId":0,"cipher":"auto","udp":true,"flow":"xtls-rprx-vision","tls":true,"skip-cert-verify":false,"servername":"cdnjs.cloudflare.com","reality-opts":{"public-key":"JrWOojSFwFA93YjsiQkDydTItQzNAsXsHU24HuWGWjA","short-id":"bc8e3658db7d1323"},"client-fingerprint":"chrome"}
+  - {"name":"中转线路1-香港02","type":"vless","server":"212.189.51.64","port":6754,"uuid":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","alterId":0,"cipher":"auto","udp":true,"flow":"xtls-rprx-vision","tls":true,"skip-cert-verify":false,"servername":"cdnjs.cloudflare.com","reality-opts":{"public-key":"JrWOojSFwFA93YjsiQkDydTItQzNAsXsHU24HuWGWjA","short-id":"bc8e3658db7d1323"},"client-fingerprint":"chrome"}
+  - {"name":"中转线路1-香港03","type":"vless","server":"212.189.51.64","port":6718,"uuid":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","alterId":0,"cipher":"auto","udp":true,"flow":"xtls-rprx-vision","tls":true,"skip-cert-verify":false,"servername":"cdnjs.cloudflare.com","reality-opts":{"public-key":"JrWOojSFwFA93YjsiQkDydTItQzNAsXsHU24HuWGWjA","short-id":"bc8e3658db7d1323"},"client-fingerprint":"chrome"}
+  - {"name":"中转线路1-香港04","type":"vless","server":"212.189.51.64","port":6720,"uuid":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","alterId":0,"cipher":"auto","udp":true,"flow":"xtls-rprx-vision","tls":true,"skip-cert-verify":false,"servername":"cdnjs.cloudflare.com","reality-opts":{"public-key":"JrWOojSFwFA93YjsiQkDydTItQzNAsXsHU24HuWGWjA","short-id":"bc8e3658db7d1323"},"client-fingerprint":"chrome"}
+  - {"name":"中转线路1-香港06","type":"vless","server":"212.189.51.64","port":6744,"uuid":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","alterId":0,"cipher":"auto","udp":true,"flow":"xtls-rprx-vision","tls":true,"skip-cert-verify":false,"servername":"cdnjs.cloudflare.com","reality-opts":{"public-key":"JrWOojSFwFA93YjsiQkDydTItQzNAsXsHU24HuWGWjA","short-id":"bc8e3658db7d1323"},"client-fingerprint":"chrome"}
+  - {"name":"中转线路1-马来西亚01","type":"vless","server":"212.189.51.64","port":6303,"uuid":"2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0","alterId":0,"cipher":"auto","udp":true,"flow":"xtls-rprx-vision","tls":true,"skip-cert-verify":false,"servername":"cdnjs.cloudflare.com","reality-opts":{"public-key":"JrWOojSFwFA93YjsiQkDydTItQzNAsXsHU24HuWGWjA","short-id":"bc8e3658db7d1323"},"client-fingerprint":"chrome"}
+
+proxy-groups:
+  - name: 套餐详情
+    type: select
+    include-all: true
+    filter: "网址|剩余流量|过期时间|套餐|购买|有效|回家页|官网|订阅|到期"
+  - name: 主代理
+    type: select
+    proxies:
+      - 自动选择
+      - 负载均衡
+      - us自动切换
+      - jp自动切换
+      - DIRECT
+    include-all: true
+    exclude-filter: "网址|剩余流量|过期时间|套餐|购买|有效"
+  - name: 自动选择
+    type: url-test
+    include-all: true
+    exclude-filter: "网址|剩余流量|过期时间|套餐|购买|有效"
+    url: 'http://www.gstatic.com/generate_204'
+    interval: 180
+    tolerance: 25
+  - name: 负载均衡
+    type: load-balance
+    include-all: true
+    exclude-filter: "网址|剩余流量|过期时间|套餐|购买|有效"
+    strategy: consistent-hashing
+    url: 'http://www.gstatic.com/generate_204'
+    interval: 300
+  - name: us自动切换
+    type: fallback
+    include-all: true
+    filter: "美国"
+    url: 'http://www.gstatic.com/generate_204'
+    interval: 60
+  - name: jp自动切换
+    type: fallback
+    include-all: true
+    filter: "日本"
+    url: 'http://www.gstatic.com/generate_204'
+    interval: 60
+  - name: 国内直连
+    type: select
+    proxies:
+      - DIRECT
+      - 主代理
+
+rule-providers:
+  Local-IP:
+    type: http
+    behavior: ipcidr
+    format: mrs
+    url: 'https://cdn.jsdmirror.com/gh/HosheaPDNX/rule-set@V2.0.0/mihomo/Local/Local-IP.mrs'
+    path: ./ruleset/Local-IP.mrs
+    proxy: DIRECT
+    interval: 86400
+  China-Site:
+    type: http
+    behavior: domain
+    format: mrs
+    url: 'https://cdn.jsdmirror.com/gh/HosheaPDNX/rule-set@V2.0.0/mihomo/China/China-Site.mrs'
+    path: ./ruleset/China-Site.mrs
+    proxy: DIRECT
+    interval: 86400
+  China-IP:
+    type: http
+    behavior: ipcidr
+    format: mrs
+    url: 'https://cdn.jsdmirror.com/gh/HosheaPDNX/rule-set@V2.0.0/mihomo/China/China-IP.mrs'
+    path: ./ruleset/China-IP.mrs
+    proxy: DIRECT
+    interval: 86400
+
+rules:
+  - 'RULE-SET,Local-IP,国内直连,no-resolve'
+  - 'RULE-SET,China-Site,国内直连'
+  - 'RULE-SET,China-IP,国内直连'
+  - 'MATCH,主代理'

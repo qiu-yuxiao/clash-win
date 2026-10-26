@@ -1,0 +1,4 @@
+profile:
+  store-selected: true
+prepend-rules:
+  - DOMAIN-SUFFIX,Google.com,PROXY

@@ -1,0 +1,56 @@
+# Profiles Config for Clash Verge
+
+config_version: 1
+current: RdzAUK1VxD4t
+items:
+- uid: Merge
+  type: merge
+  name: null
+  file: Merge.yaml
+  updated: 1792705001
+- uid: Script
+  type: script
+  name: null
+  file: Script.js
+  updated: 1792705001
+- uid: m2CFYn8m9YMw
+  type: merge
+  name: null
+  file: m2CFYn8m9YMw.yaml
+  updated: 1792705033
+- uid: sOIpbav0QpMd
+  type: script
+  name: null
+  file: sOIpbav0QpMd.js
+  updated: 1792705033
+- uid: rwWMH8DGFCbm
+  type: rules
+  name: null
+  file: rwWMH8DGFCbm.yaml
+  updated: 1792705033
+- uid: pGlaepWR90Hn
+  type: proxies
+  name: null
+  file: pGlaepWR90Hn.yaml
+  updated: 1792705033
+- uid: RdzAUK1VxD4t
+  type: remote
+  name: Clash_1792705034.yaml
+  file: RdzAUK1VxD4t.yaml
+  url: https://jfdddy.net/link/9d8GUDeZrGag0dRL?clash=1
+  selected:
+  - name: PROXY
+    now: 直连-美国-anytls (010459)
+  extra:
+    upload: 14731075611
+    download: 26437233846
+    total: 107374182400
+    expire: 1798593937
+  updated: 1792947899
+  option:
+    allow_auto_update: true
+    merge: m2CFYn8m9YMw
+    script: sOIpbav0QpMd
+    rules: rwWMH8DGFCbm
+    proxies: pGlaepWR90Hn
+    groups: null
