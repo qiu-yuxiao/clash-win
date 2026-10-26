@@ -432,6 +432,7 @@ void D2dRenderTarget::begin_frame() {
 bool D2dRenderTarget::end_frame() {
   if (!active_rt_) return false;
   HRESULT hr = active_rt_->EndDraw();
+  if (FAILED(hr))
   if (hr == D2DERR_RECREATE_TARGET) {
     lost_ = true;
     CWLOG_WARN("D2dRenderTarget: D2DERR_RECREATE_TARGET（设备丢失，待重建）");

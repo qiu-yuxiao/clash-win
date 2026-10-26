@@ -29,6 +29,11 @@ class TitleBarButton : public Widget {
   bool hover_ = false;
   wchar_t glyph_;
 
+  SizeF on_measure(float max_w, float max_h) override {
+    (void)max_w; (void)max_h;
+    return {28, 28};  // ← window-controller btnSx 28×28
+  }
+
   bool on_mouse(const MouseEvent& e) override {
     switch (e.type) {
       case MouseEventType::Enter: hover_ = true; invalidate(); return true;

@@ -3,6 +3,8 @@
 
 #include <algorithm>
 
+#include "theme/theme.h"
+
 namespace clashwin::ui {
 
 Button::Button(Widget* parent) : Widget(parent) {}
@@ -26,6 +28,21 @@ SizeF Button::on_measure(float max_w, float max_h) {
 }
 
 void Button::draw_button_bg(IRenderTarget& rt, const RectF& r) {
+  if (themed_) {
+    // T12：ThemeService 查表（皮肤 × 亮暗）；hover/pressed 由状态选择
+    auto p = theme::ThemeService::instance().button_paint(theme_color_type_);
+    Color4f fill;
+    switch (state()) {
+      case State::Hover: fill = p.fill_hover; break;
+      case State::Pressed: fill = p.fill_pressed; break;
+      case State::Disabled: fill = p.fill_disabled; break;
+      default: fill = p.fill; break;
+    }
+    Brush b{fill};
+    rt.round_rect(r, p.radius, {p.border, p.border_w}, &b);
+    last_fill_ = fill;
+    return;
+  }
   Color4f fill;
   switch (state()) {
     case State::Hover: fill = paint_params.fill_hover; break;
@@ -40,6 +57,14 @@ void Button::draw_button_bg(IRenderTarget& rt, const RectF& r) {
 
 void Button::draw_button_text(IRenderTarget& rt, const RectF& r) {
   TextStyle ts = text_style;
+  if (themed_) {
+    auto p = theme::ThemeService::instance().button_paint(theme_color_type_);
+    ts.color = state() == State::Disabled ? p.text_disabled : p.text;
+    ts.align_h = AlignH::Center;
+    ts.align_v = AlignV::Center;
+    rt.draw_text(text, r, ts);
+    return;
+  }
   ts.color = state() == State::Disabled ? paint_params.text_disabled
                                         : paint_params.text_normal;
   ts.align_h = AlignH::Center;

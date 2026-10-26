@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <memory>
 
+#include "theme/theme.h"
+
 namespace clashwin::ui::win {
 
 MainScene::MainScene(Widget* parent) : Widget(parent) {
@@ -91,8 +93,10 @@ void MainScene::on_arrange(const RectF& area) {
 }
 
 void MainScene::on_paint(IRenderTarget& rt) {
-  // 骨架占位底色（T12 接 ThemeParams：light #F5F5F5 / dark #2E303D）
-  rt.fill_rect(bounds(), Brush{Color4f::hex(0xF5F5F5)});
+  // 占位底色：tauri 背景色口径（← dt.background_color，T13 场景填充后替换）
+  rt.fill_rect(bounds(), Brush{theme::ThemeService::instance()
+                                   .palette()
+                                   .background_color});
 }
 
 }  // namespace clashwin::ui::win

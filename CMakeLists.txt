@@ -172,6 +172,8 @@ add_library(clashwin_ui STATIC
   src/ui/canvas_graph.cpp
   src/ui/text_viewer.cpp
   src/ui/ui_postbox.cpp
+  src/ui/theme/palettes.cpp
+  src/ui/theme/theme.cpp
   src/ui/breakpoints.cpp
   src/ui/title_bar.cpp
   src/ui/main_scene.cpp
@@ -264,6 +266,8 @@ add_executable(clashwin_test
   tests/test_i18n.cpp
   tests/test_ui_window_state.cpp
   tests/test_ui_window_persist.cpp
+  tests/test_theme_core.cpp
+  tests/test_theme_widgets.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)

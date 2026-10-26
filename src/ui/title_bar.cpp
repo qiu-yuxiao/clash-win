@@ -4,6 +4,7 @@
 #include <algorithm>
 
 #include "main_window.h"
+#include "theme/theme.h"
 
 namespace clashwin::ui::win {
 
@@ -63,10 +64,12 @@ void TitleBar::set_version(const std::wstring& v) {
 }
 
 void TitleBar::on_paint(IRenderTarget& rt) {
-  // 背景 var(--background-color) + 1px divider 底边（← customTitlebar 样式）
-  rt.fill_rect(bounds(), Brush{Color4f::hex(0xF5F5F5)});
+  // ← customTitlebar 样式：background var(--background-color)（light #ECECEC）
+  //   + borderBottom var(--divider-color)；close hover 红为原版硬编码保留
+  const auto& svc = theme::ThemeService::instance();
+  rt.fill_rect(bounds(), Brush{svc.vars().background_color});
   rt.fill_rect({bounds().x, bounds().bottom() - 1, bounds().w, 1},
-               Brush{Color4f::hex(0x000000, 0.12f)});
+               Brush{svc.vars().divider_color});
 }
 
 }  // namespace clashwin::ui::win

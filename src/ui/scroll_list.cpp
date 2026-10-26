@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "theme/theme.h"
+
 namespace clashwin::ui {
 
 void ScrollList::set_content(int count, float item_height, Factory factory,
@@ -113,7 +115,8 @@ void ScrollList::on_paint(IRenderTarget& rt) {
     float content = item_count_ * item_height_;
     float thumb_h = std::max(vh * vh / content, 20.0f);
     float thumb_y = (offset_ / m) * (vh - thumb_h);
-    Brush sb{scrollbar_};
+    Brush sb{themed_ ? theme::ThemeService::instance().vars().scrollbar_thumb
+                     : scrollbar_};
     rt.round_rect({bounds().w - scrollbar_w_ - 1, thumb_y, scrollbar_w_,
                    thumb_h}, scrollbar_w_ / 2, {}, &sb);
   }

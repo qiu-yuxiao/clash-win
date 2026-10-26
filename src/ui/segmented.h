@@ -20,7 +20,10 @@ class Segmented : public Widget {
 
   std::function<void(int)> on_change;
 
-  // 绘制参数（T12 皮肤覆盖）
+  // T12：主题接入开关（true 时 on_paint 走 ThemeService 查表）
+  bool themed_ = false;
+
+  // 绘制参数（T12 皮肤覆盖；themed_ 时被查表覆盖）
   TextStyle style_;
   Color4f bg_ = Color4f::hex(0x000000, 0.06f);
   Color4f selected_bg_ = Color4f::hex(0xFFFFFF);

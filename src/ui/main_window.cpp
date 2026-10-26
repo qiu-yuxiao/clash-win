@@ -9,6 +9,7 @@
 
 #include "clashwin/config/constants.h"
 #include "cmd/command_service.h"
+#include "theme/theme.h"
 #include "util/log.h"
 #include <format>
 
@@ -308,7 +309,8 @@ void MainWindow::draw() {
   }
   if (rt_.pixel_width() == 0) return;
   rt_.begin_frame();
-  rt_.clear(Color4f::hex(0xF5F5F5));  // ← 背景色 #F5F5F5（dark #2E303D 归 T12）
+  // ← tauri backgroundColor 口径（dt.background_color）：light #F5F5F5/dark #2E303D
+  rt_.clear(theme::ThemeService::instance().palette().background_color);
   root_.paint_all(rt_);
   rt_.end_frame();
 }

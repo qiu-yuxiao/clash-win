@@ -41,6 +41,7 @@ class ScrollList : public Widget {
 
   // 绘制参数
   Color4f scrollbar_ = Color4f::hex(0x000000, 0.25f);
+  bool themed_ = false;  // T12：true 时取 --scrollbar-thumb
   float scrollbar_w_ = 6;
 
  private:

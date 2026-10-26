@@ -3,6 +3,8 @@
 
 #include <algorithm>
 
+#include "theme/theme.h"
+
 namespace clashwin::ui {
 
 void Segmented::set_options(std::vector<std::wstring> opts, int sel) {
@@ -64,21 +66,39 @@ bool Segmented::on_mouse(const MouseEvent& e) {
 
 void Segmented::on_paint(IRenderTarget& rt) {
   RectF r{0, 0, bounds().w, bounds().h};
-  Brush bg{bg_};
-  rt.round_rect(r, radius_, {}, &bg);
+  Color4f bg_c = bg_, act_bg = selected_bg_, act_txt = selected_text_color_,
+         txt_c = text_color_, act_border{};
+  float act_radius = radius_ - 2;
+  if (themed_) {
+    // T12：ThemeService 查表（← get3DSegmented* 三函数）
+    auto p = theme::ThemeService::instance().segmented_paint();
+    bg_c = p.container_bg;
+    act_bg = p.active_bg;
+    act_txt = p.active_text;
+    act_border = p.active_border;
+    act_radius = p.active_radius;
+    txt_c = p.text;
+  }
+  Brush bg{bg_c};
+  rt.round_rect(r, radius_, themed_ ? Pen{bg_c.a > 0 && act_border.a > 0
+                                                ? act_border
+                                                : Color4f(0, 0, 0, 0), 1}
+                                    : Pen{Color4f(0, 0, 0, 0), 0},
+                &bg);
   if (options_.empty()) return;
   float seg_w = r.w / static_cast<float>(options_.size());
   for (int i = 0; i < static_cast<int>(options_.size()); ++i) {
     RectF seg{r.x + seg_w * i, r.y, seg_w, r.h};
     bool sel = i == selected_;
     if (sel) {
-      // 原版三段开关选中态：白底 + 主色字 + 粗体（T17 验收硬指标）
-      Brush sel_bg{selected_bg_};
-      rt.round_rect({seg.x + 2, seg.y + 2, seg.w - 4, seg.h - 4}, radius_ - 2,
-                    {}, &sel_bg);
+      Brush sel_bg{act_bg};
+      rt.round_rect({seg.x + 2, seg.y + 2, seg.w - 4, seg.h - 4}, act_radius,
+                    themed_ && act_border.a > 0 ? Pen{act_border, 1}
+                                                : Pen{Color4f(0, 0, 0, 0), 0},
+                    &sel_bg);
     }
     TextStyle ts = style_;
-    ts.color = sel ? selected_text_color_ : text_color_;
+    ts.color = sel ? act_txt : txt_c;
     ts.weight = sel ? static_cast<int>(Weight::Bold) : static_cast<int>(Weight::Normal);
     ts.align_h = AlignH::Center;
     ts.align_v = AlignV::Center;

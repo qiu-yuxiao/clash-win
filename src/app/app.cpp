@@ -1,5 +1,6 @@
 #include "app/app.h"
 
+#include "ui/theme/theme.h"
 #include "ui/main_window.h"
 #include "util/log.h"
 
@@ -42,6 +43,9 @@ bool App::init() {
   if (!init_logger()) return false;
   CWLOG_INFO(std::format("App::init：单实例 bind {} 成功，首实例启动",
                          singleton_port_));
+
+  // T12：主题服务初始化（缺省 retro-3d/light；皮肤/亮暗切换 T17 接 verge）
+  ui::theme::ThemeService::instance().init();
 
   // T11：窗口壳移交 MainWindow（无框窗 + 标题栏 + 钳制 + Widget 树）
   main_window_ = new ui::win::MainWindow();

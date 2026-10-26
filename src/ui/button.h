@@ -30,6 +30,11 @@ class Button : public Widget {
 
   std::function<void()> on_click;
 
+  // T12：主题接入开关（true 时 draw_button_bg 走 ThemeService 查表；
+  // 默认 false 保持 paint_params 直绘。T13 场景挂载时统一开启）
+  bool themed_ = false;
+  const char* theme_color_type_ = "default";  // "primary" | "error" | "default"
+
   State state() const { return enabled() ? state_ : State::Disabled; }
   void set_disabled(bool d);
 
