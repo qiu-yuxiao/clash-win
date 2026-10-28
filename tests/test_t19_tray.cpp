@@ -84,6 +84,7 @@ class MockLifecycleWindow : public ILifecycleWindow {
   int restore_d2d_count = 0;
   int disconnect_ws_count = 0;
   int reconnect_ws_count = 0;
+  int save_geometry_count = 0;
 
   void hide() override { ++hide_count; }
   void show_and_activate() override { ++show_count; }
@@ -91,6 +92,7 @@ class MockLifecycleWindow : public ILifecycleWindow {
   void restore_d2d_resources() override { ++restore_d2d_count; }
   void disconnect_ws() override { ++disconnect_ws_count; }
   void reconnect_ws() override { ++reconnect_ws_count; }
+  void save_geometry(bool /*immediately*/) override { ++save_geometry_count; }
 
   void reset() {
     hide_count = 0;
@@ -99,6 +101,7 @@ class MockLifecycleWindow : public ILifecycleWindow {
     restore_d2d_count = 0;
     disconnect_ws_count = 0;
     reconnect_ws_count = 0;
+    save_geometry_count = 0;
   }
 };
 

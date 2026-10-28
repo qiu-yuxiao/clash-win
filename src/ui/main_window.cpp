@@ -18,6 +18,7 @@
 #include "util/log.h"
 #include "util/utf.h"
 #include "system/tray.h"
+#include "system/signals.h"
 #include <format>
 
 namespace clashwin::ui::win {
@@ -452,6 +453,10 @@ void MainWindow::reconnect_ws() {
   // WsManager 保持配置
 }
 
+void MainWindow::save_geometry(bool immediately) {
+  persist_geometry(immediately);
+}
+
 void MainWindow::close_to_lightweight() {
   CWLOG_INFO("close -> Lifecycle::entry_lightweight_mode(false)");
   app::Lifecycle::instance().entry_lightweight_mode(false);
@@ -735,6 +740,17 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_CLOSE:
       // 关闭 = 隐藏 + 轻量模式（非退出；← 02§7）
       close_to_lightweight();
+      return 0;
+
+    case WM_QUERYENDSESSION:
+      CWLOG_INFO("MainWindow: received WM_QUERYENDSESSION");
+      return system::SignalHandler::instance().handle_session_query_end(lp) ? TRUE : FALSE;
+
+    case WM_ENDSESSION:
+      CWLOG_INFO(std::format("MainWindow: received WM_ENDSESSION wp={}", wp));
+      if (wp != 0) {
+        system::SignalHandler::instance().handle_session_end(true, lp);
+      }
       return 0;
 
     case WM_DESTROY: {

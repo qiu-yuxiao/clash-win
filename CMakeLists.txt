@@ -64,6 +64,7 @@ add_library(clashwin_system STATIC
   src/system/sysproxy.cpp
   src/system/guard_monitor.cpp
   src/system/tray.cpp
+  src/system/signals.cpp
 )
 target_include_directories(clashwin_system PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -321,6 +322,7 @@ add_executable(clashwin_test
   tests/test_t20_connections.cpp
   tests/test_t21_modals.cpp
   tests/test_t22_monitor_autostart.cpp
+  tests/test_t23_quit_recovery.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_app clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)

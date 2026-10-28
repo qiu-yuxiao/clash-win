@@ -16,6 +16,7 @@
 #include "system/guard_monitor.h"
 #include "system/sysproxy.h"
 #include "system/tray.h"
+#include "system/signals.h"
 #include "ui/theme/theme.h"
 #include "ui/main_window.h"
 #include "util/dirs.h"
@@ -60,6 +61,7 @@ system::Sysopt::VergeView make_startup_sysproxy_view() {
 App::App() = default;
 
 App::~App() {
+  system::SignalHandler::instance().uninstall();
   // T18：退出清理（← census §74 quit：prepare_exit → reset_sysproxy →
   //   停内核 → 停 Timer/monitor；CoreManager 停止沿既有路径）
   (void)system::Sysopt::instance().reset_sysproxy();
@@ -119,6 +121,23 @@ bool App::init() {
   if (!init_logger()) return false;
   CWLOG_INFO(std::format("App::init：单实例 bind {} 成功，首实例启动",
                          singleton_port_));
+
+  // T23: 注册控制台信号与操作系统会话终止处理器
+  system::SignalHandler::instance().install([](system::SignalType sig) {
+    CWLOG_INFO(std::format("App: 捕获系统信号 {}，执行优雅退出序列", system::to_string(sig)));
+    app::Lifecycle::instance().quit();
+  });
+
+  // T23: 装配内嵌服务器停止钩子
+  {
+    auto hooks = app::Lifecycle::instance().hooks();
+    hooks.stop_server = [this] {
+      if (singleton_server_) {
+        singleton_server_->stop();
+      }
+    };
+    app::Lifecycle::instance().set_hooks(hooks);
+  }
 
   // 判断静默启动（--silent 参数与配置）
   bool has_silent_arg = false;
@@ -199,12 +218,8 @@ bool App::init() {
       app::Lifecycle::instance().entry_lightweight_mode(true);
     }
   });
-  tray_->set_on_exit([this] {
-    if (main_window_) {
-      DestroyWindow(main_window_->hwnd());
-    } else {
-      PostQuitMessage(0);
-    }
+  tray_->set_on_exit([] {
+    app::Lifecycle::instance().quit();
   });
 
   bool tun_enabled = verge ? verge->enable_tun_mode.value_or(false) : false;

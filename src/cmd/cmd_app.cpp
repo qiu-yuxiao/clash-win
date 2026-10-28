@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include "app/lifecycle.h"
 #include "cmd/cmd_support.h"
 #include "cmd/command_service.h"
 #include "config/config.h"
@@ -15,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <thread>
 
 namespace fs = std::filesystem;
 
@@ -173,6 +175,28 @@ void install_cmd_app(CommandService& svc) {
          return CmdResult::ok(std::move(arr));
        },
        consts::kTimeoutHeavy});
+
+  // ---- exit_app (<- cmd/app.rs:65) ----
+  svc.register_command(
+      "exit_app",
+      {[](const Json&) -> CmdResult {
+         std::thread([] {
+           app::Lifecycle::instance().quit();
+         }).detach();
+         return CmdResult::ok(Json::object());
+       },
+       consts::kTimeoutProbe});
+
+  // ---- restart_app (<- cmd/app.rs:71) ----
+  svc.register_command(
+      "restart_app",
+      {[](const Json&) -> CmdResult {
+         std::thread([] {
+           app::Lifecycle::instance().restart_app();
+         }).detach();
+         return CmdResult::ok(Json::object());
+       },
+       consts::kTimeoutProbe});
 
   // ================= 桩组（T24/T25 落地；注册存在，调用返回未实现） =================
   auto stub = [](const char* name) {

@@ -175,6 +175,7 @@ class MainWindow : public app::ILifecycleWindow {
   void restore_d2d_resources() override;
   void disconnect_ws() override;
   void reconnect_ws() override;
+  void save_geometry(bool immediately) override;
 
   void close_to_lightweight();         // 关闭按钮：隐藏 + entry_lightweight_mode
   void toggle_large();                 // 大尺寸 toggle（640×860 ↔ last-non-large）
