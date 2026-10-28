@@ -1,5 +1,8 @@
 #include "app/app.h"
 
+#include "app/lifecycle.h"
+#include "app/scheme.h"
+#include "app/singleton.h"
 #include "cmd/command_service.h"
 #include "cmd/cmd_support.h"
 #include "config/config.h"
@@ -11,6 +14,7 @@
 #include "events/event_names.h"
 #include "system/guard_monitor.h"
 #include "system/sysproxy.h"
+#include "system/tray.h"
 #include "ui/theme/theme.h"
 #include "ui/main_window.h"
 #include "util/dirs.h"
@@ -21,6 +25,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <shellapi.h>
 #include <iphlpapi.h>
 #include <thread>
 #include <atomic>
@@ -31,7 +36,6 @@
 namespace clashwin {
 
 namespace {
-std::atomic<bool> g_accept_running{false};
 // 单实例唤醒（与 ui/win/main_window.cpp 的 kAppWakeup 同值 WM_APP+1）
 constexpr UINT kAppWakeupMsg = WM_APP + 1;
 
@@ -52,16 +56,23 @@ system::Sysopt::VergeView make_startup_sysproxy_view() {
 }
 }  // namespace
 
+App::App() = default;
+
 App::~App() {
   // T18：退出清理（← census §74 quit：prepare_exit → reset_sysproxy →
   //   停内核 → 停 Timer/monitor；CoreManager 停止沿既有路径）
   (void)system::Sysopt::instance().reset_sysproxy();
   system::SysproxyGuard::instance().stop();
   system::CoreMonitor::instance().stop();
-  g_accept_running = false;             // 让 accept 线程的 select 超时退出
-  if (listen_sock_) {
-    closesocket(static_cast<SOCKET>(listen_sock_));
-    listen_sock_ = 0;
+
+  if (singleton_server_) {
+    singleton_server_->stop();
+    singleton_server_.reset();
+  }
+  app::Lifecycle::instance().reset();
+  if (tray_) {
+    tray_->destroy();
+    tray_.reset();
   }
   delete main_window_;  // WM_DESTROY 内完成几何落盘 + PostQuitMessage
   main_window_ = nullptr;
@@ -75,13 +86,55 @@ bool App::init() {
   if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return false;
   wsa_inited_ = true;
 
-  if (!bind_singleton()) {
-    notify_existing_and_exit();  // 内部 exit(0)，不会返回
+  uint16_t port = consts::kSingletonPort;
+  if (const char* env = getenv("CLASHWIN_SINGLETON_PORT")) {
+    int p = atoi(env);
+    if (p > 0 && p < 65536) port = static_cast<uint16_t>(p);
+  }
+  singleton_port_ = port;
+
+  singleton_server_ = std::make_unique<app::SingletonServer>();
+  bool bound = singleton_server_->start(
+      singleton_port_,
+      [this] {
+        if (main_window_) {
+          PostMessageW(main_window_->hwnd(), kAppWakeupMsg, 0, 0);
+        }
+      },
+      [](const std::string& param) {
+        std::thread([param] {
+          (void)app::resolve_scheme(param);
+        }).detach();
+      });
+
+  if (!bound) {
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    app::SingletonClient::notify_or_exit(singleton_port_, argc, argv, /*do_exit=*/true);
+    if (argv) LocalFree(argv);
+    return false;
   }
 
   if (!init_logger()) return false;
   CWLOG_INFO(std::format("App::init：单实例 bind {} 成功，首实例启动",
                          singleton_port_));
+
+  // 判断静默启动（--silent 参数与配置）
+  bool has_silent_arg = false;
+  int argc = 0;
+  LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+  if (argv) {
+    for (int i = 1; i < argc; ++i) {
+      if (wcscmp(argv[i], L"--silent") == 0) {
+        has_silent_arg = true;
+        break;
+      }
+    }
+    LocalFree(argv);
+  }
+  auto verge = config::Config::instance().verge().latest_arc();
+  bool is_silent_start = verge ? verge->enable_silent_start.value_or(false) : false;
+  bool should_silent = is_silent_start && has_silent_arg;
 
   // T12：主题服务初始化（缺省 retro-3d/light；皮肤/亮暗切换 T17 接 verge）
   ui::theme::ThemeService::instance().init();
@@ -98,7 +151,6 @@ bool App::init() {
           uint64_t interval = 1440;
           if (it.option && it.option->update_interval)
             interval = *it.option->update_interval;
-          // next = updated(Unix 秒)×1000 + interval×60k；无 updated → 0 补跑
           int64_t next =
               it.updated ? *it.updated * 1000 +
                                 static_cast<int64_t>(interval) * 60000
@@ -124,9 +176,53 @@ bool App::init() {
 
   // T11：窗口壳移交 MainWindow（无框窗 + 标题栏 + 钳制 + Widget 树）
   main_window_ = new ui::win::MainWindow();
-  if (!main_window_->create(/*show_immediately=*/true)) {
+  if (!main_window_->create(/*show_immediately=*/!should_silent)) {
     CWLOG_ERROR("App::init：主窗口创建失败");
     return false;
+  }
+
+  // T19：系统托盘与生命周期管理装配
+  tray_ = std::make_unique<system::Tray>();
+  tray_->init(main_window_->hwnd());
+  main_window_->set_tray(tray_.get());
+  app::Lifecycle::instance().set_window(main_window_);
+  app::Lifecycle::instance().set_tray(tray_.get());
+
+  tray_->set_on_left_click([] {
+    app::Lifecycle::instance().exit_lightweight_mode();
+  });
+  tray_->set_on_toggle_lite_mode([] {
+    if (app::Lifecycle::instance().is_in_lightweight_mode()) {
+      app::Lifecycle::instance().exit_lightweight_mode();
+    } else {
+      app::Lifecycle::instance().entry_lightweight_mode(true);
+    }
+  });
+  tray_->set_on_exit([this] {
+    if (main_window_) {
+      DestroyWindow(main_window_->hwnd());
+    } else {
+      PostQuitMessage(0);
+    }
+  });
+
+  bool tun_enabled = verge ? verge->enable_tun_mode.value_or(false) : false;
+  bool sys_enabled = verge ? verge->enable_system_proxy.value_or(false) : false;
+  tray_->update_icon(tun_enabled, sys_enabled);
+
+  events::EventBus::instance().subscribe(
+      events::names::kRefreshVerge,
+      [this](const std::string&) {
+        auto v = config::Config::instance().verge().latest_arc();
+        if (v && tray_) {
+          bool tun_on = v->enable_tun_mode.value_or(false);
+          bool sys_on = v->enable_system_proxy.value_or(false);
+          tray_->update_icon(tun_on, sys_on);
+        }
+      });
+
+  if (should_silent) {
+    app::Lifecycle::instance().entry_lightweight_mode(true);
   }
 
   // ---------- T18：系统代理装配 + 启动收敛 + 内核守护 ----------
@@ -143,13 +239,11 @@ bool App::init() {
           else if (t == system::GuardType::Autoproxy)
             (void)acc->write_autoproxy(a);
         });
-    // ← resolve/mod.rs:205-209 启动时 update_sysproxy + refresh_guard
-    //   （master switch 关 → 双关收敛上次残留；← T18 完成标准"残留清理"）
     auto view = make_startup_sysproxy_view();
     (void)sysopt.update_sysproxy(view);
     sysopt.refresh_guard(view);
 
-    // ← module/monitor.rs 守护线程（生产 hooks；间隔/阈值见 guard_monitor.h）
+    // ← module/monitor.rs 守护线程
     auto& monitor = system::CoreMonitor::instance();
     monitor.set_hooks({
         /*.api_alive =*/[] {
@@ -184,7 +278,7 @@ bool App::init() {
               return true;
           return false;
         },
-        /*.node_healthy =*/nullptr,  // 节点级判定生产源留 T19/T20 深接
+        /*.node_healthy =*/nullptr,
         /*.auto_select_trigger =*/
         []() -> Result<bool> {
           auto latest = config::Config::instance().profiles().latest_arc();
@@ -194,7 +288,7 @@ bool App::init() {
                                                           /*sort_type=*/1,
                                                           /*select=*/true,
                                                           /*skip_wait=*/false);
-          if (out.busy) return Result<bool>::ok(false);   // BUSY 不算失败
+          if (out.busy) return Result<bool>::ok(false);
           return Result<bool>::ok(out.selected);
         },
         /*.alert =*/
@@ -212,7 +306,6 @@ bool App::init() {
     monitor.start();
   }
 
-  start_accept_thread();
   CWLOG_INFO("App::init 完成：主窗口就绪");
   return true;
 }
@@ -229,81 +322,6 @@ bool App::init_logger() {
   if (pos != std::wstring::npos) exe_dir.resize(pos);
   Logger::instance().init(exe_dir);
   return true;
-}
-
-// ---------- 单实例（← utils/server.rs 行为桩） ----------
-
-bool App::bind_singleton() {
-  // 单实例端口 33336（与实机 Clash Mini 的 33335 错开，允许共存——迁移期并行
-  // 对比是常态，共用端口曾导致实机无法启动）。开发/测试时可用环境变量覆盖。
-  uint16_t port = consts::kSingletonPort;
-  if (const char* env = getenv("CLASHWIN_SINGLETON_PORT")) {
-    int p = atoi(env);
-    if (p > 0 && p < 65536) port = static_cast<uint16_t>(p);
-  }
-  singleton_port_ = port;
-  SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (s == INVALID_SOCKET) return false;
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(port);
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  if (bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-    closesocket(s);
-    return false;
-  }
-  listen(s, 4);
-  listen_sock_ = static_cast<uintptr_t>(s);
-  return true;
-}
-
-void App::notify_existing_and_exit() {
-  // 作为客户端连单例端口，发 /commands/visible 请求（桩：内容不解析）唤醒首实例
-  SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (s != INVALID_SOCKET) {
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(singleton_port_);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
-      const char req[] = "GET /commands/visible HTTP/1.1\r\n"
-                         "Host: 127.0.0.1\r\n"
-                         "Connection: close\r\n\r\n";
-      send(s, req, static_cast<int>(sizeof(req) - 1), 0);
-      char buf[256];
-      recv(s, buf, sizeof(buf), 0);  // 尽力读一次响应，失败不影响
-    }
-    closesocket(s);
-  }
-  exit(0);  // ← server.rs：二次启动唤醒后自身退出
-}
-
-void App::start_accept_thread() {
-  if (!listen_sock_ || !main_window_) return;
-  g_accept_running = true;
-  uintptr_t ls = listen_sock_;
-  HWND hwnd = main_window_->hwnd();
-  std::thread([ls, hwnd] {
-    SOCKET s = static_cast<SOCKET>(ls);
-    while (g_accept_running) {
-      fd_set rset;
-      FD_ZERO(&rset);
-      FD_SET(s, &rset);
-      timeval tv{0, 500 * 1000};  // 500ms 轮询，便于退出
-      int r = select(0, &rset, nullptr, nullptr, &tv);
-      if (r <= 0) continue;
-      SOCKET c = accept(s, nullptr, nullptr);
-      if (c == INVALID_SOCKET) continue;
-      // 桩：不解析请求，直接唤醒窗口；响应留给后续任务的 embed server
-      const char resp[] = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n"
-                          "Connection: close\r\n\r\n";
-      send(c, resp, static_cast<int>(sizeof(resp) - 1), 0);
-      shutdown(c, SD_BOTH);
-      closesocket(c);
-      // 唤起动作必须在 UI 线程做（ShowWindow/SetForegroundWindow）
-      PostMessageW(hwnd, kAppWakeupMsg, 0, 0);
-    }
-  }).detach();
 }
 
 }  // namespace clashwin

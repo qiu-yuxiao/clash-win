@@ -17,6 +17,7 @@
 #include "util/dirs.h"
 #include "util/log.h"
 #include "util/utf.h"
+#include "system/tray.h"
 #include <format>
 
 namespace clashwin::ui::win {
@@ -392,12 +393,33 @@ void MainWindow::show_and_activate() {
 
 void MainWindow::hide() { ShowWindow(hwnd_, SW_HIDE); }
 
+void MainWindow::release_d2d_resources() {
+  rt_.destroy();
+  if (hwnd_) KillTimer(hwnd_, kTimerFrame);
+}
+
+void MainWindow::restore_d2d_resources() {
+  if (hwnd_) {
+    rt_.create_for_hwnd(hwnd_);
+    RECT rc;
+    GetClientRect(hwnd_, &rc);
+    on_client_resized(rc.right - rc.left, rc.bottom - rc.top);
+    SetTimer(hwnd_, kTimerFrame, 33, nullptr);
+    InvalidateRect(hwnd_, nullptr, FALSE);
+  }
+}
+
+void MainWindow::disconnect_ws() {
+  if (ws_) ws_->disconnect_all();
+}
+
+void MainWindow::reconnect_ws() {
+  // WsManager 保持配置
+}
+
 void MainWindow::close_to_lightweight() {
-  // ← 02§7：关闭按钮 = 隐藏窗口 + 进入轻量模式（非退出）
-  CWLOG_INFO("close -> hide + entry_lightweight_mode");
-  hide();
-  // T09 门面（线程池执行，非 UI 阻塞）：g_lightweight + 事件过滤
-  cmd::CommandService::instance().invoke("entry_lightweight_mode");
+  CWLOG_INFO("close -> Lifecycle::entry_lightweight_mode(false)");
+  app::Lifecycle::instance().entry_lightweight_mode(false);
 }
 
 void MainWindow::toggle_large() {
@@ -667,7 +689,11 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
     }
 
     case kAppWakeup:  // 单实例唤醒（← /commands/visible）
-      show_and_activate();
+      app::Lifecycle::instance().exit_lightweight_mode();
+      return 0;
+
+    case system::kAppTrayMsg:
+      if (tray_) tray_->handle_tray_message(wp, lp);
       return 0;
 
     case WM_CLOSE:

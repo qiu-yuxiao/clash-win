@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "app/lifecycle.h"
 #include "breakpoints.h"
 #include "clashwin/config/constants.h"
 #include "config/window_state.h"
@@ -160,19 +161,27 @@ class LargeModeController {
 };
 
 // ---------- 主窗口 ----------
-class MainWindow {
+class MainWindow : public app::ILifecycleWindow {
  public:
   // 创建窗口（restore 几何 → 注册类 → CreateWindow → D2D → Widget 树 → 定时器）
   bool create(bool show_immediately = true);
   // 消息循环（App 转发）
   static int run();
 
-  // 行为入口（TitleBar 回调 / 托盘 T19 复用）
-  void show_and_activate();   // ShowWindow + 前台化 + 激活 trick(TOPMOST→NOTOPMOST)
-  void hide();                // SW_HIDE（→ 轻量模式语义）
-  void close_to_lightweight();// 关闭按钮：隐藏 + entry_lightweight_mode
-  void toggle_large();        // 大尺寸 toggle（640×860 ↔ last-non-large）
+  // 行为入口（TitleBar 回调 / 托盘 T19 复用 / ILifecycleWindow）
+  void show_and_activate() override;   // ShowWindow + 前台化 + 激活 trick(TOPMOST→NOTOPMOST)
+  void hide() override;                // SW_HIDE（→ 轻量模式语义）
+  void release_d2d_resources() override;
+  void restore_d2d_resources() override;
+  void disconnect_ws() override;
+  void reconnect_ws() override;
+
+  void close_to_lightweight();         // 关闭按钮：隐藏 + entry_lightweight_mode
+  void toggle_large();                 // 大尺寸 toggle（640×860 ↔ last-non-large）
   void minimize() { if (hwnd_) ShowWindow(hwnd_, SW_MINIMIZE); }
+
+  void set_tray(system::Tray* tray) { tray_ = tray; }
+  system::Tray* tray() const { return tray_; }
 
   HWND hwnd() const { return hwnd_; }
   Breakpoints& breakpoints() { return bp_; }
@@ -232,6 +241,7 @@ class MainWindow {
   bool in_destroy_ = false;
   std::optional<std::pair<double, double>> last_non_large_restore_;  // 盘读
   std::optional<POINT> nc_down_;  // stealth 点击恢复判定
+  system::Tray* tray_ = nullptr;
 };
 
 }  // namespace clashwin::ui::win

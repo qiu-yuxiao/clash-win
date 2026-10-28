@@ -57,17 +57,18 @@ target_link_libraries(clashwin_config PUBLIC clashwin_util clashwin_enhance clas
 target_compile_options(clashwin_config PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
 # 网络层（T06：WinHTTP 同步 GET/POST + 代理三态 + 订阅头解析 + 轻量 URL 解析）
-# 系统域（T18：sysproxy WinINET 注册表语义 + guard_monitor 防篡改/内核守护）
+# 系统域（T18：sysproxy WinINET 注册表语义 + guard_monitor 防篡改/内核守护；T19：tray 系统托盘）
 add_library(clashwin_system STATIC
   src/system/net_http.cpp
   src/system/sysproxy.cpp
   src/system/guard_monitor.cpp
+  src/system/tray.cpp
 )
 target_include_directories(clashwin_system PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(clashwin_system PUBLIC clashwin_util winhttp wininet rasapi32)
+target_link_libraries(clashwin_system PUBLIC clashwin_util winhttp wininet rasapi32 shell32 user32)
 target_compile_options(clashwin_system PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
 # 通用 URI 解析器（T06）+ enhance 配置流水线（T08：enhance/merge/seq/field/
@@ -134,6 +135,7 @@ add_library(clashwin_cmd STATIC
   src/cmd/cmd_clash.cpp
   src/cmd/cmd_verge.cpp
   src/cmd/cmd_system.cpp
+  src/cmd/cmd_lightweight.cpp
   src/cmd/cmd_service.cpp
   src/cmd/cmd_network.cpp
   src/cmd/cmd_app.cpp
@@ -201,6 +203,21 @@ target_link_libraries(clashwin_ui PUBLIC clashwin_util clashwin_cmd clashwin_i18
   d2d1 dwrite windowscodecs user32)
 target_compile_options(clashwin_ui PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
+# app 应用聚合与生命周期/单实例/深链（T19）
+add_library(clashwin_app STATIC
+  src/app/lifecycle.cpp
+  src/app/singleton.cpp
+  src/app/scheme.cpp
+)
+target_include_directories(clashwin_app PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(clashwin_app PUBLIC
+  clashwin_util clashwin_config clashwin_cmd clashwin_system clashwin_core ws2_32
+)
+target_compile_options(clashwin_app PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
+
 add_executable(clashwin WIN32
   src/main.cpp
   src/app/app.cpp
@@ -208,6 +225,7 @@ add_executable(clashwin WIN32
 )
 
 target_link_libraries(clashwin PRIVATE
+  clashwin_app                # T19 生命周期 / 单实例 / 深链
   clashwin_util               # util + vendored 三件套（PUBLIC 传递）
   clashwin_config             # T03 配置体系
   clashwin_mihomo             # T04 管道通信层
@@ -289,7 +307,8 @@ add_executable(clashwin_test
   tests/test_t17_drawer.cpp
   tests/test_root_layout.cpp
   tests/test_t18_sysproxy.cpp
+  tests/test_t19_tray.cpp
 )
-target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32)
+target_link_libraries(clashwin_test PRIVATE clashwin_app clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 add_clashwin_copy_locales(clashwin_test)
