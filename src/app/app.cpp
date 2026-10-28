@@ -1,21 +1,32 @@
 #include "app/app.h"
 
 #include "cmd/command_service.h"
+#include "cmd/cmd_support.h"
 #include "config/config.h"
 #include "config/prfitem.h"
+#include "core/auto_select.h"
+#include "core/core_manager.h"
 #include "core/timer.h"
 #include "events/event_bus.h"
 #include "events/event_names.h"
+#include "system/guard_monitor.h"
+#include "system/sysproxy.h"
 #include "ui/theme/theme.h"
 #include "ui/main_window.h"
+#include "util/dirs.h"
 #include "util/log.h"
 
 #include <map>
+#include <vector>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <windows.h>
+#include <iphlpapi.h>
 #include <thread>
 #include <atomic>
 #include <format>
+
+#pragma comment(lib, "iphlpapi.lib")
 
 namespace clashwin {
 
@@ -23,9 +34,30 @@ namespace {
 std::atomic<bool> g_accept_running{false};
 // 单实例唤醒（与 ui/win/main_window.cpp 的 kAppWakeup 同值 WM_APP+1）
 constexpr UINT kAppWakeupMsg = WM_APP + 1;
+
+// T18：启动收敛视图（← sysopt.rs:132-143；clash mixed_port 兜底）
+system::Sysopt::VergeView make_startup_sysproxy_view() {
+  auto verge = config::Config::instance().verge().latest_arc();
+  uint16_t clash_port = 0;
+  auto mapping = config::Config::instance().clash().latest_arc()->mapping();
+  if (mapping["mixed-port"]) {
+    try {
+      clash_port = static_cast<uint16_t>(mapping["mixed-port"].as<int>());
+    } catch (const std::exception&) {
+      clash_port = 0;
+    }
+  }
+  return system::make_verge_view(*verge, clash_port,
+                                 config::consts::kSingletonPort);
+}
 }  // namespace
 
 App::~App() {
+  // T18：退出清理（← census §74 quit：prepare_exit → reset_sysproxy →
+  //   停内核 → 停 Timer/monitor；CoreManager 停止沿既有路径）
+  (void)system::Sysopt::instance().reset_sysproxy();
+  system::SysproxyGuard::instance().stop();
+  system::CoreMonitor::instance().stop();
   g_accept_running = false;             // 让 accept 线程的 select 超时退出
   if (listen_sock_) {
     closesocket(static_cast<SOCKET>(listen_sock_));
@@ -96,6 +128,90 @@ bool App::init() {
     CWLOG_ERROR("App::init：主窗口创建失败");
     return false;
   }
+
+  // ---------- T18：系统代理装配 + 启动收敛 + 内核守护 ----------
+  {
+    auto& sysopt = system::Sysopt::instance();
+    sysopt.set_access(system::wininet_access());
+    // ← sysproxy-rs GuardMonitor：重写回调（防篡改周期复原）
+    system::SysproxyGuard::instance().set_rewrite(
+        [](system::GuardType t, const system::SysProxyState& s,
+           const system::AutoProxyState& a) {
+          auto* acc = system::Sysopt::instance().access();
+          if (!acc) return;
+          if (t == system::GuardType::Sysproxy) (void)acc->write_sysproxy(s);
+          else if (t == system::GuardType::Autoproxy)
+            (void)acc->write_autoproxy(a);
+        });
+    // ← resolve/mod.rs:205-209 启动时 update_sysproxy + refresh_guard
+    //   （master switch 关 → 双关收敛上次残留；← T18 完成标准"残留清理"）
+    auto view = make_startup_sysproxy_view();
+    (void)sysopt.update_sysproxy(view);
+    sysopt.refresh_guard(view);
+
+    // ← module/monitor.rs 守护线程（生产 hooks；间隔/阈值见 guard_monitor.h）
+    auto& monitor = system::CoreMonitor::instance();
+    monitor.set_hooks({
+        /*.api_alive =*/[] {
+          return cmd::mihomo_unchecked().get_base_config().is_ok();
+        },
+        /*.core_alive =*/[] { return core::CoreManager::instance().sidecar_alive(); },
+        /*.restart_core =*/
+        [] {
+          auto& mgr = core::CoreManager::instance();
+          core::CoreApiClientAdapter api(&cmd::mihomo_unchecked());
+          core::CoreOps ops;
+          ops.start = [] {
+            return core::CoreManager::instance().start_sidecar(
+                util::dirs::clash_mini_path());
+          };
+          ops.stop = [] { return core::CoreManager::instance().stop(); };
+          return mgr.restart_with_restore(api, ops);
+        },
+        /*.network_online =*/
+        [] {
+          ULONG size = 16 * 1024;
+          std::vector<char> buf(size);
+          auto* aa = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buf.data());
+          if (GetAdaptersAddresses(AF_UNSPEC,
+                                   GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST,
+                                   nullptr, aa, &size) != NO_ERROR) {
+            return false;
+          }
+          for (auto* a = aa; a; a = a->Next)
+            if (a->IfType != IF_TYPE_SOFTWARE_LOOPBACK &&
+                a->OperStatus == IfOperStatusUp)
+              return true;
+          return false;
+        },
+        /*.node_healthy =*/nullptr,  // 节点级判定生产源留 T19/T20 深接
+        /*.auto_select_trigger =*/
+        []() -> Result<bool> {
+          auto latest = config::Config::instance().profiles().latest_arc();
+          std::string uid = latest && latest->current ? *latest->current : "";
+          if (uid.empty()) return Result<bool>::ok(false);
+          auto out = core::AutoSelect::instance().trigger(uid, std::nullopt,
+                                                          /*sort_type=*/1,
+                                                          /*select=*/true,
+                                                          /*skip_wait=*/false);
+          if (out.busy) return Result<bool>::ok(false);   // BUSY 不算失败
+          return Result<bool>::ok(out.selected);
+        },
+        /*.alert =*/
+        [](const std::wstring& title, const std::wstring& text) {
+          MessageBoxW(nullptr, text.c_str(), title.c_str(),
+                      MB_OK | MB_ICONWARNING);
+        },
+        /*.current_uid =*/
+        [] {
+          auto latest = config::Config::instance().profiles().latest_arc();
+          return latest && latest->current ? *latest->current : std::string();
+        },
+        /*.now_ms =*/[] { return static_cast<int64_t>(GetTickCount64()); },
+    });
+    monitor.start();
+  }
+
   start_accept_thread();
   CWLOG_INFO("App::init 完成：主窗口就绪");
   return true;

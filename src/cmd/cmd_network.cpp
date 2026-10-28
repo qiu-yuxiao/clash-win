@@ -12,6 +12,7 @@
 #include "config/config.h"
 #include "config/proxy_head_state.h"
 #include "enhance/enhance.h"
+#include "system/sysproxy.h"
 #include "util/dirs.h"
 #include "util/utf.h"
 
@@ -23,42 +24,18 @@
 namespace clashwin::cmd {
 
 void install_cmd_network(CommandService& svc) {
-  // ---- get_sys_proxy（← network.rs:11-38：WinINET 注册表读）----
+  // ---- get_sys_proxy（← network.rs:11-38；T18 统一走 sysproxy access
+  //      同一注册表口径，server "host:port" 读回拆分一致）----
   svc.register_command(
       "get_sys_proxy",
       {[](const Json&) -> CmdResult {
-         // T18 sysproxy 模块的读侧等价实现（同一注册表口径）
-         HKEY key = nullptr;
-         if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
-                           0, KEY_READ, &key) != ERROR_SUCCESS) {
-           return CmdResult::err({errs::kIo, "open Internet Settings failed"});
-         }
-         auto rd_str = [&](const wchar_t* name) -> std::wstring {
-           wchar_t buf[2048] = {};
-           DWORD size = sizeof(buf), type = 0;
-           if (RegQueryValueExW(key, name, nullptr, &type, reinterpret_cast<BYTE*>(buf), &size) ==
-                   ERROR_SUCCESS &&
-               type == REG_SZ) {
-             return buf;
-           }
-           return {};
-         };
-         auto rd_dword = [&](const wchar_t* name) -> std::optional<DWORD> {
-           DWORD v = 0, size = sizeof(v), type = 0;
-           if (RegQueryValueExW(key, name, nullptr, &type, reinterpret_cast<BYTE*>(&v), &size) ==
-                   ERROR_SUCCESS &&
-               type == REG_DWORD) {
-             return v;
-           }
-           return std::nullopt;
-         };
-         DWORD enable = rd_dword(L"ProxyEnable").value_or(0);
-         std::wstring server = rd_str(L"ProxyServer");
-         std::wstring bypass = rd_str(L"ProxyOverride");
-         RegCloseKey(key);
-         return CmdResult::ok(Json{{"enable", enable != 0},
-                                   {"server", utf::utf16_to_utf8(server)},
-                                   {"bypass", utf::utf16_to_utf8(bypass)}});
+         auto s = system::wininet_access()->read_sysproxy();
+         if (s.is_err()) return CmdResult::err(s.error());
+         return CmdResult::ok(Json{{"enable", s.value().enable},
+                                   {"server", utf::utf16_to_utf8(
+                                                  s.value().host + L":" +
+                                                  std::to_wstring(s.value().port))},
+                                   {"bypass", utf::utf16_to_utf8(s.value().bypass)}});
        },
        consts::kTimeoutProbe});
 
@@ -66,31 +43,10 @@ void install_cmd_network(CommandService& svc) {
   svc.register_command(
       "get_auto_proxy",
       {[](const Json&) -> CmdResult {
-         HKEY key = nullptr;
-         if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
-                           0, KEY_READ, &key) != ERROR_SUCCESS) {
-           return CmdResult::err({errs::kIo, "open Internet Settings failed"});
-         }
-         wchar_t buf[2048] = {};
-         DWORD size = sizeof(buf), type = 0;
-         std::wstring url;
-         std::optional<DWORD> enable;
-         if (RegQueryValueExW(key, L"AutoConfigURL", nullptr, &type,
-                              reinterpret_cast<BYTE*>(buf), &size) == ERROR_SUCCESS &&
-             type == REG_SZ) {
-           url = buf;
-         }
-         DWORD v = 0;
-         size = sizeof(v);
-         if (RegQueryValueExW(key, L"ProxyEnable", nullptr, &type, reinterpret_cast<BYTE*>(&v),
-                              &size) == ERROR_SUCCESS) {
-           enable = v;
-         }
-         RegCloseKey(key);
-         return CmdResult::ok(Json{{"enable", url.empty() && enable.has_value() && enable.value() != 0
-                                               ? false
-                                               : !url.empty()},
-                                   {"url", utf::utf16_to_utf8(url)}});
+         auto a = system::wininet_access()->read_autoproxy();
+         if (a.is_err()) return CmdResult::err(a.error());
+         return CmdResult::ok(Json{{"enable", a.value().enable},
+                                   {"url", utf::utf16_to_utf8(a.value().url)}});
        },
        consts::kTimeoutProbe});
 

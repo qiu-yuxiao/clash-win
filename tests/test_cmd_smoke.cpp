@@ -44,46 +44,54 @@ UT_TEST(cmd_smoke_get_profiles_empty) {
 
 UT_TEST(cmd_smoke_verge_roundtrip) {
   ensure_installed();
-  // get_verge_config → patch_verge_config → get_verge_config（值生效）
+  // get_verge_config → patch_verge_config → get_verge_config（值生效）。
+  // 离线 invoke 链断言：只 patch 纯配置面字段（traffic_graph → kFVergeConfig
+  // 仅发 refresh_verge 事件；language → kFLanguage 留痕），不触发
+  // kFRestartCore 的 mini-mihomo -t 校验子进程 10s 实时窗 → 零实时窗、确定性。
   auto& svc = CommandService::instance();
   auto before = svc.invoke("get_verge_config");
   UT_CHECK(before.is_ok());
   if (before.is_ok()) {
     UT_CHECK(before.value().contains("verge_mixed_port"));
   }
-  // patch（verge_mixed_port → kFRestartCore → 全 enhance 链 + mini-mihomo -t
-  // 校验子进程 10s 实时窗）。按 b92abd9 规范，断言不依赖实时窗：机器负载尖峰
-  // 下校验子进程可能超时（msg="Validation process timed out..."，与原版
-  // validate.rs 同文案，patch 如实判失败）。对"校验超时类"错误做有界重试
-  // （≤2 次退避），仍超时 → 确定性 SKIP 并打印原因；其它错误照常 FAIL。
-  auto try_patch = [&svc] {
-    return svc.invoke("patch_verge_config",
-                      Json{{"traffic_graph", true}, {"verge_mixed_port", 10805}});
-  };
-  auto patched = try_patch();
-  for (int attempt = 2; !patched.is_ok() && patched.error().message.find(
-                                               "Validation process timed out") !=
-                                           std::string::npos &&
-                      attempt <= 3;
-       ++attempt) {
-    std::printf("  [verge_roundtrip] validation subprocess timed out "
-                "(attempt %d/3), retrying\n",
-                attempt);
-    Sleep(200);
-    patched = try_patch();
-  }
+  auto patched = svc.invoke("patch_verge_config", Json{{"traffic_graph", true}});
   if (!patched.is_ok()) {
-    // 诊断输出（flaky 猎杀）：patch 失败时永远带出错误码与消息
     std::printf("  [verge_roundtrip] patch err code=%d msg=%s\n",
                 patched.error().code, patched.error().message.c_str());
   }
-  if (!patched.is_ok() &&
-      patched.error().message.find("Validation process timed out") !=
-          std::string::npos) {
-    std::printf("  SKIP: mini-mihomo -t validation subprocess timed out "
-                "repeatedly under machine load; environmental, not a config "
-                "regression\n");
-    return;
+  UT_CHECK(patched.is_ok());
+  auto after = svc.invoke("get_verge_config");
+  UT_CHECK(after.is_ok());
+  if (after.is_ok()) {
+    UT_CHECK_EQ(after.value().value("traffic_graph", false), true);
+  }
+  // LANG bitflag：language 变更不抛错（i18n 留 T10 仅留痕）
+  auto lang = svc.invoke("patch_verge_config", Json{{"language", "en"}});
+  UT_CHECK(lang.is_ok());
+}
+
+UT_TEST(cmd_smoke_verge_port_validate_live) {
+  // live 子进程路径（独立 SKIP-able 用例，← 14caead 后二次重构）：patch
+  // verge_mixed_port → kFRestartCore → 全 enhance 链 + mini-mihomo -t 校验
+  // 子进程（10s 实时窗）。机器负载尖峰会压垮校验子进程 → patch 如实判失败
+  // （err code=2906，msg="Validation process timed out..."，与原版
+  // validate.rs 行为一致：超时→patch 失败）。按 b92abd9 规范不做重试糊弄：
+  // 校验超时属环境依赖 → 确定性 SKIP 并打印原因；其它错误照常 FAIL；
+  // patch 成功则断言 roundtrip 值生效（失败时 draft 被 discard，配置面不变，
+  // 故 roundtrip 断言仅在成功分支执行）。
+  ensure_installed();
+  auto& svc = CommandService::instance();
+  auto patched = svc.invoke("patch_verge_config",
+                            Json{{"traffic_graph", true}, {"verge_mixed_port", 10805}});
+  if (!patched.is_ok()) {
+    std::printf("  [verge_port_validate_live] patch err code=%d msg=%s\n",
+                patched.error().code, patched.error().message.c_str());
+    if (patched.error().message.find("Validation process timed out") !=
+        std::string::npos) {
+      std::printf("  SKIP: mini-mihomo -t validation subprocess timed out under "
+                  "machine load; environmental, not a config regression\n");
+      return;
+    }
   }
   UT_CHECK(patched.is_ok());
   auto after = svc.invoke("get_verge_config");
@@ -92,9 +100,6 @@ UT_TEST(cmd_smoke_verge_roundtrip) {
     UT_CHECK_EQ(after.value().value("verge_mixed_port", 0), 10805);
     UT_CHECK_EQ(after.value().value("traffic_graph", false), true);
   }
-  // LANG bitflag：language 变更不抛错（i18n 留 T10 仅留痕）
-  auto lang = svc.invoke("patch_verge_config", Json{{"language", "en"}});
-  UT_CHECK(lang.is_ok());
 }
 
 UT_TEST(cmd_smoke_runtime_config_enhance_chain) {

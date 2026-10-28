@@ -44,10 +44,13 @@ struct AutoSelectHooks {
   // 读取 profile.selected 当前值（子集校验用）
   std::function<std::optional<std::string>(const std::string& uid)>
       read_selected;
-  // 失败服务器快照（健康检测源，T19；空集 = 不避让）
+  // 失败服务器快照（健康检测源，T18 guard_monitor；空集 = 不避让）
   std::function<std::vector<std::string>()> failed_servers;
   // 节点 → 服务器映射（避让用；空 = 不避让）
   std::function<std::map<std::string, std::string>()> node_server_map;
+  // 内核就绪等待（T18 转正：CoreMonitor::wait_for_clash_ready；返回
+  // false = 等待超时，trigger 仍继续（原版语义：等待尽力而为不阻断））
+  std::function<bool()> wait_ready;
 };
 
 class AutoSelect {

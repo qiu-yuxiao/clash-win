@@ -5,7 +5,9 @@
 
 #include "cmd/cmd_support.h"
 #include "cmd/command_service.h"
+#include "clashwin/config/constants.h"
 #include "config/config.h"
+#include "system/sysproxy.h"
 #include "util/log.h"
 #include "util/dirs.h"
 #include "util/utf.h"
@@ -89,8 +91,27 @@ Result<void> process_flags(uint16_t flags, const IVerge& patch) {
   }
   // ← feat/config.rs:182-189 注释：SYS_PROXY 必须先于 CLASH_CONFIG（TUN 切换
   //   双重接管窗口）。T18 前为留痕桩。
+  // ← feat/config.rs:190-193：SYS_PROXY flag → update_sysproxy + refresh_guard
+  //   （T18 转正；access 未装配时 Sysopt 留痕放行——测试环境安全）
   if (flags & kFSysProxy) {
-    CWLOG_INFO("patch_verge: SYS_PROXY flag (sysproxy application pending T18)");
+    uint16_t clash_port = 0;
+    {
+      auto& clash = config::Config::instance().clash();
+      YAML::Node mapping = clash.latest_arc()->mapping();
+      if (mapping["mixed-port"]) {
+        try {
+          clash_port = static_cast<uint16_t>(mapping["mixed-port"].as<int>());
+        } catch (const std::exception&) {
+          clash_port = 0;
+        }
+      }
+    }
+    auto view = system::make_verge_view(
+        patch, clash_port, config::consts::kSingletonPort);
+    auto& sysopt = system::Sysopt::instance();
+    auto r = sysopt.update_sysproxy(view);
+    if (r.is_err()) return r;
+    sysopt.refresh_guard(view);
   }
   if (flags & kFClashConfig) {
     auto outcome = run_enhance_pipeline();

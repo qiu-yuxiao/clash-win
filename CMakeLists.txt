@@ -57,14 +57,17 @@ target_link_libraries(clashwin_config PUBLIC clashwin_util clashwin_enhance clas
 target_compile_options(clashwin_config PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
 # 网络层（T06：WinHTTP 同步 GET/POST + 代理三态 + 订阅头解析 + 轻量 URL 解析）
+# 系统域（T18：sysproxy WinINET 注册表语义 + guard_monitor 防篡改/内核守护）
 add_library(clashwin_system STATIC
   src/system/net_http.cpp
+  src/system/sysproxy.cpp
+  src/system/guard_monitor.cpp
 )
 target_include_directories(clashwin_system PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(clashwin_system PUBLIC clashwin_util winhttp)
+target_link_libraries(clashwin_system PUBLIC clashwin_util winhttp wininet rasapi32)
 target_compile_options(clashwin_system PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
 # 通用 URI 解析器（T06）+ enhance 配置流水线（T08：enhance/merge/seq/field/
@@ -285,6 +288,7 @@ add_executable(clashwin_test
   tests/test_t16_delay.cpp
   tests/test_t17_drawer.cpp
   tests/test_root_layout.cpp
+  tests/test_t18_sysproxy.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)

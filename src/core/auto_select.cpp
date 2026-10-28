@@ -119,7 +119,14 @@ AutoSelect::Outcome AutoSelect::trigger(
     out.busy = true;
     return out;
   }
-  (void)skip_wait_ready;  // 内核就绪等待归 T19 监控线程（钩子注入后启用）
+  // T18 转正：内核就绪等待（← monitor.rs trigger_backend_auto_select 的
+  //   wait_for_clash_ready 前置；skip_wait_ready 时跳过——静默测速场景已就绪）。
+  //   等待失败（超时）不阻断，与原版「尽力而为」一致。
+  if (!skip_wait_ready && hooks_.wait_ready) {
+    if (!hooks_.wait_ready()) {
+      CWLOG_WARN("AutoSelect: 内核就绪等待超时，继续触发（尽力而为）");
+    }
+  }
 
   // 1. 节点子集确定（← :826-844）：显式子集剔除 dummy；全量走组信息+filter
   //    （组信息读取由调用方经 node_names 传入——本层不做 IO，保持可测）
