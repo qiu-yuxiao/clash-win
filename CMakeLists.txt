@@ -48,6 +48,7 @@ add_library(clashwin_config STATIC
   src/config/proxy_head_state.cpp
   src/config/unlock_cache.cpp
   src/config/config.cpp
+  src/system/unlock_checker.cpp
 )
 target_include_directories(clashwin_config PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -145,7 +146,7 @@ target_include_directories(clashwin_cmd PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(clashwin_cmd PUBLIC clashwin_core clashwin_enhance iphlpapi)
+target_link_libraries(clashwin_cmd PUBLIC clashwin_core clashwin_enhance clashwin_system iphlpapi)
 target_compile_options(clashwin_cmd PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
 # i18n（T10：13 语言加载 / fallback=zh / 归一 / 插值 / 热切换）
@@ -187,6 +188,10 @@ add_library(clashwin_ui STATIC
   src/ui/scenes/connections_view.cpp
   src/ui/scenes/connections_panel.cpp
   src/ui/scenes/connection_detail_dialog.cpp
+  src/ui/scenes/add_url_dialog.cpp
+  src/ui/scenes/unlock_dialog.cpp
+  src/ui/scenes/first_run_guide_dialog.cpp
+  src/ui/scenes/utility_modals.cpp
   src/ui/scenes/node_data.cpp
   src/ui/scenes/quick_bar.cpp
   src/ui/scenes/node_list.cpp
@@ -202,7 +207,7 @@ target_include_directories(clashwin_ui PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(clashwin_ui PUBLIC clashwin_util clashwin_cmd clashwin_i18n
+target_link_libraries(clashwin_ui PUBLIC clashwin_util clashwin_cmd clashwin_i18n clashwin_system
   d2d1 dwrite windowscodecs user32)
 target_compile_options(clashwin_ui PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
@@ -312,6 +317,7 @@ add_executable(clashwin_test
   tests/test_t18_sysproxy.cpp
   tests/test_t19_tray.cpp
   tests/test_t20_connections.cpp
+  tests/test_t21_modals.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_app clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)

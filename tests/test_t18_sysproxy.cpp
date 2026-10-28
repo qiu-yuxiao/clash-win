@@ -57,7 +57,8 @@ struct MockAccess : ISysProxyAccess {
 
 struct SysGuard {
   ~SysGuard() {
-    // 用例隔离：守护/monitor 全停 + 重写回调清空 + monitor 状态清零
+    // 用例隔离：守护/monitor 全停 + 重写回调清空 + monitor 状态清零 + 清除 access 防止悬垂指针
+    Sysopt::instance().set_access(nullptr);
     SysproxyGuard::instance().stop();
     SysproxyGuard::instance().set_guard_type(GuardType::None);
     SysproxyGuard::instance().set_rewrite(nullptr);

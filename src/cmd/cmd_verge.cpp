@@ -97,11 +97,14 @@ Result<void> process_flags(uint16_t flags, const IVerge& patch) {
     uint16_t clash_port = 0;
     {
       auto& clash = config::Config::instance().clash();
-      YAML::Node mapping = clash.latest_arc()->mapping();
-      if (mapping["mixed-port"]) {
+      auto arc = clash.latest_arc();
+      if (arc) {
         try {
-          clash_port = static_cast<uint16_t>(mapping["mixed-port"].as<int>());
-        } catch (const std::exception&) {
+          const auto& mapping = arc->mapping();
+          if (mapping.IsMap() && mapping["mixed-port"]) {
+            clash_port = static_cast<uint16_t>(mapping["mixed-port"].as<int>());
+          }
+        } catch (...) {
           clash_port = 0;
         }
       }

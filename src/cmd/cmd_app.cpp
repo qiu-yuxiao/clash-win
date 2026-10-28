@@ -8,6 +8,7 @@
 #include "cmd/command_service.h"
 #include "config/config.h"
 #include "enhance/enhance.h"
+#include "system/unlock_checker.h"
 #include "util/dirs.h"
 #include "util/utf.h"
 
@@ -137,18 +138,52 @@ void install_cmd_app(CommandService& svc) {
        },
        consts::kTimeoutConfig});
 
-  // ================= 桩组（T21/T25 落地；注册存在，调用返回未实现） =================
+  // ---- get_unlock_items（T21：读取流媒体与 AI 解锁缓存，无则回退 12 默认平台）----
+  svc.register_command(
+      "get_unlock_items",
+      {[](const Json&) -> CmdResult {
+         auto items = system::UnlockChecker::instance().load_cached_items();
+         Json arr = Json::array();
+         for (const auto& it : items) {
+           Json item = Json::object();
+           item["name"] = it.name;
+           item["status"] = it.status;
+           item["region"] = it.region ? Json(*it.region) : Json(nullptr);
+           item["check_time"] = it.check_time ? Json(*it.check_time) : Json(nullptr);
+           arr.push_back(std::move(item));
+         }
+         return CmdResult::ok(std::move(arr));
+       },
+       consts::kTimeoutConfig});
+
+  // ---- check_media_unlock（T21：并发执行 12 平台流媒体与 AI 解锁检测）----
+  svc.register_command(
+      "check_media_unlock",
+      {[](const Json&) -> CmdResult {
+         auto items = system::UnlockChecker::instance().check_all();
+         Json arr = Json::array();
+         for (const auto& it : items) {
+           Json item = Json::object();
+           item["name"] = it.name;
+           item["status"] = it.status;
+           item["region"] = it.region ? Json(*it.region) : Json(nullptr);
+           item["check_time"] = it.check_time ? Json(*it.check_time) : Json(nullptr);
+           arr.push_back(std::move(item));
+         }
+         return CmdResult::ok(std::move(arr));
+       },
+       consts::kTimeoutHeavy});
+
+  // ================= 桩组（T24/T25 落地；注册存在，调用返回未实现） =================
   auto stub = [](const char* name) {
     return std::pair<CmdHandler, int>{
         [name](const Json&) -> CmdResult {
           return CmdResult::err({errs::kNotImplemented,
-                                 std::string(name) + ": not implemented (T21/T25)"});
+                                 std::string(name) + ": not implemented (T24/T25)"});
         },
         consts::kTimeoutHeavy};
   };
   svc.register_command("export_diagnostic_bundle", stub("export_diagnostic_bundle"));
-  svc.register_command("get_unlock_items", stub("get_unlock_items"));
-  svc.register_command("check_media_unlock", stub("check_media_unlock"));
   svc.register_command("check_core_update", stub("check_core_update"));
   svc.register_command("start_core_upgrade", stub("start_core_upgrade"));
 }
