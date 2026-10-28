@@ -108,11 +108,14 @@ struct WsServer {
   std::string got_key;
   std::function<void(HANDLE)> script;
   HANDLE stop_ev = nullptr;
+  std::atomic<bool> pipe_ready{false};
 
   void start() {
     running = true;
+    pipe_ready = false;
     stop_ev = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     th = std::thread([this] { run(); });
+    for (int i = 0; i < 5000 && !pipe_ready.load(); ++i) Sleep(1);
   }
   void stop() {
     if (!running.exchange(false)) return;
@@ -125,7 +128,9 @@ struct WsServer {
     HANDLE h = CreateNamedPipeW(name.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
                                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 2, 1 << 20,
                                 1 << 20, 0, nullptr);
+    pipe_ready = true;
     if (h == INVALID_HANDLE_VALUE) return;
+
     OVERLAPPED ov{};
     ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     BOOL ok = ConnectNamedPipe(h, &ov);
@@ -257,6 +262,7 @@ UT_TEST(ws_handshake_text_and_close) {
 }
 
 UT_TEST(ws_fragmented_message) {
+  got_pong.clear();
   auto name = ws_unique_pipe("frag");
   WsServer srv;
   srv.name = name;
@@ -300,6 +306,7 @@ UT_TEST(ws_fragmented_message) {
 }
 
 UT_TEST(ws_big_frame_64bit_length) {
+  echoed.clear();
   auto name = ws_unique_pipe("big");
   WsServer srv;
   srv.name = name;
@@ -319,7 +326,8 @@ UT_TEST(ws_big_frame_64bit_length) {
   PipeWebSocket ws;
   PipeWsCallbacks cbs;
   cbs.on_message = [&](const std::string& m) { col.push(m); };
-  ws.connect(name, "/memory", "", cbs);
+  auto cr = ws.connect(name, "/memory", "", cbs);
+  UT_CHECK(cr.is_ok());
   UT_CHECK(col.wait_for_count(1, 10000));
   auto msgs = col.snapshot();
   UT_CHECK(msgs.size() == 1 && msgs[0] == big);

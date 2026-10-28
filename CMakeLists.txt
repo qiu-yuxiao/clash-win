@@ -321,4 +321,5 @@ add_executable(clashwin_test
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_app clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
+add_clashwin_copy_resources(clashwin_test)
 add_clashwin_copy_locales(clashwin_test)

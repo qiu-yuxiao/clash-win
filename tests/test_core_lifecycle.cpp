@@ -125,7 +125,7 @@ RestoreTimings fast() {
   t.api_ready_poll_ms = 5;
   t.group_fill_budget_ms = 100;
   t.group_fill_poll_ms = 5;
-  t.select_budget_ms = 100;
+  t.select_budget_ms = 200;
   t.select_retry_ms = 10;
   return t;
 }

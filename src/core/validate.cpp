@@ -229,6 +229,39 @@ Result<ValidationOutcome> run_core_check(const ValidateOptions& opt,
   auto outcome = judge_validation(exit_code, stdout_buf, stderr_buf);
   return Result<ValidationOutcome>::ok(std::move(outcome));
 }
+
+void ensure_app_dir_geodata(const std::wstring& app_dir) {
+  if (app_dir.empty()) return;
+  std::error_code ec;
+  fs::create_directories(app_dir, ec);
+
+  auto ensure_file = [&](const wchar_t* filename) {
+    auto target = fs::path(app_dir) / filename;
+    if (fs::exists(target, ec)) return;
+
+    std::vector<std::wstring> candidates = {
+        clashwin::util::dirs::app_resources_dir() + L"\\" + filename,
+        clashwin::util::dirs::exe_dir() + L"\\resources\\" + filename,
+        clashwin::util::dirs::exe_dir() + L"\\..\\..\\resources\\" + filename,
+        std::wstring(L"C:\\Users\\sun_y\\Documents\\AntiGravity_Projects\\ClashVerge\\src-tauri\\resources\\") + filename,
+    };
+
+    for (const auto& cand : candidates) {
+      if (fs::exists(cand, ec)) {
+        if (::CreateHardLinkW(target.c_str(), cand.c_str(), nullptr)) {
+          return;
+        }
+        if (fs::copy_file(cand, target, fs::copy_options::skip_existing, ec)) {
+          return;
+        }
+      }
+    }
+  };
+
+  ensure_file(L"Country.mmdb");
+  ensure_file(L"geosite.dat");
+}
+
 }  // namespace
 
 Result<ValidationOutcome> validate_config_file(const ValidateOptions& opt,
@@ -241,8 +274,10 @@ Result<ValidationOutcome> validate_config_file(const ValidateOptions& opt,
   if (opt.core_path.empty() || !fs::exists(opt.core_path)) {
     return Result<ValidationOutcome>::err({2323, "core not found for validation"});
   }
+  ensure_app_dir_geodata(opt.app_dir);
   return run_core_check(opt, config_path_utf8);
 }
+
 
 Validator& Validator::instance() {
   static Validator v;
