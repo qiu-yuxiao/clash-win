@@ -38,17 +38,26 @@ class ScrollList : public Widget {
   void on_arrange(const RectF& area) override;
   bool on_mouse(const MouseEvent& e) override;
   void on_paint(IRenderTarget& rt) override;
+  Widget* hit_test(PointF global) override;
 
   // 绘制参数
   Color4f scrollbar_ = Color4f::hex(0x000000, 0.25f);
   bool themed_ = false;  // T12：true 时取 --scrollbar-thumb
   float scrollbar_w_ = 6;
+  void set_show_scrollbar(bool show) {
+    if (show_scrollbar_ == show) return;
+    show_scrollbar_ = show;
+    invalidate();
+  }
+  bool show_scrollbar() const { return show_scrollbar_; }
 
  private:
   void sync_children(float viewport_h);  // 物化窗口对齐 offset_
-  int first_visible(float viewport_h) const {
+  int first_visible(float /*viewport_h*/) const {
     return static_cast<int>(offset_ / item_height_);
   }
+
+  bool show_scrollbar_ = true;
 
   int item_count_ = 0;
   float item_height_ = 0;

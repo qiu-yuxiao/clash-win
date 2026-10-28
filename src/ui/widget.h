@@ -54,6 +54,7 @@ class Widget {
 
   // ---- 树结构 ----
   Widget* parent() const { return parent_; }
+  void set_parent(Widget* p) { parent_ = p; }
   size_t child_count() const { return children_.size(); }
   Widget* child(size_t i) const { return children_[i].get(); }
   void add_child(std::unique_ptr<Widget> w);          // 尾部 = 最上层
@@ -96,7 +97,7 @@ class Widget {
 
   // ---- 命中 ----
   // 全局坐标 → 最深可见启用 widget（可为子）；未命中返回 nullptr
-  Widget* hit_test(PointF global);
+  virtual Widget* hit_test(PointF global);
   // 矩形命中默认实现（local 为相对自身原点的坐标）；圆角/异形可重载
   virtual bool hit_self(PointF local) const {
     return local.x >= 0 && local.y >= 0 && local.x < bounds_.w &&

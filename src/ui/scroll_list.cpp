@@ -71,7 +71,10 @@ void ScrollList::sync_children(float viewport_h) {
   // 物化窗口内缺失行
   for (int i = first; i <= last; ++i) {
     if (rows_.count(i)) continue;
-    if (auto w = factory_(i)) rows_.emplace(i, std::move(w));
+    if (auto w = factory_(i)) {
+      w->set_parent(this);
+      rows_.emplace(i, std::move(w));
+    }
   }
 }
 
@@ -80,9 +83,10 @@ void ScrollList::on_arrange(const RectF& area) {
   if (bounds().h > 0) {
     set_scroll_offset(offset_);  // clamp（内容变短时回弹）
     sync_children(area.h);
+    float sb_w = show_scrollbar_ ? scrollbar_w_ : 0.0f;
     for (auto& [idx, w] : rows_) {
       float y = idx * item_height_ - offset_;
-      w->layout_tree({0, y, area.w - scrollbar_w_, item_height_});
+      w->layout_tree({0, y, area.w - sb_w, item_height_});
     }
   }
 }
@@ -94,9 +98,10 @@ bool ScrollList::on_mouse(const MouseEvent& e) {
     set_scroll_offset(offset_ + lines * item_height_);  // 正 delta = 向下滚
     sync_children(bounds().h);
     // 行位置随 offset 更新
+    float sb_w = show_scrollbar_ ? scrollbar_w_ : 0.0f;
     for (auto& [idx, w] : rows_) {
       float y = idx * item_height_ - offset_;
-      w->layout_tree({0, y, bounds().w - scrollbar_w_, item_height_});
+      w->layout_tree({0, y, bounds().w - sb_w, item_height_});
     }
     return true;
   }
@@ -109,18 +114,32 @@ void ScrollList::on_paint(IRenderTarget& rt) {
   // 行子项绘制（paint 只处理直接子——rows_ 非常规 children，手动递归）
   for (auto& [idx, w] : rows_) w->paint(rt, g);
   // 滚动条（比例 thumb）
-  float m = max_scroll();
-  if (m > 0 && bounds().h > 0) {
-    float vh = bounds().h;
-    float content = item_count_ * item_height_;
-    float thumb_h = std::max(vh * vh / content, 20.0f);
-    float thumb_y = (offset_ / m) * (vh - thumb_h);
-    Brush sb{themed_ ? theme::ThemeService::instance().vars().scrollbar_thumb
-                     : scrollbar_};
-    rt.round_rect({bounds().w - scrollbar_w_ - 1, thumb_y, scrollbar_w_,
-                   thumb_h}, scrollbar_w_ / 2, {}, &sb);
+  if (show_scrollbar_) {
+    float m = max_scroll();
+    if (m > 0 && bounds().h > 0) {
+      float vh = bounds().h;
+      float content = item_count_ * item_height_;
+      float thumb_h = std::max(vh * vh / content, 20.0f);
+      float thumb_y = (offset_ / m) * (vh - thumb_h);
+      Brush sb{themed_ ? theme::ThemeService::instance().vars().scrollbar_thumb
+                       : scrollbar_};
+      rt.round_rect({bounds().w - scrollbar_w_ - 1, thumb_y, scrollbar_w_,
+                     thumb_h}, scrollbar_w_ / 2, {}, &sb);
+    }
   }
   rt.pop_clip();
+}
+
+Widget* ScrollList::hit_test(PointF global) {
+  if (!visible() || !enabled()) return nullptr;
+  RectF g = global_bounds();
+  if (!g.contains(global.x, global.y)) return nullptr;
+  for (auto& [idx, w] : rows_) {
+    if (w) {
+      if (Widget* hit = w->hit_test(global)) return hit;
+    }
+  }
+  return Widget::hit_test(global);
 }
 
 }  // namespace clashwin::ui

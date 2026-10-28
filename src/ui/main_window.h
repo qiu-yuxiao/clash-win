@@ -195,6 +195,7 @@ class MainWindow : public app::ILifecycleWindow {
   void build_widget_tree();
   void build_scene();     // T13/T14：场景装配 + 数据事件订阅
   void build_ws_pipes();  // T14：WS 订阅 → UiPostbox 转投
+  void update_conn_ws_state();  // T20：动态维护 connections WS 订阅生命周期
   void apply_geometry_restore();  // window_state.json 恢复（含脱屏居中）
 
   void on_client_resized(int cw, int ch);          // WM_SIZE

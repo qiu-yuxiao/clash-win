@@ -280,14 +280,36 @@ void MainWindow::build_scene() {
   }
 
   conn_data_ = std::make_unique<scene::ConnectionData>(300);
-  conn_data_->on_resync = [] {
-    CWLOG_WARN("conn resync：等待下一个 snapshot 帧（WS 自动重连）");
+  conn_data_->on_resync = [this] {
+    CWLOG_WARN("conn resync：等待下一个 snapshot 帧（WS 重连）");
+    if (ws_sub_conn_ != 0 && ws_) {
+      ws_->unsubscribe(ws_sub_conn_);
+      ws_sub_conn_ = 0;
+      update_conn_ws_state();
+    }
   };
 
   build_ws_pipes();
 
-  // ---------- T17：设置抽屉命令链接线 ----------
+  // ---------- T17/T20：设置抽屉命令链接线 ----------
   if (settings_drawer_) {
+    if (auto* cp = settings_drawer_->conn_panel()) {
+      cp->bind(conn_data_.get());
+      cp->on_close_one = [](const std::string& id) {
+        cmd::CommandService::instance().invoke(
+            "close_connection", nlohmann::json::object({{"id", id}}));
+      };
+      cp->on_close_all = [] {
+        cmd::CommandService::instance().invoke(
+            "close_all_connections", nlohmann::json::object());
+      };
+      cp->on_clear_history = [this] {
+        if (conn_data_) conn_data_->clear_closed();
+      };
+    }
+    settings_drawer_->on_open_changed = [this](bool) {
+      update_conn_ws_state();
+    };
     // patch_verge 键 → patch_verge_config；clash 键 → patch_clash_config
     settings_drawer_->on_patch_verge =
         [this](const std::string& k, const nlohmann::json& v) {
@@ -344,12 +366,25 @@ void MainWindow::build_ws_pipes() {
       if (traffic_pane_) traffic_pane_->on_traffic_payload(payload);
     });
   });
-  ws_sub_conn_ = ws_->subscribe_connections(
-      [this](const std::string& payload) {
-        UiPostbox::instance().post([this, payload] {
-          if (conn_data_) conn_data_->consume(payload);
+  ws_sub_conn_ = 0;
+  update_conn_ws_state();
+}
+
+void MainWindow::update_conn_ws_state() {
+  bool needed = settings_drawer_ && settings_drawer_->is_open() &&
+                !bp_.is_narrow() && !bp_.is_mini() &&
+                bp_.logical_h() > win::kMiniHeightThreshold;
+  if (needed && ws_sub_conn_ == 0 && ws_) {
+    ws_sub_conn_ = ws_->subscribe_connections(
+        [this](const std::string& payload) {
+          UiPostbox::instance().post([this, payload] {
+            if (conn_data_) conn_data_->consume(payload);
+          });
         });
-      });
+  } else if (!needed && ws_sub_conn_ != 0 && ws_) {
+    ws_->unsubscribe(ws_sub_conn_);
+    ws_sub_conn_ = 0;
+  }
 }
 
 void MainWindow::apply_geometry_restore() {
@@ -474,6 +509,7 @@ void MainWindow::on_client_resized(int cw, int ch) {
   bp_.set_logical_size(lw, lh);
   stealth_.set_mini(bp_.is_mini());
   root_.layout_tree({0, 0, static_cast<float>(cw), static_cast<float>(ch)});
+  update_conn_ws_state();
   clock_.invalidate({0, 0, static_cast<float>(cw), static_cast<float>(ch)});
   persist_geometry();
 }

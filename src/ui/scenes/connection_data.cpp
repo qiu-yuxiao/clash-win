@@ -13,46 +13,106 @@ namespace clashwin::ui::scene {
 
 namespace {
 int64_t default_now_ms() { return static_cast<int64_t>(GetTickCount64()); }
+}  // namespace
 
-// ← connection-table.tsx chains cell 三分类
-std::string chains_category(const nlohmann::json& conn) {
-  auto it = conn.find("chains");
-  if (it == conn.end() || !it->is_array() || it->empty())
-    return "Direct";  // chainsDirect
-  for (const auto& c : *it) {
-    std::string upper = c.get<std::string>();
-    for (auto& ch : upper) ch = static_cast<char>(std::toupper((unsigned char)ch));
+std::string ConnItem::host_formatted() const {
+  std::string h = !metadata.host.empty() ? metadata.host : metadata.remote_destination;
+  if (h.empty()) {
+    if (!host.empty()) return host;
+    return id;
+  }
+  if (!metadata.destination_port.empty()) {
+    return h + ":" + metadata.destination_port;
+  }
+  return h;
+}
+
+std::string ConnItem::chains_category() const {
+  if (chains.empty()) {
+    return !chains_cat.empty() ? chains_cat : "Direct";
+  }
+  for (const auto& c : chains) {
+    std::string upper = c;
+    for (auto& ch : upper) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
     if (upper == "REJECT") return "Reject";
   }
-  for (const auto& c : *it) {
-    std::string upper = c.get<std::string>();
-    for (auto& ch : upper) ch = static_cast<char>(std::toupper((unsigned char)ch));
+  for (const auto& c : chains) {
+    std::string upper = c;
+    for (auto& ch : upper) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
     if (upper == "DIRECT") return "Direct";
   }
   return "Proxy";
 }
 
-std::string host_of(const nlohmann::json& conn) {
-  const auto& m = conn.contains("metadata") && conn["metadata"].is_object()
-                      ? conn["metadata"]
-                      : nlohmann::json::object();
-  std::string host = m.value("host", "");
-  std::string port = m.value("destinationPort", "");
-  if (host.empty()) host = m.value("remoteDestination", "");
-  return port.empty() ? host : host + ":" + port;
+std::string ConnItem::chains_formatted() const {
+  if (chains.empty()) return chains_category();
+  std::string res;
+  for (auto it = chains.rbegin(); it != chains.rend(); ++it) {
+    if (!res.empty()) res += " / ";
+    res += *it;
+  }
+  return res;
 }
 
-ConnRow parse_conn(const nlohmann::json& conn) {
-  ConnRow row;
-  row.id = conn.value("id", "");
-  row.host = host_of(conn);
-  row.chains_cat = chains_category(conn);
-  row.network = conn.value("network", "");
-  row.upload = static_cast<double>(conn.value("upload", 0.0));
-  row.download = static_cast<double>(conn.value("download", 0.0));
-  row.cur_upload = 0;
-  row.cur_download = 0;
-  return row;
+std::string ConnItem::rule_formatted() const {
+  if (rule.empty()) return "";
+  if (!rule_payload.empty()) {
+    return rule + "(" + rule_payload + ")";
+  }
+  return rule;
+}
+
+std::string ConnItem::process_formatted() const {
+  if (metadata.process.empty()) return "";
+  if (!metadata.process_path.empty()) {
+    return metadata.process + "(" + metadata.process_path + ")";
+  }
+  return metadata.process;
+}
+
+namespace {
+ConnItem parse_conn(const nlohmann::json& conn) {
+  ConnItem item;
+  item.id = conn.value("id", "");
+  item.upload = static_cast<double>(conn.value("upload", 0.0));
+  item.download = static_cast<double>(conn.value("download", 0.0));
+  item.start = conn.value("start", "");
+  item.rule = conn.value("rule", "");
+  if (conn.contains("rulePayload")) {
+    item.rule_payload = conn.value("rulePayload", "");
+  } else if (conn.contains("rule_payload")) {
+    item.rule_payload = conn.value("rule_payload", "");
+  }
+
+  if (conn.contains("chains") && conn["chains"].is_array()) {
+    for (const auto& c : conn["chains"]) {
+      if (c.is_string()) item.chains.push_back(c.get<std::string>());
+    }
+  }
+
+  if (conn.contains("metadata") && conn["metadata"].is_object()) {
+    const auto& m = conn["metadata"];
+    item.metadata.network = m.value("network", "");
+    item.metadata.type = m.value("type", "");
+    item.metadata.host = m.value("host", "");
+    item.metadata.source_ip = m.contains("sourceIP") ? m.value("sourceIP", "") : m.value("source_ip", "");
+    item.metadata.source_port = m.contains("sourcePort") ? m.value("sourcePort", "") : m.value("source_port", "");
+    item.metadata.destination_port = m.contains("destinationPort") ? m.value("destinationPort", "") : m.value("destination_port", "");
+    item.metadata.destination_ip = m.contains("destinationIP") ? m.value("destinationIP", "") : m.value("destination_ip", "");
+    item.metadata.remote_destination = m.contains("remoteDestination") ? m.value("remoteDestination", "") : m.value("remote_destination", "");
+    item.metadata.process = m.value("process", "");
+    item.metadata.process_path = m.contains("processPath") ? m.value("processPath", "") : m.value("process_path", "");
+  }
+
+  if (item.metadata.network.empty() && conn.contains("network")) {
+    item.metadata.network = conn.value("network", "");
+  }
+  item.network = item.metadata.network;
+  item.chains_cat = item.chains_category();
+  item.host = item.host_formatted();
+  item.cur_upload = 0;
+  item.cur_download = 0;
+  return item;
 }
 }  // namespace
 
@@ -143,9 +203,9 @@ bool ConnectionData::consume_json(const nlohmann::json& msg) {
         }
       }
     }
-    // 未 updated 的连接 cur 清 0（← :146-157）
-    for (auto& c : active_) {
-      if (!updated_set.count(c.id)) {
+    // 未 updated 的连接 cur 清 0（← :146-157；在 active_map 中清 0，避免重建时残留上一帧速率）
+    for (auto& [id, c] : active_map) {
+      if (!updated_set.count(id)) {
         c.cur_upload = 0;
         c.cur_download = 0;
       }

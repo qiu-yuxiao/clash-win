@@ -306,6 +306,12 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
   bottom->flex_weight = 0;
   panel_->add_child(std::move(bottom));
 
+  // T20：右列连接面板（大窗宽 >285px 时并排呈现）
+  auto cp = std::make_unique<ConnectionsPanel>();
+  conn_panel_ = cp.get();
+  conn_panel_->set_visible(false);
+  add_child(std::move(cp));
+
   set_open(false);
 }
 
@@ -317,10 +323,14 @@ void SettingsDrawer::set_open(bool open) {
   set_visible(true);  // Stack 宿主常驻，遮罩/面板切换可见性
   mask_->set_visible(open);
   panel_->set_visible(open);
+  if (conn_panel_) {
+    conn_panel_->set_visible(open && bounds().w > 285.0f);
+  }
   if (open) {
     // 面板重排（宿主 on_arrange 在可见时才有效）
     invalidate();
   }
+  if (on_open_changed) on_open_changed(open);
 }
 
 void SettingsDrawer::apply_skin_prefs() {
@@ -339,35 +349,69 @@ void SettingsDrawer::apply_skin_prefs() {
 void SettingsDrawer::on_arrange(const RectF& area) {
   set_bounds(area);
   mask_->layout_tree({0, 0, area.w, area.h});
-  // 面板：顶部留 30 标题栏高（覆盖客户区其余）
-  panel_->layout_tree({0, 30, area.w, area.h - 30});
-  // 关闭按钮行（右对齐 30×30）
-  close_btn_->layout_tree({area.w - 34, 4, 30, 28});
-  // 卡片纵向排列（局部坐标）
-  float y = 36;
-  profile_card_->layout_tree({6, y, area.w - 12, 92});
-  y += 98;
-  takeover_card_->layout_tree({6, y, area.w - 12, 92});
-  y += 98;
-  routing_card_->layout_tree({6, y, area.w - 12, 92});
-  y += 98;
-  basic_card_->layout_tree({6, y, area.w - 12, 142});
-  y += 148;
-  theme_card_->layout_tree({6, y, area.w - 12, 196});
-  y += 202;
-  // 底部按钮行贴底
-  logs_btn_->layout_tree({6, area.h - 116, (area.w - 18) / 2, 30});
-  help_btn_->layout_tree({12 + (area.w - 18) / 2, area.h - 116,
-                          (area.w - 18) / 2, 30});
-  (void)y;
+
+  if (area.w > 285.0f) {
+    // 双列形态（左 240px + 1px 分割线 + 右自适应连接面板）
+    panel_->layout_tree({0, 30.0f, 240.0f, area.h - 30.0f});
+    close_btn_->layout_tree({240.0f - 34.0f, 4.0f, 30.0f, 28.0f});
+
+    float y = 36.0f;
+    profile_card_->layout_tree({6.0f, y, 228.0f, 92.0f});
+    y += 98.0f;
+    takeover_card_->layout_tree({6.0f, y, 228.0f, 92.0f});
+    y += 98.0f;
+    routing_card_->layout_tree({6.0f, y, 228.0f, 92.0f});
+    y += 98.0f;
+    basic_card_->layout_tree({6.0f, y, 228.0f, 142.0f});
+    y += 148.0f;
+    theme_card_->layout_tree({6.0f, y, 228.0f, 196.0f});
+    y += 202.0f;
+
+    logs_btn_->layout_tree({6.0f, area.h - 116.0f, (240.0f - 18.0f) / 2.0f, 30.0f});
+    help_btn_->layout_tree({12.0f + (240.0f - 18.0f) / 2.0f, area.h - 116.0f,
+                            (240.0f - 18.0f) / 2.0f, 30.0f});
+
+    if (conn_panel_) {
+      conn_panel_->set_visible(open_);
+      conn_panel_->layout_tree({246.0f, 30.0f, area.w - 246.0f, area.h - 30.0f});
+    }
+  } else {
+    // 窄窗单列形态（<= 285px）
+    panel_->layout_tree({0, 30.0f, area.w, area.h - 30.0f});
+    close_btn_->layout_tree({area.w - 34.0f, 4.0f, 30.0f, 28.0f});
+
+    float y = 36.0f;
+    profile_card_->layout_tree({6.0f, y, area.w - 12.0f, 92.0f});
+    y += 98.0f;
+    takeover_card_->layout_tree({6.0f, y, area.w - 12.0f, 92.0f});
+    y += 98.0f;
+    routing_card_->layout_tree({6.0f, y, area.w - 12.0f, 92.0f});
+    y += 98.0f;
+    basic_card_->layout_tree({6.0f, y, area.w - 12.0f, 142.0f});
+    y += 148.0f;
+    theme_card_->layout_tree({6.0f, y, area.w - 12.0f, 196.0f});
+    y += 202.0f;
+
+    logs_btn_->layout_tree({6.0f, area.h - 116.0f, (area.w - 18.0f) / 2.0f, 30.0f});
+    help_btn_->layout_tree({12.0f + (area.w - 18.0f) / 2.0f, area.h - 116.0f,
+                            (area.w - 18.0f) / 2.0f, 30.0f});
+
+    if (conn_panel_) {
+      conn_panel_->set_visible(false);
+    }
+  }
 }
 
 bool SettingsDrawer::on_mouse(const MouseEvent& e) {
   // 遮罩点击关闭（open 且点击落在遮罩/面板外层——面板内由子件路由）
   if (open_ && e.type == MouseEventType::Up) {
-    // 命中测试：面板矩形之外即遮罩
     RectF panel_g = panel_->global_bounds();
-    if (!panel_g.contains(e.pos.x, e.pos.y)) {
+    bool inside = panel_g.contains(e.pos.x, e.pos.y);
+    if (conn_panel_ && conn_panel_->visible()) {
+      RectF cp_g = conn_panel_->global_bounds();
+      if (cp_g.contains(e.pos.x, e.pos.y)) inside = true;
+    }
+    if (!inside && e.pos.y < 30.0f) {
       set_open(false);
       return true;
     }
@@ -487,6 +531,12 @@ void SettingsDrawer::on_paint(IRenderTarget& rt) {
     const auto& svc = ThemeService::instance();
     rt.fill_rect({0, 30, bounds().w, bounds().h - 30},
                  Brush{svc.vars().theme_panel_bg});
+
+    if (bounds().w > 285.0f) {
+      // 双列中间垂直分割线 (x = 240)
+      rt.fill_rect({240.0f, 30.0f, 1.0f, bounds().h - 30.0f},
+                   Brush{svc.vars().divider_color});
+    }
   }
 }
 

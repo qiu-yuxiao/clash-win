@@ -30,6 +30,7 @@
 #include "../widget.h"
 #include "profile_import_card.h"
 #include "quick_bar.h"  // TakeoverSegmented（T13）
+#include "connections_panel.h"
 
 namespace clashwin::ui::scene {
 
@@ -125,6 +126,7 @@ class SettingsDrawer : public Stack {
   RoutingCard* routing_card() const { return routing_card_; }
   BasicCard* basic_card() const { return basic_card_; }
   ThemeCard* theme_card() const { return theme_card_; }
+  ConnectionsPanel* conn_panel() const { return conn_panel_; }
   Widget* panel() const { return panel_; }  // 面板（测试：顶部标题栏留白）
 
   // 宿主回调（命令链）
@@ -135,6 +137,7 @@ class SettingsDrawer : public Stack {
       on_import_profile;
   std::function<void()> on_open_logs;
   std::function<void()> on_open_help;
+  std::function<void(bool open)> on_open_changed;
 
   void on_arrange(const RectF& area) override;
   void on_paint(IRenderTarget& rt) override;
@@ -152,6 +155,7 @@ class SettingsDrawer : public Stack {
 
   Widget* mask_ = nullptr;
   Column* panel_ = nullptr;
+  ConnectionsPanel* conn_panel_ = nullptr;
   IconW* close_btn_ = nullptr;
   ProfileImportCard* profile_card_ = nullptr;
   TakeoverCard* takeover_card_ = nullptr;

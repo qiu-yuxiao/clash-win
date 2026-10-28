@@ -24,14 +24,40 @@ namespace clashwin::ui::scene {
 
 inline constexpr size_t kMaxClosedConns = 500;  // ← MAX_CLOSED_CONNS_NUM
 
-struct ConnRow {
+struct ConnMetadata {
+  std::string network;          // tcp/udp
+  std::string type;             // HTTPS, etc.
+  std::string host;
+  std::string source_ip;
+  std::string source_port;
+  std::string destination_port;
+  std::string destination_ip;
+  std::string remote_destination;
+  std::string process;
+  std::string process_path;
+};
+
+struct ConnItem {
   std::string id;
   std::string host;        // host:port（host 空 → remoteDestination）
   std::string chains_cat;  // "Proxy"/"Direct"/"Reject"（← connection-table chains 三分类）
   std::string network;     // tcp/udp（协议色点判别用）
+  ConnMetadata metadata;
   double upload = 0, download = 0;
   double cur_upload = 0, cur_download = 0;  // 本帧增量速率
+  std::string start;
+  std::vector<std::string> chains;
+  std::string rule;
+  std::string rule_payload;
+
+  std::string host_formatted() const;
+  std::string chains_category() const;
+  std::string chains_formatted() const;
+  std::string rule_formatted() const;
+  std::string process_formatted() const;
 };
+
+using ConnRow = ConnItem;
 
 class ConnectionData {
  public:

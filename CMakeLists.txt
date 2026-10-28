@@ -117,6 +117,7 @@ add_library(clashwin_core STATIC
   src/core/timer.cpp
   src/core/delay_manager.cpp
   src/core/auto_select.cpp
+  src/core/quick_routing.cpp
 )
 target_include_directories(clashwin_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -184,6 +185,8 @@ add_library(clashwin_ui STATIC
   src/ui/theme/theme.cpp
   src/ui/scenes/connection_data.cpp
   src/ui/scenes/connections_view.cpp
+  src/ui/scenes/connections_panel.cpp
+  src/ui/scenes/connection_detail_dialog.cpp
   src/ui/scenes/node_data.cpp
   src/ui/scenes/quick_bar.cpp
   src/ui/scenes/node_list.cpp
@@ -308,6 +311,7 @@ add_executable(clashwin_test
   tests/test_root_layout.cpp
   tests/test_t18_sysproxy.cpp
   tests/test_t19_tray.cpp
+  tests/test_t20_connections.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_app clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
