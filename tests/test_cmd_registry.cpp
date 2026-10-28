@@ -78,7 +78,7 @@ UT_TEST(cmd_unknown_and_stub) {
   UT_CHECK(r.is_err());
   UT_CHECK_EQ(r.error().code, errs::kNotFound);
   // 桩命令 → 2903（注册存在，调用返回未实现）
-  auto s = svc.invoke("check_core_update");
+  auto s = svc.invoke("copy_icon_file");
   UT_CHECK(s.is_err());
   UT_CHECK_EQ(s.error().code, errs::kNotImplemented);
 }

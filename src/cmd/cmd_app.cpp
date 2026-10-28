@@ -12,6 +12,9 @@
 #include "system/unlock_checker.h"
 #include "util/dirs.h"
 #include "util/utf.h"
+#include "core/core_updater.h"
+#include "update/client_updater.h"
+#include "system/diagnostic_bundle.h"
 
 #include <filesystem>
 #include <fstream>
@@ -198,18 +201,60 @@ void install_cmd_app(CommandService& svc) {
        },
        consts::kTimeoutProbe});
 
-  // ================= 桩组（T24/T25 落地；注册存在，调用返回未实现） =================
-  auto stub = [](const char* name) {
-    return std::pair<CmdHandler, int>{
-        [name](const Json&) -> CmdResult {
-          return CmdResult::err({errs::kNotImplemented,
-                                 std::string(name) + ": not implemented (T24/T25)"});
-        },
-        consts::kTimeoutHeavy};
-  };
-  svc.register_command("export_diagnostic_bundle", stub("export_diagnostic_bundle"));
-  svc.register_command("check_core_update", stub("check_core_update"));
-  svc.register_command("start_core_upgrade", stub("start_core_upgrade"));
+  // ================= T24: 内核热升级 + 客户端自更新 + 诊断包 =================
+  svc.register_command(
+      "check_core_update",
+      {[](const Json&) -> CmdResult {
+         auto res = core::CoreUpdater::instance().check_latest_release();
+         if (!res.is_ok()) {
+           return CmdResult::err({errs::kIo, res.error().message});
+         }
+         return CmdResult::ok(res.value());
+       },
+       consts::kTimeoutProbe});
+
+  svc.register_command(
+      "start_core_upgrade",
+      {[](const Json& args) -> CmdResult {
+         core::GithubRelease release;
+         if (args.is_object() && args.contains("tag_name")) {
+           release = args.get<core::GithubRelease>();
+         } else {
+           auto check_res = core::CoreUpdater::instance().check_latest_release();
+           if (!check_res.is_ok()) {
+             return CmdResult::err({errs::kIo, check_res.error().message});
+           }
+           release = check_res.value();
+         }
+         auto res = core::CoreUpdater::instance().start_core_upgrade(release);
+         if (!res.is_ok()) {
+           return CmdResult::err({errs::kIo, res.error().message});
+         }
+         return CmdResult::ok(Json::object());
+       },
+       consts::kTimeoutHeavy});
+
+  svc.register_command(
+      "export_diagnostic_bundle",
+      {[](const Json&) -> CmdResult {
+         auto res = system::DiagnosticBundle::export_diagnostic_bundle();
+         if (!res.is_ok()) {
+           return CmdResult::err({errs::kIo, res.error().message});
+         }
+         return CmdResult::ok(Json(res.value()));
+       },
+       consts::kTimeoutHeavy});
+
+  svc.register_command(
+      "check_app_update",
+      {[](const Json&) -> CmdResult {
+         auto res = update::ClientUpdater::instance().check_app_update();
+         if (!res.is_ok()) {
+           return CmdResult::err({errs::kIo, res.error().message});
+         }
+         return CmdResult::ok(res.value().to_json());
+       },
+       consts::kTimeoutProbe});
 }
 
 }  // namespace clashwin::cmd

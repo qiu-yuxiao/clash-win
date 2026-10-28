@@ -122,12 +122,13 @@ add_library(clashwin_core STATIC
   src/core/quick_routing.cpp
   src/core/autostart.cpp
   src/core/monitor.cpp
+  src/core/core_updater.cpp
 )
 target_include_directories(clashwin_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(clashwin_core PUBLIC clashwin_config clashwin_mihomo shell32)
+target_link_libraries(clashwin_core PUBLIC clashwin_config clashwin_mihomo shell32 bcrypt)
 target_compile_options(clashwin_core PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
 # 事件总线 + CommandService 门面（T09：事件名/防抖节流/notice + 命令注册表 44 项）
@@ -144,6 +145,8 @@ add_library(clashwin_cmd STATIC
   src/cmd/cmd_service.cpp
   src/cmd/cmd_network.cpp
   src/cmd/cmd_app.cpp
+  src/update/client_updater.cpp
+  src/system/diagnostic_bundle.cpp
 )
 target_include_directories(clashwin_cmd PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -244,7 +247,7 @@ target_link_libraries(clashwin PRIVATE
   clashwin_cmd                # T09 事件总线 + 命令门面
   clashwin_i18n               # T10 i18n
   clashwin_ui                 # T10 UI 渲染核心
-  d2d1 dwrite windowscodecs user32 gdi32 ws2_32 shell32  # D2D/DWrite/WIC / 窗口 / Winsock / Shell
+  d2d1 dwrite windowscodecs user32 gdi32 ws2_32 shell32 bcrypt  # D2D/DWrite/WIC / 窗口 / Winsock / Shell / CNG
 )
 
 # 本项目源码用 /W4（第三方保持全局 /W3）
@@ -323,8 +326,9 @@ add_executable(clashwin_test
   tests/test_t21_modals.cpp
   tests/test_t22_monitor_autostart.cpp
   tests/test_t23_quit_recovery.cpp
+  tests/test_t24_updater_diagnostics.cpp
 )
-target_link_libraries(clashwin_test PRIVATE clashwin_app clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32)
+target_link_libraries(clashwin_test PRIVATE clashwin_app clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32 bcrypt)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 add_clashwin_copy_resources(clashwin_test)
 add_clashwin_copy_locales(clashwin_test)
