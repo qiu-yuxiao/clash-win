@@ -8,6 +8,7 @@
 #include <iphlpapi.h>
 
 #include "config/config.h"
+#include "core/autostart.h"
 #include "core/validate.h"
 #include "enhance/enhance.h"
 #include "system/net_http.h"
@@ -546,16 +547,7 @@ Result<void> open_url_checked(const std::string& url) {
 
 // ---------- 注册表自启状态 ----------
 Result<bool> get_auto_launch_status_impl() {
-  HKEY key = nullptr;
-  if (RegOpenKeyExW(HKEY_CURRENT_USER,
-                    L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_READ,
-                    &key) != ERROR_SUCCESS) {
-    return Result<bool>::ok(false);
-  }
-  DWORD type = 0, size = 0;
-  LONG rc = RegQueryValueExW(key, L"Clash Mini", nullptr, &type, nullptr, &size);
-  RegCloseKey(key);
-  return Result<bool>::ok(rc == ERROR_SUCCESS);
+  return core::AutostartManager::instance().get_launch_status();
 }
 
 }  // namespace clashwin::cmd

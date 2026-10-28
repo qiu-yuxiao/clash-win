@@ -7,6 +7,7 @@
 #include "cmd/command_service.h"
 #include "clashwin/config/constants.h"
 #include "config/config.h"
+#include "core/autostart.h"
 #include "system/sysproxy.h"
 #include "util/log.h"
 #include "util/dirs.h"
@@ -132,22 +133,7 @@ Result<void> process_flags(uint16_t flags, const IVerge& patch) {
   }
   if (flags & kFVergeConfig) events::EventBus::refresh_verge();
   if (flags & kFLaunch) {
-    // ← autostart::update_launch：写/删注册表 Run 值（键名 "Clash Mini" + --silent；
-    //    T22 对账复用）
-    HKEY key = nullptr;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER,
-                      L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_SET_VALUE,
-                      &key) == ERROR_SUCCESS) {
-      if (patch.enable_auto_launch.value_or(false)) {
-        std::wstring exe = util::dirs::exe_dir() + L"\\clashwin.exe --silent";
-        RegSetValueExW(key, L"Clash Mini", 0, REG_SZ,
-                       reinterpret_cast<const BYTE*>(exe.c_str()),
-                       static_cast<DWORD>((exe.size() + 1) * sizeof(wchar_t)));
-      } else {
-        RegDeleteValueW(key, L"Clash Mini");
-      }
-      RegCloseKey(key);
-    }
+    core::AutostartManager::instance().update_launch(patch.enable_auto_launch);
   }
   if (flags & kFLanguage) {
     CWLOG_INFO("patch_verge: LANGUAGE flag → " + patch.language.value_or("?") +

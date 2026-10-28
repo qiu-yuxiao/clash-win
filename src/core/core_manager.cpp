@@ -527,6 +527,22 @@ Result<void> CoreManager::restart_with_restore(ICoreApiClient& api, const CoreOp
                                                const RestoreTimings& t) {
   // ← lifecycle.rs:108-136：快照 → 停 → 启 → 恢复
   auto saved = snapshot_proxy_group_now(api);
+  if (!saved.has_value()) {
+    // 进程可能已被杀死，从持久化配置中读取选定节点作为保底
+    auto profiles = config::Config::instance().profiles().latest_arc();
+    if (profiles && profiles->current) {
+      if (const auto* item = profiles->get_item(*profiles->current)) {
+        if (item->selected) {
+          for (const auto& s : *item->selected) {
+            if (s.name.value_or("") == "PROXY" && s.now && !s.now->empty()) {
+              saved = *s.now;
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
   auto st = ops.stop();
   if (st.is_err()) return st;
   st = ops.start();

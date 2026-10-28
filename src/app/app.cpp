@@ -8,6 +8,7 @@
 #include "config/config.h"
 #include "config/prfitem.h"
 #include "core/auto_select.h"
+#include "core/autostart.h"
 #include "core/core_manager.h"
 #include "core/timer.h"
 #include "events/event_bus.h"
@@ -225,6 +226,9 @@ bool App::init() {
     app::Lifecycle::instance().entry_lightweight_mode(true);
   }
 
+  // T22：开机自启对账与历史计划任务清理
+  core::AutostartManager::instance().reconcile_on_startup();
+
   // ---------- T18：系统代理装配 + 启动收敛 + 内核守护 ----------
   {
     auto& sysopt = system::Sysopt::instance();
@@ -278,7 +282,22 @@ bool App::init() {
               return true;
           return false;
         },
-        /*.node_healthy =*/nullptr,
+        /*.node_healthy =*/
+        []() -> bool {
+          auto& client = cmd::mihomo_unchecked();
+          auto grp = client.get_group_by_name("PROXY");
+          if (grp.is_err() || !grp.value().now || grp.value().now->empty()) return true;
+          const std::string& active = *grp.value().now;
+          if (active == "DIRECT" || active == "REJECT") return true;
+          auto px = client.get_proxy_by_name(active);
+          if (px.is_err()) return false;
+          if (!px.value().alive) return false;
+          if (!px.value().history.empty()) {
+            uint32_t delay = px.value().history.back().delay;
+            if (delay < 30 || delay >= 5000) return false;
+          }
+          return true;
+        },
         /*.auto_select_trigger =*/
         []() -> Result<bool> {
           auto latest = config::Config::instance().profiles().latest_arc();
