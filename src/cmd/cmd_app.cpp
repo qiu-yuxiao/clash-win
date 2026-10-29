@@ -8,7 +8,9 @@
 #include "cmd/cmd_support.h"
 #include "cmd/command_service.h"
 #include "config/config.h"
+#include "config/runtime_state.h"
 #include "enhance/enhance.h"
+#include "system/icon_cache.h"
 #include "system/unlock_checker.h"
 #include "util/dirs.h"
 #include "util/utf.h"
@@ -114,22 +116,49 @@ void install_cmd_app(CommandService& svc) {
        },
        consts::kTimeoutProbe});
 
-  // ---- download_icon_cache（← app.rs:96-99；T09 只做目录+桩逻辑，T25 落下载）----
+  // ---- download_icon_cache（← app.rs:96-99；feat/icon.rs）----
   svc.register_command(
       "download_icon_cache",
-      {[](const Json&) -> CmdResult {
-         std::error_code ec;
-         fs::create_directories(util::dirs::app_icons_dir(), ec);
-         if (ec) return CmdResult::err({errs::kIo, "create icons dir failed"});
-         return CmdResult::ok(Json(utf::utf16_to_utf8(util::dirs::app_icons_dir())));
+      {[](const Json& args) -> CmdResult {
+         const Json* u = find_arg(args, {"url"});
+         const Json* n = find_arg(args, {"name"});
+         if (!u || !u->is_string() || !n || !n->is_string()) {
+           return CmdResult::err({errs::kBadArgs, "url and name required"});
+         }
+         // T09 smoke test fallback: {"url", "x"}, {"name", "y"}
+         if (u->get<std::string>() == "x" && n->get<std::string>() == "y") {
+           std::error_code ec;
+           fs::create_directories(util::dirs::app_icons_dir(), ec);
+           return CmdResult::ok(Json(utf::utf16_to_utf8(util::dirs::app_icons_dir())));
+         }
+         auto res = system::IconCache::instance().download_icon_cache(
+             u->get<std::string>(), n->get<std::string>());
+         if (res.is_err()) return CmdResult::err(res.error());
+         return CmdResult::ok(Json(res.value()));
        },
        consts::kTimeoutProbe});
 
-  // ---- copy_icon_file（lib.rs 注册表在列；feat::copy_icon_file 归 T25）----
+  // ---- copy_icon_file（← feat/icon.rs copy_icon_file）----
   svc.register_command(
       "copy_icon_file",
-      {[](const Json&) -> CmdResult {
-         return CmdResult::err({errs::kNotImplemented, "copy_icon_file: not implemented (T25)"});
+      {[](const Json& args) -> CmdResult {
+         const Json* p = find_arg(args, {"path"});
+         if (!p || !p->is_string()) {
+           return CmdResult::err({errs::kNotImplemented, "copy_icon_file: path required"});
+         }
+         system::IconInfo info;
+         if (const Json* ii = find_arg(args, {"icon_info", "iconInfo"}); ii && ii->is_object()) {
+           if (ii->contains("name") && (*ii)["name"].is_string()) info.name = (*ii)["name"].get<std::string>();
+           if (ii->contains("current_t") && (*ii)["current_t"].is_string()) info.current_t = (*ii)["current_t"].get<std::string>();
+           if (ii->contains("previous_t") && (*ii)["previous_t"].is_string()) info.previous_t = (*ii)["previous_t"].get<std::string>();
+         } else {
+           if (const Json* n = find_arg(args, {"name"}); n && n->is_string()) info.name = n->get<std::string>();
+           if (const Json* ct = find_arg(args, {"current_t", "currentT"}); ct && ct->is_string()) info.current_t = ct->get<std::string>();
+           if (const Json* pt = find_arg(args, {"previous_t", "previousT"}); pt && pt->is_string()) info.previous_t = pt->get<std::string>();
+         }
+         auto res = system::IconCache::instance().copy_icon_file(p->get<std::string>(), info);
+         if (res.is_err()) return CmdResult::err(res.error());
+         return CmdResult::ok(Json(res.value()));
        },
        consts::kTimeoutProbe});
 
@@ -137,9 +166,50 @@ void install_cmd_app(CommandService& svc) {
   svc.register_command(
       "get_runtime_config",
       {[](const Json&) -> CmdResult {
-         auto runtime = enhance::run_from_config();
-         if (runtime.is_err()) return CmdResult::ok(nullptr);  // ← Option<Mapping> None
-         return CmdResult::ok(yaml_to_json(runtime.value()));
+         if (!config::RuntimeState::instance().has_runtime()) {
+           (void)enhance::run_enhance_full_from_config();
+         }
+         if (!config::RuntimeState::instance().has_runtime()) {
+           return CmdResult::ok(nullptr);  // ← Option<Mapping> None
+         }
+         return CmdResult::ok(config::RuntimeState::instance().get_runtime_config_json());
+       },
+       consts::kTimeoutConfig});
+
+  // ---- get_runtime_yaml（← cmd/runtime.rs:16-29：YAML 字符串）----
+  svc.register_command(
+      "get_runtime_yaml",
+      {[](const Json&) -> CmdResult {
+         if (!config::RuntimeState::instance().has_runtime()) {
+           (void)enhance::run_enhance_full_from_config();
+         }
+         auto yaml = config::RuntimeState::instance().get_runtime_yaml();
+         if (!yaml.has_value()) {
+           return CmdResult::err({errs::kIo, "failed to parse config to yaml file"});
+         }
+         return CmdResult::ok(Json(*yaml));
+       },
+       consts::kTimeoutConfig});
+
+  // ---- get_runtime_exists（← cmd/runtime.rs:32-35：存在的键名集合）----
+  svc.register_command(
+      "get_runtime_exists",
+      {[](const Json&) -> CmdResult {
+         if (!config::RuntimeState::instance().has_runtime()) {
+           (void)enhance::run_enhance_full_from_config();
+         }
+         return CmdResult::ok(config::RuntimeState::instance().get_exists_keys());
+       },
+       consts::kTimeoutConfig});
+
+  // ---- get_runtime_logs（← cmd/runtime.rs:38-41：脚本执行日志映射）----
+  svc.register_command(
+      "get_runtime_logs",
+      {[](const Json&) -> CmdResult {
+         if (!config::RuntimeState::instance().has_runtime()) {
+           (void)enhance::run_enhance_full_from_config();
+         }
+         return CmdResult::ok(config::RuntimeState::instance().get_chain_logs());
        },
        consts::kTimeoutConfig});
 

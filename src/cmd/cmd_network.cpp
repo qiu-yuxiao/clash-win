@@ -12,6 +12,7 @@
 #include "config/config.h"
 #include "config/proxy_head_state.h"
 #include "enhance/enhance.h"
+#include "system/network_info.h"
 #include "system/sysproxy.h"
 #include "util/dirs.h"
 #include "util/utf.h"
@@ -51,42 +52,21 @@ void install_cmd_network(CommandService& svc) {
        consts::kTimeoutProbe});
 
   // ---- get_system_hostname（← network.rs:62-74）----
-  svc.register_command(
-      "get_system_hostname",
-      {[](const Json&) -> CmdResult {
-         wchar_t buf[MAX_COMPUTERNAME_LENGTH + 1] = {};
-         DWORD size = MAX_COMPUTERNAME_LENGTH + 1;
-         if (!GetComputerNameW(buf, &size)) {
-           return CmdResult::err({errs::kIo, "GetComputerNameW failed"});
-         }
-         return CmdResult::ok(Json(utf::utf16_to_utf8(buf)));
-       },
-       consts::kTimeoutProbe});
+  auto hostname_handler = [](const Json&) -> CmdResult {
+    auto host = system::get_network_info_provider()->get_hostname();
+    return CmdResult::ok(Json(host));
+  };
+  svc.register_command("get_system_hostname", {hostname_handler, consts::kTimeoutProbe});
+  svc.register_command("hostname", {hostname_handler, consts::kTimeoutProbe});
 
   // ---- get_network_interfaces（← network.rs:77-80：GetAdaptersAddresses 友好名）----
   svc.register_command(
       "get_network_interfaces",
       {[](const Json&) -> CmdResult {
+         auto list = system::get_network_info_provider()->list_interfaces();
          Json arr = Json::array();
-         ULONG size = 16 * 1024;
-         std::vector<char> buf(size);
-         auto* aa = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buf.data());
-         if (GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST,
-                                  nullptr, aa, &size) == ERROR_BUFFER_OVERFLOW) {
-           buf.resize(size);
-           aa = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buf.data());
-         }
-         if (GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST,
-                                  nullptr, aa, &size) != NO_ERROR) {
-           return CmdResult::err({errs::kIo, "GetAdaptersAddresses failed"});
-         }
-         for (auto* a = aa; a; a = a->Next) {
-           if (a->OperStatus != IfOperStatusUp) continue;
-           wchar_t name[256] = {};
-           WideCharToMultiByte(CP_UTF8, 0, a->FriendlyName, -1, nullptr, 0, nullptr, nullptr);
-           WideCharToMultiByte(CP_UTF8, 0, a->FriendlyName, -1, reinterpret_cast<LPSTR>(name),
-                               sizeof(name), nullptr, nullptr);
-           arr.push_back(std::string(reinterpret_cast<char*>(name)));
+         for (const auto& item : list) {
+           arr.push_back(item);
          }
          return CmdResult::ok(arr);
        },
@@ -96,54 +76,12 @@ void install_cmd_network(CommandService& svc) {
   svc.register_command(
       "get_network_interfaces_info",
       {[](const Json&) -> CmdResult {
+         auto list = system::get_network_info_provider()->list_interfaces_info();
          Json arr = Json::array();
-         ULONG size = 16 * 1024;
-         std::vector<char> buf(size);
-         auto* aa = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buf.data());
-         if (GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST,
-                                  nullptr, aa, &size) == ERROR_BUFFER_OVERFLOW) {
-           buf.resize(size);
-           aa = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buf.data());
-         }
-         if (GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST,
-                                  nullptr, aa, &size) != NO_ERROR) {
-           return CmdResult::err({errs::kIo, "GetAdaptersAddresses failed"});
-         }
-         for (auto* a = aa; a; a = a->Next) {
-           if (a->OperStatus != IfOperStatusUp) continue;
-           char name[256] = {};
-           WideCharToMultiByte(CP_UTF8, 0, a->FriendlyName, -1, name, sizeof(name), nullptr,
-                               nullptr);
-           Json j{{"name", std::string(name)},
-                  {"mac", ""}};
-           {
-             char mac[32] = {};
-             for (ULONG i = 0; i < a->PhysicalAddressLength && i < 8; ++i) {
-               char one[4];
-               sprintf_s(one, "%02X", a->PhysicalAddress[i]);
-               strcat_s(mac, one);
-               if (i + 1 < a->PhysicalAddressLength) strcat_s(mac, ":");
-             }
-             j["mac"] = mac;
-           }
-           Json addrs = Json::array();
-           for (auto* u = a->FirstUnicastAddress; u; u = u->Next) {
-             char ip[64] = {};
-             auto fam = u->Address.lpSockaddr->sa_family;
-             if (fam == AF_INET) {
-               InetNtopA(AF_INET,
-                         &reinterpret_cast<sockaddr_in*>(u->Address.lpSockaddr)->sin_addr, ip,
-                         sizeof(ip));
-             } else if (fam == AF_INET6) {
-               InetNtopA(AF_INET6,
-                         &reinterpret_cast<sockaddr_in6*>(u->Address.lpSockaddr)->sin6_addr, ip,
-                         sizeof(ip));
-             } else {
-               continue;
-             }
-             addrs.push_back(ip);
-           }
-           j["addresses"] = addrs;
+         for (const auto& info : list) {
+           Json j{{"name", info.name},
+                  {"mac", info.mac},
+                  {"addresses", info.addresses}};
            arr.push_back(j);
          }
          return CmdResult::ok(arr);

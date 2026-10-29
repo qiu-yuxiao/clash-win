@@ -9,6 +9,7 @@
 
 #include "config/config.h"
 #include "config/prfitem.h"
+#include "config/runtime_state.h"
 #include "enhance/dns_defaults.h"
 #include "enhance/enhance_constants.h"
 #include "enhance/field.h"
@@ -291,7 +292,7 @@ EnhanceOutput enhance_core(const EnhanceInput& input) {
   return out;
 }
 
-Result<YAML::Node> run_from_config() {
+Result<EnhanceOutput> run_enhance_full_from_config() {
   auto& cfg = config::Config::instance();
 
   EnhanceInput input;
@@ -325,14 +326,14 @@ Result<YAML::Node> run_from_config() {
           Error e;
           e.code = 1;
           e.message = "failed to read current profile \"" + *current + "\"";
-          return Result<YAML::Node>::err(std::move(e));
+          return Result<EnhanceOutput>::err(std::move(e));
         }
         input.profile.config = mapping;
       } else {
         Error e;
         e.code = 1;
         e.message = "failed to get the file field";
-        return Result<YAML::Node>::err(std::move(e));
+        return Result<EnhanceOutput>::err(std::move(e));
       }
       input.profile.profile_name = cur->name.value_or("");
       auto load_item = [&](const std::optional<std::string>& uid,
@@ -385,7 +386,14 @@ Result<YAML::Node> run_from_config() {
   }
 
   EnhanceOutput out = enhance_core(input);
-  return Result<YAML::Node>::ok(std::move(out.config));
+  config::RuntimeState::instance().update(out);
+  return Result<EnhanceOutput>::ok(std::move(out));
+}
+
+Result<YAML::Node> run_from_config() {
+  auto res = run_enhance_full_from_config();
+  if (res.is_err()) return Result<YAML::Node>::err(res.error());
+  return Result<YAML::Node>::ok(std::move(res.value().config));
 }
 
 }  // namespace clashwin::enhance

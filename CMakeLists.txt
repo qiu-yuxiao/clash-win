@@ -65,6 +65,10 @@ add_library(clashwin_system STATIC
   src/system/guard_monitor.cpp
   src/system/tray.cpp
   src/system/signals.cpp
+  src/system/service_runner.cpp
+  src/system/network_info.cpp
+  src/system/icon_cache.cpp
+  src/system/resources.cpp
 )
 target_include_directories(clashwin_system PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -86,6 +90,7 @@ add_library(clashwin_enhance STATIC
   src/enhance/dns_defaults.cpp
   src/enhance/js_engine.cpp
   src/enhance/enhance.cpp
+  src/config/runtime_state.cpp
 )
 target_include_directories(clashwin_enhance PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -130,6 +135,7 @@ target_include_directories(clashwin_core PUBLIC
 )
 target_link_libraries(clashwin_core PUBLIC clashwin_config clashwin_mihomo shell32 bcrypt)
 target_compile_options(clashwin_core PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
+target_link_libraries(clashwin_system PUBLIC clashwin_core clashwin_mihomo)
 
 # 事件总线 + CommandService 门面（T09：事件名/防抖节流/notice + 命令注册表 44 项）
 add_library(clashwin_cmd STATIC
@@ -208,6 +214,7 @@ add_library(clashwin_ui STATIC
   src/ui/title_bar.cpp
   src/ui/main_scene.cpp
   src/ui/main_window.cpp
+  src/ui/help_menu.cpp
 )
 target_include_directories(clashwin_ui PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -327,6 +334,7 @@ add_executable(clashwin_test
   tests/test_t22_monitor_autostart.cpp
   tests/test_t23_quit_recovery.cpp
   tests/test_t24_updater_diagnostics.cpp
+  tests/test_t25_p1_finalization.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_app clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32 bcrypt)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)

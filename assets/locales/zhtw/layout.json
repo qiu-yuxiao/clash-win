@@ -2,7 +2,7 @@
   "components": {
     "firstRun": {
       "title": "歡迎使用 Clash Mini",
-      "intro": "偵測到您是首次使用，尚未新增訂閱。請在下方填入代理訂閱連結，我們將自動完成節點解析、測速與網路接管：",
+      "intro": "首次使用只需一步：填入您的代理訂閱連結，系統將自動完成節點解析、併發測速與最優路線接管。",
       "paste": "一鍵貼上剪貼簿連結",
       "enterHint": "提示：按 Enter 鍵即可匯入",
       "importAndStart": "立即匯入並開啟",
@@ -10,18 +10,26 @@
       "errEmpty": "請輸入或貼上訂閱連結",
       "errScheme": "訂閱連結必須以 http:// 或 https:// 開頭",
       "errImport": "訂閱匯入失敗，請檢查連結是否有效後重試",
-      "readyTitle": "訂閱已匯入",
+      "readyTitle": "訂閱已就緒",
       "imported": "訂閱設定已成功匯入並啟用",
-      "checking": "正在確認節點連線狀態…",
-      "readyOk": "代理已就緒，網路通暢",
-      "readyUnconfirmed": "暫未測出節點延遲，可能仍在測速或該節點暫不可用",
+      "checking": "正在併發測速並自動選優最快節點…",
+      "readyOk": "代理已就緒，國際網路已連通",
+      "readyUnconfirmed": "目前節點回應逾時，可點擊下方按鈕自動重新測速並切換至最快節點；您也可以直接進入主介面手動選擇其他節點",
       "sysProxyOff": "系統代理未開啟，請在設定中開啟後再試",
-      "wikiHint": "你可以開啟 Wiki 首頁驗證連線，也順便了解進階玩法。",
-      "openWiki": "開啟 Wiki 首頁測試",
-      "finish": "完成並進入主介面"
+      "wikiHint": "點擊下方主按鈕將打開 Clash Mini 的 GitHub 倉庫——既能實測外網秒開，也懇請在打開的頁面右上角點亮一顆 ⭐ Star，您的支持是我們持續維護的最大動力！",
+      "openWiki": "查看 Wiki 進階指南",
+      "finish": "進入主介面",
+      "featureAutoSelect": "⚡ 自動測速擇優",
+      "featureDnsGuard": "🛡️ 零配置防洩漏",
+      "featureStealth": "🪶 極窄隱匿輕量",
+      "clipboardDetected": "偵測到剪貼簿中有訂閱連結，點擊填入或按 Enter 直接匯入",
+      "activeNodeLabel": "目前最優節點",
+      "starTitle": "喜歡 Clash Mini 嗎？送我們一顆 ⭐ Star 吧！",
+      "openGithubStar": "打開 GitHub 測速並點 ⭐ Star",
+      "retestNodes": "重新測速並優選節點"
     },
     "helpMenu": {
-      "github": "GitHub 主頁",
+      "github": "去 GitHub 點亮 ⭐ Star",
       "wiki": "幫助指南 (Wiki)",
       "firstRunGuide": "新手引導",
       "exportDiagnostics": "匯出診斷包",
@@ -88,6 +96,13 @@
       }
     }
   },
+  "a11y": {
+    "pinWindow": "置頂窗口",
+    "openSettings": "打開設置",
+    "closeSettings": "關閉設置",
+    "closeLogsDialog": "關閉日誌對話框",
+    "selectLanguage": "選擇語言"
+  },
   "notices": {
     "adjustingProxyMode": "正在調整代理模式，請稍候…",
     "adjusting": "正在調整，請稍候…",
@@ -109,12 +124,5 @@
     "clientCheckFailed": "檢查更新失敗: {{message}}",
     "clientInstallCompleted": "更新安裝完成，請重新啟動應用程式以套用變更",
     "clientUpdateFailed": "更新失敗: {{message}}"
-  },
-  "a11y": {
-    "pinWindow": "置頂窗口",
-    "openSettings": "打開設置",
-    "closeSettings": "關閉設置",
-    "closeLogsDialog": "關閉日誌對話框",
-    "selectLanguage": "選擇語言"
   }
 }

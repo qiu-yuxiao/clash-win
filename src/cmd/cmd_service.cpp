@@ -1,81 +1,43 @@
-// T09 cmd_service（← cmd/service.rs：install/uninstall/reinstall/repair/available）
+// T09 / T25 cmd_service（← cmd/service.rs：install/uninstall/reinstall/repair/available）
 #include "cmd/cmd_install.h"
-
-#include <windows.h>
-#include <shellapi.h>
-
-#include <filesystem>
 
 #include "cmd/cmd_support.h"
 #include "cmd/command_service.h"
-#include "core/service_mode.h"
-#include "util/dirs.h"
+#include "clashwin/core/constants.h"
+#include "system/service_runner.h"
 #include "util/log.h"
-#include "util/utf.h"
 
 namespace clashwin::cmd {
 
 namespace {
-// ← service.rs::install_service/uninstall_service：resources 独立安装器 exe +
-//   非提权走 runas（UAC）
-Result<void> run_service_installer(bool install) {
-  std::wstring base = util::dirs::app_resources_dir();
-  std::wstring exe = base + (install ? L"\\clash-verge-service-install.exe"
-                                     : L"\\clash-verge-service-uninstall.exe");
-  if (!std::filesystem::exists(exe)) {
-    return Result<void>::err({errs::kIo, "installer not found: " + utf::utf16_to_utf8(exe)});
-  }
-  SHELLEXECUTEINFOW sei{};
-  sei.cbSize = sizeof(sei);
-  sei.lpVerb = L"runas";
-  sei.lpFile = exe.c_str();
-  sei.nShow = SW_HIDE;
-  sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-  if (!ShellExecuteExW(&sei)) {
-    return Result<void>::err({errs::kIo, "launch installer failed (UAC cancelled?)"});
-  }
-  if (sei.hProcess) {
-    WaitForSingleObject(sei.hProcess, 120000);
-    DWORD code = 1;
-    GetExitCodeProcess(sei.hProcess, &code);
-    CloseHandle(sei.hProcess);
-    if (code != 0) {
-      return Result<void>::err({errs::kIo, "installer exit code " + std::to_string(code)});
-    }
-  }
-  return Result<void>::ok();
-}
 
-// ← service.rs execute_service_operation_sync：失败必留痕
 Result<void> service_op(const char* label, bool install, bool uninstall, bool start_after) {
   CWLOG_INFO(std::string(label) + " service operation");
+  auto runner = system::get_service_runner();
   if (uninstall) {
-    auto r = run_service_installer(false);
+    auto r = runner->run_installer(false);
     if (r.is_err()) CWLOG_WARN(std::string(label) + " uninstall failed: " + r.error().message);
   }
   if (install) {
-    auto r = run_service_installer(true);
+    auto r = runner->run_installer(true);
     if (r.is_err()) {
       CWLOG_ERROR(std::string(label) + " install failed: " + r.error().message);
       return r;
     }
   }
   if (start_after) {
-    auto r = core::service_mode::start_service();
+    auto r = runner->start_service();
     if (r.is_err()) {
       CWLOG_ERROR(std::string(label) + " start failed: " + r.error().message);
       return r;
     }
-    // ← wait_for_service_ipc：就绪预算 30s / 200ms
-    mihomo::ServiceIpc ipc;
-    ipc.connect();
-    core::service_mode::ServiceIpcAdapter adapter(&ipc);
-    if (!core::service_mode::wait_for_service_ready(adapter)) {
+    if (!runner->wait_for_ready(core::consts::kServiceWaitMaxMs)) {
       return Result<void>::err({errs::kIo, "service not ready in 30s budget"});
     }
   }
   return Result<void>::ok();
 }
+
 }  // namespace
 
 void install_cmd_service(CommandService& svc) {
@@ -83,8 +45,9 @@ void install_cmd_service(CommandService& svc) {
   svc.register_command(
       "install_service",
       {[](const Json&) -> CmdResult {
+         auto runner = system::get_service_runner();
          // 已安装未运行 → 启动（← apply_service_status 分支）
-         if (core::service_mode::is_service_installed()) {
+         if (runner->is_installed()) {
            auto r = service_op("Install", false, false, true);
            return r.is_err() ? CmdResult::err(r.error()) : CmdResult::ok(Json::object());
          }
@@ -124,8 +87,8 @@ void install_cmd_service(CommandService& svc) {
   svc.register_command(
       "is_service_available",
       {[](const Json&) -> CmdResult {
-         mihomo::ServiceIpc ipc;
-         if (ipc.connect().is_err()) {
+         auto runner = system::get_service_runner();
+         if (!runner->is_available()) {
            return CmdResult::err({errs::kIo, "service IPC not available"});
          }
          return CmdResult::ok(Json(true));

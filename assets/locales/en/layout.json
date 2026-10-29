@@ -2,7 +2,7 @@
   "components": {
     "firstRun": {
       "title": "Welcome to Clash Mini",
-      "intro": "Looks like this is your first launch and no subscription has been added yet. Paste your subscription link below — node parsing, speed testing and network takeover are handled automatically.",
+      "intro": "One step to get started: paste your subscription URL below, and Clash Mini will automatically parse nodes, benchmark latency, and route your traffic.",
       "paste": "Paste from clipboard",
       "enterHint": "Tip: press Enter to import",
       "importAndStart": "Import and enable",
@@ -10,18 +10,26 @@
       "errEmpty": "Please enter or paste a subscription link",
       "errScheme": "The link must start with http:// or https://",
       "errImport": "Import failed. Check the link and try again",
-      "readyTitle": "Subscription imported",
+      "readyTitle": "Ready to Go",
       "imported": "Subscription imported and activated",
-      "checking": "Checking node connectivity…",
-      "readyOk": "Proxy is ready, network is up",
-      "readyUnconfirmed": "No node latency measured yet — testing may still be running, or the node is unavailable",
+      "checking": "Benchmarking all nodes and selecting the fastest…",
+      "readyOk": "Proxy is active and connected",
+      "readyUnconfirmed": "Current node timed out. Click below to re-test and automatically switch to the fastest node, or enter the app to choose manually",
       "sysProxyOff": "System proxy is off. Enable it in Settings and try again",
-      "wikiHint": "Open the Wiki to verify connectivity and learn more.",
-      "openWiki": "Open Wiki to test",
-      "finish": "Done"
+      "wikiHint": "Click the button below to open Clash Mini on GitHub — verify your connection and please click ⭐ Star in the top-right corner to support this open-source project!",
+      "openWiki": "View Wiki Guide",
+      "finish": "Enter App",
+      "featureAutoSelect": "⚡ Auto Best Node",
+      "featureDnsGuard": "🛡️ DNS Leak Guard",
+      "featureStealth": "🪶 Ultra-Light Mode",
+      "clipboardDetected": "Subscription URL detected in clipboard — click to fill or press Enter to import",
+      "activeNodeLabel": "Active Node",
+      "starTitle": "Enjoying Clash Mini? Give us a ⭐ Star on GitHub!",
+      "openGithubStar": "Test & ⭐ Star on GitHub",
+      "retestNodes": "Re-test & Select Best Node"
     },
     "helpMenu": {
-      "github": "GitHub Home",
+      "github": "⭐ Star on GitHub",
       "wiki": "Help Guide (Wiki)",
       "firstRunGuide": "Getting Started",
       "exportDiagnostics": "Export Diagnostics",
@@ -88,6 +96,13 @@
       }
     }
   },
+  "a11y": {
+    "pinWindow": "Pin window on top",
+    "openSettings": "Open settings",
+    "closeSettings": "Close settings",
+    "closeLogsDialog": "Close logs dialog",
+    "selectLanguage": "Select language"
+  },
   "notices": {
     "adjustingProxyMode": "Adjusting proxy mode, please wait…",
     "adjusting": "Adjusting, please wait…",
@@ -109,12 +124,5 @@
     "clientCheckFailed": "Failed to check for updates: {{message}}",
     "clientInstallCompleted": "Update installed. Please restart the app to apply changes.",
     "clientUpdateFailed": "Update failed: {{message}}"
-  },
-  "a11y": {
-    "pinWindow": "Pin window on top",
-    "openSettings": "Open settings",
-    "closeSettings": "Close settings",
-    "closeLogsDialog": "Close logs dialog",
-    "selectLanguage": "Select language"
   }
 }

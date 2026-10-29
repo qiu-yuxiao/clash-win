@@ -19,6 +19,7 @@
 #include "util/utf.h"
 #include "system/tray.h"
 #include "system/signals.h"
+#include "ui/help_menu.h"
 #include <format>
 
 namespace clashwin::ui::win {
@@ -344,10 +345,10 @@ void MainWindow::build_scene() {
       if (fs::exists(dir))
         ShellExecuteW(hwnd_, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     };
-    settings_drawer_->on_open_help = [] {
-      // ← help-menu-button.tsx:131（帮助指南 Wiki）
-      ShellExecuteW(nullptr, L"open", L"https://github.com/qiu-yuxiao/clash-mini/wiki",
-                    nullptr, nullptr, SW_SHOWNORMAL);
+    settings_drawer_->on_open_help = [this] {
+      POINT pt{};
+      GetCursorPos(&pt);
+      ui::HelpMenu::show_popup(hwnd_, pt);
     };
     // 齿轮 → 打开抽屉
     title_bar_->on_settings = [this] { settings_drawer_->set_open(true); };

@@ -213,6 +213,7 @@ UT_TEST(t22_autostart_reconcile_on_startup_disabled) {
 
 // 6. CommandService 自启命令与服务装配
 UT_TEST(t22_autostart_command_service_wiring) {
+  TempHomeGuard th;
   AutostartGuard ag;
   MockAutostartAccess mock;
   mock.enabled = false;

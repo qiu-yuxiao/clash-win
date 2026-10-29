@@ -15,6 +15,7 @@
 
 #include <windows.h>
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -43,6 +44,26 @@ using namespace clashwin::ui::scene;
 using namespace ui_test;
 
 namespace {
+
+// 隔离卫士：全部 T21 落盘用例必须写入临时目录，绝不触碰真实 %APPDATA%
+struct TempHomeGuard {
+  fs::path dir;
+  TempHomeGuard() {
+    dir = fs::temp_directory_path() /
+          ("clashwin_t21_" + std::to_string(GetTickCount64()) + "_" + std::to_string(rand()));
+    fs::create_directories(dir);
+    // 预览配置落盘目录形态（与 App::init 首启产物一致）：profiles/icons/logs/ruleset
+    for (const wchar_t* sub : {L"profiles", L"icons", L"logs", L"ruleset"}) {
+      fs::create_directories(dir / sub);
+    }
+    _wputenv_s(L"CLASHWIN_HOME_OVERRIDE", dir.wstring().c_str());
+  }
+  ~TempHomeGuard() {
+    _wputenv_s(L"CLASHWIN_HOME_OVERRIDE", L"");
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+  }
+};
 
 class MockZeroNetworkTransport : public system::IUnlockTransport {
  public:
@@ -73,6 +94,7 @@ class MockZeroNetworkTransport : public system::IUnlockTransport {
 
 // Test 1: FirstRunGuide Trigger & Completion Persistence
 UT_TEST(t21_first_run_guide_trigger_500ms_delay) {
+  TempHomeGuard th;
   FirstRunGuideDialog dialog;
   UT_CHECK(!dialog.is_open());
 
@@ -158,6 +180,7 @@ UT_TEST(t21_first_run_guide_step1_bug310_and_bug311) {
 
 // Test 4: Step 2 Ready Dashboard & Warm Gold Star Card
 UT_TEST(t21_first_run_guide_step2_ready_and_star_card) {
+  TempHomeGuard th;
   FirstRunGuideDialog dialog;
   dialog.open();
   dialog.set_step(FirstRunStep::Ready);
@@ -230,6 +253,7 @@ UT_TEST(t21_addurl_modal_layout_and_fields) {
 
 // Test 6: AddUrl Injection to Merge.yaml & Pipeline
 UT_TEST(t21_addurl_merge_yaml_injection) {
+  TempHomeGuard th;
   AddUrlDialog dialog;
   dialog.open();
   dialog.set_payload("api.anthropic.com");

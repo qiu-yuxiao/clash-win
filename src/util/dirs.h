@@ -19,6 +19,7 @@ inline constexpr const wchar_t* kProfileYaml = L"profiles.yaml";
 // ← dirs.rs::init_portable_flag：探测 <exe>\.config\PORTABLE，进程内缓存一次
 void init_portable_flag();
 bool is_portable();
+void reset_portable_cache_for_testing();
 
 // 当前 exe 所在目录（GetModuleFileNameW 的父目录）
 std::wstring exe_dir();

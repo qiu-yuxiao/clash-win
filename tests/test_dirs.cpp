@@ -73,6 +73,16 @@ UT_TEST(dirs_appdata_branch_shape) {
   set_env("CLASHWIN_PORTABLE_OVERRIDE", L"0");
   set_env("CLASHWIN_HOME_OVERRIDE", L"");
 
+  // 测试运行器可整进程重定向 %APPDATA% 根（防污染真实用户配置）
+  wchar_t base_buf[MAX_PATH] = {};
+  DWORD base_len = GetEnvironmentVariableW(L"CLASHWIN_APPDATA_OVERRIDE", base_buf, MAX_PATH);
+  if (base_len > 0 && base_len < MAX_PATH) {
+    std::wstring expected = std::wstring(base_buf) + L"\\io.github.clash-mini.clash-mini";
+    UT_CHECK_EQ(dirs::app_home_dir(), expected);
+    set_env("CLASHWIN_PORTABLE_OVERRIDE", L"");
+    return;
+  }
+
   PWSTR raw = nullptr;
   HRESULT hr = SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &raw);
   if (SUCCEEDED(hr)) {

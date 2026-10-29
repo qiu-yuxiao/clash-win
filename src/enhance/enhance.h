@@ -85,6 +85,9 @@ YAML::Node get_merged_proxies(const MergedProxiesSource& source);
 // 失败（current 订阅读取错误）→ Error。
 Result<YAML::Node> run_from_config();
 
+// 完整全量流水线：返回 EnhanceOutput 并同步至 config::RuntimeState 缓存
+Result<EnhanceOutput> run_enhance_full_from_config();
+
 // 单独格式化 updated → HHMMSS（本地时区；0/异常 → 000000）
 std::string format_updated_suffix(int64_t updated);
 

@@ -66,7 +66,12 @@ void detect_portable() {
     return;
   }
   if (!g_portable_cached) {
-    g_portable = file_exists(join(join(exe_dir(), L".config"), L"PORTABLE"));
+    // ← dirs.rs:26 init_portable_flag：仅当 <exe>\.config\PORTABLE 存在才启用便携模式
+    // （单有 .config 目录不算——便携数据目录本身就在 .config 下，不能反推开关）
+    std::wstring portable_file = join(join(exe_dir(), L".config"), L"PORTABLE");
+    DWORD attr_file = GetFileAttributesW(portable_file.c_str());
+    g_portable = (attr_file != INVALID_FILE_ATTRIBUTES &&
+                  !(attr_file & FILE_ATTRIBUTE_DIRECTORY));
     g_portable_cached = true;
   }
 }
@@ -103,6 +108,11 @@ bool is_portable() {
   return g_portable;
 }
 
+void reset_portable_cache_for_testing() {
+  g_portable_cached = false;
+  g_portable = false;
+}
+
 std::wstring exe_dir() {
   wchar_t exe_path[MAX_PATH] = {};
   GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
@@ -124,7 +134,10 @@ std::wstring app_home_dir() {
 
   if (is_portable()) return portable_home_for(exe_dir());
 
-  std::wstring data = roaming_appdata();
+  // 测试隔离钩子：整进程把 %APPDATA% 根重定向（即便某个用例误清 HOME_OVERRIDE，
+  // 也绝不会写真实用户配置）；生产运行不设置该变量。
+  std::wstring appdata_override = env_or_empty("CLASHWIN_APPDATA_OVERRIDE");
+  std::wstring data = appdata_override.empty() ? roaming_appdata() : appdata_override;
   if (data.empty()) {
     CWLOG_ERROR("Failed to get the app home directory");
     return {};

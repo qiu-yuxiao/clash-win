@@ -16,6 +16,7 @@
 #include "system/guard_monitor.h"
 #include "system/sysproxy.h"
 #include "system/tray.h"
+#include "system/resources.h"
 #include "system/signals.h"
 #include "ui/theme/theme.h"
 #include "ui/main_window.h"
@@ -121,6 +122,10 @@ bool App::init() {
   if (!init_logger()) return false;
   CWLOG_INFO(std::format("App::init：单实例 bind {} 成功，首实例启动",
                          singleton_port_));
+
+  // T25: 预置离线资源包释放（Country.mmdb, geosite.dat, ruleset/gfwlist.yaml）
+  (void)system::init_resources(util::dirs::app_home_dir(),
+                               util::dirs::app_resources_dir());
 
   // T23: 注册控制台信号与操作系统会话终止处理器
   system::SignalHandler::instance().install([](system::SignalType sig) {
