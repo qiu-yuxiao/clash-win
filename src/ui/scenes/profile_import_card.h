@@ -7,18 +7,51 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
+#include "clashwin/config/models.h"
 #include "../button.h"
 #include "../container.h"
 #include "../label.h"
+#include "../scroll_list.h"
 #include "../textfield.h"
 #include "../widget.h"
 
 namespace clashwin::ui::scene {
 
 inline constexpr float kImportCardW = 240;  // ← 抽屉左列 240px 固定宽
+inline constexpr float kProfileRowH = 44;   // 列表行高（名称 + 流量/时间 + 动作）
 
-// 导入卡（卡片本体；抽屉内纵向布局的一个 88px 高块）
+// 单条订阅行（← profile-import-card.tsx 列表项）：
+// 左键选中；右侧 ↻ 更新 / ✕ 删除；右键由宿主弹 ContextMenu。
+class ProfileRowWidget : public Widget {
+ public:
+  void bind(const config::PrfItem& item, bool active);
+  void on_paint(IRenderTarget& rt) override;
+  bool on_mouse(const MouseEvent& e) override;
+
+  const std::string& uid() const { return uid_; }
+  const std::string& display_name() const { return name_; }
+  bool active() const { return active_; }
+
+  std::function<void()> on_select;
+  std::function<void()> on_update;
+  std::function<void()> on_delete;
+  std::function<void()> on_context;
+
+ private:
+  std::string uid_;
+  std::string name_;
+  std::string type_;
+  std::string sub_line_;
+  bool active_ = false;
+  bool has_extra_ = false;
+  int progress_ = 0;
+  bool hover_update_ = false;
+  bool hover_delete_ = false;
+};
+
+// 导入卡（卡片本体；抽屉内纵向布局：标题/URL/名称/列表/消息）
 class ProfileImportCard : public Widget {
  public:
   explicit ProfileImportCard(Widget* parent = nullptr);
@@ -33,11 +66,23 @@ class ProfileImportCard : public Widget {
   // 通知已在命令链路 emit）——返回 false 时卡片置错误提示
   std::function<bool(const std::string& url, const std::string& name)>
       on_import;
-  // 右键菜单动作接口（更新/编辑/删除/置顶——宿主接对应命令）
+  // 订阅列表交互（宿主接 select/update/delete 命令与 ContextMenu）
+  std::function<void(const std::string& uid)> on_select_profile;
+  std::function<void(const std::string& uid)> on_update_profile;
+  std::function<void(const std::string& uid)> on_delete_profile;
+  // action="menu"：宿主在鼠标位置弹右键菜单；其它 action 由宿主扩展
   std::function<void(const std::string& action, const std::string& uid)>
       on_context_action;
 
   void set_message(const std::wstring& msg, bool error);
+  // 列表数据（只展示 remote/local；内部 merge/script 等子项不显示）
+  void set_profiles(const std::vector<config::PrfItem>& items,
+                    const std::string& current_uid);
+  void reload_profiles();
+  int profile_count() const { return static_cast<int>(profiles_.size()); }
+  ScrollList* list() const { return list_; }
+  ProfileRowWidget* row_at(int i) const;
+
   void on_paint(IRenderTarget& rt) override;
   void on_arrange(const RectF& area) override;
 
@@ -48,14 +93,19 @@ class ProfileImportCard : public Widget {
 
  private:
   void do_import();
+  void rebuild_rows();
 
   TextField* url_field_ = nullptr;
   TextField* name_field_ = nullptr;
   Button* import_btn_ = nullptr;
   Label* title_ = nullptr;
   Label* message_ = nullptr;
+  ScrollList* list_ = nullptr;
   bool msg_error_ = false;
   std::optional<Color4f> title_color_;
+
+  std::vector<config::PrfItem> profiles_;
+  std::string current_uid_;
 };
 
 }  // namespace clashwin::ui::scene

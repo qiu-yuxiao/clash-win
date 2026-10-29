@@ -105,12 +105,18 @@ TakeoverCard::TakeoverCard() : PanelCard(L"流量接管模式") {
   hint_->style.size = 11;
   hint_->style.color = Color4f::hex(0x3C3C43, 0.6f);
   add_child(std::move(hint));
-  set_content_height(46);
+  auto ub = std::make_unique<Button>(L"🔓 解锁检测");
+  unlock_btn_ = ub.get();
+  ub->themed_ = true;
+  add_child(std::move(ub));
+  set_content_height(80);
 }
 
 void TakeoverCard::arrange_content(const RectF& content) {
   seg_->layout_tree({content.x, content.y, content.w, 26});
   hint_->layout_tree({content.x, content.y + 30, content.w, 16});
+  if (unlock_btn_)
+    unlock_btn_->layout_tree({content.x, content.y + 50, content.w, 24});
 }
 
 // ---------- RoutingCard ----------
@@ -126,12 +132,18 @@ RoutingCard::RoutingCard() : PanelCard(L"分流路由偏好") {
   hint_->style.color = Color4f::hex(0x3C3C43, 0.6f);
   hint_->set_text(L"RUL: 智能规则分流 (推荐出厂默认)");
   add_child(std::move(hint));
-  set_content_height(46);
+  auto ab = std::make_unique<Button>(L"＋ 添加自定义分流规则");
+  add_rule_btn_ = ab.get();
+  ab->themed_ = true;
+  add_child(std::move(ab));
+  set_content_height(80);
 }
 
 void RoutingCard::arrange_content(const RectF& content) {
   seg_->layout_tree({content.x, content.y, content.w, 26});
   hint_->layout_tree({content.x, content.y + 30, content.w, 16});
+  if (add_rule_btn_)
+    add_rule_btn_->layout_tree({content.x, content.y + 50, content.w, 24});
 }
 
 // ---------- BasicCard ----------

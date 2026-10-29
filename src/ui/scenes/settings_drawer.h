@@ -70,6 +70,8 @@ class TakeoverCard : public PanelCard {
   void arrange_content(const RectF& content) override;
   TakeoverSegmented* seg_ = nullptr;  // wire_callbacks 接线（Drawer 访问）
   Label* hint_ = nullptr;
+  Button* unlock_btn_ = nullptr;      // 流媒体/AI 解锁检测入口
+  std::function<void()> on_unlock;
 };
 
 // ---------- 分流路由偏好卡 ----------
@@ -79,6 +81,8 @@ class RoutingCard : public PanelCard {
   void arrange_content(const RectF& content) override;
   Segmented* seg_ = nullptr;
   Label* hint_ = nullptr;
+  Button* add_rule_btn_ = nullptr;    // ＋添加自定义分流规则
+  std::function<void()> on_add_rule;
 };
 
 // ---------- 基础设置卡（2×2 开关 + Mixed Port） ----------
@@ -137,6 +141,8 @@ class SettingsDrawer : public Stack {
       on_import_profile;
   std::function<void()> on_open_logs;
   std::function<void()> on_open_help;
+  std::function<void()> on_add_rule;
+  std::function<void()> on_unlock_check;
   std::function<void(bool open)> on_open_changed;
 
   void on_arrange(const RectF& area) override;
@@ -166,6 +172,8 @@ class SettingsDrawer : public Stack {
   Button* help_btn_ = nullptr;
   ScrollList* scroller_ = nullptr;
   bool open_ = false;
+  float scroll_y_ = 0;
+  float content_h_ = 0;
 };
 
 }  // namespace clashwin::ui::scene
