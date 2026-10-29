@@ -24,7 +24,7 @@ std::string to_lower(std::string s) {
 }
 }  // namespace
 
-// 纯择优：candidates=[30,2000) → 失败服务器避让（安全阀：全候选在失败
+// 纯择优：candidates=[30,5000) → 失败服务器避让（安全阀：全候选在失败
 // 服务器上则放弃避让）→ 最小延迟（← monitor.rs:1000-1064）
 std::optional<std::string> AutoSelect::pick_fastest(
     const std::vector<std::pair<std::string, uint32_t>>& display,

@@ -25,6 +25,14 @@ std::string werr(const char* what, DWORD gle) {
   return std::string(what) + " failed, gle=" + std::to_string(gle);
 }
 
+// ← service.rs:139-145 system32_sc_exe：绝对路径调用，避免 PATH 劫持（F-07）
+std::wstring system32_sc_exe() {
+  wchar_t root[MAX_PATH] = {};
+  DWORD n = ::GetEnvironmentVariableW(L"SystemRoot", root, MAX_PATH);
+  std::wstring base = (n > 0 && n < MAX_PATH) ? std::wstring(root) : L"C:\\Windows";
+  return base + L"\\System32\\sc.exe";
+}
+
 // ← service.rs:94-104：非提权走 ShellExecuteW runas（UAC），提权直接命令行
 bool shell_runas(const std::wstring& cmd) {
   SHELLEXECUTEINFOW sei{};
@@ -102,8 +110,9 @@ Result<void> start_service() {
       return Result<void>::err({2311, werr("OpenServiceW", gle)});
     }
   }
-  // 提权回退（UAC 弹窗）
-  if (!shell_runas(L"sc.exe start clash_verge_service")) {
+  // 提权回退（UAC 弹窗；F-07：System32 绝对路径）
+  std::wstring cmd = L"\"" + system32_sc_exe() + L"\" start clash_verge_service";
+  if (!shell_runas(cmd)) {
     return Result<void>::err({2312, "sc.exe start (runas) failed or cancelled"});
   }
   return Result<void>::ok();

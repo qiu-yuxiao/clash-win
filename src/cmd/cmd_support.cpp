@@ -356,8 +356,8 @@ core::validate::ValidationOutcome run_enhance_pipeline() {
 // ---------- 测速 ----------
 Result<uint32_t> test_delay_impl(const std::string& url) {
   // ← feat/clash.rs::test_delay：解析 URL → TCP（可选经 mixed-port CONNECT）→
-  //   https 完成握手 / http 发 HEAD 收响应；整体 2000ms 超时；失败/超时由上层折算
-  constexpr uint32_t kNodeDelayMaxMs = 2000;  // ← constants.rs NODE_DELAY_MAX_MS
+  //   https 完成握手 / http 发 HEAD 收响应；整体 5000ms 超时；失败/超时由上层折算
+  constexpr uint32_t kNodeDelayMaxMs = 5000;  // ← constants.rs NODE_DELAY_MAX_MS（BUG-304）
   auto parts = system::parse_http_url(url);
   if (parts.is_err()) return Result<uint32_t>::err({errs::kBadArgs, "invalid URL"});
   const auto& u = parts.value();
@@ -394,7 +394,7 @@ Result<uint32_t> test_delay_impl(const std::string& url) {
   auto connect_host = [&](const std::string& host, uint16_t p) -> Result<SOCKET> {
     SOCKET s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (s == INVALID_SOCKET) return Result<SOCKET>::err({errs::kIo, "socket failed"});
-    // 非阻塞 + select 实现连接超时（2000ms 预算内）
+    // 非阻塞 + select 实现连接超时（5000ms 预算内，BUG-304）
     u_long nonblock = 1;
     ::ioctlsocket(s, FIONBIO, &nonblock);
     sockaddr_in addr{};

@@ -335,6 +335,7 @@ add_executable(clashwin_test
   tests/test_t23_quit_recovery.cpp
   tests/test_t24_updater_diagnostics.cpp
   tests/test_t25_p1_finalization.cpp
+  tests/test_t26_delta_parity.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_app clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32 bcrypt)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)

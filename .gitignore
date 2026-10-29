@@ -40,3 +40,4 @@ Desktop.ini
 
 # WorkBuddy local tool state
 .workbuddy/
+.agents/

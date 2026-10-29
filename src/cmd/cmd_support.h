@@ -82,7 +82,7 @@ bool is_admin();
 bool is_core_running();
 core::RunningMode running_mode();
 
-// ---------- 测速（← feat/clash.rs::test_delay，NODE_DELAY_MAX_MS=2000）----------
+// ---------- 测速（← feat/clash.rs::test_delay，NODE_DELAY_MAX_MS=5000 BUG-304）----------
 // https 的 TLS 握手段以 TCP(+HTTP) 完成时间为口径（schannel 握手留 T16/T25 对齐）
 Result<uint32_t> test_delay_impl(const std::string& url);
 

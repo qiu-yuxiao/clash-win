@@ -8,7 +8,7 @@
 // 异常/提前 return）都不可能留下 true 态——正确语义优先于复刻历史行为。
 //
 // 择优规则（← trigger_backend_auto_select_inner）：
-// - display 全量（未测得=0 Timeout）；candidates = [30, 2000)
+// - display 全量（未测得=0 Timeout）；candidates = [30, 5000)
 // - 失败服务器避让：本层留 hook（failed_servers 快照源 = 健康检测归 T19
 //   监控线程），空集时为 no-op
 // - select：双重校验 current_uid → 选 candidates 最小延迟 → 切换 →

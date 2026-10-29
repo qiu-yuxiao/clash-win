@@ -2,6 +2,8 @@
 
 #include <cctype>
 #include <cstdio>
+#include <set>
+#include <string>
 #include <unordered_set>
 
 #include "enhance/field.h"
@@ -418,6 +420,42 @@ YAML::Node enforce_mini_agreements(const YAML::Node& config,
   YAML::Node rules(YAML::NodeType::Sequence);
   for (const auto& r : final_rules) rules.push_back(r);
   cfg["rules"] = rules;
+
+  // 4b. BUG-310（v3.2.0）：仅保留最终 rules 实际引用的 rule-providers。
+  // 机场订阅常自带未被使用的 China-Site/China-IP 等规则集，会在首次启动触发
+  // 联网拉取并常驻内存；按引用裁剪后默认仅剩随包预置的 gfwlist，实现零拉取。
+  {
+    std::set<std::string> referenced{"gfwlist"};
+    for (const auto& rule : final_rules) {
+      if (!rule.IsScalar() || rule.IsNull()) continue;
+      const std::string s = rule.Scalar();
+      size_t c1 = s.find(',');
+      if (c1 == std::string::npos) continue;
+      size_t c2 = s.find(',', c1 + 1);
+      if (c2 == std::string::npos) continue;
+      std::string kind = s.substr(0, c1);
+      size_t b = kind.find_first_not_of(" \t");
+      size_t e = kind.find_last_not_of(" \t");
+      if (b == std::string::npos) continue;
+      std::string kind_trim = kind.substr(b, e - b + 1);
+      for (char& ch : kind_trim) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+      if (kind_trim != "RULE-SET") continue;
+      std::string name = s.substr(c1 + 1, c2 - c1 - 1);
+      b = name.find_first_not_of(" \t");
+      e = name.find_last_not_of(" \t");
+      if (b == std::string::npos) continue;
+      referenced.insert(name.substr(b, e - b + 1));
+    }
+
+    YAML::Node pruned(YAML::NodeType::Map);
+    for (const auto& kv : rule_providers) {
+      if (!field::is_string_key(kv.first)) continue;
+      if (referenced.count(kv.first.Scalar())) pruned[kv.first] = kv.second;
+    }
+    // gfwlist 始终由本流程注入（即使规则链被用户脚本改写也不缺失源）
+    pruned["gfwlist"] = gfwlist;
+    cfg["rule-providers"] = pruned;
+  }
 
   return cfg;
 }

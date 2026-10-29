@@ -1,7 +1,7 @@
 #pragma once
 // 节点数据装配（T13）：PROXY 组成员加载 + 延迟缓存（TTL/判死）+ 事件局部刷新。
-// ← services/delay.ts（CACHE_TTL 30min / NODE_DELAY_MIN 30 / NODE_DELAY_MAX 2000
-//   / formatDelay 五档色映射）+ use-render-list（组行+成员行）+
+// ← services/delay.ts（CACHE_TTL 30min / NODE_DELAY_MIN 30 / NODE_DELAY_MAX 5000
+//   / formatDelay 五档色映射；BUG-304：2000→5000 与后端判死阈值统一）+ use-render-list（组行+成员行）+
 //   notification.rs DelayResults payload {"group","results":[[name,delay]...]}。
 // 数据源注入 DataHooks（生产绑 cmd::mihomo()，测试注入 mock）。
 #include <cstdint>
@@ -19,10 +19,10 @@ namespace clashwin::ui::scene {
 
 // ← services/delay.ts:13-32（单一真源，严禁漂移）
 inline constexpr int kNodeDelayMinMs = 30;       // 机场伪造低延迟过滤下限
-inline constexpr int kNodeDelayMaxMs = 2000;     // 判死阈值（探针超时同值）
+inline constexpr int kNodeDelayMaxMs = 5000;     // 判死阈值（探针超时同值，BUG-304）
 inline constexpr int64_t kDelayCacheTtlMs = 30 * 60 * 1000;  // CACHE_TTL
 
-// ← formatDelayColor 五档（250/400/2000 分界以源码为准）
+// ← formatDelayColor 五档（250/400/5000 分界，BUG-304）
 enum class DelayTier { Unknown, Success, Mid, Slow, Timeout };
 inline DelayTier delay_tier(int delay) {
   if (delay < 0) return DelayTier::Unknown;        // 未测 -1 / testing -2
@@ -31,7 +31,7 @@ inline DelayTier delay_tier(int delay) {
   if (delay >= 250) return DelayTier::Mid;         // primary
   return DelayTier::Success;                       // success
 }
-// ← formatDelay：-1='-'、-2='testing'、0/≥2000='Timeout'、>1e5='Error'
+// ← formatDelay：-1='-'、-2='testing'、0/≥5000(≤1e5)='Timeout'、>1e5='Error'
 std::wstring format_delay(int delay);
 
 struct NodeRow {

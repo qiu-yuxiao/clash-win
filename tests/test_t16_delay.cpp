@@ -65,9 +65,10 @@ UT_TEST(t16_group_probe_and_testing_state) {
     if (d != static_cast<uint32_t>(-2)) first_all_testing = false;
   UT_CHECK(first_all_testing);
   UT_CHECK(st.emitted[1].second[0].second == 120);
-  // T13 tier 口径：-2 → Unknown / 2500 → Timeout
+  // T13 tier 口径（BUG-304）：-2 → Unknown / 2500 → Slow（<5000 有效）
   UT_CHECK(clashwin::ui::scene::delay_tier(-2) == clashwin::ui::scene::DelayTier::Unknown);
-  UT_CHECK(clashwin::ui::scene::delay_tier(2500) == clashwin::ui::scene::DelayTier::Timeout);
+  UT_CHECK(clashwin::ui::scene::delay_tier(2500) == clashwin::ui::scene::DelayTier::Slow);
+  UT_CHECK(clashwin::ui::scene::delay_tier(5200) == clashwin::ui::scene::DelayTier::Timeout);
   UT_CHECK(clashwin::ui::scene::delay_tier(120) == clashwin::ui::scene::DelayTier::Success);
 }
 
@@ -114,10 +115,13 @@ UT_TEST(t16_auto_select_pick_matrix) {
   // 全正常 → 最小延迟
   auto r1 = AutoSelect::pick_fastest({{"a", 300}, {"b", 120}, {"c", 450}});
   UT_CHECK(r1 && *r1 == "b");
-  // 全超时（0）+ 越界 → 无候选
-  UT_CHECK(!AutoSelect::pick_fastest({{"a", 0}, {"b", 2000}, {"c", 5000}}).has_value());
-  // 部分超时 → 只有 [30,2000) 内参与
-  auto r3 = AutoSelect::pick_fastest({{"dead", 0}, {"slow", 1900}, {"ok", 500}});
+  // 全超时（0）+ 越界 → 无候选（5000 = 判死阈值）
+  UT_CHECK(!AutoSelect::pick_fastest({{"a", 0}, {"b", 5000}, {"c", 100000}}).has_value());
+  // BUG-304：2000~4999ms 属于「慢而可用」，必须参与选点
+  auto r2 = AutoSelect::pick_fastest({{"a", 0}, {"b", 2000}, {"c", 5000}});
+  UT_CHECK(r2 && *r2 == "b");
+  // 部分超时 → 只有 [30,5000) 内参与
+  auto r3 = AutoSelect::pick_fastest({{"dead", 0}, {"slow", 4900}, {"ok", 500}});
   UT_CHECK(r3 && *r3 == "ok");
   // 失败服务器避让：b 在失败机上 → 选 c
   auto r4 = AutoSelect::pick_fastest(

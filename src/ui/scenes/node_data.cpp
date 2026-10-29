@@ -15,10 +15,10 @@ namespace clashwin::ui::scene {
 namespace utf = clashwin::utf;
 
 std::wstring format_delay(int delay) {
-  // ← services/delay.ts formatDelay
+  // ← services/delay.ts formatDelay（0/≥timeout 且 ≤1e5 = Timeout；>1e5 = Error）
   if (delay == -1) return L"-";
   if (delay == -2) return L"testing";
-  if (delay == 0 || delay >= kNodeDelayMaxMs) return L"Timeout";
+  if (delay == 0 || (delay >= kNodeDelayMaxMs && delay <= 100000)) return L"Timeout";
   if (delay > 100000) return L"Error";
   return std::to_wstring(delay);
 }

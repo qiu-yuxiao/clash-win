@@ -3,7 +3,7 @@
 // ← census §2/T13 卡 + clashwin_pixel_perfect.png + proxy-item.tsx 行布局：
 //   行高 39；窄窗行 = 左 55px 类型（11px 灰大写右对齐、右边框 2px divider）
 //   + 名称 flex（12px、px=8、selected bold、右边框 2px divider）
-//   + 右 65px 延迟（11px bold600 居中、五档色 ← formatDelayColor 250/400/2000）
+//   + 右 65px 延迟（11px bold600 居中、五档色 ← formatDelayColor 250/400/5000）
 //   选中：左边框 3px primary + bg alpha(primary,0.15 light/0.35 dark)；
 //   奇偶行 rgba(0,120,215,.04) light；底边框 2px divider。
 // 分组头行：组名（VMESS）+ 当前节点（primary 橙字、选中橙浅底）。

@@ -231,7 +231,7 @@ void install_cmd_clash(CommandService& svc) {
        },
        consts::kTimeoutHeavy});
 
-  // ---- test_delay（← clash.rs:74-84：失败 10000 / 超时 2000）----
+  // ---- test_delay（← clash.rs:74-84：失败 10000 / 超时 5000 BUG-304）----
   svc.register_command(
       "test_delay",
       {[](const Json& args) -> CmdResult {
@@ -243,7 +243,7 @@ void install_cmd_clash(CommandService& svc) {
            // ← feat/clash.rs：整体超时 unwrap_or(Ok(NODE_DELAY_MAX_MS))；
            //   连接类错误 → 10000
            if (r.error().message.find("timeout") != std::string::npos) {
-             return CmdResult::ok(Json(2000u));
+             return CmdResult::ok(Json(5000u));
            }
            return CmdResult::ok(Json(kDelayErrorValue));
          }

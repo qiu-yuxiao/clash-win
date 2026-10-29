@@ -10,6 +10,7 @@
 #include "core/auto_select.h"
 #include "core/autostart.h"
 #include "core/core_manager.h"
+#include "core/delay_manager.h"
 #include "core/timer.h"
 #include "events/event_bus.h"
 #include "events/event_names.h"
@@ -314,7 +315,7 @@ bool App::init() {
           if (!px.value().alive) return false;
           if (!px.value().history.empty()) {
             uint32_t delay = px.value().history.back().delay;
-            if (delay < 30 || delay >= 5000) return false;
+            if (delay < core::kNodeDelayMinMs || delay >= core::kNodeDelayMaxMs) return false;
           }
           return true;
         },

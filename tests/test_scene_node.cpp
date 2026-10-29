@@ -67,7 +67,7 @@ Px px_at(Widget& w, int x, int y) {
 }  // namespace
 
 UT_TEST(t13_delay_tier_mapping) {
-  // ← formatDelayColor：250/400/2000 分界（源码口径，非任务卡口述 200/500）
+  // ← formatDelayColor：250/400/5000 分界（v3.1.1 BUG-304：2000→5000）
   UT_CHECK(delay_tier(-1) == DelayTier::Unknown);   // 未测
   UT_CHECK(delay_tier(-2) == DelayTier::Unknown);   // testing
   UT_CHECK(delay_tier(0) == DelayTier::Timeout);    // 0 = Timeout
@@ -76,14 +76,17 @@ UT_TEST(t13_delay_tier_mapping) {
   UT_CHECK(delay_tier(399) == DelayTier::Mid);
   UT_CHECK(delay_tier(400) == DelayTier::Slow);
   UT_CHECK(delay_tier(1999) == DelayTier::Slow);
-  UT_CHECK(delay_tier(2000) == DelayTier::Timeout);
+  UT_CHECK(delay_tier(2000) == DelayTier::Slow);     // 拥塞期慢而可用
+  UT_CHECK(delay_tier(4999) == DelayTier::Slow);
   UT_CHECK(delay_tier(5000) == DelayTier::Timeout);
   // 文本 ← formatDelay
   UT_CHECK(format_delay(-1) == L"-");
   UT_CHECK(format_delay(-2) == L"testing");
   UT_CHECK(format_delay(0) == L"Timeout");
   UT_CHECK(format_delay(250) == L"250");
-  UT_CHECK(format_delay(3000) == L"Timeout");
+  UT_CHECK(format_delay(3000) == L"3000");
+  UT_CHECK(format_delay(5000) == L"Timeout");
+  UT_CHECK(format_delay(100001) == L"Error");
 }
 
 UT_TEST(t13_node_data_load_merge) {
@@ -203,10 +206,10 @@ UT_TEST(t13_node_list_filter_and_sort) {
   st.all = {"alpha", "Beta", "gamma-hy", "delta"};
   NodeData data = make_data(st);
   data.load();
-  // 延迟缓存：alpha=120 Beta=450 gamma=2000（超时）delta 未测
+  // 延迟缓存：alpha=120 Beta=450 gamma=5200（超时）delta 未测
   data.set_delay("alpha", 120);
   data.set_delay("Beta", 450);
-  data.set_delay("gamma-hy", 2000);
+  data.set_delay("gamma-hy", 5200);
 
   NodeList list;
   list.bind(&data);
@@ -223,7 +226,7 @@ UT_TEST(t13_node_list_filter_and_sort) {
   // 排序：延迟升序、Unknown/Timeout 沉底
   list.toggle_sort();
   UT_CHECK(list.sorted_by_delay());
-  // visible: [-1(组头), alpha(120), Beta(450), gamma(2000 超时沉底), delta(未测沉底)]
+  // visible: [-1(组头), alpha(120), Beta(450), gamma(5200 超时沉底), delta(未测沉底)]
   // 经 ScrollList 行工厂验证顺序：取物化行绘制不可直接断言顺序——
   // 通过 visible_row 语义（组头 -1 在首）+ 排序后 delta/gamma 沉底
   // （用再过滤验证排序稳定：过滤掉 alpha 后 Beta 在 gamma 前）

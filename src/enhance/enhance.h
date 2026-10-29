@@ -5,7 +5,7 @@
 // ⑤merge_default_config（clash.yaml 键覆盖；tun 深合并；dns/profile 仅补缺；
 //   socks/http 未启用删键；redir/tproxy 跳过；config_version 剥离；
 //   external-controller 受开关控制）→ ⑥内置脚本 → ⑦enforce_mini_agreements
-// → ⑧use_tun → ⑨use_sort → ⑩apply_mandatory_dns_settings
+// → ⑧use_tun → ⑨use_sort → ⑩apply_mandatory_dns_settings → ⑪境外明文 DNS→DoH
 //
 // 设计：enhance_core 为纯函数（EnhanceInput 全量注入，测试友好，G3 golden 轨
 // 可直接指实机目录）；run_from_config 为生产装配薄层（从 Config 单例读输入）。

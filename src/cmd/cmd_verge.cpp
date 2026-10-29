@@ -5,9 +5,11 @@
 
 #include "cmd/cmd_support.h"
 #include "cmd/command_service.h"
+#include "cmd/verge_flags.h"
 #include "clashwin/config/constants.h"
 #include "config/config.h"
 #include "core/autostart.h"
+#include "core/core_manager.h"
 #include "system/sysproxy.h"
 #include "util/log.h"
 #include "util/dirs.h"
@@ -20,30 +22,31 @@ namespace clashwin::cmd {
 namespace {
 // ← feat/config.rs VERGE_PATCH_LOCK
 std::mutex& verge_patch_lock() { static std::mutex m; return m; }
+}  // namespace
 
-// ← feat/config.rs:84-100 UpdateFlags（u16 bitflags）
-enum UpdateFlags : uint16_t {
-  kFRestartCore = 1 << 0,
-  kFClashConfig = 1 << 1,
-  kFVergeConfig = 1 << 2,
-  kFLaunch = 1 << 3,
-  kFSysProxy = 1 << 4,
-  kFSysTrayIcon = 1 << 5,
-  kFLanguage = 1 << 11,
-  kFLogLevel = 1 << 12,
-  kFLogFile = 1 << 13,
-  kFAlwaysOnTop = 1 << 14,
-  kFGroupSysTray = kFSysTrayIcon,
-};
-
-// ← feat/config.rs:102-173 determine_update_flags 逐字段
-uint16_t determine_update_flags(const IVerge& patch) {
+// ← feat/config.rs:102-173 determine_update_flags 逐字段（含 BUG-305 TUN 切换）
+uint16_t determine_update_flags(const IVerge& old_config, const IVerge& patch,
+                                bool running_service) {
   uint16_t f = 0;
+
+  // 契约 1.3（v3.1.3 BUG-305）：TUN 与系统服务生命周期严格绑定。
+  // 开 TUN 需切 Service 模式；关 TUN（含 Service 模式运行中关闭）必须
+  // RESTART_CORE 退出服务内核并回到用户态 Sidecar。
+  const bool current_tun = old_config.enable_tun_mode.value_or(false);
+  bool tun_changed = false;
+  if (patch.enable_tun_mode.has_value()) {
+    if (*patch.enable_tun_mode) {
+      tun_changed = !current_tun || !running_service;
+    } else {
+      tun_changed = current_tun || running_service;
+    }
+  }
+
   bool restart_needed = patch.verge_socks_enabled.has_value() ||
                         patch.verge_http_enabled.has_value() ||
                         patch.verge_socks_port.has_value() || patch.verge_port.has_value() ||
                         patch.verge_mixed_port.has_value() ||
-                        patch.enable_external_controller.has_value();
+                        patch.enable_external_controller.has_value() || tun_changed;
   if (restart_needed) f |= kFRestartCore;
   if (patch.enable_tun_mode.has_value() || patch.rule_fallback.has_value() ||
       patch.enable_builtin_enhanced.has_value()) {
@@ -69,7 +72,7 @@ uint16_t determine_update_flags(const IVerge& patch) {
   return f;
 }
 
-// ← feat/config.rs:176-238 process_terminated_flags。
+namespace {
 // T09 阶段落位：RESTART_CORE/CLASH_CONFIG 走内核链路；SYS_PROXY（注册表写 +
 // 守护）归 T18——以钩子注入，未挂时留痕不静默；LAUNCH 注册表直写；
 // LANGUAGE/ALWAYS_ON_TOP/SYSTRAY 归 T10/T17/T19 留痕。
@@ -117,7 +120,9 @@ Result<void> process_flags(uint16_t flags, const IVerge& patch) {
     if (r.is_err()) return r;
     sysopt.refresh_guard(view);
   }
-  if (flags & kFClashConfig) {
+  // ← feat/config.rs:221-224：RESTART_CORE 已重新生成并加载配置，
+  //   跳过冗余的 CLASH_CONFIG reload（v3.1.3 BUG-305 明确要求）
+  if ((flags & kFClashConfig) && !(flags & kFRestartCore)) {
     auto outcome = run_enhance_pipeline();
     if (!outcome.is_valid()) return Result<void>::err({errs::kIo, outcome.message});
     if (is_core_running()) {
@@ -175,7 +180,9 @@ void install_cmd_verge(CommandService& svc) {
          IVerge old = *verge.latest_arc();
          verge.edit_draft([&patch](IVerge& d) { d.patch_config(patch); });
 
-         uint16_t flags = determine_update_flags(patch);
+         uint16_t flags = determine_update_flags(
+             old, patch,
+             core::CoreManager::instance().running_mode() == core::RunningMode::Service);
          auto processed = process_flags(flags, patch);
          if (processed.is_err()) {
            verge.discard();  // ← 失败丢弃 draft

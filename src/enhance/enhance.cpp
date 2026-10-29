@@ -280,10 +280,11 @@ EnhanceOutput enhance_core(const EnhanceInput& input) {
   ma.rule_fallback = verge.rule_fallback.empty() ? "direct" : verge.rule_fallback;
   config = enforce_mini_agreements(config, ma);
 
-  // ⑧ use_tun → ⑨ use_sort → ⑩ apply_mandatory_dns_settings
+  // ⑧ use_tun → ⑨ use_sort → ⑩ apply_mandatory_dns_settings → ⑪ 境外明文 DNS 转 DoH
   config = use_tun(config, verge.enable_tun);
   config = field::use_sort(config);
   config = apply_mandatory_dns_settings(config);
+  config = sanitize_foreign_plain_dns_upstreams(config);
 
   EnhanceOutput out;
   out.config = std::move(config);

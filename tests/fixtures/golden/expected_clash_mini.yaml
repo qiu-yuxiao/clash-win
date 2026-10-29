@@ -456,30 +456,6 @@ proxy-groups:
   url: https://cp.cloudflare.com/generate_204
   interval: 300
 rule-providers:
-  Local-IP:
-    type: http
-    behavior: ipcidr
-    format: mrs
-    url: https://cdn.jsdmirror.com/gh/HosheaPDNX/rule-set@V2.0.0/mihomo/Local/Local-IP.mrs
-    path: ./ruleset/Local-IP.mrs
-    proxy: DIRECT
-    interval: 86400
-  China-Site:
-    type: http
-    behavior: domain
-    format: mrs
-    url: https://cdn.jsdmirror.com/gh/HosheaPDNX/rule-set@V2.0.0/mihomo/China/China-Site.mrs
-    path: ./ruleset/China-Site.mrs
-    proxy: DIRECT
-    interval: 86400
-  China-IP:
-    type: http
-    behavior: ipcidr
-    format: mrs
-    url: https://cdn.jsdmirror.com/gh/HosheaPDNX/rule-set@V2.0.0/mihomo/China/China-IP.mrs
-    path: ./ruleset/China-IP.mrs
-    proxy: DIRECT
-    interval: 86400
   gfwlist:
     type: http
     behavior: domain
@@ -534,7 +510,7 @@ dns:
   nameserver:
   - https://doh.pub/dns-query
   - https://dns.alidns.com/dns-query
-  - 8.8.8.8
+  - https://8.8.8.8/dns-query
   direct-nameserver:
   - https://doh.pub/dns-query
   - https://dns.alidns.com/dns-query
