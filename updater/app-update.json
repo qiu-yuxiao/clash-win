@@ -1,0 +1,11 @@
+{
+  "version": "3.0.10",
+  "notes": "Clash Win v3.0.10 — 纯 Windows 原生 C++20 客户端（品牌独立首发基线）",
+  "pub_date": "2026-11-01T00:00:00Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "",
+      "url": "https://github.com/qiu-yuxiao/clash-win/releases/download/v3.0.10/clash-win-v3.0.10-windows-x86_64.zip"
+    }
+  }
+}
