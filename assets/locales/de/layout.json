@@ -1,7 +1,7 @@
 {
   "components": {
     "firstRun": {
-      "title": "Willkommen bei Clash Mini",
+      "title": "Willkommen bei Clash Win",
       "intro": "In einem Schritt startklar: Fügen Sie unten Ihren Abo-Link ein – Knotenanalyse, Geschwindigkeitstest und Routing erfolgen vollautomatisch.",
       "paste": "Aus Zwischenablage einfügen",
       "enterHint": "Tipp: mit Enter importieren",
@@ -16,7 +16,7 @@
       "readyOk": "Proxy ist bereit, Verbindung steht",
       "readyUnconfirmed": "Noch keine Knotenlatenz gemessen – evtl. läuft der Test noch oder der Knoten ist nicht verfügbar",
       "sysProxyOff": "Systemproxy ist aus. In den Einstellungen aktivieren und erneut versuchen",
-      "wikiHint": "Öffnen Sie über die Schaltfläche unten das Clash Mini GitHub-Repository, um die Verbindung zu testen – und unterstützen Sie uns gerne oben rechts mit einem ⭐ Star!",
+      "wikiHint": "Öffnen Sie über die Schaltfläche unten das Clash Win GitHub-Repository, um die Verbindung zu testen – und unterstützen Sie uns gerne oben rechts mit einem ⭐ Star!",
       "openWiki": "Wiki-Anleitung öffnen",
       "finish": "Zur Hauptansicht",
       "featureAutoSelect": "⚡ Auto-Bestknoten",
@@ -24,7 +24,7 @@
       "featureStealth": "🪶 Ultraleicht-Modus",
       "clipboardDetected": "Link in Zwischenablage erkannt – zum Einfügen klicken",
       "activeNodeLabel": "Aktiver Knoten",
-      "starTitle": "Gefällt Ihnen Clash Mini? Schenken Sie uns einen ⭐ Star!",
+      "starTitle": "Gefällt Ihnen Clash Win? Schenken Sie uns einen ⭐ Star!",
       "openGithubStar": "GitHub testen & ⭐ Star geben",
       "retestNodes": "Erneut testen & besten Knoten wählen"
     },

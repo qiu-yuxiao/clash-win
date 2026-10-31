@@ -112,7 +112,7 @@ UT_TEST(validate_check_copy) {
   UT_CHECK(dst.is_ok());
   if (dst.is_ok()) {
     UT_CHECK(fs::exists(dst.value()));
-    UT_CHECK(dst.value().find(L"clash-mini-check.yaml") != std::wstring::npos);
+    UT_CHECK(dst.value().find(L"clash-win-check.yaml") != std::wstring::npos);
     std::ifstream f(dst.value());
     char buf[64] = {};
     f.read(buf, sizeof(buf) - 1);

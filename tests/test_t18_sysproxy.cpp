@@ -433,9 +433,9 @@ UT_TEST(t18_tun_patch_chain_verge_and_clash_layers) {
     }
   }
   UT_CHECK(p.is_ok());
-  // 产物断言（T08 use_tun 注入语义已落 clash-mini.yaml）
+  // 产物断言（T08 use_tun 注入语义已落 clash-win.yaml）
   {
-    std::ifstream f(home + L"\\clash-mini.yaml", std::ios::binary);
+    std::ifstream f(home + L"\\clash-win.yaml", std::ios::binary);
     UT_CHECK(f.is_open());
     std::ostringstream ss;
     ss << f.rdbuf();

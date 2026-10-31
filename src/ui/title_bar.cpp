@@ -25,7 +25,7 @@ TitleBar::TitleBar(MainWindow* owner) {
   title_label_->style.size = 12;
   title_label_->style.weight = static_cast<int>(Weight::Medium);
   title_label_->style.ellipsis = true;
-  title_label_->set_text(L"Clash Mini Ver.");
+  title_label_->set_text(L"Clash Win Ver.");
   add_child(std::move(label));
 
   // 弹性撑开 → 右侧三键贴右（marginLeft auto）
@@ -65,7 +65,7 @@ void TitleBar::set_large_mode(bool large) {
 }
 
 void TitleBar::set_version(const std::wstring& v) {
-  title_label_->set_text(L"Clash Mini Ver." + v);
+  title_label_->set_text(L"Clash Win Ver." + v);
 }
 
 void TitleBar::on_paint(IRenderTarget& rt) {

@@ -50,12 +50,12 @@ UT_TEST(kill_rule_out_of_scope_never_killed) {
   std::vector<ProcInfo> procs = {
       // 用户实机内核（作用域外）
       proc(20, L"mini-mihomo.exe",
-           L"C:\\Users\\u\\AppData\\Roaming\\io.github.clash-mini.clash-mini\\cores\\mini-mihomo.exe"),
+           L"C:\\Users\\u\\AppData\\Roaming\\io.github.clash-win.clash-win\\cores\\mini-mihomo.exe"),
       proc(21, L"mini-mihomo.exe", L"D:\\Tools\\Clash Mini\\mini-mihomo.exe"),
       // 本应用测试作用域内
       proc(22, L"mini-mihomo.exe", L"C:\\ClashWin\\build\\bin\\Release\\sidecar\\mini-mihomo.exe"),
       proc(23, L"mini-mihomo.exe",
-           L"C:\\Users\\u\\AppData\\Roaming\\io.github.clash-mini.clash-mini\\cores\\mini-mihomo.exe"),
+           L"C:\\Users\\u\\AppData\\Roaming\\io.github.clash-win.clash-win\\cores\\mini-mihomo.exe"),
   };
   auto out = select_stale_core_pids(procs, {}, {L"C:\\ClashWin\\build\\bin\\Release\\sidecar"});
   UT_CHECK(out == std::vector<uint32_t>({22}));

@@ -111,7 +111,7 @@ void install_cmd_network(CommandService& svc) {
 }
 
 void install_cmd_proxy(CommandService& svc) {
-  // ---- get_proxy_addr（← proxy.rs:28-96：clash-mini.yaml / provider 查 server:port）----
+  // ---- get_proxy_addr（← proxy.rs:28-96：clash-win.yaml / provider 查 server:port）----
   svc.register_command(
       "get_proxy_addr",
       {[](const Json& args) -> CmdResult {
@@ -161,7 +161,7 @@ void install_cmd_proxy(CommandService& svc) {
            return std::nullopt;
          };
 
-         std::wstring cfg_path = home + L"\\clash-mini.yaml";
+         std::wstring cfg_path = home + L"\\clash-win.yaml";
          std::ifstream f(cfg_path, std::ios::binary);
          if (f.is_open()) {
            std::ostringstream oss;

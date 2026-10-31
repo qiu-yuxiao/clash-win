@@ -41,3 +41,12 @@ Desktop.ini
 # WorkBuddy local tool state
 .workbuddy/
 .agents/
+
+# Local workspace artifacts (do not publish)
+.zcode/
+ClashWin-Portable/
+Microsoft/
+clashwin_screenshot.png
+dist/
+tmp_test/
+viz/

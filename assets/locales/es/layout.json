@@ -1,8 +1,8 @@
 {
   "components": {
     "firstRun": {
-      "title": "Bienvenido a Clash Mini",
-      "intro": "Un solo paso para empezar: pega tu enlace de suscripción abajo y Clash Mini analizará los nodos, medirá la latencia y activará la mejor ruta automáticamente.",
+      "title": "Bienvenido a Clash Win",
+      "intro": "Un solo paso para empezar: pega tu enlace de suscripción abajo y Clash Win analizará los nodos, medirá la latencia y activará la mejor ruta automáticamente.",
       "paste": "Pegar del portapapeles",
       "enterHint": "Consejo: pulsa Enter para importar",
       "importAndStart": "Importar y activar",
@@ -16,7 +16,7 @@
       "readyOk": "Proxy listo y conectado",
       "readyUnconfirmed": "Aún no se ha medido la latencia del nodo; puede que el test siga en curso o que el nodo no esté disponible",
       "sysProxyOff": "El proxy del sistema está desactivado. Actívalo en Ajustes e inténtalo de nuevo",
-      "wikiHint": "Haz clic en el botón de abajo para abrir el repositorio de Clash Mini en GitHub: verifica tu conexión y regálanos una ⭐ Star arriba a la derecha para apoyar el proyecto.",
+      "wikiHint": "Haz clic en el botón de abajo para abrir el repositorio de Clash Win en GitHub: verifica tu conexión y regálanos una ⭐ Star arriba a la derecha para apoyar el proyecto.",
       "openWiki": "Ver guía Wiki",
       "finish": "Ir al inicio",
       "featureAutoSelect": "⚡ Mejor nodo auto",
@@ -24,7 +24,7 @@
       "featureStealth": "🪶 Modo ultraligero",
       "clipboardDetected": "Enlace detectado en el portapapeles — clic para rellenar",
       "activeNodeLabel": "Nodo activo",
-      "starTitle": "¿Te gusta Clash Mini? ¡Danos una ⭐ Star en GitHub!",
+      "starTitle": "¿Te gusta Clash Win? ¡Danos una ⭐ Star en GitHub!",
       "openGithubStar": "Probar red y dar ⭐ Star en GitHub",
       "retestNodes": "Reintentar y elegir mejor nodo"
     },

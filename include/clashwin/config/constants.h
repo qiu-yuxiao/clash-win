@@ -8,8 +8,8 @@
 namespace clashwin::config::consts {
 
 // ---------- 文件名（← constants.rs::files + utils/dirs.rs） ----------
-inline constexpr const char* kRuntimeConfig = "clash-mini.yaml";
-inline constexpr const char* kCheckConfig = "clash-mini-check.yaml";
+inline constexpr const char* kRuntimeConfig = "clash-win.yaml";
+inline constexpr const char* kCheckConfig = "clash-win-check.yaml";
 inline constexpr const char* kWindowState = "window_state.json";
 inline constexpr const char* kProxyHeadState = "proxy_head_state.json";
 inline constexpr const char* kUnlockCache = "unlock_cache.json";

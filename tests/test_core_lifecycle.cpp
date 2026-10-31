@@ -314,10 +314,10 @@ UT_TEST(apply_config_paths) {
     api.select_script = {Result<void>::ok()};
     CoreManager m;
     OpsRecorder rec;
-    UT_CHECK(m.apply_config(api, "C:\\home\\clash-mini.yaml", rec.ops(), fast()).is_ok());
+    UT_CHECK(m.apply_config(api, "C:\\home\\clash-win.yaml", rec.ops(), fast()).is_ok());
     UT_CHECK_EQ(api.reload_calls, 1);
     UT_CHECK_EQ(api.last_reload_force, true);
-    UT_CHECK_EQ(api.last_reload_path, std::string("C:\\home\\clash-mini.yaml"));
+    UT_CHECK_EQ(api.last_reload_path, std::string("C:\\home\\clash-win.yaml"));
     UT_CHECK_EQ(api.last_select_node, std::string("JP-02"));
     UT_CHECK(rec.order.empty());  // 未整核重启
   }
@@ -333,7 +333,7 @@ UT_TEST(apply_config_paths) {
     CoreManager m;
     OpsRecorder rec;
     api.reload_script = {Result<void>::err(Error{1103, "reload rejected"})};
-    UT_CHECK(m.apply_config(api, "C:\\home\\clash-mini.yaml", rec.ops(), fast()).is_ok());
+    UT_CHECK(m.apply_config(api, "C:\\home\\clash-win.yaml", rec.ops(), fast()).is_ok());
     UT_CHECK(rec.order == std::vector<const char*>({"stop", "start"}));
     // reload 失败后 restart 内部快照 → select 恢复
     UT_CHECK_EQ(api.select_calls, 1);
@@ -348,7 +348,7 @@ UT_TEST(apply_config_paths) {
     OpsRecorder rec;
     rec.stop_fails = true;
     api.reload_script = {Result<void>::err(Error{1103, "reload rejected"})};
-    auto r = m.apply_config(api, "C:\\home\\clash-mini.yaml", rec.ops(), fast());
+    auto r = m.apply_config(api, "C:\\home\\clash-win.yaml", rec.ops(), fast());
     UT_CHECK(r.is_err());
     UT_CHECK(r.error().message.find("Failed to apply config") != std::string::npos);
   }

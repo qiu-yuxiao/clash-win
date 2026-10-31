@@ -3,7 +3,7 @@
 // use_lowercase：仅保留字符串键并 ASCII 转小写（serde_yaml Value::as_str 语义：
 // 数字/bool 键一律丢弃）；use_sort：HANDLE_FIELDS → 中间段 → DEFAULT_FIELDS。
 //
-// 【G3 实证】实机两次生成（clash-mini.yaml vs clash-mini-check.yaml）中间段
+// 【G3 实证】实机两次生成（clash-win.yaml vs clash-win-check.yaml）中间段
 // （非 HANDLE、非 DEFAULT 的键）顺序互不相同——Rust HashSet 随机遍历序，属
 // 实机运行时不确定性。本移植取「输入插入序」这一确定序；逐行 diff 归因时
 // 该段顺序差异视为预期。另据实机 golden：DEFAULT_FIELDS 不含 rules

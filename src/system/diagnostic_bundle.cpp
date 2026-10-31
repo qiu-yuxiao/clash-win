@@ -37,7 +37,7 @@ constexpr size_t kMaxLogFileReadBytes = 2 * 1024 * 1024;  // 2MB
 constexpr size_t kMaxDiagnosticLogFiles = 60;
 
 const char* kBundleReadme =
-    "Clash Mini 诊断包\n"
+    "Clash Win 诊断包\n"
     "=================\n\n"
     "本包由「设置 → 帮助 → 导出诊断包」生成，用于问题排查。\n\n"
     "内容：\n"
@@ -377,7 +377,7 @@ Result<std::string> DiagnosticBundle::export_diagnostic_bundle() {
   char stamp[64];
   strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", &local_tm);
 
-  std::filesystem::path zip_path = diag_dir / ("clash-mini-diag-" + std::string(stamp) + ".zip");
+  std::filesystem::path zip_path = diag_dir / ("clash-win-diag-" + std::string(stamp) + ".zip");
   std::vector<ZipEntry> entries;
 
   // 1) Logs: recursively collect, skip symlinks, sort mtime desc, cap at 60 files, tail-cap 2MB

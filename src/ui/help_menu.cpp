@@ -32,10 +32,10 @@ void HelpMenu::execute_action(HelpAction action, HWND hwnd) {
 
   switch (action) {
     case HelpAction::StarGithub:
-      ShellExecuteW(hwnd, L"open", L"https://github.com/qiu-yuxiao/clash-mini", nullptr, nullptr, SW_SHOWNORMAL);
+      ShellExecuteW(hwnd, L"open", L"https://github.com/qiu-yuxiao/clash-win", nullptr, nullptr, SW_SHOWNORMAL);
       break;
     case HelpAction::OpenWiki:
-      ShellExecuteW(hwnd, L"open", L"https://github.com/qiu-yuxiao/clash-mini/wiki", nullptr, nullptr, SW_SHOWNORMAL);
+      ShellExecuteW(hwnd, L"open", L"https://github.com/qiu-yuxiao/clash-win/wiki", nullptr, nullptr, SW_SHOWNORMAL);
       break;
     case HelpAction::ReviewGuide:
       events::EventBus::instance().publish("ui:open_guide", "");

@@ -1,7 +1,7 @@
 // T08 门禁测试：enhance_core 全流水线
 //   合成轨：确定性输入 → 断言组/规则顺序/后缀格式与手工推导一致
 //   实机 golden 轨（G3 最强证据）：只读实机 {config.yaml, verge.yaml,
-//   profiles.yaml, profiles/*} → enhance_core → 与实机 clash-mini.yaml
+//   profiles.yaml, profiles/*} → enhance_core → 与实机 clash-win.yaml
 //   逐行 diff（按 golden 顶层键序重排消去实机 HashSet 随机序运行时差异）
 #include <algorithm>
 #include <functional>
@@ -310,7 +310,7 @@ UT_TEST(t08_golden_fixture) {
   EnhanceOutput out = enhance_core(input);
   std::string ours_text = config::serde::dump(out.config);
 
-  std::wstring expected_path = home + L"\\expected_clash_mini.yaml";
+  std::wstring expected_path = home + L"\\expected_clash_win.yaml";
   std::string expected_text = enhance_test::read_file_str(expected_path);
   if (expected_text.empty()) {
     // 自种子：以验收通过的当前实现为基准固化期望（此后逐行 diff 守回退）
@@ -345,10 +345,10 @@ UT_TEST(t08_golden_live_probe) {
   // serde_yaml_ng 风格换成 go-yaml v3 风格），差异属实机漂移，仅供人工
   // 评审归因；本用例无论结果如何都不得 FAIL。
   std::wstring home = enhance_test::real_home();
-  std::wstring live_path = home + L"\\clash-mini.yaml";
+  std::wstring live_path = home + L"\\clash-win.yaml";
   std::string live_text = enhance_test::read_file_str(live_path);
   if (!enhance_test::dir_exists(home) || live_text.empty()) {
-    std::printf("    INFO-SKIP: real machine clash-mini.yaml not present\n");
+    std::printf("    INFO-SKIP: real machine clash-win.yaml not present\n");
     return;
   }
 
@@ -361,7 +361,7 @@ UT_TEST(t08_golden_live_probe) {
 
   auto live = util::load_yaml_file(live_path);
   if (!live.is_ok()) {
-    std::printf("    INFO: live clash-mini.yaml unparseable\n");
+    std::printf("    INFO: live clash-win.yaml unparseable\n");
     return;
   }
   YAML::Node g = live.value();

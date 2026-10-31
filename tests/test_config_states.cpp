@@ -1,5 +1,5 @@
 // T03：proxy_head_state.json 与 unlock_cache 读写
-// （proxy_head_state 形态对照实机 %APPDATA%\io.github.clash-mini.clash-mini
+// （proxy_head_state 形态对照实机 %APPDATA%\io.github.clash-win.clash-win
 //   /proxy_head_state.json 只读样本；unlock 对照 src/pages/unlock.tsx 缓存字段）
 #include <windows.h>
 

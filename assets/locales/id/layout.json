@@ -1,8 +1,8 @@
 {
   "components": {
     "firstRun": {
-      "title": "Selamat datang di Clash Mini",
-      "intro": "Satu langkah untuk memulai: tempel tautan langganan Anda di bawah, dan Clash Mini akan otomatis mengurai node, menguji kecepatan, dan memilih rute terbaik.",
+      "title": "Selamat datang di Clash Win",
+      "intro": "Satu langkah untuk memulai: tempel tautan langganan Anda di bawah, dan Clash Win akan otomatis mengurai node, menguji kecepatan, dan memilih rute terbaik.",
       "paste": "Tempel dari papan klip",
       "enterHint": "Tips: tekan Enter untuk mengimpor",
       "importAndStart": "Impor dan aktifkan",
@@ -16,7 +16,7 @@
       "readyOk": "Proxy siap, jaringan terhubung",
       "readyUnconfirmed": "Latensi node belum terukur — mungkin masih diuji atau node tidak tersedia",
       "sysProxyOff": "Proksi sistem mati. Aktifkan di Pengaturan lalu coba lagi",
-      "wikiHint": "Klik tombol di bawah untuk membuka repositori GitHub Clash Mini — uji koneksi Anda dan berikan ⭐ Star di pojok kanan atas untuk mendukung proyek ini!",
+      "wikiHint": "Klik tombol di bawah untuk membuka repositori GitHub Clash Win — uji koneksi Anda dan berikan ⭐ Star di pojok kanan atas untuk mendukung proyek ini!",
       "openWiki": "Lihat Panduan Wiki",
       "finish": "Masuk ke Aplikasi",
       "featureAutoSelect": "⚡ Pilih Node Terbaik",
@@ -24,7 +24,7 @@
       "featureStealth": "🪶 Mode Super Ringan",
       "clipboardDetected": "Tautan terdeteksi di clipboard — klik untuk mengisi",
       "activeNodeLabel": "Node Aktif",
-      "starTitle": "Suka Clash Mini? Beri kami ⭐ Star di GitHub!",
+      "starTitle": "Suka Clash Win? Beri kami ⭐ Star di GitHub!",
       "openGithubStar": "Uji Koneksi & Beri ⭐ Star",
       "retestNodes": "Uji Ulang & Pilih Node Terbaik"
     },

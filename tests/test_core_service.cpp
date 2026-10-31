@@ -69,7 +69,7 @@ UT_TEST(service_payload_fields) {
   lc.max_log_files = 40;
   auto j = build_clash_config_payload("C:\\home\\cores\\mini-mihomo.exe",
                                       "\\\\.\\pipe\\mini-mihomo",
-                                      "C:\\home\\clash-mini.yaml", "C:\\home", lc);
+                                      "C:\\home\\clash-win.yaml", "C:\\home", lc);
   UT_CHECK(j.is_object());
   UT_CHECK(j.contains("core_config"));
   UT_CHECK(j.contains("log_config"));
@@ -78,7 +78,7 @@ UT_TEST(service_payload_fields) {
   UT_CHECK_EQ(core.value("core_path", std::string()),
               std::string("C:\\home\\cores\\mini-mihomo.exe"));
   UT_CHECK_EQ(core.value("core_ipc_path", std::string()), std::string("\\\\.\\pipe\\mini-mihomo"));
-  UT_CHECK_EQ(core.value("config_path", std::string()), std::string("C:\\home\\clash-mini.yaml"));
+  UT_CHECK_EQ(core.value("config_path", std::string()), std::string("C:\\home\\clash-win.yaml"));
   UT_CHECK_EQ(core.value("config_dir", std::string()), std::string("C:\\home"));
   UT_CHECK(core.size() == 4);
   const auto& log = j["log_config"];

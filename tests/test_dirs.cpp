@@ -38,9 +38,9 @@ UT_TEST(dirs_home_override_redirects_everything) {
   UT_CHECK_EQ(dirs::clash_path(), root + L"\\config.yaml");
   UT_CHECK_EQ(dirs::verge_path(), root + L"\\verge.yaml");
   UT_CHECK_EQ(dirs::profiles_path(), root + L"\\profiles.yaml");
-  UT_CHECK_EQ(dirs::clash_mini_path(), root + L"\\clash-mini.yaml");
+  UT_CHECK_EQ(dirs::clash_mini_path(), root + L"\\clash-win.yaml");
   UT_CHECK_EQ(dirs::clash_mini_check_path(),
-              root + L"\\clash-mini-check.yaml");
+              root + L"\\clash-win-check.yaml");
   UT_CHECK_EQ(dirs::window_state_path(), root + L"\\window_state.json");
   UT_CHECK_EQ(dirs::proxy_head_state_path(),
               root + L"\\proxy_head_state.json");
@@ -55,10 +55,10 @@ UT_TEST(dirs_home_override_redirects_everything) {
 }
 
 UT_TEST(dirs_portable_branch) {
-  // 纯函数：便携 home = <exe>\.config\io.github.clash-mini.clash-mini
+  // 纯函数：便携 home = <exe>\.config\io.github.clash-win.clash-win
   std::wstring fake_exe_dir = temp_root() + L"\\appbin";
   UT_CHECK_EQ(dirs::portable_home_for(fake_exe_dir),
-              fake_exe_dir + L"\\.config\\io.github.clash-mini.clash-mini");
+              fake_exe_dir + L"\\.config\\io.github.clash-win.clash-win");
 
   // 便携标记文件存在 → is_portable（env 强制分支验证；exe 目录不可写故用覆盖）
   set_env("CLASHWIN_PORTABLE_OVERRIDE", L"1");
@@ -69,7 +69,7 @@ UT_TEST(dirs_portable_branch) {
 }
 
 UT_TEST(dirs_appdata_branch_shape) {
-  // 非便携分支 = %APPDATA%\io.github.clash-mini.clash-mini（只读拼接，不写盘）
+  // 非便携分支 = %APPDATA%\io.github.clash-win.clash-win（只读拼接，不写盘）
   set_env("CLASHWIN_PORTABLE_OVERRIDE", L"0");
   set_env("CLASHWIN_HOME_OVERRIDE", L"");
 
@@ -77,7 +77,7 @@ UT_TEST(dirs_appdata_branch_shape) {
   wchar_t base_buf[MAX_PATH] = {};
   DWORD base_len = GetEnvironmentVariableW(L"CLASHWIN_APPDATA_OVERRIDE", base_buf, MAX_PATH);
   if (base_len > 0 && base_len < MAX_PATH) {
-    std::wstring expected = std::wstring(base_buf) + L"\\io.github.clash-mini.clash-mini";
+    std::wstring expected = std::wstring(base_buf) + L"\\io.github.clash-win.clash-win";
     UT_CHECK_EQ(dirs::app_home_dir(), expected);
     set_env("CLASHWIN_PORTABLE_OVERRIDE", L"");
     return;
@@ -87,7 +87,7 @@ UT_TEST(dirs_appdata_branch_shape) {
   HRESULT hr = SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &raw);
   if (SUCCEEDED(hr)) {
     std::wstring expected =
-        std::wstring(raw) + L"\\io.github.clash-mini.clash-mini";
+        std::wstring(raw) + L"\\io.github.clash-win.clash-win";
     CoTaskMemFree(raw);
     UT_CHECK_EQ(dirs::app_home_dir(), expected);
   }

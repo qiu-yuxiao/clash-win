@@ -1,7 +1,7 @@
 {
   "components": {
     "firstRun": {
-      "title": "歡迎使用 Clash Mini",
+      "title": "歡迎使用 Clash Win",
       "intro": "首次使用只需一步：填入您的代理訂閱連結，系統將自動完成節點解析、併發測速與最優路線接管。",
       "paste": "一鍵貼上剪貼簿連結",
       "enterHint": "提示：按 Enter 鍵即可匯入",
@@ -16,7 +16,7 @@
       "readyOk": "代理已就緒，國際網路已連通",
       "readyUnconfirmed": "目前節點回應逾時，可點擊下方按鈕自動重新測速並切換至最快節點；您也可以直接進入主介面手動選擇其他節點",
       "sysProxyOff": "系統代理未開啟，請在設定中開啟後再試",
-      "wikiHint": "點擊下方主按鈕將打開 Clash Mini 的 GitHub 倉庫——既能實測外網秒開，也懇請在打開的頁面右上角點亮一顆 ⭐ Star，您的支持是我們持續維護的最大動力！",
+      "wikiHint": "點擊下方主按鈕將打開 Clash Win 的 GitHub 倉庫——既能實測外網秒開，也懇請在打開的頁面右上角點亮一顆 ⭐ Star，您的支持是我們持續維護的最大動力！",
       "openWiki": "查看 Wiki 進階指南",
       "finish": "進入主介面",
       "featureAutoSelect": "⚡ 自動測速擇優",
@@ -24,7 +24,7 @@
       "featureStealth": "🪶 極窄隱匿輕量",
       "clipboardDetected": "偵測到剪貼簿中有訂閱連結，點擊填入或按 Enter 直接匯入",
       "activeNodeLabel": "目前最優節點",
-      "starTitle": "喜歡 Clash Mini 嗎？送我們一顆 ⭐ Star 吧！",
+      "starTitle": "喜歡 Clash Win 嗎？送我們一顆 ⭐ Star 吧！",
       "openGithubStar": "打開 GitHub 測速並點 ⭐ Star",
       "retestNodes": "重新測速並優選節點"
     },

@@ -1,7 +1,7 @@
 {
   "components": {
     "firstRun": {
-      "title": "Clash Mini へようこそ",
+      "title": "Clash Win へようこそ",
       "intro": "初回設定は1ステップで完了：下にサブスクリプションURLを入力するだけで、ノード解析・速度測定・最適ルート切り替えを自動で行います。",
       "paste": "クリップボードから貼り付け",
       "enterHint": "ヒント：Enter キーでインポートできます",
@@ -16,7 +16,7 @@
       "readyOk": "プロキシ準備完了・通信良好",
       "readyUnconfirmed": "ノードの遅延を測定できませんでした。測定中か、ノードが利用できない可能性があります",
       "sysProxyOff": "システムプロキシが無効です。設定で有効にしてから再試行してください",
-      "wikiHint": "下のボタンで Clash Mini の GitHub ページを開いて接続テストができます。気に入っていただけたら、ページ右上の ⭐ Star を押して応援してください！",
+      "wikiHint": "下のボタンで Clash Win の GitHub ページを開いて接続テストができます。気に入っていただけたら、ページ右上の ⭐ Star を押して応援してください！",
       "openWiki": "Wiki ガイドを見る",
       "finish": "メイン画面へ",
       "featureAutoSelect": "⚡ 自動最速選択",
@@ -24,7 +24,7 @@
       "featureStealth": "🪶 超軽量ミニ表示",
       "clipboardDetected": "クリップボードのURLを検出しました（クリックで自動入力）",
       "activeNodeLabel": "現在の最適ノード",
-      "starTitle": "Clash Mini を気に入りましたか？⭐ Star で応援お願いします！",
+      "starTitle": "Clash Win を気に入りましたか？⭐ Star で応援お願いします！",
       "openGithubStar": "GitHub を開いて接続確認 & ⭐ Star",
       "retestNodes": "再テストして最適ノードを選択"
     },

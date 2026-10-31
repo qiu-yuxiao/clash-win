@@ -183,7 +183,7 @@ bool MainWindow::create_hwnd() {
   int h = static_cast<int>(kDefaultWindowH);
   // ← window.rs：加载完成才 show → 创建时不带 WS_VISIBLE，show_and_activate 再显
   hwnd_ = CreateWindowExW(
-      0, kWndClass, L"Clash Mini",
+      0, kWndClass, L"Clash Win",
       WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_SYSMENU,
       x, y, w, h, nullptr, nullptr, GetModuleHandleW(nullptr), this);
   if (!hwnd_) {

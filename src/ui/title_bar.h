@@ -1,5 +1,5 @@
 #pragma once
-// 标题栏（T11）：30px —— AppIcon 16 + "Clash Mini Ver.{v}" + 右三键 28×28。
+// 标题栏（T11）：30px —— AppIcon 16 + "Clash Win Ver.{v}" + 右三键 28×28。
 // ← _layout.tsx:1119-1183（customTitlebar）+ window-controller.tsx（三键）。
 // - 三键：最小化 / 大尺寸□（large 态换 restore 字形）/ 关闭（hover 红底白字）
 // - 关闭 = 隐藏窗口 + entry_lightweight_mode（← 02§7，非退出）

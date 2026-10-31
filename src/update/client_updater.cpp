@@ -203,7 +203,7 @@ Result<AppUpdateInfo> ClientUpdater::check_app_update() {
     return Result<AppUpdateInfo>::err(make_err("downloader not configured"));
   }
   const std::string manifest_url =
-      "https://raw.githubusercontent.com/qiu-yuxiao/clash-mini/dev/updater/app-update.json";
+      "https://raw.githubusercontent.com/qiu-yuxiao/clash-win/dev/updater/app-update.json";
   auto res = downloader_->fetch_manifest(manifest_url);
   if (!res.is_ok()) {
     return Result<AppUpdateInfo>::err(res.error());

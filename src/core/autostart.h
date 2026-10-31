@@ -10,8 +10,8 @@ namespace clashwin::core {
 
 // 历史计划任务名（2025-12-26 起使用的 schtasks 方案）
 inline constexpr const wchar_t* kLegacyTaskNames[] = {
-    L"Clash Mini",
-    L"Clash Mini (Admin)"
+    L"Clash Win",
+    L"Clash Win (Admin)"
 };
 
 // 迁移完成标记文件（放在 app_home 下，与配置数据同生命周期）
@@ -19,7 +19,7 @@ inline constexpr const wchar_t* kAutostartMigrationMarker = L".autostart_task_mi
 
 // 注册表 Run 键路径与值名称
 inline constexpr const wchar_t* kRunKeySubPath = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
-inline constexpr const wchar_t* kRunValueName = L"Clash Mini";
+inline constexpr const wchar_t* kRunValueName = L"Clash Win";
 
 // 抽象接口：隔离 Windows 注册表与 schtasks 子进程操作
 class IAutostartAccess {

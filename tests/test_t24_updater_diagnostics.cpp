@@ -549,7 +549,7 @@ UT_TEST(t24_diag_bundle_zip_creation_and_contents) {
   std::ofstream(logs_dir / "app.log") << "2026-10-28 10:00:00 Authorization: Bearer secret_app_tok\n";
   std::ofstream(sidecar_logs / "core.log") << "2026-10-28 10:00:01 password=secret_core_pwd\n";
 
-  std::ofstream(th.dir / "clash-mini.yaml") << "proxies:\n  - name: P1\n    password: clash_secret_pwd\n";
+  std::ofstream(th.dir / "clash-win.yaml") << "proxies:\n  - name: P1\n    password: clash_secret_pwd\n";
   std::ofstream(th.dir / "verge.yaml") << "secret: verge_secret_val\n";
   std::ofstream(th.dir / "profiles.yaml") << "token: prof_secret_val\n";
 

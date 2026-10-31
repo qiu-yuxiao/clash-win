@@ -1,7 +1,7 @@
 #pragma once
 // Tray（T19）：系统托盘图标管理
 // - 三态图标：TUN > SysProxy > Default
-// - Tooltip："Clash Mini"
+// - Tooltip："Clash Win"
 // - 300ms 左键防抖（TRAY_CLICK_DEBOUNCE_MS）
 // - 2 项右键菜单："轻量模式 / Lite mode" 与 "退出 (Exit)"（退出绕过防抖）
 // - ITrayBackend 抽象接口：解耦 Win32 Shell API，支持全内存纯单测
@@ -95,7 +95,7 @@ class Tray {
   bool lite_mode_checked_ = false;
   bool icon_added_ = false;
   int64_t last_click_ms_ = 0;
-  std::wstring tooltip_ = L"Clash Mini";
+  std::wstring tooltip_ = L"Clash Win";
 
   std::function<void()> on_left_click_;
   std::function<void()> on_toggle_lite_mode_;

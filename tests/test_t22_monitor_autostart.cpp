@@ -155,8 +155,8 @@ UT_TEST(t22_autostart_legacy_schtasks_cleanup_and_marker) {
   // 首次运行清理
   AutostartManager::instance().cleanup_legacy_scheduled_tasks();
   UT_CHECK_EQ(mock.deleted_tasks.size(), 2);
-  UT_CHECK_EQ(mock.deleted_tasks[0], L"Clash Mini");
-  UT_CHECK_EQ(mock.deleted_tasks[1], L"Clash Mini (Admin)");
+  UT_CHECK_EQ(mock.deleted_tasks[0], L"Clash Win");
+  UT_CHECK_EQ(mock.deleted_tasks[1], L"Clash Win (Admin)");
   UT_CHECK(std::filesystem::exists(marker));
 
   // 验证标记内容为 "1"

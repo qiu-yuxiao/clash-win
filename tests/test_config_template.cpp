@@ -1,6 +1,6 @@
 // T03 门禁测试①：空环境首启产物与 tmpl.rs / serde 形态逐字节 diff 为空
 // 期望值 = tmpl.rs 模板常量 + serde_yaml_ng 序列化形态（以实机
-// %APPDATA%\io.github.clash-mini.clash-mini 三份 yaml 为对照基准只读抄录）
+// %APPDATA%\io.github.clash-win.clash-win 三份 yaml 为对照基准只读抄录）
 #include <windows.h>
 
 #include <fstream>

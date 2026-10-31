@@ -525,7 +525,7 @@ UT_TEST(t25_resources_gfwlist_release) {
 // 13. t25_dirs_portable_config_detection
 UT_TEST(t25_dirs_portable_config_detection) {
   std::wstring exe = util::dirs::exe_dir();
-  std::wstring expected = exe + L"\\.config\\io.github.clash-mini.clash-mini";
+  std::wstring expected = exe + L"\\.config\\io.github.clash-win.clash-win";
   UT_CHECK_EQ(util::dirs::portable_home_for(exe), expected);
 
   // 环境变量必须走 CRT（_wputenv_s）；SetEnvironmentVariableW 不会更新 _dupenv_s 视图

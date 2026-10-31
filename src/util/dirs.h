@@ -1,8 +1,9 @@
 #pragma once
-// 配置目录体系（← utils/dirs.rs 全函数移植）
-// app_home_dir：便携模式 = <exe>\.config\io.github.clash-mini.clash-mini
+// 配置目录体系（← utils/dirs.rs 全函数移植；品牌独立：Clash Win 自有数据目录，
+// 与参考源 Clash Mini 的 io.github.clash-mini.clash-mini 完全分离，可双机共存）
+// app_home_dir：便携模式 = <exe>\.config\io.github.clash-win.clash-win
 //              （便携标记 = <exe>\.config\PORTABLE 文件存在）；
-//              否则 %APPDATA%\io.github.clash-mini.clash-mini。
+//              否则 %APPDATA%\io.github.clash-win.clash-win。
 // 调试/测试覆盖（绝不动真实 %APPDATA%）：
 //   CLASHWIN_HOME_OVERRIDE      → 直接作为 app_home_dir 返回值
 //   CLASHWIN_PORTABLE_OVERRIDE  → "1" 强制便携分支 / "0" 强制非便携
@@ -11,7 +12,8 @@
 namespace clashwin::util::dirs {
 
 // ← dirs.rs APP_ID（dev 分支 .dev 后缀不移植：C++ 侧无 verge-dev feature）
-inline constexpr const wchar_t* kAppId = L"io.github.clash-mini.clash-mini";
+// 品牌独立：对应 github.com/qiu-yuxiao/clash-win，勿与参考源 clash-mini 共用
+inline constexpr const wchar_t* kAppId = L"io.github.clash-win.clash-win";
 inline constexpr const wchar_t* kClashConfig = L"config.yaml";
 inline constexpr const wchar_t* kVergeConfig = L"verge.yaml";
 inline constexpr const wchar_t* kProfileYaml = L"profiles.yaml";
@@ -40,8 +42,8 @@ std::wstring clash_path();             // <home>\config.yaml
 std::wstring verge_path();             // <home>\verge.yaml
 std::wstring profiles_path();          // <home>\profiles.yaml
 std::wstring service_path();           // <resources>\clash-verge-service.exe
-std::wstring clash_mini_path();        // <home>\clash-mini.yaml（运行时生成）
-std::wstring clash_mini_check_path();  // <home>\clash-mini-check.yaml（校验用）
+std::wstring clash_mini_path();        // <home>\clash-win.yaml（运行时生成）
+std::wstring clash_mini_check_path();  // <home>\clash-win-check.yaml（校验用）
 std::wstring window_state_path();      // <home>\window_state.json
 std::wstring proxy_head_state_path();  // <home>\proxy_head_state.json
 std::wstring cores_dir();              // <home>\cores（内核热升级区）

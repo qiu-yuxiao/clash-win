@@ -155,8 +155,8 @@ UT_TEST(t19_tray_tooltip_and_menu_definition) {
   auto* raw_mock = mock.get();
   Tray tray(std::move(mock));
 
-  // Tooltip 必须与 Clash Mini 原版一致 ("Clash Mini")
-  UT_CHECK_EQ(tray.tooltip(), L"Clash Mini");
+  // Tooltip = 独立品牌 "Clash Win"（品牌独立裁决：不再与 Clash Mini 原版一致）
+  UT_CHECK_EQ(tray.tooltip(), L"Clash Win");
 
   HWND dummy_hwnd = reinterpret_cast<HWND>(0x1234);
   tray.init(dummy_hwnd);

@@ -67,7 +67,7 @@ UT_TEST(ui_offscreen_dpi_96_baseline) {
 
 UT_TEST(ui_offscreen_text_renders_pixels) {
   UT_CHECK(make_offscreen(200, 60, 96));
-  Label lbl(L"Clash Mini 节点");
+  Label lbl(L"Clash Win 节点");
   lbl.style.size = 14;
   lbl.style.color = {0, 0, 0, 1};
   lbl.layout_tree({10, 20, 180, 24});

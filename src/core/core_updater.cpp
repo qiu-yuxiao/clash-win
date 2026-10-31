@@ -631,7 +631,7 @@ Result<void> CoreUpdater::start_core_upgrade(const GithubRelease& release) {
 
   if (!start_res.is_ok()) {
     std::string err_msg = "内核二进制已更新，但重启失败: " + start_res.error().message +
-                          "。请手动重启 Clash Mini。";
+                          "。请手动重启 Clash Win。";
     emit_progress("error", 0, err_msg);
     return Result<void>::err(make_err(err_msg));
   }

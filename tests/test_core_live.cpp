@@ -66,7 +66,7 @@ struct LiveEnv {
     if (ec) return false;
 
     // 最小配置：含 PROXY select 组（restore 语义联调）
-    config = home + L"\\clash-mini.yaml";
+    config = home + L"\\clash-win.yaml";
     std::ofstream f(config, std::ios::binary);
     if (!f.is_open()) return false;
     f << "mixed-port: " << kTestPort << "\n"

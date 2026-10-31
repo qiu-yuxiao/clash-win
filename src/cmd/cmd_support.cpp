@@ -318,7 +318,7 @@ core::validate::ValidationOutcome run_enhance_pipeline() {
   if (runtime.is_err()) {
     return ValidationOutcome::invalid_from_message(runtime.error().message);
   }
-  // ② 落盘 clash-mini.yaml（← Config::generate_file(Run)）
+  // ② 落盘 clash-win.yaml（← Config::generate_file(Run)）
   std::ostringstream oss;
   oss << runtime.value();
   std::string yaml_text = oss.str();
@@ -329,7 +329,7 @@ core::validate::ValidationOutcome run_enhance_pipeline() {
     std::ofstream f(run_path, std::ios::binary);
     if (!f.is_open()) {
       return ValidationOutcome::invalid(core::validate::ValidationErrorKind::FileRead,
-                                        "Failed to write clash-mini.yaml");
+                                        "Failed to write clash-win.yaml");
     }
     f << yaml_text;
   }

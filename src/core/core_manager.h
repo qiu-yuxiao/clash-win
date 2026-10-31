@@ -38,7 +38,7 @@ std::wstring locate_core_path();
 struct SidecarLaunch {
   std::wstring core_path;   // mini-mihomo.exe 全路径
   std::wstring config_dir;  // -d：app_home_dir
-  std::wstring config_file; // -f：clash-mini.yaml（运行时产物）
+  std::wstring config_file; // -f：clash-win.yaml（运行时产物）
   std::wstring ipc_pipe;    // -ext-ctl-pipe：\\.\pipe\mini-mihomo
   // Go 运行时三变量（进程环境缺失时取默认，同 std::env::var unwrap_or）
   std::string go_memlimit = consts::kGoMemLimitDefault;

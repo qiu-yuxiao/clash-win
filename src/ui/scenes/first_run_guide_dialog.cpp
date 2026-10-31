@@ -260,7 +260,7 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
     title_ts.color = Color4f::hex(0x1A1A1A);
     title_ts.align_h = AlignH::Center;
     title_ts.align_v = AlignV::Center;
-    rt.draw_text(L"🎉 欢迎使用 Clash Mini",
+    rt.draw_text(L"🎉 欢迎使用 Clash Win",
                  {card_rect_.x, card_rect_.y + 10.0f, card_rect_.w, 24.0f}, title_ts);
 
     // STEP 1 / 2 胶囊标
@@ -492,7 +492,7 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
     star_body_ts.color = Color4f::hex(0x5D4037);
     star_body_ts.wrap = true;
     rt.draw_text(
-        L"如果 Clash Mini 对您有所帮助，欢迎前往 GitHub 为本项目点亮 Star 开源支持！",
+        L"如果 Clash Win 对您有所帮助，欢迎前往 GitHub 为本项目点亮 Star 开源支持！",
         {card_star_rect_.x + 12.0f, card_star_rect_.y + 28.0f, card_star_rect_.w - 24.0f, 44.0f},
         star_body_ts);
 
@@ -612,13 +612,13 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
       }
       if (btn_wiki_rect_.contains(pt.x, pt.y)) {
         if (on_open_wiki) on_open_wiki();
-        ShellExecuteW(nullptr, L"open", L"https://github.com/qiu-yuxiao/clash-mini/wiki",
+        ShellExecuteW(nullptr, L"open", L"https://github.com/qiu-yuxiao/clash-win/wiki",
                       nullptr, nullptr, SW_SHOWNORMAL);
         return true;
       }
       if (btn_finish_star_rect_.contains(pt.x, pt.y)) {
         if (on_open_github) on_open_github();
-        ShellExecuteW(nullptr, L"open", L"https://github.com/qiu-yuxiao/clash-mini", nullptr,
+        ShellExecuteW(nullptr, L"open", L"https://github.com/qiu-yuxiao/clash-win", nullptr,
                       nullptr, SW_SHOWNORMAL);
         finish();
         return true;

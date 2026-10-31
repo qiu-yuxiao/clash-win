@@ -19,6 +19,10 @@ Result<void> init_resources(const std::wstring& app_home_dir,
 
   if (!std::filesystem::exists(home, ec)) {
     std::filesystem::create_directories(home, ec);
+    if (ec) {
+      CWLOG_ERROR("init_resources: failed to create home dir " + utf::utf16_to_utf8(home.wstring()) + ": " + ec.message());
+      return Result<void>::ok();
+    }
   }
 
   // 资源映射列表：src_rel, dest_rel

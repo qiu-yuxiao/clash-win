@@ -73,7 +73,7 @@ mihomo::MihomoClient& mihomo_unchecked();
 
 // ---------- enhance 全链（← manager/config.rs perform_config_update +
 // feat::enhance_profiles）----------
-// run_from_config → 落盘 clash-mini.yaml → check 副本校验 →（valid 且内核运行时）
+// run_from_config → 落盘 clash-win.yaml → check 副本校验 →（valid 且内核运行时）
 // 热应用 apply_config。返回四分类 outcome；核心侧失败折叠进 invalid。
 core::validate::ValidationOutcome run_enhance_pipeline();
 

@@ -81,7 +81,7 @@ class Validator {
   std::atomic<bool> processing_{false};
 };
 
-// 生成校验副本：copy source → <home>\clash-mini-check.yaml（← Config::generate_file(Check)），
+// 生成校验副本：copy source → <home>\clash-win-check.yaml（← Config::generate_file(Check)），
 // 返回 check 文件路径
 Result<std::wstring> make_check_copy(const std::wstring& source);
 

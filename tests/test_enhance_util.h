@@ -30,7 +30,7 @@ inline std::wstring real_home() {
   const char* appdata = std::getenv("APPDATA");
   if (!appdata) return L"";
   return utf8_to_utf16(std::string(appdata)) +
-         L"\\io.github.clash-mini.clash-mini";
+         L"\\io.github.clash-win.clash-win";
 }
 
 inline bool dir_exists(const std::wstring& path) {

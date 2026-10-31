@@ -1,8 +1,8 @@
 {
   "components": {
     "firstRun": {
-      "title": "Welcome to Clash Mini",
-      "intro": "One step to get started: paste your subscription URL below, and Clash Mini will automatically parse nodes, benchmark latency, and route your traffic.",
+      "title": "Welcome to Clash Win",
+      "intro": "One step to get started: paste your subscription URL below, and Clash Win will automatically parse nodes, benchmark latency, and route your traffic.",
       "paste": "Paste from clipboard",
       "enterHint": "Tip: press Enter to import",
       "importAndStart": "Import and enable",
@@ -16,7 +16,7 @@
       "readyOk": "Proxy is active and connected",
       "readyUnconfirmed": "Current node timed out. Click below to re-test and automatically switch to the fastest node, or enter the app to choose manually",
       "sysProxyOff": "System proxy is off. Enable it in Settings and try again",
-      "wikiHint": "Click the button below to open Clash Mini on GitHub — verify your connection and please click ⭐ Star in the top-right corner to support this open-source project!",
+      "wikiHint": "Click the button below to open Clash Win on GitHub — verify your connection and please click ⭐ Star in the top-right corner to support this open-source project!",
       "openWiki": "View Wiki Guide",
       "finish": "Enter App",
       "featureAutoSelect": "⚡ Auto Best Node",
@@ -24,7 +24,7 @@
       "featureStealth": "🪶 Ultra-Light Mode",
       "clipboardDetected": "Subscription URL detected in clipboard — click to fill or press Enter to import",
       "activeNodeLabel": "Active Node",
-      "starTitle": "Enjoying Clash Mini? Give us a ⭐ Star on GitHub!",
+      "starTitle": "Enjoying Clash Win? Give us a ⭐ Star on GitHub!",
       "openGithubStar": "Test & ⭐ Star on GitHub",
       "retestNodes": "Re-test & Select Best Node"
     },

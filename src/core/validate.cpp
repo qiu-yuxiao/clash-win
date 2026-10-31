@@ -235,22 +235,48 @@ void ensure_app_dir_geodata(const std::wstring& app_dir) {
   std::error_code ec;
   fs::create_directories(app_dir, ec);
 
+  // 参考源 ClashVerge 绝对只读：只能复制出来，不能硬链接——
+  // 硬链接会让应用目录内的就地写入写穿到参考源文件。
+  const std::wstring reference_resources =
+      L"C:\\Users\\sun_y\\Documents\\AntiGravity_Projects\\ClashVerge\\src-tauri\\resources\\";
+
   auto ensure_file = [&](const wchar_t* filename) {
     auto target = fs::path(app_dir) / filename;
+    auto reference_file = fs::path(reference_resources) / filename;
+
+    if (fs::exists(target, ec) && fs::exists(reference_file, ec)) {
+      std::error_code eq_ec;
+      const bool linked_to_reference =
+          fs::equivalent(target, reference_file, eq_ec) && !eq_ec;
+      if (!linked_to_reference) return;
+
+      // 历史版本可能留下指向参考源的硬链接：换成真实拷贝，断开链接。
+      auto temp = target;
+      temp += L".copying";
+      fs::copy_file(reference_file, temp, fs::copy_options::overwrite_existing, ec);
+      if (!ec) fs::rename(temp, target, ec);
+      if (ec) {
+        CWLOG_WARN("ensure_app_dir_geodata: failed to replace hardlinked " +
+                   utf::utf16_to_utf8(filename) + ": " + ec.message());
+        std::error_code rm_ec;
+        fs::remove(temp, rm_ec);
+        return;
+      }
+      CWLOG_INFO("ensure_app_dir_geodata: replaced hardlink with a real copy: " +
+                 utf::utf16_to_utf8(filename));
+      return;
+    }
     if (fs::exists(target, ec)) return;
 
     std::vector<std::wstring> candidates = {
         clashwin::util::dirs::app_resources_dir() + L"\\" + filename,
         clashwin::util::dirs::exe_dir() + L"\\resources\\" + filename,
         clashwin::util::dirs::exe_dir() + L"\\..\\..\\resources\\" + filename,
-        std::wstring(L"C:\\Users\\sun_y\\Documents\\AntiGravity_Projects\\ClashVerge\\src-tauri\\resources\\") + filename,
+        reference_resources + filename,
     };
 
     for (const auto& cand : candidates) {
       if (fs::exists(cand, ec)) {
-        if (::CreateHardLinkW(target.c_str(), cand.c_str(), nullptr)) {
-          return;
-        }
         if (fs::copy_file(cand, target, fs::copy_options::skip_existing, ec)) {
           return;
         }
@@ -309,7 +335,7 @@ Result<std::wstring> make_check_copy(const std::wstring& source) {
   std::error_code ec;
   fs::copy_file(source, dst, fs::copy_options::overwrite_existing, ec);
   if (ec) {
-    return Result<std::wstring>::err({2324, "copy to clash-mini-check.yaml failed: " + ec.message()});
+    return Result<std::wstring>::err({2324, "copy to clash-win-check.yaml failed: " + ec.message()});
   }
   return Result<std::wstring>::ok(dst);
 }

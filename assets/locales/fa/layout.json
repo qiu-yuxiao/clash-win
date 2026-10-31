@@ -1,7 +1,7 @@
 {
   "components": {
     "firstRun": {
-      "title": "به Clash Mini خوش آمدید",
+      "title": "به Clash Win خوش آمدید",
       "intro": "تنها یک گام تا شروع: لینک اشتراک خود را در پایین قرار دهید تا تجزیه گره‌ها، تست سرعت و انتخاب بهترین مسیر به‌طور خودکار انجام شود.",
       "paste": "چسباندن از کلیپ‌بورد",
       "enterHint": "نکته: برای درج، Enter را فشار دهید",
@@ -24,7 +24,7 @@
       "featureStealth": "🪶 حالت فوق سبک",
       "clipboardDetected": "لینک در کلیپ‌بورد شناسایی شد — برای درج کلیک کنید",
       "activeNodeLabel": "گره فعال",
-      "starTitle": "از Clash Mini راضی هستید؟ با یک ⭐ Star از ما حمایت کنید!",
+      "starTitle": "از Clash Win راضی هستید؟ با یک ⭐ Star از ما حمایت کنید!",
       "openGithubStar": "تست اتصال و ثبت ⭐ Star در GitHub",
       "retestNodes": "تست مجدد و انتخاب بهترین نود"
     },

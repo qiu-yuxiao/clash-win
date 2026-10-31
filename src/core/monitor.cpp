@@ -115,7 +115,7 @@ CoreMonitor::Action CoreMonitor::heal(const std::string& uid) {
     heal_fail_count_.store(0);
     CWLOG_WARN("CoreMonitor: 连续 5 次自愈选点失败，弹出系统警报");
     if (hooks_.alert) {
-      hooks_.alert(L"Clash Mini - 网络警报",
+      hooks_.alert(L"Clash Win - 网络警报",
                    L"后台自动优选节点连续 5 次失败，当前所有代理节点均已失效，无法正常连接网络。\n\n请检查您的网络连接或节点订阅状态。");
       return Action::Alerted;
     }
@@ -135,7 +135,7 @@ CoreMonitor::Action CoreMonitor::heal(const std::string& uid) {
       return Action::RestartedOnHealFail;
     }
     if (hooks_.alert) {
-      hooks_.alert(L"Clash Mini", L"内核守护自愈连续失败，已尝试重启内核仍未恢复，请检查内核状态。");
+      hooks_.alert(L"Clash Win", L"内核守护自愈连续失败，已尝试重启内核仍未恢复，请检查内核状态。");
       return Action::Alerted;
     }
   }

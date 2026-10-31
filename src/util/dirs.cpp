@@ -160,9 +160,9 @@ std::wstring profiles_path() { return join(app_home_dir(), kProfileYaml); }
 std::wstring service_path() {
   return join(app_resources_dir(), L"clash-verge-service.exe");
 }
-std::wstring clash_mini_path() { return join(app_home_dir(), L"clash-mini.yaml"); }
+std::wstring clash_mini_path() { return join(app_home_dir(), L"clash-win.yaml"); }
 std::wstring clash_mini_check_path() {
-  return join(app_home_dir(), L"clash-mini-check.yaml");
+  return join(app_home_dir(), L"clash-win-check.yaml");
 }
 std::wstring window_state_path() {
   return join(app_home_dir(), L"window_state.json");
