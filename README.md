@@ -21,7 +21,7 @@ Click the [Gear] button in the upper right corner of Clash Win, paste your subsc
 
 ### Client Configuration
 * **Browsers**: You can start browsing the web directly after importing the nodes (system proxy is set automatically).
-* **Other Client Apps**: Most apps can access the internet directly. For the few that cannot, manually set their proxy address to `127.0.0.1` with port `10802` (SOCKS) or `10803` (HTTP).
+* **Other Client Apps**: Most apps can access the internet directly. For the few that cannot, manually set their proxy address to `127.0.0.1` with port `10812` (SOCKS) or `10813` (HTTP).
 * **Global Proxy**: If an app has no manual proxy option, enable Clash Win's **TUN Mode**.
 
 > [!NOTE]
@@ -47,7 +47,7 @@ Click the [Gear] button in the upper right corner of Clash Win, paste your subsc
 
 ### 客户端配置
 * **浏览器**：导入节点后即可直接浏览网页（自动设置系统代理）。
-* **其他客户端应用**：大多数应用可直接上网。少数无法直接上网的应用，可手动设置代理地址为 `127.0.0.1`，端口为 `10802`（SOCKS）或 `10803`（HTTP）。
+* **其他客户端应用**：大多数应用可直接上网。少数无法直接上网的应用，可手动设置代理地址为 `127.0.0.1`，端口为 `10812`（SOCKS）或 `10813`（HTTP）。
 * **全局代理**：如果软件没有手动代理配置选项，请启用 Clash Win 的 **TUN 模式**。
 
 ### 核心功能
@@ -91,7 +91,7 @@ Click the [Gear] button in the upper right corner of Clash Win, paste your subsc
 | **Graphics** | **Direct2D & DirectWrite** | Hardware-accelerated vector rendering, 3D bevel skeuomorphic UI, zero web engine |
 | **Window Host** | **Pure Win32 API** | Custom frameless window, NCHITTEST hit-testing, WM_SIZING geometry clamping, Per-Monitor v2 DPI |
 | **Networking** | **WinHTTP** | Direct REST + WebSocket communication with the Mihomo core |
-| **Core Service** | **Win32 SCM API** | Shares `clash-verge-service` with Clash Mini / Clash Verge |
+| **Core Service** | **Win32 SCM API** | Shares the `clash_verge_service` Windows service with Clash Mini / Clash Verge |
 | **Build** | **CMake 3.20+ / VS 2022** | `CMakePresets.json` for reproducible configuration |
 
 ---
@@ -141,7 +141,18 @@ Key facts:
 
 * **Feature-aligned, implementation-independent.** Clash Win reproduces Clash Mini's user-visible behavior (layout, skins, workflows, rule engine pipeline) with a completely separate C++ codebase — no shared Tauri/Rust/TypeScript code.
 * **Not an official replacement and not an upstream fork.** Clash Win is a sibling project by the same author; Clash Mini remains the primary line and is developed on its own track.
-* **Designed to coexist with Clash Mini on the same machine.** All network ports are deliberately staggered (e.g. SOCKS `10802` / HTTP `10803` vs Clash Mini's `10801`; the single-instance port and the controller port conflict-relocation are also offset), and both clients share the same `clash-verge-service`. The one rule: **do not enable TUN mode or system proxy on both clients at the same time** — enable exactly one active proxy path.
+* **Designed to coexist with Clash Mini on the same machine.** All network ports are deliberately staggered:
+
+  | Port | Clash Win | Clash Mini |
+  | :--- | :--- | :--- |
+  | Mixed | `10811` | `10801` |
+  | SOCKS | `10812` | `10802` |
+  | HTTP | `10813` | `10803` |
+  | HTTP guard | `10814` | — |
+  | External controller | `9108` | `9098` |
+  | Single-instance / PAC | `33337` | `33335` (Release) / `33336` (Dev) |
+
+  Both clients share the same `clash_verge_service` Windows service (the `clash-verge-service` name refers only to its binary/installer file). The one rule: **do not enable TUN mode or system proxy on both clients at the same time** — enable exactly one active proxy path.
 * **Independent versioning.** Clash Win versions from **0.1.0** and does not track Clash Mini's 3.x release numbers.
 
 ---
