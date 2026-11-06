@@ -145,3 +145,27 @@ UT_TEST(tfix_drawer_covers_content_not_titlebar) {
   Px bar_restored = pixel(135, 5);
   UT_CHECK(bar_restored.r > 0xF0 && bar_restored.r < 0xFB);
 }
+
+// ← _layout.tsx:1176-1186：按钮组容器 `marginLeft:'auto'`，三键永远贴右边缘
+//   （而不是紧跟标题文字后面）。此前的实现三者按主轴顺序左对齐。
+UT_TEST(t11_titlebar_controls_pinned_right) {
+  make_offscreen(640, 200, 96);
+  ThemeService::instance().init(SkinId::Original, ThemeMode::Light);
+  RootTree t;
+  for (float w : {271.0f, 400.0f, 640.0f}) {
+    t.layout(w, 200);
+    const RectF mi = t.tb->btn_minimize()->global_bounds();
+    const RectF lg = t.tb->btn_large()->global_bounds();
+    const RectF cl = t.tb->btn_close()->global_bounds();
+    // 栏内右内距 8 → 关闭键右缘贴 w-8
+    UT_CHECK(near_f(cl.right(), w - 8.0f));
+    // 三键 28×28、间距 2、顺序 最小化→大尺寸→关闭
+    UT_CHECK(near_f(mi.w, 28) && near_f(cl.w, 28));
+    UT_CHECK(near_f(mi.y, 1) && near_f(cl.y, 1));  // 30 高栏内垂直居中
+    UT_CHECK(near_f(lg.x, mi.right() + 2.0f));
+    UT_CHECK(near_f(cl.x, lg.right() + 2.0f));
+    // 标题文字不被按钮盖住：标题右缘不超过最小化键起点
+    const RectF icon = t.tb->icon()->global_bounds();
+    UT_CHECK(icon.x < mi.x);
+  }
+}

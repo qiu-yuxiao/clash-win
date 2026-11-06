@@ -114,6 +114,14 @@ TitleBar::TitleBar(MainWindow* owner) {
 
   // 三键 28×28 gap 2（← WindowControls；flex-shrink:0 固定尺寸）。
   // 内层 Row 承担 gap 2，外层 spacing 8 只作用于 icon/label/按钮组之间。
+  // 【右对齐】Mini 的按钮组容器带 marginLeft:'auto'（_layout.tsx:1178），
+  //   把剩余横向空间全部吃掉 → 三键永远贴右边缘，而不是紧跟在标题文字后面。
+  //   对应物 = 可压缩的空占位（flex 1 + 最小宽 0），语义与 marginLeft:auto 一致。
+  auto spacer = std::make_unique<Widget>();
+  spacer->flex_weight = 1;
+  spacer->shrink_to_free = true;
+  add_child(std::move(spacer));
+
   auto ctrls = std::make_unique<Row>();
   ctrls->spacing = 2;
   ctrls->flex_weight = 0;
