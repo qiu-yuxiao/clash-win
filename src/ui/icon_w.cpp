@@ -601,6 +601,12 @@ SizeF IconW::on_measure(float max_w, float max_h) {
 
 void IconW::on_paint(IRenderTarget& rt) {
   const float w = bounds().w, h = bounds().h;
+  // 字形边长 = size_（Mini 里 <svg> 的 width/height 就是 fontSize），在命中盒里
+  // 居中绘制。box_w/box_h 只是 IconButton 的点击区域（28×28 / 26×26），
+  // 不能拿来当缩放基准 —— 否则 20px 的齿轮会被画成 28px，比 Mini 大一圈。
+  const float glyph_side = (size_ > 0.0f && size_ < (w < h ? w : h))
+                               ? size_
+                               : (w < h ? w : h);
   // 旋转（绕盒中心；src: _layout.tsx:1362-1364 transform: rotate(45deg)）
   auto rotated = [&](const std::vector<std::vector<PointF>>& loops,
                      std::vector<std::vector<PointF>>& out) {
@@ -623,7 +629,7 @@ void IconW::on_paint(IRenderTarget& rt) {
   //   独立按其 fill-opacity 填充（SignalWifi1-3Bar 背景扇形 .3）。
   std::vector<MuiLoopSet> mui;
   if (!name_.empty() && mui_paths_for(name_, mui)) {
-    const float s = w < h ? w : h;
+    const float s = glyph_side;
     const float scale = s / 24.0f;
     const float ox = (w - s) * 0.5f, oy = (h - s) * 0.5f;
     std::vector<std::vector<PointF>> scaled, out;
@@ -676,7 +682,7 @@ void IconW::on_paint(IRenderTarget& rt) {
   // 优先级 2：手绘折线（描边）——未入 MUI 表的名字兜底
   std::vector<std::vector<PointF>> paths;
   if (!name_.empty() && build_vector_paths(name_, paths)) {
-    float s = w < h ? w : h;
+    float s = glyph_side;
     float side = s * 0.80f;
     float ox = (w - side) * 0.5f, oy = (h - side) * 0.5f;
     Pen pen;

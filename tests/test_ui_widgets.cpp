@@ -342,3 +342,42 @@ UT_TEST(ui_overlay_fade_enter_leave_timing) {
   b.set_opacity(2.0f);
   UT_CHECK(near_f(b.opacity(), 1.0f));
 }
+
+// ← Mini：<IconButton sx={{width:'28px',height:'28px'}}><SettingsRoundedIcon
+//   sx={{fontSize:'20px',width:'20px',height:'20px'}} /></IconButton>
+//   （_layout.tsx:1371-1387）。按钮 28 是命中盒，字形只有 20。
+//   早期实现拿命中盒当缩放基准 → 20px 的齿轮被画成 28px，比 Mini 大一圈。
+UT_TEST(ui_icon_glyph_size_ignores_hitbox) {
+  make_offscreen(40, 40, 96);
+  IconW ic;
+  ic.set_icon("settings");
+  ic.size_ = 20;                 // fontSize
+  ic.box_w = ic.box_h = 28;      // IconButton 命中盒
+  ic.color_ = Color4f::hex(0x000000);
+  ic.layout_tree({6, 6, 28, 28});
+
+  rt().begin_frame();
+  rt().clear({1, 1, 1, 1});
+  ic.paint_all(rt());
+  rt().end_frame();
+
+  int minx = 999, maxx = -1, miny = 999, maxy = -1;
+  for (int y = 0; y < 40; ++y) {
+    for (int x = 0; x < 40; ++x) {
+      Px p = pixel(x, y);
+      if (p.r > 240 && p.g > 240 && p.b > 240) continue;  // 背景白
+      if (x < minx) minx = x;
+      if (x > maxx) maxx = x;
+      if (y < miny) miny = y;
+      if (y > maxy) maxy = y;
+    }
+  }
+  UT_CHECK(maxx >= 0);
+  const int gw = maxx - minx + 1, gh = maxy - miny + 1;
+  // MUI 24 viewBox 的 SettingsRounded 实际占约 21/24 → 20px 盒里约 17.5px。
+  // 若按 28 的命中盒缩放，包围盒会到 24px 左右，这里直接卡住。
+  UT_CHECK(gw <= 21 && gh <= 21);
+  // 居中：盒 x∈[6,34)，20px 字形两侧各留 4px
+  UT_CHECK(minx >= 6 + 3 && maxx <= 6 + 25);
+  UT_CHECK(miny >= 6 + 3 && maxy <= 6 + 25);
+}
