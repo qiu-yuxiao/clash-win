@@ -34,6 +34,19 @@ enum class SortDir {
   Desc,
 };
 
+// 连接表外框 + 空态覆盖层：需盖在 ScrollList 之上
+//   src: connection-table.tsx:48 border: '5px double var(--theme-border)' radius 4
+//   src: connections-panel.tsx:232-233 filterConn 为空 → BaseEmpty（"空空如也"）
+class ConnTableOverlay : public Widget {
+ public:
+  explicit ConnTableOverlay(Widget* parent = nullptr) : Widget(parent) {
+    set_z_order(80);
+  }
+  bool empty = false;
+  void on_paint(IRenderTarget& rt) override;
+  bool hit_self(PointF) const override { return false; }
+};
+
 class ConnPanelRowWidget : public Widget {
  public:
   explicit ConnPanelRowWidget(Widget* parent = nullptr) : Widget(parent) {}
@@ -42,9 +55,9 @@ class ConnPanelRowWidget : public Widget {
   void on_paint(IRenderTarget& rt) override;
   bool on_mouse(const MouseEvent& e) override;
 
-  std::function<void(const ConnItem& item)> on_click;
+  std::function<void(const ConnItem& item, RectF row_global)> on_click;
   std::function<void(const ConnItem& item)> on_close;
-  std::function<void(const ConnItem& item, PointF local_pt)> on_context_menu;
+  std::function<void(const ConnItem& item, PointF local_pt, RectF row_global)> on_context_menu;
 
   const ConnItem& item() const { return item_; }
 
@@ -99,7 +112,7 @@ class ConnectionsPanel : public Widget {
   void refresh_visible();
 
  private:
-  void show_context_menu(const ConnItem& item, PointF anchor);
+  void show_context_menu(const ConnItem& item, PointF anchor, RectF row_global);
   void apply_quick_route(const ConnItem& item, int target);
 
   ConnectionData* data_ = nullptr;
@@ -117,6 +130,7 @@ class ConnectionsPanel : public Widget {
   Button* btn_disconnect_all_ = nullptr;
   Button* btn_clear_history_ = nullptr;
   ScrollList* list_ = nullptr;
+  ConnTableOverlay* table_overlay_ = nullptr;
   ContextMenu* context_menu_ = nullptr;
   ConnectionDetailDialog* detail_dialog_ = nullptr;
 

@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 
+#include "clashwin/config/constants.h"
 #include "util/result.h"
 #include "nlohmann/json.hpp"
 
@@ -17,6 +18,7 @@ struct AppUpdateInfo {
   std::string pub_date;
   std::string download_url;
   std::string signature;
+  std::string sha256;  // ← tauri updater 平台节点 sha256（Mini pubkey 验签前用于完整性兜底）
   size_t file_size = 0;
 
   nlohmann::json to_json() const;
@@ -31,6 +33,7 @@ inline nlohmann::json AppUpdateInfo::to_json() const {
       {"pub_date", pub_date},
       {"download_url", download_url},
       {"signature", signature},
+      {"sha256", sha256},
       {"file_size", file_size},
   };
 }
@@ -52,20 +55,24 @@ class ClientUpdater {
   const std::string& current_version() const { return current_version_; }
 
   Result<AppUpdateInfo> check_app_update();
-  Result<std::wstring> download_app_update(const std::string& download_url);
-  Result<void> install_app_update(const std::wstring& installer_path, bool silent = true);
+  Result<std::wstring> download_app_update(const std::string& download_url,
+                                           const std::string& expected_sha256 = "",
+                                           const std::string& signature_b64 = "");
+  Result<void> install_app_update(const std::wstring& installer_path, bool silent = false);
 
   // Pure helpers (fully testable)
   static bool is_version_newer(const std::string& latest, const std::string& current);
   static Result<AppUpdateInfo> parse_manifest(const std::string& json_text,
                                              const std::string& current_version);
+  // CNG SHA-256 流水线；文件不存在/读取失败返回空串
+  static std::string compute_sha256_hex(const std::wstring& file_path);
 
  private:
   ClientUpdater();
   ~ClientUpdater() = default;
 
   std::shared_ptr<IAppUpdateDownloader> downloader_;
-  std::string current_version_ = "3.2.2";
+  std::string current_version_ = config::consts::kAppVersion;  // 单一事实源（0.1.0）
 };
 
 }  // namespace clashwin::update

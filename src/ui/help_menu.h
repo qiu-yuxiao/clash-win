@@ -21,8 +21,10 @@ enum class HelpAction {
   ExportDiagnostics = 4, // 4. 📦 导出诊断信息
   CheckAppUpdate = 5,    // 5. 🚀 检查客户端更新
   CheckCoreUpdate = 6,   // 6. ⚙️ 检查内核更新
-  OpenConfigDir = 7,     // 7. 📂 打开配置目录
-  OpenLogsDir = 8        // 8. 📝 打开日志目录
+  // Mini 菜单无「打开配置/日志目录」入口（help-menu-button.tsx:114-205 6 项），
+  // 已从菜单移除；枚举保留给命令链/测试直调
+  OpenConfigDir = 7,     // 非菜单项
+  OpenLogsDir = 8        // 非菜单项
 };
 
 class HelpMenu {

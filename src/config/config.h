@@ -31,9 +31,11 @@ class Config {
   // ← Config::apply_all_and_save_file：三份草稿提交 + 落盘（退出序列调用）
   void apply_all_and_save_file();
 
+  // ← utils/sysinfo.rs::app_is_admin（管理员组判定）；启动模式决策需要（T07 接线）
+  bool is_admin() const;
+
  private:
   Config();
-  bool is_admin() const;
   bool is_service_installed() const;
 
   Draft<IClashTemp> clash_;

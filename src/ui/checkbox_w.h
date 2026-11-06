@@ -19,7 +19,7 @@ class CheckboxW : public Widget {
   std::function<void(bool)> on_change;
 
   // 绘制参数（T12 覆盖）
-  Color4f check_color_ = Color4f::hex(0x007AFF);
+  Color4f check_color_ = Color4f::hex(0x007AFF);  // ← 选中主色缺省（主题注入前）
   TextStyle label_style_;
   float box_ = 16;
 

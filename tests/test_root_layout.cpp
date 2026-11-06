@@ -1,6 +1,6 @@
-// T17-fix：root 布局根治测试——Stack{Column{titlebar(30), scene(flex)}, drawer}
+// T17-fix：root 布局根治测试——Stack{Column{titlebar(30), Stack{scene, drawer}}}
 // 离屏像素断言：y0-29 标题栏（#ECECEC+divider），y30+ 场景（#F5F5F5），
-// 窄窗/Mini 断点形态复测，抽屉 overlay 盖标题栏。
+// 窄窗/Mini 断点形态复测；抽屉只覆盖内容区（标题栏保持可见，Mini 同构）。
 #include <windows.h>
 
 #include "test_ui_helper.h"
@@ -23,6 +23,7 @@ struct RootTree {
   Stack root;
   Column* flow = nullptr;
   TitleBar* tb = nullptr;
+  Stack* content = nullptr;
   MainScene* scene = nullptr;
   SettingsDrawer* drawer = nullptr;
 
@@ -32,15 +33,18 @@ struct RootTree {
     root.add_child(std::move(f));
     auto t = std::make_unique<TitleBar>(nullptr);
     tb = t.get();
-    tb->set_version(L"3.0.10");
+    tb->set_version(L"0.1.0");
     flow->add_child(std::move(t));
+    auto c = std::make_unique<Stack>();
+    content = c.get();
+    content->flex_weight = 1;
+    flow->add_child(std::move(c));
     auto sc = std::make_unique<MainScene>();
     scene = sc.get();
-    scene->flex_weight = 1;
-    flow->add_child(std::move(sc));
+    content->add_child(std::move(sc));
     auto d = std::make_unique<SettingsDrawer>();
     drawer = d.get();
-    root.add_child(std::move(d));
+    content->add_child(std::move(d));
   }
   void layout(float w, float h) { root.layout_tree({0, 0, w, h}); }
   void paint() {
@@ -58,23 +62,28 @@ UT_TEST(tfix_root_titlebar_30_scene_below) {
   svc.init(SkinId::Original, ThemeMode::Light);
   RootTree t;
   t.layout(271, 680);
-  // 结构：titlebar 固定 30 顶置；scene y=30 撑满剩余；drawer 全屏 overlay
+  // 结构：titlebar 固定 30 顶置；content Stack 从 y=30 撑满剩余，
+  //   scene 与 drawer 都铺满内容区（Mini：抽屉挂在 .layout-content 内）。
+  //   scene/drawer 是 Stack 子件 → bounds 为局部坐标，用 global_bounds 校验窗内位置。
   RectF tb = t.tb->bounds();
   UT_CHECK(near_f(tb.y, 0) && near_f(tb.h, 30) && near_f(tb.w, 271));
-  RectF sc = t.scene->bounds();
+  RectF sc = t.scene->global_bounds();
   UT_CHECK(near_f(sc.y, 30) && near_f(sc.h, 650) && near_f(sc.w, 271));
-  RectF dr = t.drawer->bounds();
-  UT_CHECK(near_f(dr.y, 0) && near_f(dr.h, 680) && near_f(dr.w, 271));
-  // 像素：y0-29 标题栏 #ECECEC；divider 一行；y30+ 场景 #F5F5F5
+  RectF dr = t.drawer->global_bounds();
+  UT_CHECK(near_f(dr.y, 30) && near_f(dr.h, 650) && near_f(dr.w, 271));
+  // 像素：y0-29 标题栏 #f5f5f5（src: layout.scss:452 var(--theme-bg) 覆写；
+  //   = use-custom-theme.ts:421）；divider 一行；y30+ 场景内容底 #FFF
   t.paint();
   Px bar = pixel(135, 5);
-  UT_CHECK(bar.r > 0xE4 && bar.r < 0xF2);  // ECECEC（标题栏背景）
+  UT_CHECK(bar.r > 0xF0 && bar.r < 0xFB);  // #f5f5f5（Original 标题栏背景）
   Px div = pixel(135, 29);
   UT_CHECK(div.r < 0xFA);                  // divider（rgba(0,0,0,.06) 混色）
   Px scene_bg = pixel(135, 40);
-  UT_CHECK(scene_bg.r > 0xEF && scene_bg.r < 0xFB);  // F5F5F5（场景背景）
+  // 内容底 = --theme-bg（src: _layout.tsx:1773 background:'inherit' +
+  //   use-custom-theme.ts:421 Original light '#f5f5f5'）
+  UT_CHECK(scene_bg.r > 0xF0 && scene_bg.r < 0xFB && scene_bg.b > 0xF0 && scene_bg.b < 0xFB);
   Px mid = pixel(135, 300);
-  UT_CHECK(mid.r > 0xEF);                  // 场景中部未被上栏覆盖异常
+  UT_CHECK(mid.r > 0xF0 && mid.r < 0xFB && mid.b > 0xF0 && mid.b < 0xFB);  // 场景中部未被上栏覆盖异常
 }
 
 UT_TEST(tfix_root_narrow_and_mini_shapes) {
@@ -86,13 +95,14 @@ UT_TEST(tfix_root_narrow_and_mini_shapes) {
   t.layout(240, 680);
   RectF tb = t.tb->bounds();
   UT_CHECK(near_f(tb.y, 0) && near_f(tb.h, 30) && near_f(tb.w, 240));
-  RectF sc = t.scene->bounds();
+  RectF sc = t.scene->global_bounds();
   UT_CHECK(near_f(sc.y, 30) && near_f(sc.h, 650));
   t.paint();
   Px bar = pixel(120, 5);
-  UT_CHECK(bar.r > 0xE4 && bar.r < 0xF2);
+  UT_CHECK(bar.r > 0xF0 && bar.r < 0xFB);
   Px scene_bg = pixel(120, 40);
-  UT_CHECK(scene_bg.r > 0xEF && scene_bg.r < 0xFB);
+  // 内容底 = --theme-bg（src: use-custom-theme.ts:421 Original light '#f5f5f5'）
+  UT_CHECK(scene_bg.r > 0xF0 && scene_bg.r < 0xFB && scene_bg.b > 0xF0 && scene_bg.b < 0xFB);
 
   // Mini（scene 卸上栏）：titlebar/scene 结构不变
   make_offscreen(240, 680, 96);
@@ -102,14 +112,14 @@ UT_TEST(tfix_root_narrow_and_mini_shapes) {
   t2.layout(240, 680);
   RectF tb2 = t2.tb->bounds();
   UT_CHECK(near_f(tb2.y, 0) && near_f(tb2.h, 30));
-  RectF sc2 = t2.scene->bounds();
+  RectF sc2 = t2.scene->global_bounds();
   UT_CHECK(near_f(sc2.y, 30) && near_f(sc2.h, 650));
   t2.paint();
   Px bar2 = pixel(120, 5);
-  UT_CHECK(bar2.r > 0xE4 && bar2.r < 0xF2);
+  UT_CHECK(bar2.r > 0xF0 && bar2.r < 0xFB);
 }
 
-UT_TEST(tfix_drawer_overlay_covers_titlebar) {
+UT_TEST(tfix_drawer_covers_content_not_titlebar) {
   make_offscreen(271, 680, 96);
   auto& svc = ThemeService::instance();
   svc.init(SkinId::Original, ThemeMode::Light);
@@ -118,17 +128,20 @@ UT_TEST(tfix_drawer_overlay_covers_titlebar) {
   // 关闭态：标题栏区正常可见
   t.paint();
   Px bar_closed = pixel(135, 5);
-  UT_CHECK(bar_closed.r > 0xE4 && bar_closed.r < 0xF2);
-  // 打开态：遮罩盖住标题栏（z 最高）→ y=10 变混色灰；面板区白
+  UT_CHECK(bar_closed.r > 0xF0 && bar_closed.r < 0xFB);
+  // 打开态：抽屉只覆盖内容区（_layout.tsx:1254-1424，挂在 .layout-content），
+  //   标题栏 y<30 保持原样、按钮可点；y>=30 为 light theme-panel 亮金渐变。
   t.drawer->set_open(true);
   t.paint();
-  Px masked = pixel(135, 10);
-  UT_CHECK(masked.r > 100 && masked.r < 190);  // 白×α0.45 黑 ≈ 140
-  Px panel = pixel(135, 300);
-  UT_CHECK(panel.r > 240);                     // 面板底 theme_panel_bg
+  Px bar_under = pixel(135, 10);
+  UT_CHECK(bar_under.r > 0xF0 && bar_under.r < 0xFB);  // 标题栏未被面板吃掉
+  Px content_panel = pixel(135, 40);
+  UT_CHECK(content_panel.r > 240 && content_panel.b < 240);  // 内容区亮金面板
+  Px panel = pixel(135, 297);  // 左列卡片间隙（profile/combo 之间 5px gap）
+  UT_CHECK(panel.r > 240);     // theme-panel 底（亮金）
   // 关闭恢复
   t.drawer->set_open(false);
   t.paint();
   Px bar_restored = pixel(135, 5);
-  UT_CHECK(bar_restored.r > 0xE4 && bar_restored.r < 0xF2);
+  UT_CHECK(bar_restored.r > 0xF0 && bar_restored.r < 0xFB);
 }

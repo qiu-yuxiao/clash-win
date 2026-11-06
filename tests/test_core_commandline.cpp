@@ -11,13 +11,14 @@ using namespace clashwin;
 using namespace clashwin::core;
 
 UT_TEST(cmdline_matches_state_rs) {
-  // 对照 state.rs:56-63（品牌独立后文件名/目录随之更名，参数形态不变）：
-  //   mini-mihomo.exe -d <app_home_dir> -f <clash-win.yaml> -ext-ctl-pipe \\.\pipe\mini-mihomo
+  // 对照 state.rs:56-63（品牌独立后文件名/目录随之更名，参数形态不变；
+  // 管道名共存错开：Clash Win 用 \\.\pipe\mini-mihomo-win）：
+  //   mini-mihomo.exe -d <app_home_dir> -f <clash-win.yaml> -ext-ctl-pipe \\.\pipe\mini-mihomo-win
   SidecarLaunch s;
   s.core_path = L"C:\\app\\mini-mihomo.exe";
   s.config_dir = L"C:\\app\\.config\\io.github.clash-win.clash-win";
   s.config_file = L"C:\\app\\.config\\io.github.clash-win.clash-win\\clash-win.yaml";
-  s.ipc_pipe = L"\\\\.\\pipe\\mini-mihomo";
+  s.ipc_pipe = L"\\\\.\\pipe\\mini-mihomo-win";
   s.go_memlimit = "128MiB";
   s.go_gc = "100";
   s.go_maxprocs = "2";
@@ -27,7 +28,7 @@ UT_TEST(cmdline_matches_state_rs) {
       "\"C:\\app\\mini-mihomo.exe\""
       " -d \"C:\\app\\.config\\io.github.clash-win.clash-win\""
       " -f \"C:\\app\\.config\\io.github.clash-win.clash-win\\clash-win.yaml\""
-      " -ext-ctl-pipe \\\\.\\pipe\\mini-mihomo";
+      " -ext-ctl-pipe \\\\.\\pipe\\mini-mihomo-win";
   UT_CHECK_EQ(cmd, expected);
 
   // 参数顺序与原版逐字段一致
@@ -39,7 +40,7 @@ UT_TEST(cmdline_matches_state_rs) {
 UT_TEST(env_defaults) {
   // ← state.rs:39-41：缺省 GOMEMLIMIT=128MiB / GOGC=100 / GOMAXPROCS=2
   SidecarLaunch s = make_sidecar_launch(L"C:\\core.exe", L"C:\\home", L"C:\\home\\clash-win.yaml",
-                                        L"\\\\.\\pipe\\mini-mihomo");
+                                        L"\\\\.\\pipe\\mini-mihomo-win");
   // 宿主进程未设置这些变量时的缺省（若宿主已设置则按语义应取环境值——两分支都合法）
   UT_CHECK(!s.go_memlimit.empty());
   UT_CHECK(!s.go_gc.empty());

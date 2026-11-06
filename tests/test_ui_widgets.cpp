@@ -187,6 +187,69 @@ UT_TEST(ui_widget_textfield_editing) {
   clear_input_state();
 }
 
+UT_TEST(ui_widget_textfield_clear_button) {
+  TextField tf;
+  tf.layout_tree({0, 0, 160, 28});
+  tf.set_clear_button(true);
+  UT_CHECK(tf.clear_button());
+  UT_CHECK(!tf.can_clear());
+  tf.set_text(L"abc");
+  UT_CHECK(tf.can_clear());
+
+  // ✕ 热区：右边距 4 + 24 框（src: base-search-box.tsx:126-136）
+  click(&tf, 145, 14);
+  UT_CHECK(tf.text().empty());
+  UT_CHECK(!tf.can_clear());
+
+  // opt-in：默认关
+  TextField plain;
+  plain.layout_tree({0, 0, 160, 28});
+  UT_CHECK(!plain.clear_button());
+  clear_input_state();
+}
+
+UT_TEST(ui_widget_textfield_edit_commands) {
+  std::wstring clip;
+  TextField::set_clipboard_hooks([&clip] { return clip; },
+                                 [&clip](const std::wstring& v) { clip = v; });
+  TextField tf;
+  tf.layout_tree({0, 0, 160, 28});
+  tf.set_text(L"abcd");
+  tf.request_focus();
+
+  UT_CHECK(!tf.can_undo());  // 无撤销栈 → EM_CANUNDO=false
+  UT_CHECK(!tf.can_cut());
+  UT_CHECK(!tf.can_copy());
+  tf.select_all();
+  UT_CHECK(tf.selection() == L"abcd");
+  UT_CHECK(tf.can_cut());
+  UT_CHECK(tf.can_copy());
+
+  tf.copy();
+  UT_CHECK(clip == L"abcd");
+  tf.cut();
+  UT_CHECK(tf.text().empty());
+  UT_CHECK(clip == L"abcd");
+
+  UT_CHECK(tf.can_paste());  // 编辑控件恒可粘贴
+  tf.paste();
+  UT_CHECK(tf.text() == L"abcd");
+
+  tf.select_all();
+  tf.clear_text();
+  UT_CHECK(tf.text().empty());
+  UT_CHECK(!tf.can_select_all());
+
+  // 右键回调锚点（窗口坐标）+ 焦点
+  PointF got{-1, -1};
+  tf.on_context_menu = [&](PointF p) { got = p; };
+  MouseEvent e{MouseEventType::Down, {20, 14}, kMouseRight};
+  route_mouse_event(&tf, e);
+  UT_CHECK(got.x == 20 && got.y == 14);
+  UT_CHECK(tf.focused());
+  clear_input_state();
+}
+
 UT_TEST(ui_widget_segmented_switch) {
   Segmented seg;
   seg.set_options({L"手动", L"系统代理", L"TUN"}, 0);

@@ -31,4 +31,11 @@ class DefaultNetworkInfoProvider : public INetworkInfoProvider {
 std::shared_ptr<INetworkInfoProvider> get_network_info_provider();
 void set_network_info_provider(std::shared_ptr<INetworkInfoProvider> provider);
 
+// 【P0-6】探测承载出网的物理网卡名（FriendlyName，如 "WLAN 2"）。
+// 用于把内核 interface-name 钉在物理网卡上，避免同机其它 TUN（Clash Mini 的
+// Meta Tunnel）抢走默认路由并劫持 DNS 后，本内核解析到 198.18.x.x 假 IP → 出网
+// 502。排除 loopback / IF_TYPE_TUNNEL 及 Mihomo/Clash/Meta 命名的虚拟网卡。
+// 无可用网卡时返回空串。
+std::string detect_outbound_interface();
+
 }  // namespace clashwin::system

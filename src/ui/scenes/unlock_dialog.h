@@ -1,12 +1,10 @@
 #pragma once
-// 流媒体与 AI 解锁检测弹窗（T21）：对齐 clashwin_modal_unlock.png（360×620 px）。
-// - 12 大平台列表（ChatGPT/Claude/Gemini/YouTube/Netflix/Disney+/Spotify/TikTok/B站港澳台/动画疯/B站大陆/Prime Video）
-// - 状态标记：☑ 已解锁（绿）、✖ 未解锁（红）、⏳ 检测中（蓝）、⚠️ 错误（橙）
-// - 地区代码显示（如 usUS, jpJP, sgSG, hkHK, twTW）
-// - 底部"🔄 重新检测全部平台"全宽按钮
-// - 严格遵守 Direct2D 局部坐标规则 {0, y}
+// 流媒体与 AI 解锁检测弹窗（T21）。
+// 布局/配色对齐 pages/unlock.tsx：Grid 响应式列（xs1/sm2/md3）、Card outlined
+// radius16 + 左 4px 状态色、p1.3、名称 16px/600、32×32 圆测试按钮、状态 Chip
+// (success/error/warning/info/default)、地区 outlined info Chip、虚线分隔、
+// 右下 0.7rem 检测时间。Mini 为整页；本弹窗为 ClashWin 承载壳（见 cpp 豁免）。
 #include <functional>
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -23,6 +21,9 @@ class UnlockDialog : public Widget {
   void open();
   void close();
   bool is_open() const { return open_; }
+  // 整页模式（Mini /unlock 为整页 pages/unlock.tsx:1206-1219 承载）
+  void set_page_mode(bool on) { page_mode_ = on; invalidate(); }
+  bool page_mode() const { return page_mode_; }
 
   const std::vector<config::unlock_cache::UnlockItem>& items() const { return items_; }
   void set_items(std::vector<config::unlock_cache::UnlockItem> items);
@@ -44,16 +45,34 @@ class UnlockDialog : public Widget {
   RectF card_rect() const { return card_rect_; }
   RectF retest_btn_rect() const { return btn_retest_rect_; }
 
+  // src: locales/zh/tests.json:11 「"test": "测试"」；:4 testAll「测试全部」
+  std::wstring tooltip_text() const override {
+    if (hover_card_ >= 0) return L"测试";
+    if (hover_retest_) return L"测试全部";
+    return {};
+  }
+
  private:
   void reload_from_cache();
+  struct Ctrl {
+    RectF card;
+    RectF retest;
+    RectF chip;
+    RectF region;
+  };
+  std::vector<Ctrl> ctrls_;
 
   bool open_ = false;
   bool is_checking_ = false;
+  bool page_mode_ = false;
+  float scroll_ = 0.0f;     // 整页模式滚动偏移（内容超高时）
+  float max_scroll_ = 0.0f;
   std::vector<config::unlock_cache::UnlockItem> items_;
 
   RectF card_rect_;
   RectF btn_close_x_rect_;
   RectF btn_retest_rect_;
+  int hover_card_ = -1;
   bool hover_close_x_ = false;
   bool hover_retest_ = false;
 };

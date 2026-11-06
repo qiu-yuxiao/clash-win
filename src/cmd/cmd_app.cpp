@@ -325,6 +325,28 @@ void install_cmd_app(CommandService& svc) {
          return CmdResult::ok(res.value().to_json());
        },
        consts::kTimeoutProbe});
+
+  // 客户端更新包下载（← use-client-update.ts:72 clientUpdateObj.downloadAndInstall 的下载段）。
+  // 仅落地到临时目录；安装/重启需提权，由调用方在本轮末尾统一列清单后再接。
+  svc.register_command(
+      "download_app_update",
+      {[](const Json& args) -> CmdResult {
+         const Json* url = find_arg(args, {"url", "download_url"});
+         if (!url || !url->is_string() || url->get<std::string>().empty()) {
+           return CmdResult::err({errs::kBadArgs, "missing url"});
+         }
+         const Json* sha = find_arg(args, {"sha256"});
+         const std::string sha256 = (sha && sha->is_string()) ? sha->get<std::string>() : "";
+         const Json* sig = find_arg(args, {"signature"});
+         const std::string signature = (sig && sig->is_string()) ? sig->get<std::string>() : "";
+         auto res = update::ClientUpdater::instance().download_app_update(
+             url->get<std::string>(), sha256, signature);
+         if (!res.is_ok()) {
+           return CmdResult::err({errs::kIo, res.error().message});
+         }
+         return CmdResult::ok(Json{{"path", utf::utf16_to_utf8(res.value())}});
+       },
+       consts::kTimeoutHeavy});
 }
 
 }  // namespace clashwin::cmd

@@ -15,7 +15,7 @@ class TooltipHost : public Widget {
     set_visible(false);
   }
 
-  static constexpr int kShowDelayMs = 500;
+  static constexpr int kShowDelayMs = 500;  // 豁免: Mini 无对应物 — 悬停防抖 500ms（MUI 默认 100ms，应用自定）
 
   // 鼠标悬停在带 tooltip_text() 的 widget 上时由宿主调用（全局坐标）
   void hover(Widget* target, PointF global);
@@ -26,12 +26,14 @@ class TooltipHost : public Widget {
   RectF tip_bounds() const { return bounds(); }
 
   void on_paint(IRenderTarget& rt) override;
+  // 提示层不拦截命中（否则显示期间鼠标事件全被它吃掉）
+  bool hit_self(PointF) const override { return false; }
 
   // 绘制参数（MUI tooltip：深灰底白字）
-  Color4f bg_ = Color4f::hex(0x616161, 0.95f);
-  Color4f text_color_ = Color4f::hex(0xFFFFFF);
-  float font_size = 11;
-  float pad_h = 8, pad_v = 4;
+  Color4f bg_ = Color4f::hex(0x616161, 0.95f);  // src: MUI grey[700] rgba(97,97,97,.95)
+  Color4f text_color_ = Color4f::hex(0xFFFFFF);  // src: MUI tooltip 文字白
+  float font_size = 11;  // ← MUI tooltip caption 字号
+  float pad_h = 8, pad_v = 4;  // ← MUI tooltip 内距 8/4
   float radius_ = 4;
 
  private:

@@ -56,7 +56,7 @@ struct RectF {
 
 struct Color4f {
   float r = 0, g = 0, b = 0, a = 1;
-  static constexpr Color4f hex(uint32_t rgb, float alpha = 1.0f) {
+  static constexpr Color4f hex(uint32_t rgb, float alpha = 1.0f) {  // 豁免: Mini 无对应物 — 颜色工具缺省 alpha 不透明
     return {((rgb >> 16) & 0xFF) / 255.0f, ((rgb >> 8) & 0xFF) / 255.0f,
             (rgb & 0xFF) / 255.0f, alpha};
   }
@@ -91,6 +91,11 @@ struct Pen {
   float width = 1;
 };
 
+struct GradientStop {
+  float offset;  // 0..1
+  Color4f color;
+};
+
 // ---------- Widget 树唯一绘制接口（逻辑像素；实现负责乘 DPI scale） ----------
 class IRenderTarget {
  public:
@@ -99,7 +104,41 @@ class IRenderTarget {
   virtual void fill_rect(const RectF& r, const Brush& b) = 0;
   virtual void round_rect(const RectF& r, float radius, const Pen& p,
                           const Brush* fill) = 0;
+  // 水平线性渐变圆角填充（← Mini 流量卡；stops 按 offset 升序）
+  virtual void fill_round_rect_gradient(const RectF& r, float radius,
+                                        const GradientStop* stops,
+                                        int count) {
+    (void)r; (void)radius; (void)stops; (void)count;
+  }
+  // 圆角矩形 + CSS 角度线性渐变（css_angle_deg：0=to top，顺时针；135=to 右下）。
+  // 对齐 CSS linear-gradient 渐变线投影：d=(sinθ,-cosθ)，L=|W·sinθ|+|H·cosθ|。
+  // corner_mask：bit0=TL bit1=TR bit2=BR bit3=BL（默认全角）。
+  // src: mini-traffic-panel.tsx:102-104/171-173 指标卡成对接缝处内角半径 0。
+  virtual void fill_round_rect_gradient_angle(const RectF& r, float radius,
+                                              const GradientStop* stops,
+                                              int count, float css_angle_deg,
+                                              int corner_mask = 0xF) {
+    // 默认退化：无角度支持时用水平渐变近似。
+    (void)css_angle_deg; (void)corner_mask;
+    fill_round_rect_gradient(r, radius, stops, count);
+  }
+  // 圆角矩形 + 径向渐变（CSS radial-gradient(circle at cx% cy%, ...)）：
+  //   c 为渐变圆心（相对 r 的比例 0..1），rx/ry 为椭圆半径（DIP）。
+  //   src: base-switch.tsx:76-80 / layout.scss:19-22 极光
+  virtual void fill_round_rect_radial(const RectF& r, float radius,
+                                      const GradientStop* stops, int count,
+                                      float cx_ratio, float cy_ratio,
+                                      float rx, float ry) {
+    // 默认退化：无径向支持时用水平渐变近似。
+    (void)cx_ratio; (void)cy_ratio; (void)rx; (void)ry;
+    fill_round_rect_gradient(r, radius, stops, count);
+  }
   virtual void draw_line(const PointF& a, const PointF& b, const Pen& p) = 0;
+  // 折线（SVG path 扁平化后用；默认逐段 draw_line，实现可覆盖为几何 stroke）
+  virtual void draw_polyline(const PointF* pts, int count, const Pen& p) {
+    if (!pts || count < 2) return;
+    for (int i = 1; i < count; ++i) draw_line(pts[i - 1], pts[i], p);
+  }
   virtual void draw_text(const std::wstring& text, const RectF& r,
                          const TextStyle& ts) = 0;
   // 位图：id 由 T12 icon_store 登记（register_bitmap）；未登记则不绘制
@@ -160,7 +199,7 @@ class FrameClock {
   }
 
   // 30fps 帧间隔（ms）常量——T11 SetTimer 用
-  static constexpr int kFrameIntervalMs = 33;
+  static constexpr int kFrameIntervalMs = 33;  // ← 30fps 渲染节拍（1000/30）
 
  private:
   RectF dirty_{};

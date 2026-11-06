@@ -34,6 +34,10 @@ struct PipeHttpConfig {
   int busy_retry_delay_ms = 125;        // BUSY 重试间隔
   int open_retry_count = 3;             // 非 BUSY 打开失败重试次数
   int default_timeout_ms = 3000;        // ← mihomo DEFAULT_REQUEST_TIMEOUT
+  // clash-verge-service 的 kode_bridge 服务端不接受空 body 的 Content-Length 与
+  // keep-alive（会直接 EOF）；ServiceIpc 构造时打开这两项以改用 close 语义。
+  bool omit_content_length_when_empty = false;
+  bool force_connection_close = false;
 };
 
 class PipeHttpClient {

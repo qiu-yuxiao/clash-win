@@ -415,55 +415,55 @@ UT_TEST(t20_connection_detail_dialog_fields) {
   UT_CHECK_EQ(fields.size(), 13u);
 
   // 1. Host
-  UT_CHECK(fields[0].first == L"域名/地址");
+  UT_CHECK(fields[0].first == L"主机");
   UT_CHECK(fields[0].second == L"api.clash.win:8443");
 
   // 2. Downloaded (10 MB)
-  UT_CHECK(fields[1].first == L"累计下载");
+  UT_CHECK(fields[1].first == L"下载量");
   UT_CHECK(fields[1].second.find(L"MB") != std::wstring::npos);
 
   // 3. Uploaded (2 MB)
-  UT_CHECK(fields[2].first == L"累计上传");
+  UT_CHECK(fields[2].first == L"上传量");
   UT_CHECK(fields[2].second.find(L"MB") != std::wstring::npos);
 
   // 4. Dl Speed
-  UT_CHECK(fields[3].first == L"下载速率");
+  UT_CHECK(fields[3].first == L"下载速度");
   UT_CHECK(fields[3].second.find(L"/s") != std::wstring::npos);
 
   // 5. Ul Speed
-  UT_CHECK(fields[4].first == L"上传速率");
+  UT_CHECK(fields[4].first == L"上传速度");
   UT_CHECK(fields[4].second.find(L"/s") != std::wstring::npos);
 
   // 6. Chains (反转展示: DIRECT / HongKong 01 / ProxyGroup)
-  UT_CHECK(fields[5].first == L"规则链");
+  UT_CHECK(fields[5].first == L"链路");
   UT_CHECK_EQ(fields[5].second, L"DIRECT / HongKong 01 / ProxyGroup");
 
   // 7. Rule
-  UT_CHECK(fields[6].first == L"命中规则");
+  UT_CHECK(fields[6].first == L"规则");
   UT_CHECK_EQ(fields[6].second, L"DomainSuffix(clash.win)");
 
   // 8. Process
-  UT_CHECK(fields[7].first == L"关联进程");
+  UT_CHECK(fields[7].first == L"进程");
   UT_CHECK_EQ(fields[7].second, L"clashwin.exe(C:\\Tools\\clashwin.exe)");
 
   // 9. Time
-  UT_CHECK(fields[8].first == L"建立时间");
+  UT_CHECK(fields[8].first == L"连接时间");
   UT_CHECK_EQ(fields[8].second, L"2026-10-28 12:00:00");
 
   // 10. Source
-  UT_CHECK(fields[9].first == L"来源");
+  UT_CHECK(fields[9].first == L"源地址");
   UT_CHECK_EQ(fields[9].second, L"192.168.1.50:54321");
 
   // 11. Destination
-  UT_CHECK(fields[10].first == L"目的");
+  UT_CHECK(fields[10].first == L"目标地址");
   UT_CHECK_EQ(fields[10].second, L"104.21.5.12");
 
   // 12. Destination Port
-  UT_CHECK(fields[11].first == L"目的端口");
+  UT_CHECK(fields[11].first == L"目标端口");
   UT_CHECK_EQ(fields[11].second, L"8443");
 
   // 13. Type
-  UT_CHECK(fields[12].first == L"类型/网络");
+  UT_CHECK(fields[12].first == L"类型");
   UT_CHECK_EQ(fields[12].second, L"HTTPS(tcp)");
 
   // 离屏渲染验证无崩溃
@@ -472,29 +472,42 @@ UT_TEST(t20_connection_detail_dialog_fields) {
   rt().begin_frame();
   dialog.on_paint(rt());
   rt().end_frame();
+
+  // 纸面尺寸上限：maxWidth 520 / maxHeight 480（src: connection-detail.tsx:59-61）
+  dialog.layout_tree({0, 0, 900, 900});
+  UT_CHECK(dialog.card_rect().w <= 520.0f);
+  UT_CHECK(dialog.card_rect().h <= 480.0f);
+  UT_CHECK(dialog.card_rect().w > 0 && dialog.card_rect().h > 0);
 }
 
 // Test 8: SettingsDrawer Two-Column Responsive Split
+// src: _layout.tsx:1403-1438 容器全窗 padding 12 / gap 12；左列 240 / gap 5 / pr 1
+// src: _layout.tsx:1519-1533 右列 ConnectionsPanel flex:1
 UT_TEST(t20_settings_drawer_two_column_responsive_split) {
   SettingsDrawer drawer;
   drawer.set_open(true);
 
   // 1. 窄窗形态 (<= 285px): 单列呈现，ConnectionsPanel 隐藏
   drawer.layout_tree({0, 0, 271, 680});
-  UT_CHECK_EQ(drawer.panel()->bounds().w, 271.0f);
-  UT_CHECK_EQ(drawer.profile_card()->bounds().w, 259.0f); // 271 - 12
+  UT_CHECK_EQ(drawer.panel()->bounds().w, 271.0f);  // 全窗覆盖层
+  UT_CHECK_EQ(drawer.panel()->bounds().h, 680.0f);
+  UT_CHECK_EQ(drawer.profile_card()->bounds().x, 16.0f);  // 边框 4 + padding 12
+  UT_CHECK_EQ(drawer.profile_card()->bounds().w, 231.0f);  // 240 - pr 8 - border 1
   UT_CHECK(drawer.conn_panel() != nullptr);
   UT_CHECK(!drawer.conn_panel()->visible());
 
   // 2. 宽窗形态 (> 285px): 两列并排，左列固定 240px，右列自适应
   drawer.layout_tree({0, 0, 640, 680});
-  UT_CHECK_EQ(drawer.panel()->bounds().w, 240.0f);
-  UT_CHECK_EQ(drawer.profile_card()->bounds().w, 228.0f); // 240 - 12
+  UT_CHECK_EQ(drawer.panel()->bounds().w, 640.0f);
+  UT_CHECK_EQ(drawer.profile_card()->bounds().w, 231.0f);
   UT_CHECK(drawer.conn_panel()->visible());
   RectF cp_bounds = drawer.conn_panel()->bounds();
-  UT_CHECK_EQ(cp_bounds.x, 246.0f);
-  UT_CHECK_EQ(cp_bounds.w, 394.0f);                      // 640 - 246
-  UT_CHECK_EQ(cp_bounds.h, 650.0f);                      // 680 - 30
+  UT_CHECK_EQ(cp_bounds.x, 264.0f);  // 12 + 240 + 12
+  UT_CHECK_EQ(cp_bounds.w, 364.0f);  // 640 - 264 - 12
+  // area.h + 30(标题栏) + 135(底部流量区) = 845 > 830 → tall 形态，
+  // 抽屉内底部行占 30（_layout.tsx:1593/1654），故可用高 = 680 - 30
+  // 再扣 2*4(边框) + 2*12(padding) = 618。
+  UT_CHECK_EQ(cp_bounds.h, 618.0f);
 }
 
 // Test 9: WebSocket Subscription Lifecycle & BUG-306 Synchronous Resize Fix

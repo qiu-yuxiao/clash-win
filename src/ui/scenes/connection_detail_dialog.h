@@ -1,6 +1,8 @@
 #pragma once
 // 连接详情弹窗（T20）：对齐 connection-detail.tsx 13 项元数据展示。
-// - 13 项元数据全量展示（域名/累计流量/实时速率/规则链/命中规则/进程/时间/源/目的/类型）
+// - 13 项元数据全量展示，标签照 connections.json:7-17（主机/下载量/上传量/下载速度/
+//   上传速度/链路/规则/进程/连接时间/源地址/目标地址/目标端口/类型），纸面
+//   maxWidth 520 / maxHeight 480（src: connection-detail.tsx:59-61）
 // - 活跃连接支持右下角"断开连接"按钮
 // - 点击遮罩外部或按 Escape 键关闭
 // - 严格遵守 Direct2D 局部坐标规则（以 {0, y} 相对本控件绘制，禁止 double offset）
@@ -19,7 +21,9 @@ class ConnectionDetailDialog : public Widget {
   explicit ConnectionDetailDialog(Widget* parent = nullptr);
   ~ConnectionDetailDialog() override = default;
 
-  void open(const ConnItem& item, bool closed);
+  // anchor_global: 触发行的根坐标矩形（Mini Popover anchorEl）。
+  // 缺省空矩形则居中（仅供单元测试/无锚点场景）。
+  void open(const ConnItem& item, bool closed, const RectF& anchor_global = {});
   void close();
   bool is_open() const { return open_; }
 
@@ -28,6 +32,9 @@ class ConnectionDetailDialog : public Widget {
 
   // 13 字段键值对导出（供单元测试精准断言）
   std::vector<std::pair<std::wstring, std::wstring>> fields() const;
+
+  // 纸面矩形（供测试断言 maxWidth 520 / maxHeight 480）
+  const RectF& card_rect() const { return card_rect_; }
 
   // 断开连接回调（生产绑 DELETE /connections/:id）
   std::function<void(const std::string& id)> on_close_connection;
@@ -43,9 +50,11 @@ class ConnectionDetailDialog : public Widget {
   }
 
  private:
+  void place_card();
   bool open_ = false;
   bool closed_ = false;
   ConnItem item_;
+  RectF anchor_global_;
   RectF card_rect_;
   RectF btn_close_conn_rect_;
   RectF btn_dismiss_rect_;

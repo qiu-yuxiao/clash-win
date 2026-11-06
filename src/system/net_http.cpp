@@ -7,7 +7,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <fstream>
+#include <vector>
 
+#include "clashwin/config/constants.h"
 #include "util/str_utils.h"
 #include "util/utf.h"
 
@@ -24,7 +27,7 @@ using util::trim;
 namespace {
 
 constexpr uint64_t kDefaultTimeoutS = 20;  // ← PrfOption timeout_seconds 默认
-constexpr const char* kDefaultUserAgent = "clash-verge/v3.0.10";  // ← CARGO_PKG_VERSION
+constexpr const char* kDefaultUserAgent = "clash-verge/v0.1.0";  // 应用版本 0.1.0
 
 bool cancel_signaled(HANDLE ev) {
   if (!ev) return false;
@@ -752,7 +755,7 @@ Result<HttpResponse> http_request(const std::string& method_in,
     case ProxyType::None:
       break;
     case ProxyType::Localhost: {
-      uint16_t port = 10801;  // ← clash.rs 模板 mixed-port 兜底
+      uint16_t port = config::consts::kDefaultMixed;  // Clash Win 默认 mixed-port（错开 Mini 10801）
       if (opts.localhost_mixed_port) {
         if (auto p = opts.localhost_mixed_port()) port = *p;
       }
@@ -1037,6 +1040,202 @@ Result<HttpResponse> http_get(const std::string& url, const HttpOptions& opts) {
 Result<HttpResponse> http_post(const std::string& url, std::string body,
                                const HttpOptions& opts) {
   return detail::http_request("POST", url, std::move(body), opts);
+}
+
+Result<void> http_download_file(
+    const std::string& url, const std::wstring& dest_path, const HttpOptions& opts,
+    std::function<void(uint64_t, uint64_t)> on_progress) {
+  const uint64_t timeout_s = opts.timeout_seconds.value_or(kDefaultTimeoutS);
+  const std::string ua = opts.user_agent.value_or(kDefaultUserAgent);
+
+  // ← network.rs：代理三态（与 http_request 同口径）
+  std::optional<std::string> proxy;
+  switch (opts.proxy_type) {
+    case ProxyType::None:
+      break;
+    case ProxyType::Localhost: {
+      uint16_t port = config::consts::kDefaultMixed;
+      if (opts.localhost_mixed_port) {
+        if (auto p = opts.localhost_mixed_port()) port = *p;
+      }
+      proxy = "127.0.0.1:" + std::to_string(port);
+      break;
+    }
+    case ProxyType::System:
+      proxy = read_system_proxy();
+      break;
+  }
+
+  HINTERNET session = WinHttpOpen(utf8_to_utf16(ua).c_str(),
+                                  WINHTTP_ACCESS_TYPE_NO_PROXY,
+                                  WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+  if (!session) {
+    Error e;
+    e.code = 31;
+    e.message = last_error_msg("WinHttpOpen", GetLastError());
+    return Result<void>::err(std::move(e));
+  }
+
+  std::string current_url = url;
+  int redirects = 0;
+  for (;;) {
+    if (cancel_signaled(opts.cancel_event)) {
+      WinHttpCloseHandle(session);
+      return Result<void>::err(Error{39, "request cancelled"});
+    }
+    auto pr = parse_http_url(current_url);
+    if (!pr.is_ok()) {
+      WinHttpCloseHandle(session);
+      return Result<void>::err(pr.error());
+    }
+    UrlParts parts = pr.value();
+    const bool is_https = parts.scheme == "https";
+
+    HINTERNET connect = WinHttpConnect(session,
+                                       utf8_to_utf16(parts.host).c_str(),
+                                       parts.effective_port(), 0);
+    if (!connect) {
+      WinHttpCloseHandle(session);
+      return Result<void>::err(Error{31, "WinHttpConnect failed"});
+    }
+    HINTERNET request = WinHttpOpenRequest(
+        connect, L"GET", utf8_to_utf16(parts.request_target()).c_str(), nullptr,
+        WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+        is_https ? WINHTTP_FLAG_SECURE : 0);
+    if (!request) {
+      WinHttpCloseHandle(connect);
+      WinHttpCloseHandle(session);
+      return Result<void>::err(Error{31, "WinHttpOpenRequest failed"});
+    }
+
+    WINHTTP_PROXY_INFO pi{};
+    std::wstring proxy_w;
+    if (proxy) {
+      proxy_w = utf8_to_utf16(*proxy);
+      pi.dwAccessType = WINHTTP_ACCESS_TYPE_NAMED_PROXY;
+      pi.lpszProxy = const_cast<LPWSTR>(proxy_w.c_str());
+    } else {
+      pi.dwAccessType = WINHTTP_ACCESS_TYPE_NO_PROXY;
+    }
+    WinHttpSetOption(request, WINHTTP_OPTION_PROXY, &pi, sizeof(pi));
+
+    DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
+    WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY, &policy,
+                     sizeof(policy));
+
+    const int total_ms = static_cast<int>(std::min<uint64_t>(timeout_s, 600) * 1000);
+    const int connect_ms = static_cast<int>(std::min<uint64_t>(timeout_s, 10) * 1000);
+    WinHttpSetTimeouts(request, connect_ms, connect_ms, total_ms, total_ms);
+
+    std::string req_headers = "User-Agent: " + ua + "\r\n";
+    std::wstring headers_w = utf8_to_utf16(req_headers);
+    if (!WinHttpSendRequest(request, headers_w.c_str(),
+                            static_cast<DWORD>(headers_w.size()),
+                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
+        !WinHttpReceiveResponse(request, nullptr)) {
+      Error e{33, "Request failed: " + last_error_msg("WinHttpSendRequest",
+                                                      GetLastError())};
+      WinHttpCloseHandle(request);
+      WinHttpCloseHandle(connect);
+      WinHttpCloseHandle(session);
+      return Result<void>::err(std::move(e));
+    }
+
+    auto hr = receive_headers(request);
+    if (!hr.is_ok()) {
+      WinHttpCloseHandle(request);
+      WinHttpCloseHandle(connect);
+      WinHttpCloseHandle(session);
+      return Result<void>::err(hr.error());
+    }
+    const RawResponse& raw = hr.value();
+    if ((raw.status == 301 || raw.status == 302 || raw.status == 303 ||
+         raw.status == 307 || raw.status == 308) &&
+        !raw.locations.empty() && redirects < opts.max_redirects) {
+      current_url = absolutize(parts, raw.locations.front());
+      ++redirects;
+      WinHttpCloseHandle(request);
+      WinHttpCloseHandle(connect);
+      continue;
+    }
+    if (raw.status < 200 || raw.status > 299) {
+      std::string msg = "HTTP status error: " + std::to_string(raw.status);
+      WinHttpCloseHandle(request);
+      WinHttpCloseHandle(connect);
+      WinHttpCloseHandle(session);
+      return Result<void>::err(Error{33, msg});
+    }
+
+    uint64_t total = 0;
+    for (const auto& h : raw.headers) {
+      if (to_lower(h.name) == "content-length") {
+        try {
+          total = std::stoull(h.value);
+        } catch (...) {
+          total = 0;
+        }
+        break;
+      }
+    }
+
+    std::ofstream out(dest_path, std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) {
+      WinHttpCloseHandle(request);
+      WinHttpCloseHandle(connect);
+      WinHttpCloseHandle(session);
+      return Result<void>::err(Error{31, "failed to open destination file"});
+    }
+
+    uint64_t downloaded = 0;
+    std::vector<char> buf(65536);
+    for (;;) {
+      if (cancel_signaled(opts.cancel_event)) {
+        out.close();
+        WinHttpCloseHandle(request);
+        WinHttpCloseHandle(connect);
+        WinHttpCloseHandle(session);
+        return Result<void>::err(Error{39, "request cancelled"});
+      }
+      DWORD avail = 0;
+      if (!WinHttpQueryDataAvailable(request, &avail)) {
+        out.close();
+        WinHttpCloseHandle(request);
+        WinHttpCloseHandle(connect);
+        WinHttpCloseHandle(session);
+        return Result<void>::err(Error{35, "Stream read error: " +
+                                           last_error_msg("WinHttpQueryDataAvailable",
+                                                           GetLastError())});
+      }
+      if (avail == 0) break;
+      if (avail > buf.size()) buf.resize(avail);
+      DWORD got = 0;
+      if (!WinHttpReadData(request, buf.data(), avail, &got)) {
+        out.close();
+        WinHttpCloseHandle(request);
+        WinHttpCloseHandle(connect);
+        WinHttpCloseHandle(session);
+        return Result<void>::err(Error{35, "Stream read error: " +
+                                           last_error_msg("WinHttpReadData",
+                                                          GetLastError())});
+      }
+      if (got > 0) out.write(buf.data(), got);
+      downloaded += got;
+      if (out.bad()) {
+        out.close();
+        WinHttpCloseHandle(request);
+        WinHttpCloseHandle(connect);
+        WinHttpCloseHandle(session);
+        return Result<void>::err(Error{31, "failed to write download chunk"});
+      }
+      if (on_progress) on_progress(downloaded, total);
+    }
+    out.close();
+
+    WinHttpCloseHandle(request);
+    WinHttpCloseHandle(connect);
+    WinHttpCloseHandle(session);
+    return Result<void>::ok();
+  }
 }
 
 }  // namespace clashwin::system

@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <format>
 #include <fstream>
 
 #include <nlohmann/json.hpp>
@@ -80,10 +81,16 @@ bool is_position_on_screen(double x, double y) {
 void save_sync(const std::wstring& path, double w, double h,
                std::optional<double> x, std::optional<double> y) {
   nlohmann::json obj = nlohmann::json::object();
-  obj["width"] = w;
-  obj["height"] = h;
-  if (x) obj["x"] = *x;
-  if (y) obj["y"] = *y;
+  // 【DPIARCH】内部数值必须整数：整数值以 int 落盘（271 而非 271.0/270.666）
+  auto jnum = [](double v) -> nlohmann::json {
+    double r = std::round(v);
+    if (std::abs(v - r) < 1e-6) return static_cast<int64_t>(r);
+    return v;
+  };
+  obj["width"] = jnum(w);
+  obj["height"] = jnum(h);
+  if (x) obj["x"] = jnum(*x);
+  if (y) obj["y"] = jnum(*y);
   // compact 单行；nlohmann 默认 std::map 键序 = serde_json BTreeMap 字母序
   std::ofstream f(path, std::ios::binary | std::ios::trunc);
   if (!f) return;
@@ -236,6 +243,18 @@ std::optional<SavedWindowState> restore(const std::wstring& path) {
                         consts::kWindowMaxWidth);
   st.height = std::clamp(st.height, consts::kWindowMinHeight,
                          consts::kWindowMaxHeight);
+  // 默认尺寸 271×680（源码 resolve/window.rs:18-19 DEFAULT_WIDTH/HEIGHT）。
+  //   历史版本在 150% DPI 下把 680 取整成 681（恢复后物理 1022，比默认 1020 多 2px）；
+  //   1px 级取整残留按默认值归一，避免把旧值一直带下去。
+  constexpr double kRoundTolerance = 1.5;
+  if (st.height > consts::kWindowDefaultHeight &&
+      st.height <= consts::kWindowDefaultHeight + kRoundTolerance) {
+    st.height = consts::kWindowDefaultHeight;
+  }
+  if (st.width > consts::kWindowDefaultWidth &&
+      st.width <= consts::kWindowDefaultWidth + kRoundTolerance) {
+    st.width = consts::kWindowDefaultWidth;
+  }
   // 位置脱屏（拔插显示器）→ 重置为默认居中（x/y 空）
   if (st.x && st.y && !is_position_on_screen(*st.x, *st.y)) {
     CWLOG_WARN("saved window position off-screen, reset to default center");

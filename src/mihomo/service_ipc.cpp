@@ -9,8 +9,15 @@ namespace clashwin::mihomo {
 constexpr wchar_t ServiceIpc::kDefaultPipeName[];
 constexpr const char* ServiceIpc::kIpcMagic;
 
-ServiceIpc::ServiceIpc(PipeHttpConfig cfg)
-    : client_(std::make_shared<PipeHttpClient>(std::move(cfg))), owns_(true) {}
+ServiceIpc::ServiceIpc(PipeHttpConfig cfg) {
+  // clash-verge-service（kode_bridge）不接受空 body 的 Content-Length 与
+  // keep-alive：保持会直接 EOF，故服务调用一律 close 语义。
+  cfg.omit_content_length_when_empty = true;
+  cfg.force_connection_close = true;
+  cfg.min_connections = 0;
+  client_ = std::make_shared<PipeHttpClient>(std::move(cfg));
+  owns_ = true;
+}
 
 ServiceIpc::ServiceIpc(std::shared_ptr<PipeHttpClient> shared_client)
     : client_(std::move(shared_client)), owns_(false) {}

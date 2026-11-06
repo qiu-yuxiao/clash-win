@@ -4,7 +4,11 @@
 #include <algorithm>
 #include <cmath>
 
+#include "theme/theme.h"
+
 namespace clashwin::ui {
+
+using theme::ThemeService;
 
 void Slider::set_value(float v, bool fire) {
   v = std::clamp(v, min_, max_);
@@ -66,6 +70,48 @@ void Slider::on_paint(IRenderTarget& rt) {
   auto cx_of = [&](float v) {
     return thumb_d_ / 2 + (v - min_) / (max_ - min_) * range;
   };
+  if (gold_3d_) {
+    // src: style-helpers.tsx:251-283 get3DSliderStyle retro-3d
+    //   rail：rgba(212,175,55,.25/.15) + 1px #B8860B(light)/#8A6D00(dark)（:255-263）
+    RectF rail{thumb_d_ / 2, cy - thickness_ / 2, range, thickness_};
+    Brush rail_b{track_};
+    rt.round_rect(rail, thickness_ / 2,
+                  Pen{theme::ThemeService::instance().is_light()
+                          ? Color4f::hex(0xB8860B)
+                          : Color4f::hex(0x8A6D00),
+                      1.0f},
+                  &rail_b);
+    // track（已填充段）：linear-gradient(to bottom,#FFE082,#FFC107,#B8860B)（:265-273）
+    float fw = cx_of(value_) - thumb_d_ / 2;
+    if (fw > 0) {
+      GradientStop track[3] = {{0.0f, Color4f::hex(0xFFE082)},
+                               {0.50f, Color4f::hex(0xFFC107)},
+                               {1.00f, Color4f::hex(0xB8860B)}};
+      RectF filled{thumb_d_ / 2, cy - thickness_ / 2, fw, thickness_};
+      rt.fill_round_rect_gradient_angle(filled, thickness_ / 2, track, 3, 180.0f);
+    }
+    // thumb：radial-gradient(circle at 35% 35%)（:280-283）
+    float d = thumb_d_;
+    RectF ball_rect{cx_of(value_) - d / 2, cy - d / 2, d, d};
+    GradientStop ball[4] = {
+        {0.00f, Color4f::hex(theme::ThemeService::instance().is_light() ? 0xFFFDE7
+                                                                       : 0xFFF9C4)},
+        {0.45f, Color4f::hex(theme::ThemeService::instance().is_light() ? 0xFFD54F
+                                                                       : 0xFFC107)},
+        {0.80f, Color4f::hex(0xFFA000)},
+        {1.00f, Color4f::hex(theme::ThemeService::instance().is_light() ? 0xB8860B
+                                                                       : 0x8A6D00)}};
+    rt.fill_round_rect_radial(ball_rect, d / 2, ball, 4, 0.35f, 0.35f, d * 0.65f,
+                              d * 0.65f);
+    // src: :297 border 1px #8A6D00(light)/#634E00(dark)
+    rt.round_rect(ball_rect, d / 2,
+                  Pen{theme::ThemeService::instance().is_light()
+                          ? Color4f::hex(0x8A6D00)
+                          : Color4f::hex(0x634E00),
+                      1.0f},
+                  nullptr);
+    return;
+  }
   rt.fill_rect({thumb_d_ / 2, cy - thickness_ / 2, range, thickness_},
                Brush{track_});
   Brush fill_b{fill_};

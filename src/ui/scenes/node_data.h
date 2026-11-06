@@ -21,6 +21,8 @@ namespace clashwin::ui::scene {
 inline constexpr int kNodeDelayMinMs = 30;       // 机场伪造低延迟过滤下限
 inline constexpr int kNodeDelayMaxMs = 5000;     // 判死阈值（探针超时同值，BUG-304）
 inline constexpr int64_t kDelayCacheTtlMs = 30 * 60 * 1000;  // CACHE_TTL
+// src: services/delay.ts:22 HISTORY_FALLBACK_MAX_AGE_MS = 10 * 60 * 1000
+inline constexpr int64_t kHistoryFallbackMaxAgeMs = 10 * 60 * 1000;
 
 // ← formatDelayColor 五档（250/400/5000 分界，BUG-304）
 enum class DelayTier { Unknown, Success, Mid, Slow, Timeout };
@@ -98,6 +100,12 @@ class NodeData {
   std::string group_ = "PROXY";
   // 延迟缓存：name → (delay, updated_at_ms)
   std::map<std::string, std::pair<int, int64_t>> delay_cache_;
+  // src: services/delay.ts:268-298 getDelayFix：缓存过期后回落内核 history
+  struct ProxyHistory {
+    int delay = -1;       // 最后一条 history.delay；-1 = 无记录
+    std::string time;     // history.time（RFC3339）
+  };
+  std::map<std::string, ProxyHistory> proxy_history_;
   std::vector<std::pair<uint64_t, std::function<void()>>> subs_;
   uint64_t next_id_ = 1;
 };

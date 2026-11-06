@@ -1,7 +1,10 @@
 #include "update/client_updater.h"
 
 #include <windows.h>
+#include <bcrypt.h>
 #include <shellapi.h>
+
+#pragma comment(lib, "bcrypt.lib")
 
 #include <algorithm>
 #include <filesystem>
@@ -9,8 +12,12 @@
 #include <sstream>
 #include <vector>
 
+#include "config/update_keys.h"
+#include "events/event_bus.h"
 #include "system/net_http.h"
+#include "util/base64.h"
 #include "util/dirs.h"
+#include "util/ed25519.h"
 #include "util/log.h"
 #include "util/str_utils.h"
 #include "util/utf.h"
@@ -27,6 +34,67 @@ using util::trim;
 
 inline Error make_err(const std::string& msg, int code = 1) {
   return Error{code, msg};
+}
+
+// src: use-client-update.ts:63-105 客户端更新进度事件（status: downloading/done/error）
+void emit_client_progress(const std::string& status, int progress,
+                          const std::string& message) {
+  events::EventBus::instance().publish(
+      "client-update-progress",
+      nlohmann::json{{"status", status}, {"progress", progress}, {"message", message}});
+}
+
+// src: locales/zh/layout.json:73-74 「已下载 {{percent}}% ({{downloaded}} MB / {{total}} MB)」
+std::string format_mb(double bytes) {
+  std::ostringstream oss;
+  oss.setf(std::ios::fixed);
+  oss.precision(2);
+  oss << bytes / (1024.0 * 1024.0);
+  return oss.str();
+}
+
+std::optional<std::vector<uint8_t>> hex_to_bytes(const std::string& hex) {
+  if (hex.size() % 2 != 0) return std::nullopt;
+  std::vector<uint8_t> out;
+  out.reserve(hex.size() / 2);
+  for (size_t i = 0; i < hex.size(); i += 2) {
+    auto nib = [](char c) -> int {
+      if (c >= '0' && c <= '9') return c - '0';
+      if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+      if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+      return -1;
+    };
+    const int hi = nib(hex[i]), lo = nib(hex[i + 1]);
+    if (hi < 0 || lo < 0) return std::nullopt;
+    out.push_back(static_cast<uint8_t>((hi << 4) | lo));
+  }
+  return out;
+}
+
+// 验签口径：signature = Base64(Ed25519(私钥, SHA-256(installer)))。
+// ← 行为对齐 plugin-updater：先验签后安装；失败可见报错，绝不静默放行。
+bool verify_installer_signature(const std::string& actual_sha256_hex,
+                                const std::string& signature_b64, std::string* err) {
+  const auto pk = util::decode_base64_robust(config::kUpdatePubkeyB64);
+  if (!pk || pk->size() != 32) {
+    *err = "更新公钥未配置或格式错误，已中止安装";
+    return false;
+  }
+  const auto sig = util::decode_base64_robust(signature_b64);
+  if (!sig || sig->size() != 64) {
+    *err = "发布清单缺少有效签名，已中止安装";
+    return false;
+  }
+  const auto digest = hex_to_bytes(actual_sha256_hex);
+  if (!digest || digest->size() != 32) {
+    *err = "安装包摘要无效";
+    return false;
+  }
+  if (!util::ed25519_verify(digest->data(), digest->size(), sig->data(), pk->data())) {
+    *err = "安装包签名校验失败";
+    return false;
+  }
+  return true;
 }
 
 class DefaultAppUpdateDownloader : public IAppUpdateDownloader {
@@ -57,22 +125,20 @@ class DefaultAppUpdateDownloader : public IAppUpdateDownloader {
     for (auto pt : proxy_types) {
       system::HttpOptions opts;
       opts.proxy_type = pt;
-      opts.timeout_seconds = 600;
+      opts.timeout_seconds = 600;  // 安装包体积大：与 Mini downloadAndInstall 10 分钟超时同口径
       opts.user_agent = "ClashWin-ClientUpdater";
-      opts.max_response_bytes = 200u << 20;  // 200MB installer limit
-      auto res = system::http_get(url, opts);
-      if (res.is_ok() && res.value().is_success()) {
-        std::ofstream out(dest_path, std::ios::binary | std::ios::trunc);
-        if (!out.is_open()) {
-          return Result<void>::err(make_err("failed to open destination installer file"));
-        }
-        out.write(res.value().body.data(), res.value().body.size());
-        out.close();
-        if (on_progress) {
-          on_progress(res.value().body.size(), res.value().body.size());
-        }
+      auto res = system::http_download_file(
+          url, dest_path, opts,
+          [&on_progress](uint64_t downloaded, uint64_t total) {
+            if (on_progress) {
+              on_progress(static_cast<size_t>(downloaded), static_cast<size_t>(total));
+            }
+          });
+      if (res.is_ok()) {
         return Result<void>::ok();
       }
+      std::error_code ec;
+      std::filesystem::remove(dest_path, ec);
     }
     return Result<void>::err(make_err("failed to download client installer across all proxy modes"));
   }
@@ -106,6 +172,56 @@ std::vector<int> parse_version_numbers(const std::string& ver_str) {
 
 ClientUpdater::ClientUpdater()
     : downloader_(std::make_shared<DefaultAppUpdateDownloader>()) {}
+
+std::string ClientUpdater::compute_sha256_hex(const std::wstring& file_path) {
+  std::ifstream in(file_path, std::ios::binary);
+  if (!in.is_open()) return {};
+
+  BCRYPT_ALG_HANDLE alg = nullptr;
+  if (!BCRYPT_SUCCESS(BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM,
+                                                  nullptr, 0))) {
+    return {};
+  }
+  std::string out;
+  DWORD obj_len = 0, hash_len = 0, cb = 0;
+  if (BCRYPT_SUCCESS(BCryptGetProperty(alg, BCRYPT_OBJECT_LENGTH,
+                                       reinterpret_cast<PUCHAR>(&obj_len),
+                                       sizeof(obj_len), &cb, 0)) &&
+      BCRYPT_SUCCESS(BCryptGetProperty(alg, BCRYPT_HASH_LENGTH,
+                                       reinterpret_cast<PUCHAR>(&hash_len),
+                                       sizeof(hash_len), &cb, 0))) {
+    std::vector<uint8_t> obj(obj_len);
+    BCRYPT_HASH_HANDLE hash = nullptr;
+    if (BCRYPT_SUCCESS(BCryptCreateHash(alg, &hash, obj.data(), obj_len,
+                                        nullptr, 0, 0))) {
+      std::vector<char> buf(65536);
+      bool read_ok = true;
+      while (in) {
+        in.read(buf.data(), static_cast<std::streamsize>(buf.size()));
+        const std::streamsize got = in.gcount();
+        if (got > 0 &&
+            !BCRYPT_SUCCESS(BCryptHashData(hash, reinterpret_cast<PUCHAR>(buf.data()),
+                                           static_cast<ULONG>(got), 0))) {
+          read_ok = false;
+          break;
+        }
+      }
+      std::vector<uint8_t> digest(hash_len);
+      if (read_ok && in.eof() &&
+          BCRYPT_SUCCESS(BCryptFinishHash(hash, digest.data(), hash_len, 0))) {
+        static const char* kHex = "0123456789abcdef";
+        out.reserve(digest.size() * 2);
+        for (auto b : digest) {
+          out.push_back(kHex[b >> 4]);
+          out.push_back(kHex[b & 0x0F]);
+        }
+      }
+      BCryptDestroyHash(hash);
+    }
+  }
+  BCryptCloseAlgorithmProvider(alg, 0);
+  return out;
+}
 
 ClientUpdater& ClientUpdater::instance() {
   static ClientUpdater inst;
@@ -164,6 +280,9 @@ Result<AppUpdateInfo> ClientUpdater::parse_manifest(
           if (pobj.contains("signature") && pobj["signature"].is_string()) {
             info.signature = pobj["signature"].get<std::string>();
           }
+          if (pobj.contains("sha256") && pobj["sha256"].is_string()) {
+            info.sha256 = to_lower(pobj["sha256"].get<std::string>());
+          }
           break;
         }
       }
@@ -190,6 +309,9 @@ Result<AppUpdateInfo> ClientUpdater::parse_manifest(
     if (info.signature.empty() && j.contains("signature") && j["signature"].is_string()) {
       info.signature = j["signature"].get<std::string>();
     }
+    if (info.sha256.empty() && j.contains("sha256") && j["sha256"].is_string()) {
+      info.sha256 = to_lower(j["sha256"].get<std::string>());
+    }
 
     info.has_update = is_version_newer(info.latest_version, info.current_version);
     return Result<AppUpdateInfo>::ok(info);
@@ -211,7 +333,9 @@ Result<AppUpdateInfo> ClientUpdater::check_app_update() {
   return parse_manifest(res.value(), current_version_);
 }
 
-Result<std::wstring> ClientUpdater::download_app_update(const std::string& download_url) {
+Result<std::wstring> ClientUpdater::download_app_update(const std::string& download_url,
+                                                        const std::string& expected_sha256,
+                                                        const std::string& signature_b64) {
   if (!downloader_) {
     return Result<std::wstring>::err(make_err("downloader not configured"));
   }
@@ -219,10 +343,58 @@ Result<std::wstring> ClientUpdater::download_app_update(const std::string& downl
   GetTempPathW(MAX_PATH, temp_dir);
   std::wstring dest_path = std::wstring(temp_dir) + L"clashwin_setup_update.exe";
 
-  auto res = downloader_->download_installer(download_url, dest_path, nullptr);
+  // src: use-client-update.ts:65-67 / locales/zh/layout.json:71 「正在下载更新...」
+  emit_client_progress("downloading", 0, "开始下载软件更新包...");
+
+  int last_pct = -1;
+  int last_mb_without_total = -1;
+  auto res = downloader_->download_installer(
+      download_url, dest_path,
+      [&last_pct, &last_mb_without_total](size_t downloaded, size_t total) {
+        if (total == 0) {
+          int mb = static_cast<int>(downloaded / (1024 * 1024));
+          if (mb != last_mb_without_total) {
+            last_mb_without_total = mb;
+            // src: locales/zh/layout.json:74 「已下载 {{downloaded}} MB」
+            emit_client_progress("downloading", 0, "已下载 " + format_mb(static_cast<double>(downloaded)) + " MB");
+          }
+          return;
+        }
+        int pct = static_cast<int>((static_cast<double>(downloaded) /
+                                    static_cast<double>(total)) * 100.0);
+        if (pct > 100) pct = 100;
+        if (pct != last_pct) {
+          last_pct = pct;
+          // src: locales/zh/layout.json:73 「已下载 {{percent}}% ({{downloaded}} MB / {{total}} MB)」
+          emit_client_progress("downloading", pct,
+                               "已下载 " + std::to_string(pct) + "% (" +
+                                   format_mb(static_cast<double>(downloaded)) + " MB / " +
+                                   format_mb(static_cast<double>(total)) + " MB)");
+        }
+      });
   if (!res.is_ok()) {
+    // src: locales/zh/layout.json:126 「更新失败: {{message}}」
+    emit_client_progress("error", 0, "更新失败: " + res.error().message);
     return Result<std::wstring>::err(res.error());
   }
+
+  // 完整性 + 验签（← plugin-updater：先验签后安装；失败可见报错，不静默放行）
+  const std::string actual_sha = compute_sha256_hex(dest_path);
+  const bool hash_ok =
+      expected_sha256.empty() || actual_sha == to_lower(expected_sha256);
+  std::string sig_err;
+  const bool sig_ok = verify_installer_signature(actual_sha, signature_b64, &sig_err);
+  if (!hash_ok || !sig_ok) {
+    std::error_code ec;
+    std::filesystem::remove(dest_path, ec);
+    const std::string reason =
+        !hash_ok ? std::string("安装包校验失败（SHA-256 不匹配）") : sig_err;
+    emit_client_progress("error", 0, "更新失败: " + reason);
+    return Result<std::wstring>::err(make_err(reason));
+  }
+
+  // src: locales/zh/layout.json:75 「下载完成，正在准备安装并重启...」
+  emit_client_progress("done", 100, "下载完成，正在准备安装并重启...");
   return Result<std::wstring>::ok(dest_path);
 }
 

@@ -156,6 +156,7 @@ Result<void> resolve_scheme(std::string_view link) {
     return Result<void>::err(Error{2906, "from_url failed"});
   }
 
+  profiles.apply();
   auto save = profiles.data_arc()->save_file();
   if (!save.is_ok()) {
     events::EventBus::notice_message("import_sub_url::error", "导入订阅保存失败: " + save.error().message);

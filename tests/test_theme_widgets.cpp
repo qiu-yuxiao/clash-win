@@ -143,23 +143,67 @@ UT_TEST(t12_titlebar_uses_theme_vars) {
   rt().clear({1, 1, 1, 1});
   tb.on_paint(rt());
   rt().end_frame();
-  // 标题栏背景 = --background-color light #ECECEC（非窗口底 #F5F5F5！）
+  // 标题栏背景（Original）：layout.scss:452 var(--theme-bg) 覆写 inline
+  //   = use-custom-theme.ts:421 light #f5f5f5
   Px bg = pixel(135, 5);
-  UT_CHECK(bg.r > 0xE4 && bg.r < 0xF2 && bg.b > 0xE4 && bg.b < 0xF2);
-  // 底边 divider（rgba(0,0,0,0.06) 混白 ≈ #F2）
-  Px div = pixel(135, 28);
-  UT_CHECK(div.r < 0xFA && div.b < 0xFA);
+  UT_CHECK(bg.r > 0xF0 && bg.r < 0xFB && bg.b > 0xF0 && bg.b < 0xFB);
+  // 底边 divider（rgba(0,0,0,0.06) 混底 ≈ 略暗）；bottom-1 = y29
+  Px div = pixel(135, 29);
+  UT_CHECK(div.r < bg.r && div.b < bg.b);
 
-  // 暗色：#2E303D
+  // 暗色：use-custom-theme.ts:422 #121212
   svc.set_mode(ThemeMode::Dark);
   rt().begin_frame();
   rt().clear({0, 0, 0, 1});
   tb.on_paint(rt());
   rt().end_frame();
   Px dark_bg = pixel(135, 5);
-  UT_CHECK(dark_bg.r > 0x24 && dark_bg.r < 0x38 && dark_bg.b > 0x30 &&
-           dark_bg.b < 0x46);
+  UT_CHECK(dark_bg.r > 0x08 && dark_bg.r < 0x1E && dark_bg.b > 0x08 &&
+           dark_bg.b < 0x1E);
   svc.init(SkinId::Retro3d, ThemeMode::Light);
+}
+
+UT_TEST(t12_titlebar_retro3d_bg_alpha) {
+  make_offscreen(300, 60, 96);
+  auto& svc = ThemeService::instance();
+  // retro-3d：layout.scss:166 rgba(base-rgb, 1-0.2×1.0)=0.8（:323 无 retro 覆写）
+  //   base-rgb ← use-custom-theme.ts:466-468 light 240,245,255 / dark 15,20,35
+  svc.init(SkinId::Retro3d, ThemeMode::Light);
+  win::TitleBar tb(nullptr);
+  tb.layout_tree({0, 0, 271, 30});
+  rt().begin_frame();
+  rt().clear({1, 1, 1, 1});
+  tb.on_paint(rt());
+  rt().end_frame();
+  // 0.8×(240,245,255) + 0.2×白 ≈ (243,247,255)
+  Px bg = pixel(135, 5);
+  UT_CHECK(bg.r > 0xED && bg.r < 0xF9 && bg.b > 0xF9);
+  svc.set_mode(ThemeMode::Dark);
+  rt().begin_frame();
+  rt().clear({0, 0, 0, 1});
+  tb.on_paint(rt());
+  rt().end_frame();
+  // 0.8×(15,20,35) + 0.2×黑 ≈ (12,16,28)
+  Px dark_bg = pixel(135, 5);
+  UT_CHECK(dark_bg.r > 0x04 && dark_bg.r < 0x16 && dark_bg.b > 0x10 &&
+           dark_bg.b < 0x2C);
+  svc.init(SkinId::Retro3d, ThemeMode::Light);
+}
+
+UT_TEST(t12_titlebar_appicon_16) {
+  make_offscreen(300, 60, 96);
+  auto& svc = ThemeService::instance();
+  svc.init(SkinId::Retro3d, ThemeMode::Light);
+  win::TitleBar tb(nullptr);
+  tb.layout_tree({0, 0, 271, 30});
+  // src: _layout.tsx:1149-1150 AppIcon 16×16；padding-left 10（:1130）→ x=10
+  auto* icon = tb.icon();
+  UT_CHECK(icon != nullptr);
+  UT_CHECK(icon->bounds().w == 16.0f && icon->bounds().h == 16.0f);
+  UT_CHECK(icon->bounds().x == 10.0f);
+  UT_CHECK(icon->bounds().y == 7.0f);  // (30-16)/2 垂直居中
+  // pointerEvents: 'none'（src: _layout.tsx:1152）→ 不吞命中
+  UT_CHECK(!icon->hit_self({8, 8}));
 }
 
 UT_TEST(t12_close_hover_red_both_modes) {
@@ -178,7 +222,8 @@ UT_TEST(t12_close_hover_red_both_modes) {
     rt().clear({1, 1, 1, 1});
     close->on_paint(rt());
     rt().end_frame();
-    Px hp = pixel(static_cast<int>(b.x + 4), static_cast<int>(b.y + 4));
+    // 【PAINTFIX】on_paint 以局部坐标绘制：在 (4,4) 采样按钮左上角
+    Px hp = pixel(4, 4);
     UT_CHECK_MSG(hp.r > 200 && hp.g < 90 && hp.b < 90,
                  "close hover red in mode");
   }

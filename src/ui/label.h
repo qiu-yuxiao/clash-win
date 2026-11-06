@@ -17,6 +17,9 @@ class Label : public Widget {
 
   SizeF on_measure(float max_w, float max_h) override;
   void on_paint(IRenderTarget& rt) override;
+  // 文本不吞鼠标：让 Click/悬停落到父级按钮/段选/输入框
+  // （否则点段选文字时命中 Label，父控件收不到 Up，表现为“点了没反应”）
+  bool hit_self(PointF) const override { return false; }
 };
 
 }  // namespace clashwin::ui

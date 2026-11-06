@@ -12,6 +12,7 @@
 #include <sstream>
 #include <thread>
 
+#include "clashwin/config/constants.h"
 #include "events/event_bus.h"
 #include "system/net_http.h"
 #include "util/dirs.h"
@@ -101,7 +102,7 @@ class DefaultCoreUpdateDownloader : public ICoreUpdateDownloader {
 
     std::wstring proxy_str;
     if (proxy_type == system::ProxyType::Localhost) {
-      proxy_str = L"127.0.0.1:10801";
+      proxy_str = L"127.0.0.1:" + std::to_wstring(static_cast<uint32_t>(config::consts::kDefaultMixed));
     } else if (proxy_type == system::ProxyType::System) {
       auto sys = system::read_system_proxy();
       if (sys.has_value()) proxy_str = utf8_to_utf16(*sys);
@@ -612,7 +613,7 @@ Result<void> CoreUpdater::start_core_upgrade(const GithubRelease& release) {
     if (lifecycle_ops_.has_value() && lifecycle_ops_->start) {
       lifecycle_ops_->start();
     } else {
-      CoreManager::instance().start_sidecar(util::dirs::clash_mini_path());
+      CoreManager::instance().start_auto(util::dirs::clash_mini_path());
     }
     if (saved_proxy_now.has_value() && api_client_) {
       CoreManager::instance().restore_proxy_group_now(*api_client_, *saved_proxy_now);
@@ -626,7 +627,7 @@ Result<void> CoreUpdater::start_core_upgrade(const GithubRelease& release) {
   if (lifecycle_ops_.has_value() && lifecycle_ops_->start) {
     start_res = lifecycle_ops_->start();
   } else {
-    start_res = CoreManager::instance().start_sidecar(util::dirs::clash_mini_path());
+    start_res = CoreManager::instance().start_auto(util::dirs::clash_mini_path());
   }
 
   if (!start_res.is_ok()) {

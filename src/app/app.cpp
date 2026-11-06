@@ -1,5 +1,7 @@
 #include "app/app.h"
 
+#include <windows.h>
+
 #include "app/lifecycle.h"
 #include "app/scheme.h"
 #include "app/singleton.h"
@@ -44,7 +46,8 @@ namespace {
 constexpr UINT kAppWakeupMsg = WM_APP + 1;
 
 // T18：启动收敛视图（← sysopt.rs:132-143；clash mixed_port 兜底）
-system::Sysopt::VergeView make_startup_sysproxy_view() {
+// pac_port：PAC URL 端口，必须传单实例服务器运行时实际绑定端口
+system::Sysopt::VergeView make_startup_sysproxy_view(uint16_t pac_port) {
   auto verge = config::Config::instance().verge().latest_arc();
   uint16_t clash_port = 0;
   auto mapping = config::Config::instance().clash().latest_arc()->mapping();
@@ -55,8 +58,7 @@ system::Sysopt::VergeView make_startup_sysproxy_view() {
       clash_port = 0;
     }
   }
-  return system::make_verge_view(*verge, clash_port,
-                                 config::consts::kSingletonPort);
+  return system::make_verge_view(*verge, clash_port, pac_port);
 }
 }  // namespace
 
@@ -91,7 +93,7 @@ bool App::init() {
   if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return false;
   wsa_inited_ = true;
 
-  uint16_t port = consts::kSingletonPort;
+  uint16_t port = config::consts::kSingletonPort;
   if (const char* env = getenv("CLASHWIN_SINGLETON_PORT")) {
     int p = atoi(env);
     if (p > 0 && p < 65536) port = static_cast<uint16_t>(p);
@@ -112,17 +114,32 @@ bool App::init() {
         }).detach();
       });
 
+  bool port_taken_by_other = false;
   if (!bound) {
-    int argc = 0;
-    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    app::SingletonClient::notify_or_exit(singleton_port_, argc, argv, /*do_exit=*/true);
-    if (argv) LocalFree(argv);
-    return false;
+    // bind 失败：先探测端口上是否确实是 Clash Win 前代实例（/commands/visible
+    // 返回 200 才算），确认后才唤醒并退出；若是其它程序占用则继续启动，
+    // 绝不把别人的端口当成自己人、绝不静默退出。
+    int probe = app::SingletonClient::send_request(singleton_port_, "/commands/visible");
+    if (probe != 200) {
+      port_taken_by_other = true;
+    } else {
+      int argc = 0;
+      LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+      app::SingletonClient::notify_or_exit(singleton_port_, argc, argv, /*do_exit=*/true);
+      if (argv) LocalFree(argv);
+      return false;
+    }
   }
 
   if (!init_logger()) return false;
-  CWLOG_INFO(std::format("App::init：单实例 bind {} 成功，首实例启动",
-                         singleton_port_));
+  if (port_taken_by_other) {
+    CWLOG_WARN(std::format(
+        "App::init：端口 {} 被非 Clash Win 进程占用，跳过单实例服务继续启动",
+        singleton_port_));
+  } else {
+    CWLOG_INFO(std::format("App::init：单实例 bind {} 成功，首实例启动",
+                           singleton_port_));
+  }
 
   // T25: 预置离线资源包释放（Country.mmdb, geosite.dat, ruleset/gfwlist.yaml）
   (void)system::init_resources(util::dirs::app_home_dir(),
@@ -164,6 +181,9 @@ bool App::init() {
 
   // T12：主题服务初始化（缺省 retro-3d/light；皮肤/亮暗切换 T17 接 verge）
   ui::theme::ThemeService::instance().init();
+
+  // T09：装配命令注册表（必须在任何 invoke 之前——抽屉/定时器/托盘命令链依赖）
+  cmd::CommandService::instance().install_all();
 
   // T15：订阅定时更新（默认 1440min/过期补跑/失败 2min 重试/切换互斥）
   {
@@ -264,7 +284,7 @@ bool App::init() {
           else if (t == system::GuardType::Autoproxy)
             (void)acc->write_autoproxy(a);
         });
-    auto view = make_startup_sysproxy_view();
+    auto view = make_startup_sysproxy_view(app::current_singleton_port());
     (void)sysopt.update_sysproxy(view);
     sysopt.refresh_guard(view);
 
@@ -274,18 +294,35 @@ bool App::init() {
         /*.api_alive =*/[] {
           return cmd::mihomo_unchecked().get_base_config().is_ok();
         },
-        /*.core_alive =*/[] { return core::CoreManager::instance().sidecar_alive(); },
+        /*.core_alive =*/[] { return core::CoreManager::instance().core_alive(); },
         /*.restart_core =*/
         [] {
+          // ← Verge start_core_by_sidecar：先 generate_file(Run) 重生成运行时
+          //   产物再起内核（档案增删改后守护拉起才不会用陈旧配置）
+          auto outcome = cmd::run_enhance_pipeline();
+          if (!outcome.is_valid()) {
+            // 失败必须留痕：此前这里只有 WARN 且后续启动失败静默，
+            // 导致“内核反复静默退出→自动重启”却查不到 enhance 的真实错误
+            CWLOG_WARN("restart_core: enhance pipeline invalid: " + outcome.message);
+          } else {
+            CWLOG_INFO("restart_core: enhance pipeline ok（clash-win.yaml 已重生成）");
+          }
           auto& mgr = core::CoreManager::instance();
           core::CoreApiClientAdapter api(&cmd::mihomo_unchecked());
           core::CoreOps ops;
           ops.start = [] {
-            return core::CoreManager::instance().start_sidecar(
+            return core::CoreManager::instance().start_auto(
                 util::dirs::clash_mini_path());
           };
           ops.stop = [] { return core::CoreManager::instance().stop(); };
-          return mgr.restart_with_restore(api, ops);
+          auto rr = mgr.restart_with_restore(api, ops);
+          if (!rr.is_ok()) {
+            CWLOG_WARN("restart_core: 内核重启失败: " + rr.error().message);
+          }
+          // ← Verge：内核起来后 handle.refresh_clash()，UI 据此重取 PROXY 组
+          //   （否则启动期 fetch 失败后主页列表永远空）
+          events::EventBus::refresh_clash();
+          return rr;
         },
         /*.network_online =*/
         [] {
@@ -343,6 +380,20 @@ bool App::init() {
         },
         /*.now_ms =*/[] { return static_cast<int64_t>(GetTickCount64()); },
     });
+
+    // ← clash.rs::start_core（启动收敛）：主动重生成运行时配置并拉起内核。
+    //   此前这里只装配 CoreMonitor hooks，从不主动 start_core，只能等守护
+    //   空转重试。一旦内核没在跑（首次启动/上次异常退出），clash-win.yaml
+    //   就停留在旧内容（mixed-port: 7890、/proxies 无 PROXY 组），10811 永远
+    //   不通。start_core 内部 = enhance pipeline → start_sidecar → refresh_clash。
+    auto startup_core = cmd::CommandService::instance().invoke("start_core");
+    if (!startup_core.is_ok()) {
+      CWLOG_WARN("App::init：start_core 失败（内核未启动）: " +
+                 startup_core.error().message);
+    } else {
+      CWLOG_INFO("App::init：start_core 完成（运行时配置已重生成、内核已拉起）");
+    }
+
     monitor.start();
   }
 
@@ -355,12 +406,10 @@ int App::run() { return ui::win::MainWindow::run(); }
 // ---------- 日志 ----------
 
 bool App::init_logger() {
-  wchar_t exe_path[MAX_PATH] = {};
-  GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
-  std::wstring exe_dir(exe_path);
-  size_t pos = exe_dir.find_last_of(L"\\/");
-  if (pos != std::wstring::npos) exe_dir.resize(pos);
-  Logger::instance().init(exe_dir);
+  // 【INSTALLFIX】perMachine 安装目录（Program Files）对非管理员不可写：
+  // 日志必须落在 app_home_dir（%APPDATA%\<APPID>，← dirs.rs::app_logs_dir），
+  // 否则 CreateFileW 静默失败 → 装机版完全没有主日志。
+  Logger::instance().init(util::dirs::app_home_dir());
   return true;
 }
 

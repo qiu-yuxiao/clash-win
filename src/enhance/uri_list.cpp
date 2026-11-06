@@ -199,7 +199,10 @@ std::vector<std::string> decode_alpn_list(std::string_view v) {
 // ← extract_host_port
 std::optional<std::pair<std::string, uint16_t>> extract_host_port(
     std::string_view host_port, uint16_t default_port) {
-  host_port = trim(host_port);
+  // trim 返回 std::string 临时对象：必须实体化持有，直接赋给 string_view
+  // 会悬垂（Debug 堆读回 0xCD 垃圾，>15B 非 SSO 输入必现）
+  const std::string host_port_owned = trim(host_port);
+  host_port = host_port_owned;
   if (!host_port.empty() && host_port.front() == '[') {
     size_t close = host_port.find(']');
     if (close == std::string_view::npos) return std::nullopt;

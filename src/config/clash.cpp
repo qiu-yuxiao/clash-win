@@ -8,6 +8,7 @@
 
 #include "clashwin/config/constants.h"
 #include "migrate.h"
+#include "system/network_info.h"
 #include "util/dirs.h"
 #include "util/log.h"
 #include "util/str_utils.h"
@@ -157,7 +158,8 @@ uint16_t IClashTemp::guard_socks_port(const YAML::Node& map) {
   return clash::guard_port_common(map, "socks-port", consts::kDefaultSocks);
 }
 uint16_t IClashTemp::guard_port(const YAML::Node& map) {
-  // ← clash.rs:283：http port 兜底是 7899（非 10803）
+  // ← clash.rs:283 形态：http port 兜底与模板默认分离（Mini 为 7899/10803，
+  // Clash Win 共存错开为 kHttpGuardFallback(10814)/kDefaultHttp(10813)）
   return clash::guard_port_common(map, "port", consts::kHttpGuardFallback);
 }
 
@@ -204,6 +206,29 @@ void IClashTemp::apply_guard() {
   serde::set_u16(mapping_, "port", guard_port(mapping_));
   mapping_["external-controller"] = guard_external_controller(mapping_);
   mapping_["external-controller-pipe"] = guard_external_controller_ipc();
+
+  // 【P0-6】内核出网钉物理网卡。事故：同机 Clash Mini 的 TUN 抢走 0.0.0.0/0
+  // 并劫持 any:53，本内核解析节点域名拿到 198.18.x.x 假 IP，连接被送进 Mini 的
+  // TUN 后超时 → mixed-port 全部 502。显式配置 interface-name 时尊重用户值。
+  const YAML::Node in = mapping_["interface-name"];
+  if (!in || !in.IsScalar() || in.IsNull() || in.Scalar().empty()) {
+    std::string nic = system::detect_outbound_interface();
+    if (!nic.empty()) {
+      mapping_["interface-name"] = nic;
+      CWLOG_INFO("[P0-6] interface-name=" + nic);
+    }
+  }
+
+  // 【P0-6】DNS 服务端口与同机其它内核隔离（Mini 默认占 :53）。不隔离时
+  // 本内核启动报 "Start DNS server(UDP) error: listen udp :53 ... permitted"。
+  YAML::Node dns = mapping_["dns"];
+  if (dns && dns.IsMap()) {
+    const YAML::Node ln = dns["listen"];
+    const std::string s = (ln && ln.IsScalar()) ? ln.Scalar() : std::string();
+    if (s.empty() || s == ":53" || s == "0.0.0.0:53" || s == "127.0.0.1:53") {
+      dns["listen"] = "127.0.0.1:1053";
+    }
+  }
 }
 
 IClashTemp::ClashInfo IClashTemp::get_client_info() const {

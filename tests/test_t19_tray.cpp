@@ -1,7 +1,7 @@
 // T19 测试：系统托盘 (3态/300ms防抖/2项菜单) + 轻量模式 (D2D/WS释放恢复/EventBus静音)
-// + 单实例 (TCP 33336/SO_REUSEADDR/HTTP路由) + PAC 端口替换 + 深层链接 (clash:// 解码/条件重载)
+// + 单实例 (TCP 33337/SO_EXCLUSIVEADDRUSE/HTTP路由) + PAC 端口替换 + 深层链接 (clash:// 解码/条件重载)
 // 【铁律】全部使用 MockTrayBackend / MockLifecycleWindow / 隔离端口进行测试，
-// 绝不触发真实 Windows 任务栏图标闪烁、绝不占用 33335 端口、绝不污染真实注册表。
+// 绝不触发真实 Windows 任务栏图标闪烁、绝不占用 33335/33336 端口、绝不污染真实注册表。
 #include "test_util.h"
 
 #include <string>
@@ -155,13 +155,13 @@ UT_TEST(t19_tray_tooltip_and_menu_definition) {
   auto* raw_mock = mock.get();
   Tray tray(std::move(mock));
 
-  // Tooltip = 独立品牌 "Clash Win"（品牌独立裁决：不再与 Clash Mini 原版一致）
+  // Tooltip = 产品显示名 "Clash Win"（中间一个空格）
   UT_CHECK_EQ(tray.tooltip(), L"Clash Win");
 
   HWND dummy_hwnd = reinterpret_cast<HWND>(0x1234);
   tray.init(dummy_hwnd);
 
-  // 默认状态下展示右键菜单：菜单项必须正好 2 项
+  // 默认状态下展示右键菜单：菜单项必须正好 2 项（轻量模式 + 退出）
   POINT pt{100, 100};
   tray.update_lite_mode_menu(false);
   raw_mock->show_menu(dummy_hwnd, pt, tray.is_lite_mode_checked(), nullptr);
@@ -307,10 +307,10 @@ UT_TEST(t19_lightweight_mode_resource_teardown_and_restore) {
 }
 
 // =========================================================================
-// 5. 单实例服务端 SO_REUSEADDR 与 HTTP 路由端点验证
+// 5. 单实例服务端 SO_EXCLUSIVEADDRUSE 独占绑定与 HTTP 路由端点验证
 // =========================================================================
-UT_TEST(t19_singleton_server_so_reuseaddr_and_endpoints) {
-  // 使用专用测试端口（33342），绝不与实机 Clash Mini (33335) 或默认 ClashWin (33336) 冲突
+UT_TEST(t19_singleton_server_exclusiveaddruse_and_endpoints) {
+  // 使用专用测试端口（33342），绝不与实机 Clash Mini (33335/33336) 或默认 ClashWin (33337) 冲突
   const uint16_t kTestPort = 33342;
 
   SingletonServer server;
@@ -358,7 +358,17 @@ UT_TEST(t19_singleton_server_so_reuseaddr_and_endpoints) {
   UT_CHECK_EQ(code_404, 404);
   UT_CHECK(resp_404.find("404 Not Found") != std::string::npos);
 
-  // ⑤ 验证 SO_REUSEADDR：关闭后立即在同端口重启，绝不发生 WSAEADDRINUSE
+  // ⑤ SO_EXCLUSIVEADDRUSE 独占语义：服务运行中，第二个实例同端口 bind 必须失败，
+  // 杜绝 Windows 下 SO_REUSEADDR 的重复绑定/端口劫持（第二实例不得静默"自唤醒"）
+  SingletonServer second;
+  bool second_ok = second.start(kTestPort, nullptr, nullptr);
+  UT_CHECK(!second_ok);
+  UT_CHECK(!second.is_running());
+  // 原服务不受影响，仍可正常响应
+  UT_CHECK(server.is_running());
+  UT_CHECK_EQ(SingletonClient::send_request(kTestPort, "/commands/visible"), 200);
+
+  // ⑥ stop 后立即在同端口重启：独占绑定随 closesocket 释放，不应发生 WSAEADDRINUSE
   server.stop();
   UT_CHECK(!server.is_running());
 
@@ -445,12 +455,13 @@ UT_TEST(t19_deep_link_import_core_reload_condition) {
 // 9. 安全红线测试：常量端口隔离与零任务栏污染
 // =========================================================================
 UT_TEST(t19_host_safety_and_no_port_conflict) {
-  // ClashWin 默认单例端口必须为 33336
-  uint16_t singleton_port = clashwin::consts::kSingletonPort;
-  UT_CHECK_EQ(singleton_port, 33336);
+  // Clash Win 默认单例端口必须为统一的 config::consts::kSingletonPort = 33337
+  uint16_t singleton_port = config::consts::kSingletonPort;
+  UT_CHECK_EQ(singleton_port, 33337);
 
-  // 严格杜绝使用 33335（保护主机上运行的 ClashVerge/Clash Mini）
+  // 严格错开 Clash Mini 占用的 33335/33336（保护主机上同时运行的 Clash Mini）
   UT_CHECK(singleton_port != 33335);
+  UT_CHECK(singleton_port != 33336);
 
   // MockTrayBackend 验证：没有真实 Shell 调用产生
   MockTrayBackend mock;

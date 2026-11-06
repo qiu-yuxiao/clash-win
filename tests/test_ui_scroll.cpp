@@ -13,6 +13,8 @@ struct ListFixture {
   ScrollList list;
   int created = 0;
   ListFixture() {
+    // 豁免: 虚拟滚动用例的行高为测试夹具任意值（非节点列表 kNodeRowH=26），
+    //   目的只是验证「可视区+overscan」语义。
     list.set_content(1000, 39.0f,
                      [this](int index) {
                        ++created;
@@ -56,8 +58,8 @@ UT_TEST(ui_scroll_wheel_and_window_slide) {
   ListFixture fx;
   int scrolls = 0;
   fx.list.on_scroll = [&] { ++scrolls; };
-  // 滚轮一格 = 3 行 = 117px
-  wheel_at(&fx.list, 100, 200, 120);
+  // 滚轮一格 = 3 行 = 117px（Windows 向下 delta=-120，见 scroll_list.cpp:105-107）
+  wheel_at(&fx.list, 100, 200, -120);
   UT_CHECK(near_f(fx.list.scroll_offset(), 117));
   UT_CHECK_EQ(scrolls, 1);
   // 物化窗口滑动：0..15 → 卸载顶部、物化底部
@@ -65,7 +67,7 @@ UT_TEST(ui_scroll_wheel_and_window_slide) {
   UT_CHECK_EQ(idx.front(), 0);   // first=-2 → clamp 0
   UT_CHECK_EQ(idx.back(), 18);   // (117+390)/39=13 → +5
   // 连滚到深处：物化数恒有界（不随 1000 项增长）
-  for (int i = 0; i < 30; ++i) wheel_at(&fx.list, 100, 200, 120);
+  for (int i = 0; i < 30; ++i) wheel_at(&fx.list, 100, 200, -120);
   idx = fx.list.materialized_indices();
   UT_CHECK(idx.size() <= 25);
   // 滚出可视区的行已卸载
@@ -86,7 +88,7 @@ UT_TEST(ui_scroll_wheel_bubbles_to_container) {
   Column root;
   root.add_child(std::unique_ptr<ScrollList>(&fx.list));  // 所有权转 root
   root.layout_tree({0, 0, 271, 390});
-  wheel_at(&root, 100, 100, 120);
+  wheel_at(&root, 100, 100, -120);
   UT_CHECK(near_f(fx.list.scroll_offset(), 117));
   root.remove_child(&fx.list).release();  // 归还所有权避免双销毁（fixture 接管）
 }

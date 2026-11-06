@@ -31,40 +31,40 @@ IClashTemp map_with(std::initializer_list<std::pair<const char*, std::string>> k
 UT_TEST(t03_guard_mixed_port_cases) {
   // ← clash.rs::guard_mixed_port + 官方用例
   UT_CHECK_EQ(IClashTemp::guard_mixed_port(YAML::Node(YAML::NodeType::Map)),
-              10801);  // 缺失 → 默认
+              10811);  // 缺失 → 默认
   UT_CHECK_EQ(IClashTemp::guard_mixed_port(map_with({{"mixed-port", "0"}}).mapping()),
-              10801);  // 0 → 默认
+              10811);  // 0 → 默认
   UT_CHECK_EQ(IClashTemp::guard_mixed_port(map_with({{"mixed-port", "8888"}}).mapping()),
               8888);
   UT_CHECK_EQ(IClashTemp::guard_mixed_port(map_with({{"mixed-port", "65537"}}).mapping()),
               1);  // u16 截断（Rust as u16 wrapping）
   UT_CHECK_EQ(IClashTemp::guard_mixed_port(map_with({{"mixed-port", ""}}).mapping()),
-              10801);
+              10811);
   UT_CHECK_EQ(IClashTemp::guard_mixed_port(map_with({{"mixed-port", "abc"}}).mapping()),
-              10801);
+              10811);
   // 字符串数字可解析
   UT_CHECK_EQ(IClashTemp::guard_mixed_port(map_with({{"mixed-port", "7897"}}).mapping()),
               7897);
 }
 
 UT_TEST(t03_guard_socks_and_http_port) {
-  UT_CHECK_EQ(IClashTemp::guard_socks_port(YAML::Node(YAML::NodeType::Map)), 10802);
+  UT_CHECK_EQ(IClashTemp::guard_socks_port(YAML::Node(YAML::NodeType::Map)), 10812);
   UT_CHECK_EQ(IClashTemp::guard_socks_port(map_with({{"socks-port", "0"}}).mapping()),
-              10802);
-  // ← clash.rs:283：http port 兜底是 7899
-  UT_CHECK_EQ(IClashTemp::guard_port(YAML::Node(YAML::NodeType::Map)), 7899);
-  UT_CHECK_EQ(IClashTemp::guard_port(map_with({{"port", "0"}}).mapping()), 7899);
-  UT_CHECK_EQ(IClashTemp::guard_port(map_with({{"port", "10803"}}).mapping()), 10803);
+              10812);
+  // ← clash.rs:283 形态：http port 兜底（Mini 7899 → Clash Win 错开为 10814）
+  UT_CHECK_EQ(IClashTemp::guard_port(YAML::Node(YAML::NodeType::Map)), 10814);
+  UT_CHECK_EQ(IClashTemp::guard_port(map_with({{"port", "0"}}).mapping()), 10814);
+  UT_CHECK_EQ(IClashTemp::guard_port(map_with({{"port", "10813"}}).mapping()), 10813);
 }
 
 UT_TEST(t03_guard_controller_parse_cases) {
   // ← clash.rs::test_clash_info 官方用例（external-controller 解析）
   UT_CHECK_EQ(IClashTemp::guard_server_ctrl(YAML::Node(YAML::NodeType::Map)),
-              std::string("127.0.0.1:9098"));
+              std::string("127.0.0.1:9108"));
   UT_CHECK_EQ(IClashTemp::guard_server_ctrl(map_with({{"external-controller", ""}}).mapping()),
-              std::string("127.0.0.1:9098"));
+              std::string("127.0.0.1:9108"));
   UT_CHECK_EQ(IClashTemp::guard_server_ctrl(map_with({{"external-controller", "   :98888 "}}).mapping()),
-              std::string("127.0.0.1:9098"));  // 越界端口 → 非法 → 默认
+              std::string("127.0.0.1:9108"));  // 越界端口 → 非法 → 默认
   UT_CHECK_EQ(IClashTemp::guard_server_ctrl(map_with({{"external-controller", "127.0.0.1:8888"}}).mapping()),
               std::string("127.0.0.1:8888"));
   UT_CHECK_EQ(IClashTemp::guard_server_ctrl(map_with({{"external-controller", "0.0.0.0:8080"}}).mapping()),
@@ -74,7 +74,7 @@ UT_TEST(t03_guard_controller_parse_cases) {
   UT_CHECK_EQ(IClashTemp::guard_server_ctrl(map_with({{"external-controller", "192.168.1.1:8080"}}).mapping()),
               std::string("192.168.1.1:8080"));
   UT_CHECK_EQ(IClashTemp::guard_server_ctrl(map_with({{"external-controller", "192.168.1.1:80800"}}).mapping()),
-              std::string("127.0.0.1:9098"));
+              std::string("127.0.0.1:9108"));
   UT_CHECK_EQ(IClashTemp::guard_server_ctrl(map_with({{"external-controller", ":9888"}}).mapping()),
               std::string("127.0.0.1:9888"));  // ':' 前缀补 127.0.0.1
 
@@ -88,10 +88,10 @@ UT_TEST(t03_guard_controller_parse_cases) {
 UT_TEST(t03_guard_client_info) {
   IClashTemp empty;
   auto info = empty.get_client_info();
-  UT_CHECK_EQ(info.mixed_port, 10801);
-  UT_CHECK_EQ(info.socks_port, 10802);
-  UT_CHECK_EQ(info.port, 7899);
-  UT_CHECK_EQ(info.server, std::string("127.0.0.1:9098"));
+  UT_CHECK_EQ(info.mixed_port, 10811);
+  UT_CHECK_EQ(info.socks_port, 10812);
+  UT_CHECK_EQ(info.port, 10814);
+  UT_CHECK_EQ(info.server, std::string("127.0.0.1:9108"));
   UT_CHECK(!info.secret.has_value());
   UT_CHECK(!info.ipv6);
   UT_CHECK(!info.allow_lan);
@@ -112,41 +112,41 @@ UT_TEST(t03_guard_client_info) {
 }
 
 UT_TEST(t03_controller_conflict_finds_free_port) {
-  // 独占 9098 → load/resolve 自动寻 9099 起的空闲口
+  // 独占 9108 → load/resolve 自动寻 9109 起的空闲口
   WSADATA wsa;
   WSAStartup(MAKEWORD(2, 2), &wsa);
   SOCKET blocker = socket(AF_INET, SOCK_STREAM, 0);
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
-  addr.sin_port = htons(9098);
+  addr.sin_port = htons(9108);
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   UT_CHECK(bind(blocker, (sockaddr*)&addr, sizeof(addr)) == 0);
   UT_CHECK(listen(blocker, 1) == 0);
 
-  // 9098 被占且探测无成功响应 → 冲突；寻位从 9098 起找到 9099
-  UT_CHECK(IClashTemp::is_port_conflict(9098, "x"));
-  UT_CHECK_EQ(IClashTemp::find_free_controller_port(9098), 9099);
+  // 9108 被占且探测无成功响应 → 冲突；寻位从 9108 起找到 9109
+  UT_CHECK(IClashTemp::is_port_conflict(9108, "x"));
+  UT_CHECK_EQ(IClashTemp::find_free_controller_port(9108), 9109);
 
   YAML::Node m(YAML::NodeType::Map);
-  m["external-controller"] = "127.0.0.1:9098";
-  m["secret"] = "adapted-by-qiu-yuxiao";
+  m["external-controller"] = "127.0.0.1:9108";
+  m["secret"] = "adapted-by-clash-win";
   IClashTemp c(m);
   c.resolve_controller_conflict();
   UT_CHECK_EQ(c.mapping()["external-controller"].Scalar(),
-              std::string("127.0.0.1:9099"));
+              std::string("127.0.0.1:9109"));
 
   closesocket(blocker);
   WSACleanup();
 
-  // 空闲时保持 9098
-  UT_CHECK(!IClashTemp::is_port_conflict(9098, "x"));
+  // 空闲时保持 9108
+  UT_CHECK(!IClashTemp::is_port_conflict(9108, "x"));
   YAML::Node m2(YAML::NodeType::Map);
-  m2["external-controller"] = "127.0.0.1:9098";
-  m2["secret"] = "adapted-by-qiu-yuxiao";
+  m2["external-controller"] = "127.0.0.1:9108";
+  m2["secret"] = "adapted-by-clash-win";
   IClashTemp c2(m2);
   c2.resolve_controller_conflict();
   UT_CHECK_EQ(c2.mapping()["external-controller"].Scalar(),
-              std::string("127.0.0.1:9098"));
+              std::string("127.0.0.1:9108"));
 }
 
 UT_TEST(t03_secret_fix_and_load_pipeline) {
@@ -173,9 +173,9 @@ UT_TEST(t03_secret_fix_and_load_pipeline) {
   UT_CHECK_EQ(serde::opt_u32(c.mapping(), "config_version"), 2u);
   UT_CHECK_EQ(c.mapping()["tun"]["stack"].Scalar(), std::string("gvisor"));
   // secret 修正
-  UT_CHECK_EQ(c.mapping()["secret"].Scalar(), std::string("adapted-by-qiu-yuxiao"));
+  UT_CHECK_EQ(c.mapping()["secret"].Scalar(), std::string("adapted-by-clash-win"));
   // 模板键补齐 + guard
-  UT_CHECK_EQ(c.get_mixed_port(), 10801);  // 0 → 回退
+  UT_CHECK_EQ(c.get_mixed_port(), 10811);  // 0 → 回退
   UT_CHECK_EQ(c.mapping()["log-level"].Scalar(), std::string("warning"));
   UT_CHECK_EQ(c.mapping()["unified-delay"].Scalar(), std::string("true"));
   // 迁移前备份存在

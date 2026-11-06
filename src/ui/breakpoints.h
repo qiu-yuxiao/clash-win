@@ -28,8 +28,8 @@ inline constexpr double kMiniHeightThreshold = 126;  // 极小窗高度门槛
 inline constexpr double kMiniPhysSlack = 1;
 
 // ---- 主场景骨架常量（← _layout.tsx:119-120 / window-provider FEAT-003） ----
-inline constexpr int kTrafficPaneWide = 135;     // TRAFFIC_PANE_HEIGHT_WIDE
-inline constexpr int kTrafficPaneMinimal = 100;  // TRAFFIC_PANE_HEIGHT_MINIMAL
+inline constexpr int kTrafficPaneWide = 135;     // src: _layout.tsx:119
+inline constexpr int kTrafficPaneMinimal = 100;  // src: _layout.tsx:120 TRAFFIC_PANE_HEIGHT_MINIMAL
 inline constexpr int kTitleBarH = 30;            // 标题栏高
 inline constexpr int kIdleHideDelayMs = 10000;   // FEAT-003 空闲隐藏标题栏
 

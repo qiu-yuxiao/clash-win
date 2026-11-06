@@ -27,11 +27,13 @@ class Slider : public Widget {
   void on_paint(IRenderTarget& rt) override;
 
   // 绘制参数
-  Color4f track_ = Color4f::hex(0x000000, 0.20f);
-  Color4f fill_ = Color4f::hex(0x007AFF);
-  Color4f thumb_ = Color4f::hex(0x007AFF);
-  float thickness_ = 4;
-  float thumb_d_ = 14;
+  Color4f track_ = Color4f::hex(0x000000, 0.20f);  // ← 滑轨 20% 黑
+  Color4f fill_ = Color4f::hex(0x007AFF);  // ← 主色缺省（主题注入前）
+  Color4f thumb_ = Color4f::hex(0x007AFF);  // ← 主色缺省（主题注入前）
+  float thickness_ = 4;  // ← 轨厚 4
+  float thumb_d_ = 14;  // ← 滑块直径 14
+  // 金色立体（3D 停靠）← get3DSliderStyle retro-3d；true 时轨道/滑块走金渐变+描边
+  bool gold_3d_ = false;
 
  private:
   float value_at(float local_x);   // x → 量化值

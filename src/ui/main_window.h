@@ -26,11 +26,15 @@
 #include "title_bar.h"
 #include "widget.h"
 #include "container.h"
+#include "tooltip_w.h"
 #include "main_scene.h"
 #include "scenes/connection_data.h"
-#include "scenes/connections_view.h"
 #include "scenes/node_data.h"
 #include "scenes/settings_drawer.h"
+#include "scenes/utility_modals.h"
+#include "scenes/add_url_dialog.h"
+#include "scenes/first_run_guide_dialog.h"
+#include "scenes/unlock_dialog.h"
 #include "scenes/node_list.h"
 #include "scenes/quick_bar.h"
 #include "scenes/traffic_pane.h"
@@ -161,6 +165,18 @@ class LargeModeController {
 };
 
 // ---------- 主窗口 ----------
+// 内容区 Stack：铺满 scene，但抽屉只覆盖上栏（不含底部流量区），
+// 与 Mini .layout-content 结构一致（_layout.tsx:1267-1284 / 1760-1784：
+// 上栏承载 drawer，下栏 MiniTrafficPanel 固定高、抽屉不遮）。
+class ContentStack : public Stack {
+ public:
+  using Stack::Stack;
+  Widget* overlay = nullptr;   // 设置抽屉（唯一的非铺满子层）
+  float bottom_inset = 0.0f;   // = 下栏流量区高度（135/100 逻辑）
+
+  void on_arrange(const RectF& area) override;
+};
+
 class MainWindow : public app::ILifecycleWindow {
  public:
   // 创建窗口（restore 几何 → 注册类 → CreateWindow → D2D → Widget 树 → 定时器）
@@ -177,6 +193,7 @@ class MainWindow : public app::ILifecycleWindow {
   void reconnect_ws() override;
   void save_geometry(bool immediately) override;
 
+  void open_unlock_page();             // /unlock 整页（内部路由，无可见入口，同 Mini）
   void close_to_lightweight();         // 关闭按钮：隐藏 + entry_lightweight_mode
   void toggle_large();                 // 大尺寸 toggle（640×860 ↔ last-non-large）
   void minimize() { if (hwnd_) ShowWindow(hwnd_, SW_MINIMIZE); }
@@ -199,6 +216,9 @@ class MainWindow : public app::ILifecycleWindow {
   void update_conn_ws_state();  // T20：动态维护 connections WS 订阅生命周期
   void apply_geometry_restore();  // window_state.json 恢复（含脱屏居中）
 
+  void reload_nodes();                             // NodeData 加载 + QuickBar 同步（失败 2s 重试）
+  // 首启就绪轮询：只刷新 proxies/activeDelay，不触发组测速
+  void sync_first_run_proxy();
   void on_client_resized(int cw, int ch);          // WM_SIZE
   void persist_geometry(bool immediately = false); // WM_SIZE/WM_MOVE
   void pump_frame();                               // 33ms 帧泵
@@ -214,23 +234,40 @@ class MainWindow : public app::ILifecycleWindow {
   FrameClock clock_;
 
   Stack root_;            // Widget 树根（客户区；overlay 宿主）
+  TooltipHost* tooltip_host_ = nullptr;  // 悬停提示层（z 1200）
   Column* flow_ = nullptr;  // root_ 内流式层：Column{titlebar(30), scene(flex)}
+  ContentStack* content_ = nullptr;  // flow_ 第二层：Stack{scene, drawer}
   TitleBar* title_bar_ = nullptr;
   MainScene* scene_ = nullptr;
   // T13 场景
   std::unique_ptr<scene::NodeData> node_data_;
+  int node_retry_left_ = 0;  // 内核配置就绪竞态：取数重试剩余次数
   scene::QuickBar* quick_bar_ = nullptr;
+  bool pinned_ = false;  // QuickBar 图钉：窗口置顶开关
   scene::NodeList* node_list_ = nullptr;
   // T14 场景
   std::unique_ptr<scene::TrafficPane> traffic_pane_holder_;
   scene::TrafficPane* traffic_pane_ = nullptr;
   std::unique_ptr<scene::ConnectionData> conn_data_;
-  scene::ConnectionsView* conn_view_ = nullptr;
   scene::SettingsDrawer* settings_drawer_ = nullptr;
   bool drawer_mounted_ = false;
-  bool conn_view_mounted_ = false;
+  scene::LogViewerModal* log_viewer_ = nullptr;  // 主题卡“调试日志”弹窗（Mini 同构）
+  scene::UnlockDialog* unlock_page_ = nullptr;   // /unlock 整页（内部路由，无可见入口，同 Mini）
+  scene::AddUrlDialog* add_url_ = nullptr;  // 代理方式第三段“添加网址”（Mini 同构）
+  scene::FirstRunGuideDialog* first_run_ = nullptr;  // 首次运行向导（Mini 同构）
+  // 帮助菜单「检查软件更新 / 检查内核更新」→ 弹窗（Mini: _layout.tsx:1948/1956）
+  scene::ClientUpdateModal* client_update_ = nullptr;
+  scene::CoreUpdateModal* core_update_ = nullptr;
+  // 检查内核更新时拿到的原始 release JSON（升级时原样回传，← use-core-update.ts:88-106
+  //   前端持有 release 对象再 invoke start_core_upgrade）
+  std::string pending_core_release_json_;
+  // 客户端更新包的 manifest sha256 / Ed25519 签名（下载后校验）
+  std::string pending_client_sha256_;
+  std::string pending_client_signature_;
   std::unique_ptr<mihomo::WsManager> ws_;  // T14：traffic/connections WS
   uint64_t ws_sub_traffic_ = 0, ws_sub_conn_ = 0;
+  uint64_t theme_sub_ = 0;  // ThemeService 热切换订阅（切皮肤/亮暗 → 全窗重绘）
+  int64_t aurora_tick_ms_ = 0;  // 极光动画自续帧节流（10fps；src: layout.scss:23）
 
   Breakpoints bp_;
   StealthController stealth_;
@@ -240,6 +277,16 @@ class MainWindow : public app::ILifecycleWindow {
   std::unique_ptr<config::window_state::WindowStateStore> store_;
   int client_w_ = 0, client_h_ = 0;
   float dpi_ = 96.0f;
+  // 【DPIARCH】物理↔逻辑换算一律直读窗口实际 DPI（输入/落盘/恢复/热区共用），
+  //   杜绝 init 早期或换挡间隙 dpi_ 仍是 96 造成的 stale 双缩放/坐标错位。
+  float dpi_scale() const;
+  // 【DPIFIX】apply_geometry_restore 完成前禁止落盘：创建期 WM_SIZE 触发时
+  //   dpi_ 仍是默认 96，persist 会把物理 client（387×1000）当逻辑像素写盘，
+  //   restore 再钳到 860 → 581×1290 自污染循环
+  bool restore_done_ = false;
+  // 【DPIFIX】apply_geometry_restore 完成前禁止落盘：创建期 WM_SIZE 触发时
+  //   dpi_ 仍是默认 96（init_render 尚未换挡到 144），persist 会把物理像素
+  //   当逻辑像素写进 window_state.json（407×1020 污染 → 下次启动 ×1.5 = 610×1530）
   bool in_destroy_ = false;
   std::optional<std::pair<double, double>> last_non_large_restore_;  // 盘读
   std::optional<POINT> nc_down_;  // stealth 点击恢复判定

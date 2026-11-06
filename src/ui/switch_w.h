@@ -19,11 +19,11 @@ class SwitchW : public Widget {
 
   std::function<void(bool)> on_change;
 
-  // 绘制参数（T12 皮肤覆盖）
-  Color4f track_on_ = Color4f::hex(0x007AFF);
-  Color4f track_off_ = Color4f::hex(0x000000, 0.25f);
-  Color4f thumb_ = Color4f::hex(0xFFFFFF);
-  float width_ = 36, height_ = 20;  // iOS 风
+  // 绘制参数（T12 皮肤覆盖；缺省 = retro-3d 源码值，on_paint 内按主题重算）
+  Color4f track_on_ = Color4f::hex(0xFFC107);   // src: base-switch.tsx:99-103
+  Color4f track_off_ = Color4f::hex(0xD4AF37);  // src: base-switch.tsx:104-109
+  Color4f thumb_ = Color4f::hex(0xFFD54F);      // src: base-switch.tsx:84-97
+  float width_ = 28, height_ = 14;  // ← base-switch.tsx（small 同值强制，零内衬）
 
   SizeF on_measure(float max_w, float max_h) override;
   bool on_mouse(const MouseEvent& e) override;

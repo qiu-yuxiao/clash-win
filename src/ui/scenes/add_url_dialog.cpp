@@ -1,6 +1,8 @@
+// 添加网址弹窗实现（T21，按 add-url-dialog.tsx 源码重做）。
 #include "add_url_dialog.h"
 
 #include <windows.h>
+
 #include <algorithm>
 
 #include "ui/theme/theme.h"
@@ -11,21 +13,48 @@ namespace clashwin::ui::scene {
 
 namespace {
 
-std::string read_win32_clipboard() {
-  if (!OpenClipboard(nullptr)) return "";
-  HANDLE hData = GetClipboardData(CF_UNICODETEXT);
-  if (!hData) {
-    CloseClipboard();
-    return "";
+// ---------- 源码常量（逻辑 DIP） ----------
+// src: add-url-dialog.tsx:200-202 width 'calc(100% - 32px)'; maxWidth '380px'
+constexpr float kMaxW = 380.0f, kEdge = 32.0f;
+// src: add-url-dialog.tsx:210-212 fontSize '15px'、px 2=16、py 1.5=12
+constexpr float kTitlePx = 16.0f, kTitlePy = 12.0f, kTitleFs = 15.0f;
+// src: add-url-dialog.tsx:217 px 2=16、pb 1=8
+constexpr float kContentPx = 16.0f, kContentPb = 8.0f;
+// src: add-url-dialog.tsx:235 px 2=16、py 1.5=12、gap 1=8
+constexpr float kActsPx = 16.0f, kActsPy = 12.0f, kActsGap = 8.0f;
+// src: add-url-dialog.tsx:221-222 multiline minRows 4（13px × 行高 1.4375 ≈ 18.7）
+constexpr float kRows = 4.0f, kLineH = 20.0f;
+// src: add-url-dialog.tsx:236-249 MUI Button medium 高 36.5、minWidth 64、fontSize 13
+constexpr float kBtnH = 36.5f, kBtnW = 64.0f, kBtnFs = 13.0f;
+
+bool is_light() { return theme::ThemeService::instance().is_light(); }
+
+Color4f card_text() {
+  // src: button-styles.ts:535 get3DCardStyle('default').color
+  //   light '#3C2F0F' / dark '#2C1F03'
+  return is_light() ? Color4f::hex(0x3C2F0F) : Color4f::hex(0x2C1F03);
+}
+
+void draw_card(IRenderTarget& rt, const RectF& r) {
+  // src: button-styles.ts:534-565 get3DCardStyle('default')：radius 6 + 135° 4 停靠
+  GradientStop stops[4];
+  if (is_light()) {
+    // src: button-styles.ts:538 light #FFFDE7@0 #FFF9C4@35 #FFF59D@70 #FFE082@100
+    stops[0] = {0.00f, Color4f::hex(0xFFFDE7)};
+    stops[1] = {0.35f, Color4f::hex(0xFFF9C4)};
+    stops[2] = {0.70f, Color4f::hex(0xFFF59D)};
+    stops[3] = {1.00f, Color4f::hex(0xFFE082)};
+  } else {
+    // src: button-styles.ts:539 dark #FFF59D@0 #FBC02D@35 #F57F17@70 #E65100@100
+    stops[0] = {0.00f, Color4f::hex(0xFFF59D)};
+    stops[1] = {0.35f, Color4f::hex(0xFBC02D)};
+    stops[2] = {0.70f, Color4f::hex(0xF57F17)};
+    stops[3] = {1.00f, Color4f::hex(0xE65100)};
   }
-  const wchar_t* pszText = static_cast<const wchar_t*>(GlobalLock(hData));
-  std::string res;
-  if (pszText) {
-    res = utf::utf16_to_utf8(pszText);
-    GlobalUnlock(hData);
-  }
-  CloseClipboard();
-  return res;
+  rt.fill_round_rect_gradient_angle(r, 6.0f, stops, 4, 135.0f);  // src: button-styles.ts:544
+  // src: :540 bevelShadowDark light '#B8860B' / dark '#755500'
+  Brush bevel{is_light() ? Color4f::hex(0xB8860B) : Color4f::hex(0x755500)};
+  rt.fill_rect({r.x + 6.0f, r.bottom() - 1.0f, r.w - 12.0f, 1.0f}, bevel);
 }
 
 }  // namespace
@@ -37,11 +66,9 @@ AddUrlDialog::AddUrlDialog(Widget* parent) : Widget(parent) {
 void AddUrlDialog::open() {
   open_ = true;
   error_message_.clear();
-  hover_close_x_ = false;
-  hover_paste_ = false;
   hover_cancel_ = false;
   hover_add_ = false;
-  input_focused_ = true;
+  input_focused_ = true;  // src: :220 autoFocus
   invalidate();
 }
 
@@ -49,6 +76,7 @@ void AddUrlDialog::close() {
   if (!open_) return;
   open_ = false;
   input_focused_ = false;
+  payload_.clear();  // src: add-url-dialog.tsx:49-53 handleClose setText('')
   invalidate();
   if (on_dismiss) on_dismiss();
 }
@@ -63,21 +91,11 @@ void AddUrlDialog::set_target(core::quick_routing::RuleTarget t) {
   invalidate();
 }
 
-void AddUrlDialog::do_paste() {
-  std::string text = read_win32_clipboard();
-  if (!text.empty()) {
-    // Strip trailing newlines or spaces
-    payload_ = util::trim(text);
-    error_message_.clear();
-    invalidate();
-  }
-}
-
 void AddUrlDialog::do_submit() {
   std::string val = util::trim(payload_);
   if (val.empty()) {
-    error_message_ = "请输入有效的域名或 IP";
-    invalidate();
+    // src: :56-59 空文本 → 直接关闭（不报错）
+    close();
     return;
   }
   auto res = core::quick_routing::add_quick_routing_rule(
@@ -88,6 +106,7 @@ void AddUrlDialog::do_submit() {
     close();
     if (on_rule_added) on_rule_added(r);
   } else {
+    // src: :74-76 showNotice.error(message)
     error_message_ = res.error.empty() ? "添加分流规则失败" : res.error;
     invalidate();
   }
@@ -95,177 +114,135 @@ void AddUrlDialog::do_submit() {
 
 void AddUrlDialog::on_arrange(const RectF& area) {
   set_bounds(area);
-  const float cw = 360.0f;
-  const float ch = 290.0f;
+  // src: :200-202 width calc(100%-32px)、maxWidth 380
+  float cw = std::min(kMaxW, std::max(0.0f, area.w - kEdge));
+  // 高度 = 标题(12+20+12) + 内容(8+4行×20+8) + 动作(12+36.5+12)
+  const float title_h = kTitlePy * 2 + 20.0f;         // 44
+  const float input_h = kRows * kLineH + 8.0f;        // 88（文本框内上下留白 4）
+  const float content_h = 8.0f + input_h + kContentPb;  // 104
+  const float acts_h = kActsPy * 2 + kBtnH;           // 60.5
+  float ch = title_h + content_h + acts_h;            // 208.5
   float cx = std::max(0.0f, (area.w - cw) / 2.0f);
   float cy = std::max(0.0f, (area.h - ch) / 2.0f);
   card_rect_ = {cx, cy, cw, ch};
 
-  btn_close_x_rect_ = {cx + cw - 32.0f, cy + 6.0f, 26.0f, 24.0f};
+  title_rect_ = {cx, cy, cw, title_h};
+  input_rect_ = {cx + kContentPx, cy + title_h + 8.0f,
+                 cw - kContentPx * 2, input_h};
 
-  input_rect_ = {cx + 18.0f, cy + 68.0f, 252.0f, 32.0f};
-  btn_paste_rect_ = {cx + 278.0f, cy + 68.0f, 64.0f, 32.0f};
-
-  seg_rect_ = {cx + 18.0f, cy + 134.0f, 324.0f, 30.0f};
-  float seg_w = 324.0f / 3.0f;
-  seg_direct_rect_ = {cx + 18.0f, cy + 134.0f, seg_w, 30.0f};
-  seg_proxy_rect_ = {cx + 18.0f + seg_w, cy + 134.0f, seg_w, 30.0f};
-  seg_reject_rect_ = {cx + 18.0f + seg_w * 2.0f, cy + 134.0f, seg_w, 30.0f};
-
-  btn_cancel_rect_ = {cx + 194.0f, cy + ch - 42.0f, 68.0f, 28.0f};
-  btn_add_rect_ = {cx + 270.0f, cy + ch - 42.0f, 72.0f, 28.0f};
+  // 动作行右对齐：添加在右，取消在其左（gap 8）
+  float acts_y = cy + ch - kActsPy - kBtnH;
+  btn_add_rect_ = {cx + cw - kActsPx - kBtnW, acts_y, kBtnW, kBtnH};
+  btn_cancel_rect_ = {btn_add_rect_.x - kActsGap - kBtnW, acts_y, kBtnW, kBtnH};
 }
 
 void AddUrlDialog::on_paint(IRenderTarget& rt) {
   if (!open_) return;
+  // 1. backdrop（src: MUI Dialog 默认 backdrop rgba(0,0,0,.5)；组件库默认值）
+  rt.fill_rect({0, 0, bounds().w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
 
-  // 1. 半透明遮罩（局部坐标 {0,0,w,h}）
-  rt.fill_rect({0, 0, bounds().w, bounds().h}, Brush{Color4f(0, 0, 0, 0.45f)});
+  // 2. paper：3D 渐变卡（get3DCardStyle default）+ radius 6
+  draw_card(rt, card_rect_);
 
-  // 2. 卡片底座（圆角 8px + 阴影）
-  Brush shadow_b{Color4f(0, 0, 0, 0.22f)};
-  rt.round_rect({card_rect_.x - 2, card_rect_.y - 1, card_rect_.w + 4, card_rect_.h + 5}, 9.0f,
-                {}, &shadow_b);
-
-  Brush card_bg{Color4f::hex(0xEBEBEB)};
-  rt.round_rect(card_rect_, 8.0f, {Color4f::hex(0xA0A0A0), 1.0f}, &card_bg);
-
-  // 3. 标题行
-  TextStyle icon_ts;
-  icon_ts.size = 14.0f;
-  icon_ts.weight = static_cast<int>(Weight::Bold);
-  icon_ts.color = Color4f::hex(0x1A1A1A);
-  icon_ts.align_v = AlignV::Center;
-  rt.draw_text(L"✚", {card_rect_.x + 16, card_rect_.y + 8, 20, 22}, icon_ts);
-
+  // 3. 标题 src: :206-216 15px bold、px 16、py 12
   TextStyle title_ts;
-  title_ts.size = 13.5f;
+  title_ts.size = kTitleFs;
   title_ts.weight = static_cast<int>(Weight::Bold);
-  title_ts.color = Color4f::hex(0x1A1A1A);
+  title_ts.color = card_text();
   title_ts.align_v = AlignV::Center;
-  rt.draw_text(L"添加自定义分流规则",
-               {card_rect_.x + 36, card_rect_.y + 8, card_rect_.w - 76, 22}, title_ts);
+  rt.draw_text(L"添加网址",
+               {title_rect_.x + kTitlePx, title_rect_.y, title_rect_.w - kTitlePx * 2,
+                title_rect_.h},
+               title_ts);
 
-  // 关闭 ✕ 按钮
-  Color4f x_bg = hover_close_x_ ? Color4f::hex(0xDCDCDC) : Color4f::hex(0xE4E4E4);
-  Brush xb{x_bg};
-  rt.round_rect(btn_close_x_rect_, 3.0f, {Color4f::hex(0xBEBEBE), 1.0f}, &xb);
-  TextStyle x_ts;
-  x_ts.size = 11.5f;
-  x_ts.color = Color4f::hex(0x333333);
-  x_ts.align_h = AlignH::Center;
-  x_ts.align_v = AlignV::Center;
-  rt.draw_text(L"✕", btn_close_x_rect_, x_ts);
-
-  // 标题下横线
-  rt.fill_rect({card_rect_.x, card_rect_.y + 36, card_rect_.w, 1.0f},
-               Brush{Color4f::hex(0xCCCCCC)});
-
-  // 4. 输入框提示文字
-  TextStyle subtitle_ts;
-  subtitle_ts.size = 10.5f;
-  subtitle_ts.color = Color4f::hex(0x222222);
-  subtitle_ts.align_v = AlignV::Center;
-  rt.draw_text(L"请输入域名或 IP (例如: google.com 或 1.1.1.1):",
-               {card_rect_.x + 18, card_rect_.y + 46, card_rect_.w - 36, 18}, subtitle_ts);
-
-  // 5. 规则输入框（深色底 + 橙色边框 + 白色文字）
-  Brush input_bg{Color4f::hex(0x6E6E6E)};
-  Pen input_pen{Color4f::hex(0xE65100), 1.5f};
+  // 4. TextField multiline（get3DInputStyle）
+  // src: button-styles.ts:734-778 bg rgba(255,253,231,.8)/rgba(26,22,14,.4)、
+  //   outline 2px rgba(212,175,55,.35/.25)、focus border '#B8860B'/'#FFA000'
+  Brush input_bg{is_light() ? Color4f::hex(0xFFFDE7, 0.8f)
+                            : Color4f::hex(0x1A160E, 0.4f)};
+  Pen input_pen{input_focused_
+                    ? (is_light() ? Color4f::hex(0xB8860B) : Color4f::hex(0xFFA000))
+                    : Color4f::hex(0xD4AF37, is_light() ? 0.35f : 0.25f),
+                1.0f};
   rt.round_rect(input_rect_, 4.0f, input_pen, &input_bg);
-
-  TextStyle input_ts;
-  input_ts.size = 11.5f;
-  input_ts.color = Color4f::hex(0xFFFFFF);
-  input_ts.align_v = AlignV::Center;
-  std::wstring payload_w = utf::utf8_to_utf16(payload_);
-  if (input_focused_) payload_w += L"|";
-  rt.draw_text(payload_w,
-               {input_rect_.x + 8, input_rect_.y, input_rect_.w - 16, input_rect_.h},
-               input_ts);
-
-  // 粘贴按钮
-  Color4f p_bg = hover_paste_ ? Color4f::hex(0xE0E0E0) : Color4f::hex(0xF4F4F4);
-  Brush pb{p_bg};
-  rt.round_rect(btn_paste_rect_, 4.0f, {Color4f::hex(0xBEBEBE), 1.0f}, &pb);
-  TextStyle paste_ts;
-  paste_ts.size = 11.0f;
-  paste_ts.color = Color4f::hex(0x222222);
-  paste_ts.align_h = AlignH::Center;
-  paste_ts.align_v = AlignV::Center;
-  rt.draw_text(L"📋粘贴", btn_paste_rect_, paste_ts);
-
-  // 6. 分流策略偏好提示
-  TextStyle pref_ts;
-  pref_ts.size = 10.5f;
-  pref_ts.color = Color4f::hex(0x222222);
-  pref_ts.align_v = AlignV::Center;
-  rt.draw_text(L"分流策略偏好:",
-               {card_rect_.x + 18, card_rect_.y + 112, card_rect_.w - 36, 18}, pref_ts);
-
-  // 7. 三段式策略开关（DIRECT / PROXY / REJECT）
-  Brush seg_bg{Color4f::hex(0xD8D8D8)};
-  rt.round_rect(seg_rect_, 4.0f, {Color4f::hex(0xAAAAAA), 1.0f}, &seg_bg);
-
-  auto draw_seg_item = [&](const RectF& r, const wchar_t* label, bool active) {
-    if (active) {
-      Brush act_b{Color4f::hex(0xFFFFFF)};
-      rt.round_rect(r, 3.0f, {Color4f::hex(0xE65100), 1.0f}, &act_b);
-      TextStyle ts;
-      ts.size = 11.0f;
-      ts.weight = static_cast<int>(Weight::Bold);
-      ts.color = Color4f::hex(0xE65100);
-      ts.align_h = AlignH::Center;
-      ts.align_v = AlignV::Center;
-      rt.draw_text(label, r, ts);
+  {
+    TextStyle ts;
+    ts.size = 13.0f;  // src: get3DInputStyle fontSize 13px
+    ts.color = is_light() ? Color4f::hex(0x2C1F03) : Color4f::hex(0xFFFDE7);
+    ts.wrap = true;
+    ts.max_lines = static_cast<int>(kRows);
+    std::wstring body = utf::utf8_to_utf16(payload_);
+    if (body.empty()) {
+      // placeholder src: :227-229 '请填入需要代理的网址（每行一个）'
+      // MUI 空值时即使聚焦也显示 placeholder，光标叠加在行首
+      TextStyle ph = ts;
+      ph.color.a *= 0.5f;
+      rt.draw_text(L"请填入需要代理的网址（每行一个）",
+                   {input_rect_.x + 6, input_rect_.y + 4, input_rect_.w - 12,
+                    input_rect_.h - 8},
+                   ph);
+      if (input_focused_) {
+        rt.draw_text(L"|", {input_rect_.x + 6, input_rect_.y + 4,
+                            input_rect_.w - 12, input_rect_.h - 8}, ts);
+      }
     } else {
-      TextStyle ts;
-      ts.size = 11.0f;
-      ts.color = Color4f::hex(0x616161);
-      ts.align_h = AlignH::Center;
-      ts.align_v = AlignV::Center;
-      rt.draw_text(label, r, ts);
+      body += input_focused_ ? L"|" : L"";
+      rt.draw_text(body,
+                   {input_rect_.x + 6, input_rect_.y + 4, input_rect_.w - 12,
+                    input_rect_.h - 8},
+                   ts);
     }
-  };
-
-  draw_seg_item(seg_direct_rect_, L"DIRECT",
-                target_ == core::quick_routing::RuleTarget::Direct);
-  draw_seg_item(seg_proxy_rect_, L"PROXY",
-                target_ == core::quick_routing::RuleTarget::Proxy);
-  draw_seg_item(seg_reject_rect_, L"REJECT",
-                target_ == core::quick_routing::RuleTarget::Reject);
-
-  // 8. 错误信息提示
-  if (!error_message_.empty()) {
-    TextStyle err_ts;
-    err_ts.size = 10.0f;
-    err_ts.color = Color4f::hex(0xD32F2F);
-    err_ts.align_v = AlignV::Center;
-    rt.draw_text(utf::utf8_to_utf16(error_message_),
-                 {card_rect_.x + 18, card_rect_.y + 172, card_rect_.w - 36, 18}, err_ts);
   }
 
-  // 9. 底部取消与添加按钮
-  Color4f c_bg = hover_cancel_ ? Color4f::hex(0xE0E0E0) : Color4f::hex(0xF4F4F4);
-  Brush cb{c_bg};
-  rt.round_rect(btn_cancel_rect_, 4.0f, {Color4f::hex(0xBEBEBE), 1.0f}, &cb);
-  TextStyle cancel_ts;
-  cancel_ts.size = 11.0f;
-  cancel_ts.color = Color4f::hex(0x333333);
-  cancel_ts.align_h = AlignH::Center;
-  cancel_ts.align_v = AlignV::Center;
-  rt.draw_text(L"取消", btn_cancel_rect_, cancel_ts);
+  // 5. 动作按钮：取消 outlined default、添加 contained primary（src: :236-249）
+  {
+    // outlined default src: button-styles.ts get3DButtonStyle(outlined, default)
+    Brush c_bg{hover_cancel_ ? Color4f::hex(0xD4AF37, 0.14f)
+                             : Color4f::hex(0xD4AF37, 0.06f)};
+    Pen c_pen{Color4f::hex(0xD4AF37, is_light() ? 0.35f : 0.22f), 1.0f};
+    rt.round_rect(btn_cancel_rect_, 6.0f, c_pen, &c_bg);
+    TextStyle ts;
+    ts.size = kBtnFs;
+    ts.weight = static_cast<int>(Weight::Bold);
+    ts.color = card_text();
+    ts.align_h = AlignH::Center;
+    ts.align_v = AlignV::Center;
+    rt.draw_text(L"取消", btn_cancel_rect_, ts);
+  }
+  {
+    // contained primary src: button-styles.ts:38-39 retro-3d 135° 六停（与卡片同源）
+    GradientStop st[6];
+    st[0] = {0.00f, Color4f::hex(0xFFE082)};
+    st[1] = {0.20f, Color4f::hex(0xFFD54F)};
+    st[2] = {0.45f, Color4f::hex(0xFFC107)};
+    st[3] = {0.70f, Color4f::hex(0xFFB300)};
+    st[4] = {0.85f, Color4f::hex(0xD4AF37)};
+    st[5] = {1.00f, Color4f::hex(0xB8860B)};
+    rt.fill_round_rect_gradient_angle(btn_add_rect_, 6.0f, st, 6, 135.0f);  // src: :544
+    // src: button-styles.ts:36-37 borderColor light '#8A6D00' / dark '#634E00'，2px
+    Pen bevel{is_light() ? Color4f::hex(0x8A6D00) : Color4f::hex(0x634E00), 2.0f};
+    rt.round_rect({btn_add_rect_.x + 1, btn_add_rect_.y + 1,
+                   btn_add_rect_.w - 2, btn_add_rect_.h - 2},
+                  5.0f, bevel, nullptr);
+    TextStyle ts;
+    ts.size = kBtnFs;
+    ts.weight = static_cast<int>(Weight::Bold);
+    ts.color = Color4f::hex(0x2C1F03);  // src: button-styles.ts:1105-1121 retro-3d
+    ts.align_h = AlignH::Center;
+    ts.align_v = AlignV::Center;
+    rt.draw_text(L"添加", btn_add_rect_, ts);
+  }
 
-  Color4f a_bg = hover_add_ ? Color4f::hex(0xFFF3E0) : Color4f::hex(0xFBFBFB);
-  Brush ab{a_bg};
-  rt.round_rect(btn_add_rect_, 4.0f, {Color4f::hex(0xBEBEBE), 1.0f}, &ab);
-  TextStyle add_ts;
-  add_ts.size = 11.5f;
-  add_ts.weight = static_cast<int>(Weight::Bold);
-  add_ts.color = Color4f::hex(0xE65100);
-  add_ts.align_h = AlignH::Center;
-  add_ts.align_v = AlignV::Center;
-  rt.draw_text(L"添加", btn_add_rect_, add_ts);
+  // 6. 错误提示（showNotice.error → 对话框内红字，源码为 toast；此处保留内联提示）
+  if (!error_message_.empty()) {
+    TextStyle err_ts;
+    err_ts.size = 11.0f;
+    err_ts.color = Color4f::hex(0xD32F2F);  // src: MUI error.main（palettes.cpp 同值）
+    err_ts.align_v = AlignV::Center;
+    rt.draw_text(utf::utf8_to_utf16(error_message_),
+                 {input_rect_.x, btn_cancel_rect_.y - 18, input_rect_.w, 18},
+                 err_ts);
+  }
 }
 
 bool AddUrlDialog::on_mouse(const MouseEvent& e) {
@@ -273,13 +250,9 @@ bool AddUrlDialog::on_mouse(const MouseEvent& e) {
   PointF pt = e.pos;
 
   if (e.type == MouseEventType::Move) {
-    bool hx = btn_close_x_rect_.contains(pt.x, pt.y);
-    bool hp = btn_paste_rect_.contains(pt.x, pt.y);
     bool hc = btn_cancel_rect_.contains(pt.x, pt.y);
     bool ha = btn_add_rect_.contains(pt.x, pt.y);
-    if (hx != hover_close_x_ || hp != hover_paste_ || hc != hover_cancel_ || ha != hover_add_) {
-      hover_close_x_ = hx;
-      hover_paste_ = hp;
+    if (hc != hover_cancel_ || ha != hover_add_) {
       hover_cancel_ = hc;
       hover_add_ = ha;
       invalidate();
@@ -288,29 +261,6 @@ bool AddUrlDialog::on_mouse(const MouseEvent& e) {
   }
 
   if (e.type == MouseEventType::Up) {
-    if (btn_close_x_rect_.contains(pt.x, pt.y)) {
-      close();
-      return true;
-    }
-    if (btn_paste_rect_.contains(pt.x, pt.y)) {
-      do_paste();
-      return true;
-    }
-    if (seg_direct_rect_.contains(pt.x, pt.y)) {
-      target_ = core::quick_routing::RuleTarget::Direct;
-      invalidate();
-      return true;
-    }
-    if (seg_proxy_rect_.contains(pt.x, pt.y)) {
-      target_ = core::quick_routing::RuleTarget::Proxy;
-      invalidate();
-      return true;
-    }
-    if (seg_reject_rect_.contains(pt.x, pt.y)) {
-      target_ = core::quick_routing::RuleTarget::Reject;
-      invalidate();
-      return true;
-    }
     if (btn_cancel_rect_.contains(pt.x, pt.y)) {
       close();
       return true;
@@ -324,7 +274,7 @@ bool AddUrlDialog::on_mouse(const MouseEvent& e) {
       invalidate();
       return true;
     }
-    // 点击卡片外部遮罩：关闭
+    // src: :190-191 onClose（点 backdrop 关闭）
     if (!card_rect_.contains(pt.x, pt.y)) {
       close();
       return true;
@@ -332,9 +282,7 @@ bool AddUrlDialog::on_mouse(const MouseEvent& e) {
     return true;
   }
 
-  if (e.type == MouseEventType::Down) {
-    return true;  // 拦截下层点击
-  }
+  if (e.type == MouseEventType::Down) return true;  // 拦截下层点击
 
   return true;
 }
@@ -347,8 +295,10 @@ bool AddUrlDialog::on_key(const KeyEvent& e) {
       close();
       return true;
     }
-    if (e.key == VK_RETURN || e.key == 13) {
-      do_submit();
+    // src: :220-226 multiline → Enter 插入换行（不提交）
+    if ((e.key == VK_RETURN || e.key == 13) && input_focused_) {
+      payload_.push_back('\n');
+      invalidate();
       return true;
     }
     if (e.key == VK_BACK && input_focused_) {

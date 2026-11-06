@@ -4,6 +4,9 @@
 #include <shlobj.h>
 
 #include <cstdlib>
+#include <cstring>
+#include <string>
+#include <vector>
 
 #include "util/log.h"
 
@@ -18,9 +21,10 @@ std::wstring join(const std::wstring& a, const std::wstring& b) {
 }
 
 std::wstring env_or_empty(const char* name) {
-  char* v = nullptr;
+  std::wstring wname(name, name + std::strlen(name));
+  wchar_t* v = nullptr;
   size_t len = 0;
-  _dupenv_s(&v, &len, name);
+  _wdupenv_s(&v, &len, wname.c_str());
   std::wstring out;
   if (v) {
     out.assign(v, v + (len > 0 ? len - 1 : 0));  // 去掉结尾 NUL
@@ -150,9 +154,17 @@ std::wstring app_resources_dir() {
   return join(exe_dir(), L"resources");
 }
 
-std::wstring app_profiles_dir() { return join(app_home_dir(), L"profiles"); }
+std::wstring app_profiles_dir() {
+  std::wstring dir = join(app_home_dir(), L"profiles");
+  create_dirs_all(dir);  // 首启 profiles/ 不存在会导致订阅写入失败（← app_logs_dir 同款）
+  return dir;
+}
 std::wstring app_icons_dir() { return join(app_home_dir(), L"icons"); }
-std::wstring app_logs_dir() { return join(app_home_dir(), L"logs"); }
+std::wstring app_logs_dir() { 
+  std::wstring dir = join(app_home_dir(), L"logs");
+  create_dirs_all(dir);
+  return dir;
+}
 std::wstring app_latest_log() { return join(app_logs_dir(), L"latest.log"); }
 std::wstring clash_path() { return join(app_home_dir(), kClashConfig); }
 std::wstring verge_path() { return join(app_home_dir(), kVergeConfig); }
@@ -192,6 +204,10 @@ std::wstring clash_latest_log() {
   return join(sidecar_log_dir(), L"sidecar_latest.log");
 }
 
-std::wstring ipc_path() { return L"\\\\.\\pipe\\mini-mihomo"; }
+std::wstring ipc_path() {
+  // 共存错开：Clash Mini 用 \\.\pipe\mini-mihomo，Clash Win 用独立管道名，
+  // 两程序的内核可同时创建各自的控制管道
+  return L"\\\\.\\pipe\\mini-mihomo-win";
+}
 
 }  // namespace clashwin::util::dirs

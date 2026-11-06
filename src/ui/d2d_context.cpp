@@ -10,6 +10,7 @@
 #include <wincodec.h>
 #include <windows.h>
 
+#include <cmath>
 #include <format>
 #include <unordered_map>
 
@@ -116,14 +117,21 @@ bool D2dRenderTarget::create_for_hwnd(HWND hwnd) {
   destroy();
   if (!ctx_.init()) return false;
   hwnd_ = hwnd;
+  // 【DPIARCH】target 取窗口实际 DPI（150% 屏=144）：scale()=1.5，
+  // apply_transform 统一 物理=逻辑×scale（形状+文字单缩放，字号仍用 ts.size 逻辑值）。
   dpi_ = static_cast<float>(GetDpiForWindow(hwnd));
-  if (dpi_ <= 0) dpi_ = 96.0f;
   RECT rc;
   GetClientRect(hwnd, &rc);
   D2D1_SIZE_U size = D2D1::SizeU(static_cast<UINT32>(rc.right - rc.left),
                                  static_cast<UINT32>(rc.bottom - rc.top));
+  // 【DPIARCH】单缩放架构：target DPI=窗口 DPI（144），DIP→物理由 target
+  // 自动完成；transform 恒等（见 apply_transform）。此前默认属性 DPI=0→
+  // 跟随系统 144 + transform×1.5 = 双缩放（实测 effDpi=144/m11=1.5），已修。
   HRESULT hr = ctx_.d2d()->CreateHwndRenderTarget(
-      D2D1::RenderTargetProperties(),
+      D2D1::RenderTargetProperties(
+          D2D1_RENDER_TARGET_TYPE_DEFAULT,
+          D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_UNKNOWN), dpi_,
+          dpi_),
       D2D1::HwndRenderTargetProperties(hwnd, size), &hwnd_rt_);
   if (FAILED(hr)) {
     CWLOG_ERROR(std::format("D2dRenderTarget: CreateHwndRenderTarget 失败 0x{:08X}",
@@ -151,7 +159,8 @@ bool D2dRenderTarget::create_offscreen(int width_px, int height_px, float dpi) {
       D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_SOFTWARE,
                                    D2D1::PixelFormat(
                                        DXGI_FORMAT_B8G8R8A8_UNORM,
-                                       D2D1_ALPHA_MODE_PREMULTIPLIED)),
+                                       D2D1_ALPHA_MODE_PREMULTIPLIED),
+                                   dpi_, dpi_),
       &wic_rt_);
   if (FAILED(hr)) return false;
   active_rt_ = wic_rt_;
@@ -170,15 +179,17 @@ void D2dRenderTarget::on_target_ready() {
 }
 
 void D2dRenderTarget::apply_transform() {
-  // 物理 = (逻辑 + origin) × scale → 先平移后缩放
-  float s = scale();
-  active_rt_->SetTransform(D2D1::Matrix3x2F::Scale(D2D1::SizeF(s, s)) *
-                           D2D1::Matrix3x2F::Translation(origin_.x, origin_.y));
+  // 【DPIARCH-EXP】最小实验：target 有效 DPI=144（实测 effDpi=144）已自动
+  // DIP→物理 ×1.5；transform 恒等（origin 为逻辑 DIP，平移在 DIP 空间，
+  // 由 target DPI 统一换算），消除双缩放。
+  active_rt_->SetTransform(
+      D2D1::Matrix3x2F::Translation(origin_.x, origin_.y));
 }
 
 void D2dRenderTarget::destroy() {
   brushes_.clear();
   formats_.clear();
+  measure_cache_.clear();  // 【FONTSIZE-FIX】测量含 dpi 因子，重建时一并失效
   bitmaps_.clear();
   if (hwnd_rt_) { hwnd_rt_->Release(); hwnd_rt_ = nullptr; }
   if (wic_rt_) { wic_rt_->Release(); wic_rt_ = nullptr; }
@@ -214,10 +225,12 @@ bool D2dRenderTarget::recreate() {
     int w = pixel_width(), h = pixel_height();
     destroy();
     if (!ctx_.init()) return false;
-    dpi_ = static_cast<float>(GetDpiForWindow(hwnd_));
-    if (dpi_ <= 0) dpi_ = 96.0f;
+    dpi_ = static_cast<float>(GetDpiForWindow(hwnd_));  // 【DPIARCH】重建同样换挡
     HRESULT hr = ctx_.d2d()->CreateHwndRenderTarget(
-        D2D1::RenderTargetProperties(),
+        D2D1::RenderTargetProperties(
+            D2D1_RENDER_TARGET_TYPE_DEFAULT,
+            D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_UNKNOWN),
+            dpi_, dpi_),
         D2D1::HwndRenderTargetProperties(hwnd_, D2D1::SizeU(w, h)), &hwnd_rt_);
     if (FAILED(hr)) return false;
     active_rt_ = hwnd_rt_;
@@ -251,9 +264,12 @@ uint32_t D2dRenderTarget::key_of(const Color4f& c) {
 
 // ---- 文本格式缓存 ----
 IDWriteTextFormat* D2dRenderTarget::format(const TextStyle& ts) {
+  // 【SCALEFIX】1:1 物理像素：scale()=1.0，字号直接用 ts.size（12=12 物理），
+  // 不 ×1.5 也不 /1.5；key 含 dpi_ 位仅为防御（现为常量）。
   uint64_t key = static_cast<uint64_t>(static_cast<uint32_t>(ts.size * 4)) ^
                  (static_cast<uint64_t>(ts.weight) << 32) ^
-                 (static_cast<uint64_t>(ts.italic) << 40);
+                 (static_cast<uint64_t>(ts.italic) << 40) ^
+                 (static_cast<uint64_t>(static_cast<uint32_t>(dpi_)) << 48);
   // family 哈希（FNV-1a 32）
   uint64_t h = 2166136261u;
   for (wchar_t ch : ts.font_family) {
@@ -268,7 +284,7 @@ IDWriteTextFormat* D2dRenderTarget::format(const TextStyle& ts) {
   HRESULT hr = ctx_.dwrite()->CreateTextFormat(
       ts.font_family.c_str(), nullptr,
       static_cast<DWRITE_FONT_WEIGHT>(ts.weight), DWRITE_FONT_STYLE_NORMAL,
-      DWRITE_FONT_STRETCH_NORMAL, ts.size * scale(), L"", &f);
+      DWRITE_FONT_STRETCH_NORMAL, ts.size, L"", &f);
   if (FAILED(hr)) return nullptr;
   formats_.emplace(key, f);
   return f;
@@ -285,19 +301,21 @@ SizeF D2dRenderTarget::measure_text(const std::wstring& text,
   h ^= static_cast<uint64_t>(ts.weight) << 24;
   h ^= static_cast<uint64_t>(ts.wrap) << 40;
   h ^= static_cast<uint64_t>(static_cast<int32_t>(max_w * 4)) << 41;
+  // 【FONTSIZE-FIX】测量结果随 dpi 变化（format 字号含 /scale），key 必须含 dpi
+  h ^= static_cast<uint64_t>(static_cast<uint32_t>(dpi_)) << 56;
   auto it = measure_cache_.find(h);
   if (it != measure_cache_.end()) return it->second;
 
   IDWriteTextLayout* layout = nullptr;
   HRESULT hr = ctx_.dwrite()->CreateTextLayout(
       text.c_str(), static_cast<UINT32>(text.size()),
-      layout_for_measure(ts), max_w > 0 ? max_w * scale() : 1e6f,
+      layout_for_measure(ts), max_w > 0 ? max_w : 1e6f,
       1e6f, &layout);
   if (FAILED(hr) || !layout) return {};
   DWRITE_TEXT_METRICS m;
   layout->GetMetrics(&m);
   layout->Release();
-  SizeF s{m.widthIncludingTrailingWhitespace / scale(), m.height / scale()};
+  SizeF s{m.widthIncludingTrailingWhitespace, m.height};
   measure_cache_.emplace(h, s);
   if (measure_cache_.size() > 4096) measure_cache_.clear();  // 防膨胀
   return s;
@@ -334,6 +352,137 @@ void D2dRenderTarget::round_rect(const RectF& r, float radius, const Pen& p,
   }
 }
 
+void D2dRenderTarget::fill_round_rect_gradient(const RectF& r, float radius,
+                                               const GradientStop* stops,
+                                               int count) {
+  if (!active_rt_ || count < 2) return;
+  std::vector<D2D1_GRADIENT_STOP> gs(count);
+  for (int i = 0; i < count; ++i) {
+    gs[i].position = stops[i].offset;
+    gs[i].color = D2D1::ColorF(stops[i].color.r, stops[i].color.g,
+                               stops[i].color.b, stops[i].color.a);
+  }
+  ID2D1GradientStopCollection* coll = nullptr;
+  if (FAILED(active_rt_->CreateGradientStopCollection(gs.data(),
+                                                      static_cast<UINT32>(count),
+                                                      &coll)) ||
+      !coll)
+    return;
+  ID2D1LinearGradientBrush* br = nullptr;
+  HRESULT hr = active_rt_->CreateLinearGradientBrush(
+      D2D1::LinearGradientBrushProperties(D2D1::Point2F(r.x, r.y),
+                                          D2D1::Point2F(r.right(), r.y)),
+      coll, &br);
+  coll->Release();
+  if (FAILED(hr) || !br) return;
+  D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(
+      D2D1::RectF(r.x, r.y, r.right(), r.bottom()), radius, radius);
+  active_rt_->FillRoundedRectangle(rr, br);
+  br->Release();
+}
+
+void D2dRenderTarget::fill_round_rect_gradient_angle(
+    const RectF& r, float radius, const GradientStop* stops, int count,
+    float css_angle_deg, int corner_mask) {
+  if (!active_rt_ || count < 2) return;
+  std::vector<D2D1_GRADIENT_STOP> gs(count);
+  for (int i = 0; i < count; ++i) {
+    gs[i].position = stops[i].offset;
+    gs[i].color = D2D1::ColorF(stops[i].color.r, stops[i].color.g,
+                               stops[i].color.b, stops[i].color.a);
+  }
+  ID2D1GradientStopCollection* coll = nullptr;
+  if (FAILED(active_rt_->CreateGradientStopCollection(gs.data(),
+                                                      static_cast<UINT32>(count),
+                                                      &coll)) ||
+      !coll)
+    return;
+  // CSS 渐变线：0=to top，顺时针。方向 d=(sinθ,-cosθ)（屏坐标 y 向下）；
+  // 长度 L=|W·sinθ|+|H·cosθ|；起止点=center±d·L/2。
+  const float th = css_angle_deg * 3.14159265358979f / 180.0f;
+  float dx = std::sin(th), dy = -std::cos(th);
+  float L = std::fabs(r.w * dx) + std::fabs(r.h * dy);
+  float cx = r.x + r.w / 2.0f, cy = r.y + r.h / 2.0f;
+  D2D1_POINT_2F p0 = {cx - dx * L / 2.0f, cy - dy * L / 2.0f};
+  D2D1_POINT_2F p1 = {cx + dx * L / 2.0f, cy + dy * L / 2.0f};
+  ID2D1LinearGradientBrush* br = nullptr;
+  HRESULT hr = active_rt_->CreateLinearGradientBrush(
+      D2D1::LinearGradientBrushProperties(p0, p1), coll, &br);
+  coll->Release();
+  if (FAILED(hr) || !br) return;
+  if (corner_mask == 0xF) {
+    D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(
+        D2D1::RectF(r.x, r.y, r.right(), r.bottom()), radius, radius);
+    active_rt_->FillRoundedRectangle(rr, br);
+  } else {
+    // 分角圆角路径（src: mini-traffic-panel.tsx 成对指标卡内角半径 0）
+    const float rtl = (corner_mask & 1) ? radius : 0.f;
+    const float rtr = (corner_mask & 2) ? radius : 0.f;
+    const float rbr = (corner_mask & 4) ? radius : 0.f;
+    const float rbl = (corner_mask & 8) ? radius : 0.f;
+    ID2D1PathGeometry* path = nullptr;
+    ID2D1GeometrySink* sink = nullptr;
+    if (SUCCEEDED(ctx_.d2d()->CreatePathGeometry(&path)) && path &&
+        SUCCEEDED(path->Open(&sink)) && sink) {
+      const float x0 = r.x, y0 = r.y, x1 = r.right(), y1 = r.bottom();
+      auto arc = [&](D2D1_POINT_2F pt, float rad) {
+        D2D1_ARC_SEGMENT seg{};
+        seg.point = pt;
+        seg.size = {rad, rad};
+        seg.rotationAngle = 0.f;
+        seg.sweepDirection = D2D1_SWEEP_DIRECTION_CLOCKWISE;
+        seg.arcSize = D2D1_ARC_SIZE_SMALL;
+        sink->AddArc(seg);
+      };
+      sink->BeginFigure(D2D1::Point2F(x0 + rtl, y0), D2D1_FIGURE_BEGIN_FILLED);
+      sink->AddLine(D2D1::Point2F(x1 - rtr, y0));
+      if (rtr > 0) arc(D2D1::Point2F(x1, y0 + rtr), rtr);
+      sink->AddLine(D2D1::Point2F(x1, y1 - rbr));
+      if (rbr > 0) arc(D2D1::Point2F(x1 - rbr, y1), rbr);
+      sink->AddLine(D2D1::Point2F(x0 + rbl, y1));
+      if (rbl > 0) arc(D2D1::Point2F(x0, y1 - rbl), rbl);
+      sink->AddLine(D2D1::Point2F(x0, y0 + rtl));
+      if (rtl > 0) arc(D2D1::Point2F(x0 + rtl, y0), rtl);
+      sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+      sink->Close();
+      sink->Release();
+      active_rt_->FillGeometry(path, br);
+      path->Release();
+    }
+  }
+  br->Release();
+}
+
+void D2dRenderTarget::fill_round_rect_radial(
+    const RectF& r, float radius, const GradientStop* stops, int count,
+    float cx_ratio, float cy_ratio, float rx, float ry) {
+  if (!active_rt_ || count < 2) return;
+  std::vector<D2D1_GRADIENT_STOP> gs(count);
+  for (int i = 0; i < count; ++i) {
+    gs[i].position = stops[i].offset;
+    gs[i].color = D2D1::ColorF(stops[i].color.r, stops[i].color.g,
+                               stops[i].color.b, stops[i].color.a);
+  }
+  ID2D1GradientStopCollection* coll = nullptr;
+  if (FAILED(active_rt_->CreateGradientStopCollection(gs.data(),
+                                                      static_cast<UINT32>(count),
+                                                      &coll)) ||
+      !coll)
+    return;
+  // CSS radial-gradient(circle at cx cy, ...)：圆心按比例落在 r 内
+  D2D1_POINT_2F center = {r.x + r.w * cx_ratio, r.y + r.h * cy_ratio};
+  ID2D1RadialGradientBrush* br = nullptr;
+  HRESULT hr = active_rt_->CreateRadialGradientBrush(
+      D2D1::RadialGradientBrushProperties(center, D2D1::Point2F(0, 0), rx, ry),
+      coll, &br);
+  coll->Release();
+  if (FAILED(hr) || !br) return;
+  D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(
+      D2D1::RectF(r.x, r.y, r.right(), r.bottom()), radius, radius);
+  active_rt_->FillRoundedRectangle(rr, br);
+  br->Release();
+}
+
 void D2dRenderTarget::draw_line(const PointF& a, const PointF& b, const Pen& p) {
   if (!active_rt_) return;
   ID2D1SolidColorBrush* br = brush(p.color);
@@ -350,7 +499,7 @@ void D2dRenderTarget::draw_text(const std::wstring& text, const RectF& r,
   IDWriteTextLayout* layout = nullptr;
   HRESULT hr = ctx_.dwrite()->CreateTextLayout(
       text.c_str(), static_cast<UINT32>(text.size()), f,
-      r.w * scale(), r.h * scale(), &layout);
+      r.w, r.h, &layout);
   if (FAILED(hr) || !layout) return;
 
   layout->SetTextAlignment(
@@ -377,13 +526,17 @@ void D2dRenderTarget::draw_text(const std::wstring& text, const RectF& r,
       DWRITE_TRIMMING trim{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
       layout->SetTrimming(&trim, nullptr);
       ID2D1SolidColorBrush* br = brush(ts.color);
-      if (br) active_rt_->DrawTextLayout(D2D1::Point2F(rr.x, rr.y), layout, br);
+      if (br)
+        active_rt_->DrawTextLayout(D2D1::Point2F(rr.x, rr.y), layout, br,
+                                   D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
       layout->Release();
       return;
     }
   }
   ID2D1SolidColorBrush* br = brush(ts.color);
-  if (br) active_rt_->DrawTextLayout(D2D1::Point2F(r.x, r.y), layout, br);
+  if (br)
+    active_rt_->DrawTextLayout(D2D1::Point2F(r.x, r.y), layout, br,
+                               D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
   layout->Release();
 }
 
@@ -402,6 +555,10 @@ void D2dRenderTarget::register_bitmap(uint64_t id, IWICBitmapSource* src) {
   HRESULT hr = active_rt_->CreateBitmapFromWicBitmap(src, &bmp);
   if (FAILED(hr)) return;
   bitmaps_[id] = bmp;
+}
+
+bool D2dRenderTarget::has_bitmap(uint64_t id) const {
+  return bitmaps_.find(id) != bitmaps_.end();
 }
 
 void D2dRenderTarget::set_origin(const PointF& global_origin) {

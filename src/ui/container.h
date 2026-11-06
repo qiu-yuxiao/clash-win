@@ -20,9 +20,22 @@ enum class CrossAlign { Start, Center, End, Stretch };
 class Box : public Widget {
  public:
   explicit Box(Widget* parent = nullptr) : Widget(parent) {}
-  Brush background{Color4f(0, 0, 0, 0)};
-  Pen border{Color4f(0, 0, 0, 0), 0};
+  Brush background{Color4f(0, 0, 0, 0)};  // 豁免: Mini 无对应物 — 容器缺省透明背景（Widget 基类缺省）
+  Pen border{Color4f(0, 0, 0, 0), 0};  // 豁免: Mini 无对应物 — 容器缺省无边框（Widget 基类缺省）
   float corner_radius = 0;
+  // 【QBFIX】期望尺寸 = 最大子 + padding（基类返回 {0,0} 致 Column 里
+  //   flex_weight=0 的 quickbar Box 测得高 0 → 整条不可见）
+  SizeF on_measure(float max_w, float max_h) override {
+    float mw = 0, mh = 0;
+    for (size_t i = 0; i < child_count(); ++i) {
+      if (!child(i)->visible()) continue;
+      SizeF s = child(i)->measure(max_w > 0 ? max_w - padding().h() : max_w,
+                                  max_h > 0 ? max_h - padding().v() : max_h);
+      if (s.w > mw) mw = s.w;
+      if (s.h > mh) mh = s.h;
+    }
+    return {mw + padding().h(), mh + padding().v()};
+  }
   void on_paint(IRenderTarget& rt) override {
     // on_paint 局部坐标约定：画 {0,0,w,h}（画 bounds() 会在非零 bounds 时偏移）
     if (background.color.a > 0 || border.width > 0)

@@ -15,6 +15,13 @@
 
 namespace clashwin::app {
 
+namespace {
+// 本进程实际绑定的单实例端口（start 成功后写入）
+std::atomic<uint16_t> g_singleton_port{config::consts::kSingletonPort};
+}  // namespace
+
+uint16_t current_singleton_port() { return g_singleton_port.load(); }
+
 SingletonServer::SingletonServer() = default;
 
 SingletonServer::~SingletonServer() {
@@ -33,8 +40,15 @@ bool SingletonServer::start(uint16_t port,
   SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (s == INVALID_SOCKET) return false;
 
+  // socket() 句柄默认带 OBJ_INHERIT：拉起 sidecar 时 CreateProcessW 的 bInheritHandles=TRUE
+  // （stdout/stderr 管道必须重定向）会把它一并继承给 mini-mihomo，导致本进程退出后
+  // 33337 仍被 sidecar 持着 LISTEN。源头清除继承位，覆盖所有 CreateProcessW 调用点。
+  ::SetHandleInformation(reinterpret_cast<HANDLE>(s), HANDLE_FLAG_INHERIT, 0);
+
+  // 独占绑定：端口被占用（含其它程序监听）时 bind 直接失败，
+  // 杜绝 Windows SO_REUSEADDR 的重复绑定/劫持语义
   int opt = 1;
-  setsockopt(s, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt), sizeof(opt));
+  setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&opt), sizeof(opt));
 
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
@@ -51,6 +65,7 @@ bool SingletonServer::start(uint16_t port,
     return false;
   }
 
+  g_singleton_port.store(port);
   listen_sock_ = static_cast<uintptr_t>(s);
   running_ = true;
   worker_ = std::thread([this] { accept_loop(); });
@@ -84,6 +99,7 @@ void SingletonServer::accept_loop() {
     SOCKET c = accept(s, nullptr, nullptr);
     if (c == INVALID_SOCKET) continue;
 
+    ::SetHandleInformation(reinterpret_cast<HANDLE>(c), HANDLE_FLAG_INHERIT, 0);
     handle_connection(static_cast<uintptr_t>(c));
   }
 }

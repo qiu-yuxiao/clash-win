@@ -23,9 +23,9 @@ namespace clashwin::ui {
 // ---------- 输入事件（合成消息；测试直接构造后走 route_*_event） ----------
 enum class MouseEventType { Enter, Leave, Move, Down, Up, Wheel };
 // buttons 位：1=左 2=右 4=中
-inline constexpr int kMouseLeft = 1;
-inline constexpr int kMouseRight = 2;
-inline constexpr int kMouseMiddle = 4;
+inline constexpr int kMouseLeft = 1;    // src: Win32 MK_LBUTTON
+inline constexpr int kMouseRight = 2;   // src: Win32 MK_RBUTTON
+inline constexpr int kMouseMiddle = 4;  // src: Win32 MK_MBUTTON
 // key：VK_*；Char 事件 ch 有效
 enum class KeyEventType { Down, Up, Char };
 
@@ -57,7 +57,9 @@ class Widget {
   void set_parent(Widget* p) { parent_ = p; }
   size_t child_count() const { return children_.size(); }
   Widget* child(size_t i) const { return children_[i].get(); }
-  void add_child(std::unique_ptr<Widget> w);          // 尾部 = 最上层
+  // 尾部 = 最上层。【所有权移交】调用方 std::move 后不得再使用原指针；
+  // 需要后续访问请在 move 前先取裸指针（Widget* raw = x.get()）。
+  void add_child(std::unique_ptr<Widget> w);
   void insert_child(size_t index, std::unique_ptr<Widget> w);  // 保序挂载
   std::unique_ptr<Widget> remove_child(Widget* w);    // 卸载（React unmount 等价）
   // 绘制顺序 = z_order 升序稳定（同序按加入顺序，后加者在上）
@@ -80,6 +82,7 @@ class Widget {
   void request_focus();                 // wants_key 才有意义
   void blur();
   virtual bool wants_key() const { return false; }  // 焦点候选（textfield）
+  std::function<void()> on_focus_lost;  // 焦点被其它控件接管时触发（MUI onBlur 语义）
 
   // ---- 两阶段布局 ----
   SizeF measure(float max_w, float max_h);   // 期望尺寸（含 padding）
@@ -109,10 +112,14 @@ class Widget {
   void invalidate(const RectF& local);     // 局部（父坐标系内再转全局）
 
   // ---- tooltip 钩子（TooltipHost 扫描用；返回空=无提示） ----
-  virtual std::wstring tooltip_text() const { return {}; }
+  void set_tooltip_text(std::wstring t) { tooltip_text_ = t; }
+  virtual std::wstring tooltip_text() const { return tooltip_text_; }
 
   // ---- flex 权重（Column/Row 主轴分配；0 = 固定尺寸） ----
   float flex_weight = 0;
+  // ← CSS flex-shrink + min-width:0（ellipsis 截断场景）：flex 子自由份额
+  //   小于期望宽时允许收缩到份额（如标题栏 Label），而非被 min 钳回溢出。
+  bool shrink_to_free = false;
 
   // ---- 布局钩子 ----
   // 默认（叶/基类）：内容期望尺寸 {0,0}；容器重写
@@ -150,6 +157,7 @@ class Widget {
   bool visible_ = true;
   bool enabled_ = true;
   int z_order_ = 0;
+  std::wstring tooltip_text_;
 };
 
 // ---------- 全局输入路由（窗口层把 WM_MOUSE*/WM_KEY* 转成事件后调） ----------

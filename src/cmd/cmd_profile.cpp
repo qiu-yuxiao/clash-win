@@ -140,7 +140,10 @@ void ensure_t16_hooks() {
         }
       }
     });
-    if (ok) (void)profiles.data_arc()->save_file();
+    if (ok) {
+      profiles.apply();
+      (void)profiles.data_arc()->save_file();
+    }
     return ok;
   };
   ah.read_selected = [](const std::string& uid) -> std::optional<std::string> {
@@ -217,6 +220,7 @@ void install_cmd_profile(CommandService& svc) {
          if (!item_opt) {
            return CmdResult::err({errs::kIo, "导入订阅失败（下载/解析失败或被拒）"});
          }
+         profiles.apply();
          auto save = profiles.data_arc()->save_file();
          if (!save.is_ok()) {
            return CmdResult::err({errs::kIo, "导入订阅失败: " + save.error().message});
@@ -275,6 +279,7 @@ void install_cmd_profile(CommandService& svc) {
          if (!item_opt) {
            return CmdResult::err({errs::kIo, "更新订阅失败（原文已保留）"});
          }
+         profiles.apply();
          if (auto save = profiles.data_arc()->save_file(); !save.is_ok()) {
            return CmdResult::err({errs::kIo, save.error().message});
          }
@@ -297,15 +302,24 @@ void install_cmd_profile(CommandService& svc) {
          const Json* index = find_arg(args, {"index"});
          if (!index || !index->is_string()) return CmdResult::err({errs::kBadArgs, "index required"});
          auto& profiles = config::Config::instance().profiles();
+         // 运行时配置合并全部 remote/local 订阅节点（get_merged_proxies），
+         // 删除任一 remote/local 档案都会改变产物 → 必须重建并重载内核
+         bool merged_affected = false;
+         if (const config::PrfItem* it =
+                 profiles.latest_arc()->get_item(index->get<std::string>())) {
+           merged_affected = it->itype &&
+                             (*it->itype == "remote" || *it->itype == "local");
+         }
          Result<bool> should_update = Result<bool>::ok(false);
          profiles.edit_draft([&](config::IProfiles& d) {
            should_update = d.delete_item(index->get<std::string>());
          });
          if (should_update.is_err()) return CmdResult::err(should_update.error());
+         profiles.apply();
          if (auto save = profiles.data_arc()->save_file(); !save.is_ok()) {
            return CmdResult::err({errs::kIo, save.error().message});
          }
-         if (should_update.value()) {
+         if (should_update.value() || merged_affected) {
            auto outcome = update_config_forced();
            if (outcome.is_valid()) {
              events::EventBus::refresh_clash();
@@ -336,6 +350,7 @@ void install_cmd_profile(CommandService& svc) {
            r = d.patch_item(index->get<std::string>(), item);
          });
          if (r.is_err()) return CmdResult::err(r.error());
+         profiles.apply();
          if (auto save = profiles.data_arc()->save_file(); !save.is_ok()) {
            return CmdResult::err({errs::kIo, save.error().message});
          }
@@ -499,7 +514,10 @@ void install_cmd_profile(CommandService& svc) {
                          ok = true;
                        }
                      });
-                     if (ok) (void)profiles.data_arc()->save_file();
+                     if (ok) {
+                       profiles.apply();
+                       (void)profiles.data_arc()->save_file();
+                     }
                      return ok;
                    });
              }
@@ -599,6 +617,7 @@ void install_cmd_profile(CommandService& svc) {
          if (!item.uid) {
            return CmdResult::err({errs::kBadArgs, "unsupported itype: " + itype});
          }
+         profiles.apply();
          if (auto save = profiles.data_arc()->save_file(); !save.is_ok())
            return CmdResult::err({errs::kIo, "add profile error: " + save.error().message});
          if (item.uid) events::EventBus::notify_profile_changed(*item.uid);
@@ -628,6 +647,7 @@ void install_cmd_profile(CommandService& svc) {
          });
          if (!reorder_ok)
            return CmdResult::err({errs::kIo, "重新排序配置文件失败: " + reorder_err});
+         profiles.apply();
          if (auto save = profiles.data_arc()->save_file(); !save.is_ok())
            return CmdResult::err({errs::kIo, save.error().message});
          events::EventBus::refresh_verge();  // 顺序落盘后通知（列表重渲染）

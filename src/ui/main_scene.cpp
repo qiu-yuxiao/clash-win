@@ -13,7 +13,10 @@ MainScene::MainScene(Widget* parent) : Widget(parent) {
   auto upper = std::make_unique<Column>();
   upper_ = upper.get();
   auto qb = std::make_unique<Box>();
+  // src: _layout.tsx:1314-1322 仅有一层容器，padding 由该层承担；
+  //   本 Box 只是 30px 承载槽，零内距与源码等价（内距见 quick_bar.cpp set_padding）
   qb->set_padding(0, 0, 0, 0);
+  qb->set_z_order(9998);  // src: _layout.tsx:1320「zIndex: 9998」
   quickbar_ = qb.get();
   quickbar_->flex_weight = 0;
   upper_->add_child(std::move(qb));
@@ -23,8 +26,8 @@ MainScene::MainScene(Widget* parent) : Widget(parent) {
   upper_->add_child(std::move(slot));
   add_child(std::move(upper));
 
-  // 下栏：流量占位（T14）
-  auto traffic = std::make_unique<Box>();
+  // 下栏：流量面板（T14）挂载槽（135/100，铺满语义由 on_arrange 负责）
+  auto traffic = std::make_unique<Stack>();
   traffic_ = traffic.get();
   add_child(std::move(traffic));
 }
@@ -95,10 +98,10 @@ void MainScene::on_paint(IRenderTarget& rt) {
   // 占位底色：tauri 背景色口径（← dt.background_color，T13 场景填充后替换）
   // 【T17-fix】on_paint 局部坐标约定：画 {0,0,w,h}（画 bounds() 会在
   //   scene 不从 y=0 起时双重偏移——root 改 Column 流式后 scene y=30 暴露）
+  // src: _layout.tsx:1773 「background: 'inherit'」→ 继承 .layout 的 --theme-bg
+  //   （assets/styles/layout.scss:8 background: var(--theme-bg) !important）
   rt.fill_rect({0, 0, bounds().w, bounds().h},
-               Brush{theme::ThemeService::instance()
-                                   .palette()
-                                   .background_color});
+               Brush{theme::ThemeService::instance().vars().theme_bg});
 }
 
 }  // namespace clashwin::ui::win

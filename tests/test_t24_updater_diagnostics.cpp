@@ -13,6 +13,7 @@
 #include "core/core_updater.h"
 #include "events/event_bus.h"
 #include "mihomo/mihomo_client.h"
+#include "util/ed25519.h"
 #include "system/diagnostic_bundle.h"
 #include "update/client_updater.h"
 #include "util/dirs.h"
@@ -427,6 +428,171 @@ UT_TEST(t24_client_updater_manifest_parsing) {
   auto res_no_update = ClientUpdater::parse_manifest(manifest_json, "v3.2.3");
   UT_CHECK(res_no_update.is_ok());
   UT_CHECK(!res_no_update.value().has_update);
+}
+
+// Test 8b: Client Updater Download Progress Events
+UT_TEST(t24_client_updater_download_progress_events) {
+  // ← use-client-update.ts:73-105 Started/Progress/Finished 三段事件
+  struct MockAppDownloader : IAppUpdateDownloader {
+    Result<std::string> fetch_manifest(const std::string&) override {
+      return Result<std::string>::err(Error{1, "unused"});
+    }
+    Result<void> download_installer(
+        const std::string&, const std::wstring& dest_path,
+        std::function<void(size_t, size_t)> on_progress) override {
+      std::ofstream out(dest_path, std::ios::binary | std::ios::trunc);
+      out.write("SETUP_PAYLOAD", 13);
+      out.close();
+      if (on_progress) {
+        on_progress(100, 1000);
+        on_progress(1000, 1000);
+      }
+      return Result<void>::ok();
+    }
+  };
+
+  auto dl = std::make_shared<MockAppDownloader>();
+  ClientUpdater::instance().set_downloader(dl);
+
+  std::vector<std::pair<std::string, int>> captured;
+  std::string last_message;
+  uint64_t sub_id = events::EventBus::instance().subscribe(
+      "client-update-progress", [&](const nlohmann::json& payload) {
+        captured.emplace_back(payload.value("status", ""), payload.value("progress", 0));
+        last_message = payload.value("message", "");
+      });
+
+  auto res = ClientUpdater::instance().download_app_update(
+      "https://mock/setup.exe",
+      "14f8d5227db0d72a23479944bd4263bfdcf77dceaa6b04ec77f7d0e5eb4bb457",
+      "liNKJZVe7syWqcblanQIkI6yeT3fpVVGzSyrovd3C0npD6B+xmMWjSHO0O/WM5saDUnB8MObtL5/oFy4Td5KBQ==");
+  events::EventBus::instance().unsubscribe(sub_id);
+
+  UT_CHECK(res.is_ok());
+  UT_CHECK(std::filesystem::exists(res.value()));
+  UT_CHECK(!captured.empty());
+
+  // 首事件 downloading/0（开始下载软件更新包...），中间有 downloading/10
+  UT_CHECK_EQ(captured.front().first, "downloading");
+  UT_CHECK_EQ(captured.front().second, 0);
+  bool saw_ten = false;
+  for (const auto& ev : captured) {
+    if (ev.first == "downloading" && ev.second == 10) saw_ten = true;
+  }
+  UT_CHECK(saw_ten);
+
+  // 末事件 done/100 + 完成文案
+  UT_CHECK_EQ(captured.back().first, "done");
+  UT_CHECK_EQ(captured.back().second, 100);
+  UT_CHECK(last_message.find("下载完成") != std::string::npos);
+
+  std::error_code ec;
+  std::filesystem::remove(res.value(), ec);
+}
+
+// Test 8c: Client Updater Download Failure Emits Error Event
+UT_TEST(t24_client_updater_download_failure_emits_error) {
+  struct FailingDownloader : IAppUpdateDownloader {
+    Result<std::string> fetch_manifest(const std::string&) override {
+      return Result<std::string>::err(Error{1, "unused"});
+    }
+    Result<void> download_installer(const std::string&, const std::wstring&,
+                                    std::function<void(size_t, size_t)>) override {
+      return Result<void>::err(Error{2, "mock boom"});
+    }
+  };
+
+  ClientUpdater::instance().set_downloader(std::make_shared<FailingDownloader>());
+
+  std::string last_status;
+  std::string last_message;
+  uint64_t sub_id = events::EventBus::instance().subscribe(
+      "client-update-progress", [&](const nlohmann::json& payload) {
+        last_status = payload.value("status", "");
+        last_message = payload.value("message", "");
+      });
+
+  auto res = ClientUpdater::instance().download_app_update("https://mock/setup.exe");
+  events::EventBus::instance().unsubscribe(sub_id);
+
+  UT_CHECK(!res.is_ok());
+  UT_CHECK_EQ(last_status, "error");
+  UT_CHECK(last_message.find("更新失败") == 0);
+  UT_CHECK(last_message.find("mock boom") != std::string::npos);
+}
+
+// Test 8d: Client Updater SHA-256 校验（已知向量 + manifest 解析 + 不匹配拒绝）
+UT_TEST(t24_client_updater_sha256_verify) {
+  // "abc" 的 SHA-256 标准向量
+  const auto tmp = std::filesystem::temp_directory_path() / "cw_sha_abc.bin";
+  {
+    std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+    out.write("abc", 3);
+  }
+  UT_CHECK_EQ(ClientUpdater::compute_sha256_hex(tmp.wstring()),
+              std::string("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+  std::error_code ec;
+  std::filesystem::remove(tmp, ec);
+
+  // manifest 平台节点 sha256（统一转小写）
+  auto info = ClientUpdater::parse_manifest(
+      R"({"version":"9.9.9","platforms":{"windows-x86_64":{"url":"https://x/setup.exe","sha256":"BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD"}}})",
+      "1.0.0");
+  UT_CHECK(info.is_ok());
+  UT_CHECK_EQ(info.value().sha256,
+              std::string("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+
+  // 不匹配 → 删除文件 + error 事件（← Mini 验签失败即中止）
+  struct PayloadDownloader : IAppUpdateDownloader {
+    Result<std::string> fetch_manifest(const std::string&) override {
+      return Result<std::string>::err(Error{1, "unused"});
+    }
+    Result<void> download_installer(const std::string&, const std::wstring& dest_path,
+                                    std::function<void(size_t, size_t)> on_progress) override {
+      std::ofstream out(dest_path, std::ios::binary | std::ios::trunc);
+      out.write("NOT_ABC", 7);
+      out.close();
+      if (on_progress) on_progress(7, 7);
+      return Result<void>::ok();
+    }
+  };
+  ClientUpdater::instance().set_downloader(std::make_shared<PayloadDownloader>());
+
+  std::string last_status, last_message;
+  uint64_t sub_id = events::EventBus::instance().subscribe(
+      "client-update-progress", [&](const nlohmann::json& payload) {
+        last_status = payload.value("status", "");
+        last_message = payload.value("message", "");
+      });
+  auto res = ClientUpdater::instance().download_app_update(
+      "https://mock/setup.exe",
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  events::EventBus::instance().unsubscribe(sub_id);
+
+  UT_CHECK(!res.is_ok());
+  UT_CHECK_EQ(last_status, "error");
+  UT_CHECK(last_message.find("校验失败") != std::string::npos);
+}
+
+// Test 8e: Ed25519 验签（RFC 8032 test vector + 篡改拒绝）
+UT_TEST(t24_ed25519_verify_rfc8032) {
+  const uint8_t pk[32] = {0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7,
+                          0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
+                          0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25,
+                          0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a};
+  const uint8_t sig[64] = {0xe5, 0x56, 0x43, 0x00, 0xc3, 0x60, 0xac, 0x72,
+                           0x90, 0x86, 0xe2, 0xcc, 0x80, 0x6e, 0x82, 0x8a,
+                           0x84, 0x87, 0x7f, 0x1e, 0xb8, 0xe5, 0xd9, 0x74,
+                           0xd8, 0x73, 0xe0, 0x65, 0x22, 0x49, 0x01, 0x55,
+                           0x5f, 0xb8, 0x82, 0x15, 0x90, 0xa3, 0x3b, 0xac,
+                           0xc6, 0x1e, 0x39, 0x70, 0x1c, 0xf9, 0xb4, 0x6b,
+                           0xd2, 0x5b, 0xf5, 0xf0, 0x59, 0x5b, 0xbe, 0x24,
+                           0x65, 0x51, 0x41, 0x43, 0x8e, 0x7a, 0x10, 0x0b};
+  // 空消息
+  UT_CHECK(util::ed25519_verify(nullptr, 0, sig, pk));
+  // 篡改消息 → 拒绝
+  const uint8_t bad[3] = {'a', 'b', 'c'};
+  UT_CHECK(!util::ed25519_verify(bad, 3, sig, pk));
 }
 
 // Test 9: Diagnostic Bundle YAML Secret Redaction

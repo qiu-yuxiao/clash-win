@@ -3,10 +3,12 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include <algorithm>
 #include <fstream>
 #include <nlohmann/json.hpp>
 
 #include "cmd/command_service.h"
+#include "config/config.h"
 #include "config/profiles.h"
 #include "ui/theme/theme.h"
 #include "util/dirs.h"
@@ -15,7 +17,270 @@
 
 namespace clashwin::ui::scene {
 
+using theme::ThemeService;
+
 namespace {
+
+// ============================================================================
+// 全部几何/字号常量逐项对照
+// src/pages/_layout/components/first-run-guide-dialog.tsx
+// ============================================================================
+constexpr float kCardMaxW = 520.0f;      // src: :554 maxWidth '520px'
+constexpr float kCardRadius = 8.0f;      // src: :555 borderRadius '8px'
+constexpr float kTitlePadX = 14.0f;      // src: :566 px: 1.75
+constexpr float kTitlePadY = 12.0f;      // src: :567 py: 1.5
+constexpr float kTitleSize = 15.5f;      // src: :582 fontSize '15.5px'
+constexpr float kTitleGap = 4.8f;        // src: :571 gap: 0.6
+constexpr float kTitleLineH = 20.9f;     // src: :583 lineHeight 1.35 × 15.5
+constexpr float kBadgeFont = 10.5f;      // src: :504 fontSize '10.5px'
+constexpr float kBadgePadX = 8.0f;       // src: :502 px: 1
+constexpr float kBadgePadY = 1.6f;       // src: :503 py: 0.2
+constexpr float kBadgeW = 86.0f;         // 豁免: Mini 无对应物 — 徽标宽按内容自适应，无 width 字面量（出处: first-run-guide-dialog.tsx:503-514）
+constexpr float kBadgeH = 17.8f;         // src: :503-514 py1.6×2 + 10.5 行高 + 1px 边框×2
+constexpr float kTitleBlockH = 68.5f;    // src: :566-572 12+20.9+4.8+17.8+12+1
+constexpr float kContentPad = 14.0f;     // src: :592 px/py 1.75
+constexpr float kIntroSize = 13.0f;      // src: :599 fontSize '13px'
+constexpr float kIntroH = 41.6f;         // src: :597 lineHeight 1.6 × 13 × 2 行（长句换行）
+constexpr float kIntroMb = 12.0f;        // src: :598 mb: 1.5
+constexpr float kPillFont = 11.5f;       // src: :629 fontSize '11.5px'
+constexpr float kPillPadY = 3.2f;        // src: :627 py: 0.4
+constexpr float kPillH = 22.2f;          // src: :627/:629 3.2×2 + 11.5 行高 + 1px 边框×2
+constexpr float kPillGap = 6.0f;         // src: :611 gap: 0.75
+constexpr float kPillMb = 14.0f;         // src: :612 mb: 1.75
+constexpr float kBannerPadX = 10.0f;     // src: :660 px: 1.25
+constexpr float kBannerPadY = 6.0f;      // src: :661 py: 0.75
+constexpr float kBannerFont = 12.0f;     // src: :688 fontSize '12px'
+constexpr float kBannerH = 31.4f;        // src: :661/:688 6×2 + 12×1.45 + 1px 边框×2
+constexpr float kBannerMb = 10.0f;       // src: :659 mb: 1.25
+constexpr float kFieldH = 40.0f;         // 豁免: MUI TextField size=small 默认输入框高 40
+constexpr float kFieldMb = 8.0f;         // src: :697 mb: 1
+constexpr float kFieldRadius = 4.0f;     // 豁免: MUI OutlinedInput 默认 shape 圆角 4
+constexpr float kFieldBorderW = 2.0f;    // src: get3DInputStyle :752 2px × depth
+constexpr float kPasteFont = 12.0f;      // src: :767 fontSize '12px'
+constexpr float kPasteH = 18.4f;         // src: :771/:772 py: 0.25×2 + 12 行高
+constexpr float kPasteW = 150.0f;        // 豁免: Mini 无对应物 — 按钮宽按文字 + px 8×2 自适应，无 width 字面量（出处: first-run-guide-dialog.tsx:750-760）
+constexpr float kPasteMt = 8.0f;         // src: :757 mt: 1
+constexpr float kHintFont = 11.5f;       // src: :782 fontSize '11.5px'
+constexpr float kHintH = 16.1f;          // src: :783 lineHeight 1.4 × 11.5
+constexpr float kHintGap = 4.0f;         // src: :756 gap: 0.5
+constexpr float kActionPadY = 12.0f;     // src: :798 py: 1.5
+constexpr float kActionGap = 8.0f;       // src: :799 gap: 1
+constexpr float kPrimaryBtnH = 34.0f;    // src: :807 py: 0.85×2 + 13 行高 + 2px 边框×2
+constexpr float kSecondaryBtnH = 30.0f;  // src: :821 py: 0.7×2 + 12.5 行高 + 2px 边框×2
+constexpr float kActionsH = 96.4f;       // src: :798-800 12+34+8+30+12 + 1px 上边框
+constexpr float kRadiusBtn = 6.0f;       // src: get3DButtonStyle :79 borderRadius '6px'
+constexpr float kInputStepH = 357.0f;    // src: 68.5+14+(41.6+12+22.2+14+40+8+38.5)+14+96.4
+constexpr float kReadyNodeH = 206.0f;    // src: :865-1016 绿色卡流式高（含重测/接管提示预留）
+constexpr float kReadyStarH = 134.0f;    // src: :1019-1083 Star 卡流式高（正文 3 行）
+constexpr float kReadyGap = 12.0f;       // src: :877 mb: 1.5
+constexpr float kReadyStepH = 545.0f;    // src: 68.5+14+206+12+134+14+96.4
+
+// 绿色卡内部（src: :862-1016）
+constexpr float kCardPad = 12.0f;        // src: :866 p: 1.5
+constexpr float kImportedFont = 13.5f;   // src: :886 fontSize '13.5px'
+constexpr float kImportedH = 20.25f;     // src: :885 行高 1.5 × 13.5
+constexpr float kImportedMb = 4.0f;      // src: :885 mb: 0.5
+constexpr float kStatusMt = 4.0f;        // src: :898 mt: 0.5
+constexpr float kStatusFont = 12.5f;     // src: :910 fontSize '12.5px'
+constexpr float kStatusH = 37.5f;        // src: :909 lineHeight 1.5 × 12.5 × 2 行
+constexpr float kNodeMt = 8.0f;          // src: :925 mt: 1
+constexpr float kNodePt = 6.8f;          // src: :926 pt: 0.85
+constexpr float kNodeLabelH = 16.0f;     // src: :945/:946 caption 11.5
+constexpr float kNodeGap = 3.2f;         // src: :930 gap: 0.4
+constexpr float kNodeNameH = 18.2f;      // src: :973 lineHeight 1.4 × 13
+constexpr float kRetestMt = 8.8f;        // src: :989 mt: 1.1
+constexpr float kRetestH = 29.4f;        // src: :990 py: 0.65×2 + 12.5 行高 + 2px 边框×2
+constexpr float kWarnMt = 6.0f;          // src: :1008 mt: 0.75
+constexpr float kWarnH = 18.0f;          // src: :1009 lineHeight 1.5 × 12
+constexpr float kStarTitleFont = 13.5f;  // src: :1040 fontSize '13.5px'
+constexpr float kStarTitleH = 19.6f;     // src: :1041 lineHeight 1.45 × 13.5
+constexpr float kStarBodyFont = 12.5f;   // src: :1053 fontSize '12.5px'
+constexpr float kStarBodyH = 58.2f;      // src: :1052 lineHeight 1.55 × 12.5 × 3 行
+constexpr float kStarBtnMt = 6.0f;       // src: :1061 mt: 0.75
+constexpr float kStarBtnH = 22.0f;       // src: :1072/:1073 py: 0.2×2 + 11.5 行高
+constexpr float kStarBtnW = 130.0f;      // 豁免: Mini 无对应物 — 按钮宽按文字自适应，无 width 字面量（出处: first-run-guide-dialog.tsx:1065-1080）
+
+// 前置声明：定义见本匿名命名空间后部（语义色 helper 依赖皮肤判断）
+bool is_retro();
+bool is_light();
+
+// 语义色（src: :479-487）
+Color4f secondary_text() {
+  // src: :479 retro-3d 换 deep brown rgba(44,31,3,.78)，其余 text.secondary
+  return is_retro() ? Color4f::hex(0x2C1F03, 0.78f)
+                    : ThemeService::instance().palette().secondary_text;
+}
+Color4f disabled_text() {
+  // src: :480 retro-3d rgba(44,31,3,.55)，其余 text.disabled
+  return is_retro() ? Color4f::hex(0x2C1F03, 0.55f)
+                    : ThemeService::instance().palette().secondary_text;
+}
+Color4f ready_color() {
+  // src: :481 retro-3d #1B5E20，其余 success.main
+  return is_retro() ? Color4f::hex(0x1B5E20)
+                    : ThemeService::instance().palette().success_color;
+}
+Color4f warning_color() {
+  // src: :482 retro-3d #8C4A03，其余 warning.main
+  return is_retro() ? Color4f::hex(0x8C4A03)
+                    : ThemeService::instance().palette().warning_color;
+}
+Color4f star_accent_color() {
+  // src: :483-487 retro-3d #7A3E00；其余 dark #FFD54F / light #B26A00
+  if (is_retro()) return Color4f::hex(0x7A3E00);
+  return is_light() ? Color4f::hex(0xB26A00) : Color4f::hex(0xFFD54F);
+}
+Color4f card_text_color() {
+  // src: get3DCardStyle :535 default textColor light #3C2F0F / dark #2C1F03
+  return is_retro() ? (is_light() ? Color4f::hex(0x3C2F0F) : Color4f::hex(0x2C1F03))
+                    : ThemeService::instance().palette().primary_text;
+}
+
+bool is_retro() {
+  return ThemeService::instance().skin() == theme::SkinId::Retro3d;
+}
+bool is_light() {
+  return ThemeService::instance().is_light();
+}
+
+// src: MUI 默认 palette.divider light rgba(0,0,0,.12) / dark rgba(255,255,255,.12)
+Color4f divider_color() {
+  return is_light() ? Color4f::hex(0x000000, 0.12f) : Color4f::hex(0xFFFFFF, 0.12f);
+}
+
+void draw_text(IRenderTarget& rt, const std::wstring& text, const RectF& r,
+               float size, int weight, const Color4f& color,
+               AlignH ah = AlignH::Left, AlignV av = AlignV::Center,
+               bool wrap = false, bool ellipsis = false) {
+  TextStyle ts;
+  ts.size = size;
+  ts.weight = weight;
+  ts.color = color;
+  ts.align_h = ah;
+  ts.align_v = av;
+  ts.wrap = wrap;
+  ts.ellipsis = ellipsis;
+  rt.draw_text(text, r, ts);
+}
+
+// 3D 金卡：src: get3DCardStyle :548-566（bevel 暗金 + 135° 四停靠渐变）
+void paint_card(IRenderTarget& rt, const RectF& r) {
+  if (!is_retro()) {
+    // 豁免: 非 retro-3d 皮肤由主题面板底色承载
+    Brush bg{ThemeService::instance().vars().theme_panel_bg};
+    rt.round_rect(r, kCardRadius, Pen{divider_color(), 1.0f}, &bg);
+    return;
+  }
+  // src: :556-565 box-shadow 0 1/2/3px bevel，引擎无阴影，偏移层模拟
+  Brush bevel{Color4f::hex(is_light() ? 0xB8860B : 0x755500)};
+  rt.round_rect({r.x, r.y + 3.0f, r.w, r.h}, kCardRadius, {}, &bevel);
+  Brush soft{Color4f::hex(0x000000, is_light() ? 0.35f : 0.6f)};
+  rt.round_rect({r.x, r.y + 5.0f, r.w, r.h}, kCardRadius, {}, &soft);
+
+  // src: get3DCardStyle :537-539 light FFFDE7/FFF9C4/FFF59D/FFE082；
+  //      dark FFF59D/FBC02D/F57F17/E65100（135deg）
+  const GradientStop light_stops[4] = {
+      {0.00f, Color4f::hex(0xFFFDE7)},  // src: :538
+      {0.35f, Color4f::hex(0xFFF9C4)},  // src: :538
+      {0.70f, Color4f::hex(0xFFF59D)},  // src: :538
+      {1.00f, Color4f::hex(0xFFE082)},  // src: :538
+  };
+  const GradientStop dark_stops[4] = {
+      {0.00f, Color4f::hex(0xFFF59D)},  // src: :539
+      {0.35f, Color4f::hex(0xFBC02D)},  // src: :539
+      {0.70f, Color4f::hex(0xF57F17)},  // src: :539
+      {1.00f, Color4f::hex(0xE65100)},  // src: :539
+  };
+  // src: :554-556 linear-gradient(135deg, ...)
+  rt.fill_round_rect_gradient_angle(r, kCardRadius,
+                                    is_light() ? light_stops : dark_stops, 4, 135.0f);
+}
+
+enum class BtnStyle { Primary, OutlinedDefault, OutlinedPrimary };
+
+// src: get3DButtonStyle :28-127（retro-3d 渐变 + 2px 描边 + 粗体）
+void paint_button(IRenderTarget& rt, const RectF& r, BtnStyle style,
+                  const std::wstring& label, float font_size) {
+  Color4f text_color;
+  if (!is_retro()) {
+    // 豁免: 非 retro 皮肤走主题主色平涂（其余皮肤分支未在本弹窗启用）
+    if (style == BtnStyle::Primary) {
+      Brush b{ThemeService::instance().primary()};
+      rt.round_rect(r, kRadiusBtn, {}, &b);
+      text_color = Color4f::hex(0xFFFFFF);
+    } else {
+      rt.round_rect(r, kRadiusBtn, Pen{ThemeService::instance().primary(), 1.0f},
+                    nullptr);
+      text_color = ThemeService::instance().primary();
+    }
+    draw_text(rt, label, r, font_size, static_cast<int>(Weight::Bold), text_color,
+              AlignH::Center);
+    return;
+  }
+
+  if (style == BtnStyle::Primary) {
+    // src: :38-39 主按钮 135° 六停靠
+    const GradientStop stops[6] = {
+        {0.00f, Color4f::hex(0xFFE082)},  // src: :39
+        {0.20f, Color4f::hex(0xFFD54F)},  // src: :39
+        {0.45f, Color4f::hex(0xFFC107)},  // src: :39
+        {0.70f, Color4f::hex(0xFFB300)},  // src: :39
+        {0.85f, Color4f::hex(0xD4AF37)},  // src: :39
+        {1.00f, Color4f::hex(0xB8860B)},  // src: :39
+    };
+    // src: :83 background linear-gradient(135deg ...)
+    rt.fill_round_rect_gradient_angle(r, kRadiusBtn, stops, 6, 135.0f);
+    // src: :36 borderColor light #8A6D00 / dark #634E00（2px）
+    rt.round_rect(r, kRadiusBtn,
+                  Pen{Color4f::hex(is_light() ? 0x8A6D00 : 0x634E00), 2.0f}, nullptr);
+    text_color = Color4f::hex(0x2C1F03);  // src: :35
+  } else {
+    // src: :59-63 outlined default：to bottom 半透明金渐变
+    const GradientStop light_stops[2] = {
+        {0.00f, Color4f::hex(0xFFFDE7, 0.4f)},  // src: :61
+        {1.00f, Color4f::hex(0xFFF59D, 0.2f)},  // src: :61
+    };
+    const GradientStop dark_stops[2] = {
+        {0.00f, Color4f::hex(0x2A2413, 0.4f)},  // src: :62
+        {1.00f, Color4f::hex(0x17140B, 0.2f)},  // src: :62
+    };
+    // src: :61-62 linear-gradient(to bottom, ...)
+    rt.fill_round_rect_gradient_angle(r, kRadiusBtn,
+                                      is_light() ? light_stops : dark_stops, 2, 180.0f);
+    // src: :52 borderColor light #D4AF37 / dark #8A6D00（2px）
+    rt.round_rect(r, kRadiusBtn,
+                  Pen{Color4f::hex(is_light() ? 0xD4AF37 : 0x8A6D00), 2.0f}, nullptr);
+    // src: :47-51 outlined default text light #3C2F0F / dark #FFE082
+    text_color = style == BtnStyle::OutlinedPrimary
+                     ? Color4f::hex(0x2C1F03)
+                     : (is_light() ? Color4f::hex(0x3C2F0F) : Color4f::hex(0xFFE082));
+  }
+  draw_text(rt, label, r, font_size, static_cast<int>(Weight::Bold), text_color,
+            AlignH::Center);
+}
+
+// src: :674-676 border 1px dashed（引擎无虚线图元，以离散段绘制）
+void dashed_rect(IRenderTarget& rt, const RectF& r, const Color4f& c) {
+  const float dash = 4.0f;  // 豁免: Mini 无对应物 — CSS dashed 无引擎图元，以 4/3 段模拟（出处: :674-676）
+  const float gap = 3.0f;   // 豁免: Mini 无对应物 — 同上（dash/gap 4/3；出处: :674-676）
+  Brush b{c};
+  for (float x = r.x; x < r.right(); x += dash + gap)
+    rt.fill_rect({x, r.y, std::min(dash, r.right() - x), 1.0f}, b);
+  for (float x = r.x; x < r.right(); x += dash + gap)
+    rt.fill_rect({x, r.y + r.h - 1.0f, std::min(dash, r.right() - x), 1.0f}, b);
+  for (float y = r.y; y < r.bottom(); y += dash + gap) {
+    rt.fill_rect({r.x, y, 1.0f, std::min(dash, r.bottom() - y)}, b);
+    rt.fill_rect({r.x + r.w - 1.0f, y, 1.0f, std::min(dash, r.bottom() - y)}, b);
+  }
+}
+
+void dashed_line(IRenderTarget& rt, float x, float y, float w, const Color4f& c) {
+  const float dash = 4.0f;  // 豁免: Mini 无对应物 — CSS dashed 无引擎图元，段长 4（出处: :674-676）
+  const float gap = 3.0f;   // 豁免: Mini 无对应物 — 同上（gap 3；出处: :674-676）
+  Brush b{c};
+  for (float dx = x; dx < x + w; dx += dash + gap)
+    rt.fill_rect({dx, y, std::min(dash, x + w - dx), 1.0f}, b);
+}
 
 std::string read_clipboard_url() {
   if (!OpenClipboard(nullptr)) return "";
@@ -85,9 +350,19 @@ FirstRunGuideDialog::FirstRunGuideDialog(Widget* parent) : Widget(parent) {
 
 void FirstRunGuideDialog::open() {
   open_ = true;
+  // src: :286-298 resetForm：重新打开从导入步开始
   step_ = FirstRunStep::Input;
   is_importing_ = false;
   error_message_.clear();
+  retesting_ = false;
+  input_focused_ = false;
+  // src: :143-166/:209-244 就绪态全部复位（activeDelay=null、未超时、未自动重测）
+  active_node_name_.clear();
+  active_delay_ms_ = -1;
+  gave_up_ = false;
+  ready_started_ms_ = 0;
+  last_poll_ms_ = 0;
+  auto_retested_ = false;
   check_clipboard();
   invalidate();
 }
@@ -118,8 +393,44 @@ void FirstRunGuideDialog::check_clipboard() {
 }
 
 void FirstRunGuideDialog::set_active_delay_ms(int ms) {
+  // -1 = null（未测出）；0 = 测速失败；>0 有效延迟（src: :143-166）
   active_delay_ms_ = ms;
   invalidate();
+}
+
+// src: :228-232 进入 ready 且未就绪、未重测：20s 后置 gaveUp
+// src: :236-245 进入 ready 立即刷新一次，随后每 1.5s 轮询；
+//            (gaveUp && !retesting) 时停止轮询
+void FirstRunGuideDialog::tick(int64_t now_ms) {
+  if (!open_ || step_ != FirstRunStep::Ready) return;
+  if (proxy_ready()) return;
+  if (retesting_) return;  // src: :229 retesting 短路（重测期间不计时/不轮询）
+  if (gave_up_) return;    // src: :237 超时确认后停止轮询
+  if (ready_started_ms_ == 0) ready_started_ms_ = now_ms;
+  if (now_ms - ready_started_ms_ >= kReadyTimeoutMs) {
+    gave_up_ = true;
+    invalidate();
+    return;
+  }
+  if (last_poll_ms_ == 0 || now_ms - last_poll_ms_ >= kReadyPollIntervalMs) {
+    last_poll_ms_ = now_ms;
+    if (on_refresh_proxy) on_refresh_proxy();
+  }
+}
+
+void FirstRunGuideDialog::on_retest_finished() {
+  if (!retesting_) return;
+  retesting_ = false;
+  // src: :228-245 重测结束后重新计时/恢复轮询
+  ready_started_ms_ = 0;
+  last_poll_ms_ = 0;
+  invalidate();
+}
+
+// src: :173-174 isUnconfirmed = !proxyReady && (gaveUp || (!retesting && activeDelay === 0))
+bool FirstRunGuideDialog::unconfirmed() const {
+  return !proxy_ready() &&
+         (gave_up_ || (!retesting_ && active_delay_ms_ == 0));
 }
 
 void FirstRunGuideDialog::submit_import() {
@@ -137,15 +448,17 @@ void FirstRunGuideDialog::submit_import() {
     }
   }
 
+  // src: :374-377 errEmpty
   if (target_url.empty()) {
-    error_message_ = "请输入订阅链接或复制链接到剪贴板";
+    error_message_ = "请输入或粘贴订阅链接";
     invalidate();
     return;
   }
 
+  // src: :383-386 errScheme（仅 http(s)；clash:// 为本应用兼容保留）
   if (target_url.rfind("http://", 0) != 0 && target_url.rfind("https://", 0) != 0 &&
       target_url.rfind("clash://", 0) != 0) {
-    error_message_ = "仅支持 http://, https:// 或 clash:// 订阅协议";
+    error_message_ = "订阅链接必须以 http:// 或 https:// 开头";
     invalidate();
     return;
   }
@@ -165,8 +478,17 @@ void FirstRunGuideDialog::submit_import() {
   }
 
   if (success) {
-    // BUG-310 自动接管：若系统代理与 TUN 均未开启，自动开启系统代理
-    if (!takeover_active_) {
+    // src: :398 verge 已加载且 enable_system_proxy/enable_tun_mode 均未开启 → 自动接管
+    bool checked = false;
+    bool takeover_on = false;
+    try {
+      const auto& v = *config::Config::instance().verge().latest_arc();
+      takeover_on = v.enable_system_proxy.value_or(false) ||
+                    v.enable_tun_mode.value_or(false);
+      checked = true;
+    } catch (...) {
+    }
+    if (checked && !takeover_on) {
       if (on_patch_system_proxy) {
         on_patch_system_proxy(true);
       } else {
@@ -175,391 +497,402 @@ void FirstRunGuideDialog::submit_import() {
                                                  {{"enable_system_proxy", true}});
         } catch (...) {}
       }
-      takeover_active_ = true;
+      takeover_on = true;
     }
+    // src: :181-186 isTakeoverOff = Boolean(verge && …)：verge 未加载时不误报
+    takeover_active_ = !checked || takeover_on;
 
-    // BUG-311 守护释放：is_importing_ 在状态切换前释放，避免阻塞后续测速
+    // src: :401 setStep('ready')；BUG-311 守卫先释放，避免阻塞后续测速
     is_importing_ = false;
     step_ = FirstRunStep::Ready;
-    active_delay_ms_ = 48;  // 模拟优选最快节点延迟
+    gave_up_ = false;
+    ready_started_ms_ = 0;
+    last_poll_ms_ = 0;
     invalidate();
 
-    if (on_retest_nodes) {
-      on_retest_nodes();
+    // src: :207-225 首次进入 ready 且未就绪 → 后台全节点测速优选（仅一次）
+    if (!auto_retested_) {
+      auto_retested_ = true;
+      if (on_retest_nodes) on_retest_nodes();
     }
   } else {
+    // src: :403 errImport
     is_importing_ = false;
-    error_message_ = "订阅配置导入失败，请检查链接或网络后重试";
+    error_message_ = "订阅导入失败，请检查链接是否有效后重试";
     invalidate();
   }
 }
 
 void FirstRunGuideDialog::finish() {
+  // src: :301-303 markGuided：三个出口共用完成标记
   set_first_run_completed(true);
   close();
 }
 
 void FirstRunGuideDialog::on_arrange(const RectF& area) {
   set_bounds(area);
-  const float cw = std::min(480.0f, area.w - 24.0f);
-  const float ch = step_ == FirstRunStep::Input ? 350.0f : 430.0f;
-  float cx = std::max(0.0f, (area.w - cw) / 2.0f);
-  float cy = std::max(0.0f, (area.h - ch) / 2.0f);
+  // src: :545-557 paper width 100% / maxWidth 520（窗口侧留 32px 呼吸）
+  const float cw = std::min(kCardMaxW, area.w - 32.0f);
+  const bool has_banner =
+      step_ == FirstRunStep::Input && detected_clipboard_url_.empty() == false &&
+      url_.empty();
+  // src: :560-1120 内容随流式增减：输入步 + 横幅高度；就绪步两卡 + 动作
+  float ch = step_ == FirstRunStep::Input
+                 ? kInputStepH + (has_banner ? kBannerH + kBannerMb : 0.0f)
+                 : kReadyStepH;
+  ch = std::min(ch, area.h - 16.0f);
+  const float cx = std::max(0.0f, (area.w - cw) / 2.0f);
+  const float cy = std::max(0.0f, (area.h - ch) / 2.0f);
   card_rect_ = {cx, cy, cw, ch};
 
-  btn_close_x_rect_ = {cx + cw - 32.0f, cy + 8.0f, 24.0f, 24.0f};
+  const float inner_x = cx + kTitlePadX;
+  const float inner_w = cw - kTitlePadX * 2.0f;
+  const float content_y = cy + kTitleBlockH + kContentPad;
 
   if (step_ == FirstRunStep::Input) {
-    banner_clip_rect_ = {cx + 20.0f, cy + 96.0f, cw - 40.0f, 28.0f};
-    input_rect_ = {cx + 20.0f, cy + 134.0f, cw - 40.0f - 88.0f, 34.0f};
-    btn_clear_rect_ = {cx + cw - 100.0f, cy + 134.0f, 32.0f, 34.0f};
-    btn_paste_rect_ = {cx + cw - 64.0f, cy + 134.0f, 44.0f, 34.0f};
-    btn_submit_rect_ = {cx + 20.0f, cy + ch - 82.0f, cw - 40.0f, 34.0f};
-    btn_later_rect_ = {cx + 20.0f, cy + ch - 42.0f, cw - 40.0f, 28.0f};
+    const float pills_y = content_y + kIntroH + kIntroMb;
+    const float field_y = pills_y + kPillH + kPillMb +
+                          (has_banner ? kBannerH + kBannerMb : 0.0f);
+    banner_clip_rect_ = {inner_x, pills_y + kPillH + kPillMb, inner_w, kBannerH};
+    input_rect_ = {inner_x, field_y, inner_w, kFieldH};
+    // src: :715-729 endAdornment KeyboardReturn 16px（点击即导入）
+    btn_enter_rect_ = {input_rect_.right() - 26.0f, field_y + 12.0f, 16.0f, 16.0f};
+
+    const float paste_y = field_y + kFieldH + kPasteMt;
+    btn_paste_rect_ = {cx + (cw - kPasteW) / 2.0f, paste_y, kPasteW, kPasteH};
+    const float actions_top = cy + ch - kActionsH;
+    btn_submit_rect_ = {inner_x, actions_top + kActionPadY, inner_w, kPrimaryBtnH};
+    btn_later_rect_ = {inner_x, btn_submit_rect_.bottom() + kActionGap, inner_w,
+                       kSecondaryBtnH};
   } else {
-    // Step 2
-    card_node_rect_ = {cx + 20.0f, cy + 62.0f, cw - 40.0f, 134.0f};
-    btn_retest_rect_ = {cx + 32.0f, cy + 160.0f, cw - 64.0f, 26.0f};
-    card_star_rect_ = {cx + 20.0f, cy + 206.0f, cw - 40.0f, 114.0f};
-    btn_wiki_rect_ = {cx + cw - 150.0f, cy + 284.0f, 120.0f, 24.0f};
-    btn_finish_star_rect_ = {cx + 20.0f, cy + ch - 84.0f, cw - 40.0f, 34.0f};
-    btn_finish_rect_ = {cx + 20.0f, cy + ch - 44.0f, cw - 40.0f, 30.0f};
+    // src: :863-1083 绿色仪表卡 → Star 卡（卡间 mb 12）
+    card_node_rect_ = {inner_x, content_y, inner_w, kReadyNodeH};
+    // src: :984-999 重测按钮 fullWidth，内距 12 + mt 8.8
+    const float retest_y = content_y + kCardPad + kImportedH + kImportedMb + kStatusMt +
+                           kStatusH + kNodeMt + kNodePt + 1.0f + kNodeLabelH +
+                           kNodeGap + kNodeNameH + kRetestMt;
+    btn_retest_rect_ = {card_node_rect_.x + kCardPad, retest_y,
+                        card_node_rect_.w - kCardPad * 2.0f, kRetestH};
+
+    const float star_y = content_y + kReadyNodeH + kReadyGap;
+    card_star_rect_ = {inner_x, star_y, inner_w, kReadyStarH};
+    // src: :1059-1082 Wiki 文本按钮右对齐
+    const float wiki_y = star_y + kCardPad + kStarTitleH + kImportedMb + kStarBodyH +
+                         kStarBtnMt;
+    btn_wiki_rect_ = {card_star_rect_.right() - kCardPad - kStarBtnW, wiki_y,
+                     kStarBtnW, kStarBtnH};
+
+    const float actions_top = cy + ch - kActionsH;
+    btn_finish_star_rect_ = {inner_x, actions_top + kActionPadY, inner_w, kPrimaryBtnH};
+    btn_finish_rect_ = {inner_x, btn_finish_star_rect_.bottom() + kActionGap, inner_w,
+                        kSecondaryBtnH};
   }
 }
 
 void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
   if (!open_) return;
 
-  // 1. 半透明遮罩（局部坐标 {0,0,w,h}）
-  rt.fill_rect({0, 0, bounds().w, bounds().h}, Brush{Color4f(0, 0, 0, 0.48f)});
+  // src: MUI Dialog backdrop 默认 rgba(0,0,0,0.5)
+  rt.fill_rect({0, 0, bounds().w, bounds().h},
+               Brush{Color4f(0, 0, 0, 0.5f)});
 
-  // 2. 卡片底座（圆角 8px + 阴影）
-  Brush shadow_b{Color4f(0, 0, 0, 0.25f)};
-  rt.round_rect({card_rect_.x - 2, card_rect_.y - 1, card_rect_.w + 4, card_rect_.h + 5}, 9.0f,
-                {}, &shadow_b);
+  paint_card(rt, card_rect_);
+  const Color4f text_color = card_text_color();
 
-  Brush card_bg{Color4f::hex(0xFFFFFF)};
-  rt.round_rect(card_rect_, 8.0f, {Color4f::hex(0xE0E0E0), 1.0f}, &card_bg);
+  // ---- 标题区（src: :562-590 / :832-860）----
+  const std::wstring title =
+      step_ == FirstRunStep::Input ? L"🎉 欢迎使用 Clash Win" : L"🚀 订阅已就绪";
+  draw_text(rt, title,
+            {card_rect_.x, card_rect_.y + kTitlePadY, card_rect_.w, kTitleLineH},
+            kTitleSize, static_cast<int>(Weight::Bold),
+            step_ == FirstRunStep::Input ? text_color : ready_color(), AlignH::Center);
 
-  // 关闭 ✕ 按钮
-  Color4f x_bg = hover_close_x_ ? Color4f::hex(0xEEEEEE) : Color4f::hex(0xFAFAFA);
-  Brush xb{x_bg};
-  rt.round_rect(btn_close_x_rect_, 3.0f, {Color4f::hex(0xCCCCCC), 1.0f}, &xb);
-  TextStyle x_ts;
-  x_ts.size = 11.5f;
-  x_ts.color = Color4f::hex(0x555555);
-  x_ts.align_h = AlignH::Center;
-  x_ts.align_v = AlignV::Center;
-  rt.draw_text(L"✕", btn_close_x_rect_, x_ts);
+  // 步骤胶囊：src: :495-527
+  const RectF badge_r = {card_rect_.x + (card_rect_.w - kBadgeW) / 2.0f,
+                         card_rect_.y + kTitlePadY + kTitleLineH + kTitleGap,
+                         kBadgeW, kBadgeH};
+  // src: :507-514 bgcolor / borderColor（retro 深棕 / 其余中性灰）
+  const Color4f badge_bg = is_retro() ? Color4f::hex(0x2C1F03, 0.12f)
+                                      : Color4f::hex(0x808080, 0.14f);
+  const Color4f badge_bd = is_retro() ? Color4f::hex(0x2C1F03, 0.22f)
+                                      : Color4f::hex(0x808080, 0.24f);
+  Brush badge_b{badge_bg};
+  rt.round_rect(badge_r, badge_r.h / 2.0f, Pen{badge_bd, 1.0f}, &badge_b);
+  // src: :517-524 6×6 圆点（STEP1 primary.main / STEP2 readyColor）
+  Brush dot_b{step_ == FirstRunStep::Input ? ThemeService::instance().primary()
+                                           : ready_color()};
+  rt.round_rect({badge_r.x + kBadgePadX, badge_r.y + (badge_r.h - 6.0f) / 2.0f, 6.0f,
+                 6.0f},
+                3.0f, {}, &dot_b);
+  draw_text(rt, step_ == FirstRunStep::Input ? L"STEP 1 / 2" : L"STEP 2 / 2",
+            {badge_r.x + kBadgePadX + 6.0f + kPillGap, badge_r.y,
+             badge_r.w - kBadgePadX - 6.0f - kPillGap, badge_r.h},
+            kBadgeFont, static_cast<int>(Weight::Bold), secondary_text(), AlignH::Left);
+
+  // src: :572 borderBottom 1px solid palette.divider
+  rt.fill_rect({card_rect_.x, card_rect_.y + kTitleBlockH - 1.0f, card_rect_.w, 1.0f},
+               Brush{divider_color()});
+
+  const float content_y = card_rect_.y + kTitleBlockH + kContentPad;
+  const float inner_x = card_rect_.x + kTitlePadX;
+  const float inner_w = card_rect_.w - kTitlePadX * 2.0f;
 
   if (step_ == FirstRunStep::Input) {
-    // ---- STEP 1: 标题与引导 ----
-    TextStyle title_ts;
-    title_ts.size = 15.5f;
-    title_ts.weight = static_cast<int>(Weight::Bold);
-    title_ts.color = Color4f::hex(0x1A1A1A);
-    title_ts.align_h = AlignH::Center;
-    title_ts.align_v = AlignV::Center;
-    rt.draw_text(L"🎉 欢迎使用 Clash Win",
-                 {card_rect_.x, card_rect_.y + 10.0f, card_rect_.w, 24.0f}, title_ts);
+    // ---- 引导文案（src: :593-603）----
+    draw_text(rt,
+              L"首次使用只需一步：填入您的代理订阅链接，系统将自动完成节点解析、"
+              L"并发测速与最优路线接管。",
+              {inner_x, content_y, inner_w, kIntroH}, kIntroSize,
+              static_cast<int>(Weight::Normal), secondary_text(), AlignH::Left,
+              AlignV::Top, true);
 
-    // STEP 1 / 2 胶囊标
-    RectF badge_r = {card_rect_.x + (card_rect_.w - 80.0f) / 2.0f, card_rect_.y + 36.0f, 80.0f,
-                     18.0f};
-    Brush badge_bg{Color4f::hex(0xFFF3E0)};
-    rt.round_rect(badge_r, 9.0f, {Color4f::hex(0xFFB74D), 1.0f}, &badge_bg);
-    TextStyle badge_ts;
-    badge_ts.size = 10.0f;
-    badge_ts.weight = static_cast<int>(Weight::Bold);
-    badge_ts.color = Color4f::hex(0xE65100);
-    badge_ts.align_h = AlignH::Center;
-    badge_ts.align_v = AlignV::Center;
-    rt.draw_text(L"STEP 1 / 2", badge_r, badge_ts);
-
-    // 分隔线
-    rt.fill_rect({card_rect_.x, card_rect_.y + 58.0f, card_rect_.w, 1.0f},
-                 Brush{Color4f::hex(0xEEEEEE)});
-
-    // 3 特性图标标签
-    float f_w = (card_rect_.w - 56.0f) / 3.0f;
-    auto draw_feature = [&](float x, const wchar_t* text) {
-      RectF fr = {x, card_rect_.y + 66.0f, f_w, 22.0f};
-      Brush fb{Color4f::hex(0xF5F5F5)};
-      rt.round_rect(fr, 4.0f, {}, &fb);
-      TextStyle fts;
-      fts.size = 10.0f;
-      fts.color = Color4f::hex(0x424242);
-      fts.align_h = AlignH::Center;
-      fts.align_v = AlignV::Center;
-      rt.draw_text(text, fr, fts);
-    };
-    draw_feature(card_rect_.x + 20.0f, L"⚡ 自动优选最快节点");
-    draw_feature(card_rect_.x + 24.0f + f_w, L"🛡️ 国内 DNS 防污染");
-    draw_feature(card_rect_.x + 28.0f + f_w * 2.0f, L"🪶 极轻内存常驻");
-
-    // 剪贴板自动嗅探横幅
-    if (!detected_clipboard_url_.empty()) {
-      Brush banner_bg{hover_banner_ ? Color4f::hex(0xFFE082) : Color4f::hex(0xFFECB3)};
-      rt.round_rect(banner_clip_rect_, 4.0f, {Color4f::hex(0xFFB300), 1.0f}, &banner_bg);
-      TextStyle bts;
-      bts.size = 10.5f;
-      bts.color = Color4f::hex(0x6D4C41);
-      bts.align_h = AlignH::Center;
-      bts.align_v = AlignV::Center;
-      rt.draw_text(L"✨ 探测到剪贴板订阅链接，点击自动填入", banner_clip_rect_, bts);
+    // ---- 三大特性胶囊（src: :606-647）----
+    const float pills_y = content_y + kIntroH + kIntroMb;
+    const float pill_w = (inner_w - kPillGap * 2.0f) / 3.0f;
+    // src: :632-641 bgcolor / borderColor
+    const Color4f pill_bg = is_retro() ? Color4f::hex(0x2C1F03, 0.10f)
+                                      : (is_light() ? Color4f::hex(0x000000, 0.04f)
+                                                    : Color4f::hex(0xFFFFFF, 0.06f));
+    const Color4f pill_bd = is_retro() ? Color4f::hex(0x2C1F03, 0.20f)
+                                      : divider_color();
+    const wchar_t* pills[3] = {L"⚡ 自动测速择优", L"🛡️ 零配置防泄漏",
+                               L"🪶 极窄隐匿轻量"};
+    for (int i = 0; i < 3; ++i) {
+      const RectF pr = {inner_x + i * (pill_w + kPillGap), pills_y, pill_w, kPillH};
+      Brush pb{pill_bg};
+      rt.round_rect(pr, 6.0f, Pen{pill_bd, 1.0f}, &pb);
+      draw_text(rt, pills[i], pr, kPillFont, static_cast<int>(Weight::Bold), text_color,
+                AlignH::Center);
     }
 
-    // 输入框
-    Brush in_bg{Color4f::hex(0xFAFAFA)};
-    Pen in_pen{input_focused_ ? Color4f::hex(0xE65100) : Color4f::hex(0xCCCCCC), 1.5f};
-    rt.round_rect(input_rect_, 4.0f, in_pen, &in_bg);
-
-    TextStyle in_ts;
-    in_ts.size = 11.5f;
-    in_ts.color = url_.empty() ? Color4f::hex(0x9E9E9E) : Color4f::hex(0x212121);
-    in_ts.align_v = AlignV::Center;
-    in_ts.ellipsis = true;
-    std::wstring display_url =
-        url_.empty() ? L"支持各类订阅链接 (http/https/clash://)" : utf::utf8_to_utf16(url_);
-    rt.draw_text(display_url,
-                 {input_rect_.x + 8.0f, input_rect_.y, input_rect_.w - 16.0f, input_rect_.h},
-                 in_ts);
-
-    // 清空与粘贴按钮
-    Brush cb{hover_clear_ ? Color4f::hex(0xEEEEEE) : Color4f::hex(0xF5F5F5)};
-    rt.round_rect(btn_clear_rect_, 4.0f, {Color4f::hex(0xCCCCCC), 1.0f}, &cb);
-    TextStyle c_ts;
-    c_ts.size = 11.0f;
-    c_ts.color = Color4f::hex(0x424242);
-    c_ts.align_h = AlignH::Center;
-    c_ts.align_v = AlignV::Center;
-    rt.draw_text(L"✕", btn_clear_rect_, c_ts);
-
-    Brush pb{hover_paste_ ? Color4f::hex(0xEEEEEE) : Color4f::hex(0xF5F5F5)};
-    rt.round_rect(btn_paste_rect_, 4.0f, {Color4f::hex(0xCCCCCC), 1.0f}, &pb);
-    TextStyle p_ts;
-    p_ts.size = 10.5f;
-    p_ts.color = Color4f::hex(0x424242);
-    p_ts.align_h = AlignH::Center;
-    p_ts.align_v = AlignV::Center;
-    rt.draw_text(L"粘贴", btn_paste_rect_, p_ts);
-
-    // 错误信息
-    if (!error_message_.empty()) {
-      TextStyle err_ts;
-      err_ts.size = 10.5f;
-      err_ts.color = Color4f::hex(0xD32F2F);
-      err_ts.align_h = AlignH::Center;
-      err_ts.align_v = AlignV::Center;
-      rt.draw_text(utf::utf8_to_utf16(error_message_),
-                   {card_rect_.x + 20.0f, card_rect_.y + 176.0f, card_rect_.w - 40.0f, 20.0f},
-                   err_ts);
+    // ---- 剪贴板智能探测横幅（src: :650-695）----
+    if (!detected_clipboard_url_.empty() && url_.empty()) {
+      const RectF br = {inner_x, pills_y + kPillH + kPillMb, inner_w, kBannerH};
+      banner_clip_rect_ = br;
+      // src: :667-676 retro rgba(27,94,32,.12) / dark rgba(46,125,50,.18) /
+      //      light rgba(46,125,50,.1)，边框 1px dashed
+      const Color4f b_bg = is_retro()
+                               ? Color4f::hex(0x1B5E20, 0.12f)
+                               : (is_light() ? Color4f::hex(0x2E7D32, 0.10f)
+                                             : Color4f::hex(0x2E7D32, 0.18f));
+      const Color4f b_bd = is_retro() ? Color4f::hex(0x1B5E20, 0.45f) : ready_color();
+      Brush bbg{b_bg};
+      rt.round_rect(br, 6.0f, {}, &bbg);
+      dashed_rect(rt, br, b_bd);
+      draw_text(rt, L"✨ 检测到剪贴板中有订阅链接，点击填入或按 Enter 直接导入",
+                {br.x + kBannerPadX, br.y, br.w - kBannerPadX * 2.0f, br.h}, kBannerFont,
+                static_cast<int>(Weight::Bold), ready_color());
     }
 
-    // 底部"立即导入并开启"按钮
-    Color4f sub_bg = hover_submit_ ? Color4f::hex(0xEF6C00) : Color4f::hex(0xE65100);
-    Brush sub_b{sub_bg};
-    rt.round_rect(btn_submit_rect_, 4.0f, {}, &sub_b);
-    TextStyle sub_ts;
-    sub_ts.size = 12.0f;
-    sub_ts.weight = static_cast<int>(Weight::Bold);
-    sub_ts.color = Color4f::hex(0xFFFFFF);
-    sub_ts.align_h = AlignH::Center;
-    sub_ts.align_v = AlignV::Center;
-    rt.draw_text(is_importing_ ? L"⏳ 正在下载并解析配置..." : L"立即导入并开启",
-                 btn_submit_rect_, sub_ts);
+    // ---- 凹陷订阅输入框（src: :697-733 + get3DInputStyle :739-777）----
+    const float field_y = input_rect_.y;
+    // src: :742-744 背景 light rgba(255,253,231,.8) / dark rgba(26,22,14,.4)
+    const Color4f field_bg = is_retro()
+                                 ? (is_light() ? Color4f::hex(0xFFFDE7, 0.8f)
+                                               : Color4f::hex(0x1A160E, 0.4f))
+                                 : ThemeService::instance().vars().theme_input_bg;
+    // src: :753-755 描边 rgba(212,175,55,.35/.25)；:772 focus #B8860B/#FFA000
+    const Color4f field_bd =
+        input_focused_
+            ? (is_light() ? Color4f::hex(0xB8860B) : Color4f::hex(0xFFA000))
+            : (is_light() ? Color4f::hex(0xD4AF37, 0.35f)
+                          : Color4f::hex(0xD4AF37, 0.25f));
+    Brush fbg{field_bg};
+    rt.round_rect(input_rect_, kFieldRadius, Pen{field_bd, kFieldBorderW}, &fbg);
+    const std::wstring display_url =
+        url_.empty() ? L"https://example.com/api/v1/client/subscribe?token=..."
+                     : utf::utf8_to_utf16(url_);
+    // src: :708 placeholder；:704 onChange 文本色继承（retro 深棕）
+    draw_text(rt, display_url,
+              {input_rect_.x + 12.0f, field_y, input_rect_.w - 44.0f, kFieldH},
+              kIntroSize, static_cast<int>(Weight::Normal),
+              url_.empty() ? disabled_text() : text_color, AlignH::Left, AlignV::Center,
+              false, true);
+    // src: :725-727 KeyboardReturn 16px color text.disabled
+    draw_text(rt, L"⏎", btn_enter_rect_, 16.0f,
+              static_cast<int>(Weight::Normal),
+              hover_enter_ ? ThemeService::instance().primary() : disabled_text(),
+              AlignH::Center);
 
-    // "稍后设置"按钮
-    TextStyle lat_ts;
-    lat_ts.size = 11.0f;
-    lat_ts.color = hover_later_ ? Color4f::hex(0xE65100) : Color4f::hex(0x757575);
-    lat_ts.align_h = AlignH::Center;
-    lat_ts.align_v = AlignV::Center;
-    rt.draw_text(L"稍后设置", btn_later_rect_, lat_ts);
+    // ---- 粘贴按钮（src: :750-779）----
+    draw_text(rt, L"📋 一键粘贴剪贴板链接", btn_paste_rect_, kPasteFont,
+              static_cast<int>(Weight::Bold),
+              hover_paste_ ? warning_color() : ThemeService::instance().primary(),
+              AlignH::Center);
+
+    // ---- 错误提示 / Enter 提示（src: :735-748 错误行；:781-789 提示行）----
+    // 豁免: 本引擎布局不随错误动态改高，错误与提示共用输入框下方同一行
+    const bool has_error = !error_message_.empty();
+    const std::wstring hint_line =
+        has_error ? L"⚠️ " + utf::utf8_to_utf16(error_message_)
+                  : L"提示：按 Enter 键即可导入";
+    draw_text(rt, hint_line,
+              {inner_x, btn_paste_rect_.bottom() + kHintGap, inner_w, kHintH},
+              has_error ? kPasteFont : kHintFont,
+              static_cast<int>(has_error ? Weight::Bold : Weight::Normal),
+              has_error ? ThemeService::instance().palette().error_color
+                        : disabled_text(),
+              AlignH::Center);
+
+    // ---- 动作区（src: :792-828）----
+    rt.fill_rect({card_rect_.x, card_rect_.y + card_rect_.h - kActionsH,
+                  card_rect_.w, 1.0f},
+                 Brush{divider_color()});
+    // src: :803-815 contained primary
+    // src: locales/zh/layout.json:8 「"importAndStart": "立即导入并开启"」（Button loading 仅展示 spinner）
+    paint_button(rt, btn_submit_rect_, BtnStyle::Primary, L"立即导入并开启", 13.0f);
+    // src: :816-827 outlined default
+    paint_button(rt, btn_later_rect_, BtnStyle::OutlinedDefault, L"稍后手动配置", 12.5f);
 
   } else {
-    // ---- STEP 2: 就绪仪表盘 ----
-    TextStyle title_ts;
-    title_ts.size = 15.5f;
-    title_ts.weight = static_cast<int>(Weight::Bold);
-    title_ts.color = Color4f::hex(0x2E7D32);  // 绿色
-    title_ts.align_h = AlignH::Center;
-    title_ts.align_v = AlignV::Center;
-    rt.draw_text(L"🚀 已准备就绪！",
-                 {card_rect_.x, card_rect_.y + 10.0f, card_rect_.w, 24.0f}, title_ts);
+    // ================= STEP 2：就绪仪表盘（src: :830-1119）=================
+    // ---- 绿色仪表卡（src: :864-1016）----
+    const RectF& nc = card_node_rect_;
+    // src: :868-876 bgcolor rgba(76,175,80,.08/.12) + 1px 边框
+    const Color4f node_bg = Color4f::hex(0x4CAF50, is_light() ? 0.08f : 0.12f);
+    const Color4f node_bd = Color4f::hex(0x4CAF50, is_light() ? 0.28f : 0.32f);
+    Brush nb{node_bg};
+    rt.round_rect(nc, 8.0f, Pen{node_bd, 1.0f}, &nb);
 
-    // STEP 2 / 2 胶囊标
-    RectF badge_r = {card_rect_.x + (card_rect_.w - 80.0f) / 2.0f, card_rect_.y + 36.0f, 80.0f,
-                     18.0f};
-    Brush badge_bg{Color4f::hex(0xE8F5E9)};
-    rt.round_rect(badge_r, 9.0f, {Color4f::hex(0x81C784), 1.0f}, &badge_bg);
-    TextStyle badge_ts;
-    badge_ts.size = 10.0f;
-    badge_ts.weight = static_cast<int>(Weight::Bold);
-    badge_ts.color = Color4f::hex(0x2E7D32);
-    badge_ts.align_h = AlignH::Center;
-    badge_ts.align_v = AlignV::Center;
-    rt.draw_text(L"STEP 2 / 2", badge_r, badge_ts);
+    // src: :880-890 ✅ 导入成功
+    const float imported_y = nc.y + kCardPad;
+    draw_text(rt, L"✅ 订阅配置已成功导入并激活",
+              {nc.x + kCardPad, imported_y, nc.w - kCardPad * 2.0f, kImportedH},
+              kImportedFont, static_cast<int>(Weight::Bold), ready_color());
 
-    // 分隔线
-    rt.fill_rect({card_rect_.x, card_rect_.y + 56.0f, card_rect_.w, 1.0f},
-                 Brush{Color4f::hex(0xEEEEEE)});
+    // src: :893-919 就绪状态（未测出前如实提示，不做虚假宣称）
+    const bool ready = proxy_ready();
+    const bool unconfirmed = this->unconfirmed();
+    const float status_y = imported_y + kImportedH + kImportedMb + kStatusMt;
+    if (!ready && !unconfirmed) {
+      // 豁免: CircularProgress 以 12px 空心圆近似（引擎无动画组件）
+      rt.round_rect({nc.x + kCardPad, status_y + 2.0f, 12.0f, 12.0f}, 6.0f,
+                    Pen{secondary_text(), 1.0f}, nullptr);
+      draw_text(rt, L"◌", {nc.x + kCardPad, status_y, 14.0f, 18.0f}, kStatusFont,
+                static_cast<int>(Weight::Normal), secondary_text(), AlignH::Center);
+    }
+    const Color4f status_color =
+        ready ? ready_color() : (unconfirmed ? warning_color() : secondary_text());
+    const std::wstring status_text =
+        ready ? L"代理已就绪，国际网络已连通"
+              : (unconfirmed
+                     ? L"当前节点响应超时，可点击下方按钮自动重新测速并切换至最快节点；"
+                       L"您也可以直接进入主界面手动选择其他节点"
+                     : L"正在并发测速并自动选优最快节点…");
+    draw_text(rt, status_text,
+              {nc.x + kCardPad + (ready || unconfirmed ? 0.0f : 18.0f), status_y,
+               nc.w - kCardPad * 2.0f - (ready || unconfirmed ? 0.0f : 18.0f), kStatusH},
+              kStatusFont, static_cast<int>(Weight::Bold), status_color, AlignH::Left,
+              AlignV::Top, true);
 
-    // 卡片 1：实时节点连通仪表盘（浅绿底 + 边框）
-    Brush node_bg{Color4f::hex(0xF1F8E9)};
-    rt.round_rect(card_node_rect_, 6.0f, {Color4f::hex(0xC5E1A5), 1.0f}, &node_bg);
-
-    TextStyle imp_ts;
-    imp_ts.size = 11.5f;
-    imp_ts.weight = static_cast<int>(Weight::Bold);
-    imp_ts.color = Color4f::hex(0x2E7D32);
-    rt.draw_text(L"✅ 订阅配置导入成功",
-                 {card_node_rect_.x + 12.0f, card_node_rect_.y + 8.0f, card_node_rect_.w - 24.0f,
-                  18.0f},
-                 imp_ts);
-
-    TextStyle conn_ts;
-    conn_ts.size = 10.5f;
-    conn_ts.color = Color4f::hex(0x388E3C);
-    std::wstring conn_str = proxy_ready() ? L"所有节点测速完成，网络已就连通！"
-                                         : L"正在检测节点连通性与测速...";
-    rt.draw_text(conn_str,
-                 {card_node_rect_.x + 12.0f, card_node_rect_.y + 28.0f, card_node_rect_.w - 24.0f,
-                  18.0f},
-                 conn_ts);
-
-    // 最优节点行
-    TextStyle opt_ts;
-    opt_ts.size = 10.5f;
-    opt_ts.color = Color4f::hex(0x555555);
-    opt_ts.align_v = AlignV::Center;
-    rt.draw_text(L"🌐 当前最优节点",
-                 {card_node_rect_.x + 12.0f, card_node_rect_.y + 50.0f, 120.0f, 20.0f}, opt_ts);
-
-    if (proxy_ready()) {
-      RectF delay_badge = {card_node_rect_.x + card_node_rect_.w - 82.0f, card_node_rect_.y + 50.0f,
-                           70.0f, 18.0f};
-      Brush d_bg{Color4f::hex(0xE8F5E9)};
-      rt.round_rect(delay_badge, 9.0f, {Color4f::hex(0x4CAF50), 1.0f}, &d_bg);
-      TextStyle d_ts;
-      d_ts.size = 10.0f;
-      d_ts.weight = static_cast<int>(Weight::Bold);
-      d_ts.color = Color4f::hex(0x2E7D32);
-      d_ts.align_h = AlignH::Center;
-      d_ts.align_v = AlignV::Center;
-      std::wstring d_text = L"⚡ " + std::to_wstring(active_delay_ms_) + L" ms";
-      rt.draw_text(d_text, delay_badge, d_ts);
+    // src: :921-981 当前最优节点（仅在测速完成/超时确认后展示）
+    const float node_top = status_y + kStatusH + kNodeMt;
+    if (!active_node_name_.empty() && (ready || unconfirmed)) {
+      // src: :926-930 borderTop 1px dashed rgba(128,128,128,.25)
+      dashed_line(rt, nc.x + kCardPad, node_top + kNodePt, nc.w - kCardPad * 2.0f,
+                  Color4f::hex(0x808080, 0.25f));
+      const float label_y = node_top + kNodePt + 1.0f;
+      draw_text(rt, L"🌐 当前最优节点",
+                {nc.x + kCardPad, label_y, 140.0f, kNodeLabelH},
+                kHintFont, static_cast<int>(Weight::Bold), secondary_text());
+      if (ready) {
+        // src: :952-965 延迟胶囊：⚡ xx ms
+        const RectF db = {nc.right() - kCardPad - 72.0f, label_y - 1.0f, 72.0f, 18.0f};
+        Brush dbb{Color4f::hex(0x4CAF50, 0.18f)};
+        rt.round_rect(db, db.h / 2.0f, {}, &dbb);
+        draw_text(rt, L"⚡ " + std::to_wstring(active_delay_ms_) + L" ms", db, 11.0f,
+                  static_cast<int>(Weight::Bold), ready_color(), AlignH::Center);
+      }
+      // src: :968-979 节点名
+      draw_text(rt, utf::utf8_to_utf16(active_node_name_),
+                {nc.x + kCardPad, label_y + kNodeLabelH + kNodeGap,
+                 nc.w - kCardPad * 2.0f, kNodeNameH},
+                13.0f, static_cast<int>(Weight::Bold),
+                ThemeService::instance().palette().primary_text, AlignH::Left, AlignV::Center,
+                false, true);
     }
 
-    TextStyle node_ts;
-    node_ts.size = 12.0f;
-    node_ts.weight = static_cast<int>(Weight::Bold);
-    node_ts.color = Color4f::hex(0x212121);
-    node_ts.align_v = AlignV::Center;
-    node_ts.ellipsis = true;
-    rt.draw_text(utf::utf8_to_utf16(active_node_name_),
-                 {card_node_rect_.x + 12.0f, card_node_rect_.y + 70.0f,
-                  card_node_rect_.w - 24.0f, 20.0f},
-                 node_ts);
+    // src: :983-1000 重测并优选（仅在未就绪/重测中显示）
+    if (!ready && (unconfirmed || retesting_)) {
+      paint_button(rt, btn_retest_rect_, BtnStyle::OutlinedPrimary,
+                   L"🔄 重新测速并优选节点", 12.5f);
+    }
 
-    // 重测按钮
-    Color4f ret_bg = hover_retest_ ? Color4f::hex(0xE8F5E9) : Color4f::hex(0xFFFFFF);
-    Brush ret_b{ret_bg};
-    rt.round_rect(btn_retest_rect_, 4.0f, {Color4f::hex(0x81C784), 1.0f}, &ret_b);
-    TextStyle ret_ts;
-    ret_ts.size = 10.5f;
-    ret_ts.weight = static_cast<int>(Weight::Bold);
-    ret_ts.color = Color4f::hex(0x2E7D32);
-    ret_ts.align_h = AlignH::Center;
-    ret_ts.align_v = AlignV::Center;
-    rt.draw_text(L"🔄 重新测速并优选节点", btn_retest_rect_, ret_ts);
+    // src: :1002-1015 接管未开启提示
+    if (!takeover_active_) {
+      const float warn_y = btn_retest_rect_.bottom() + kWarnMt;
+      draw_text(rt, L"⚠️ 系统代理未开启，请在设置中开启后再试",
+                {nc.x + kCardPad, warn_y, nc.w - kCardPad * 2.0f, kWarnH}, 12.0f,
+                static_cast<int>(Weight::Bold), warning_color());
+    }
 
-    // 卡片 2：金色星标 GitHub Star 开源应援卡片
-    Brush star_bg{Color4f::hex(0xFFFDE7)};
-    rt.round_rect(card_star_rect_, 6.0f, {Color4f::hex(0xFFE082), 1.0f}, &star_bg);
+    // ---- 暖金 Star 卡（src: :1019-1083）----
+    const RectF& sc = card_star_rect_;
+    // src: :1023-1032 bgcolor / borderColor
+    const Color4f star_bg = is_retro()
+                                ? Color4f::hex(0xFFFFFF, 0.22f)
+                                : Color4f::hex(0xFFC107, is_light() ? 0.10f : 0.09f);
+    const Color4f star_bd = is_retro() ? Color4f::hex(0x7A3E00, 0.35f)
+                                      : Color4f::hex(0xFFC107, 0.45f);
+    Brush sb{star_bg};
+    rt.round_rect(sc, 8.0f, Pen{star_bd, 1.0f}, &sb);
 
-    TextStyle star_title_ts;
-    star_title_ts.size = 12.0f;
-    star_title_ts.weight = static_cast<int>(Weight::Bold);
-    star_title_ts.color = Color4f::hex(0xF57F17);  // 暖金色
-    rt.draw_text(L"⭐ 点亮 GitHub Star 支持作者",
-                 {card_star_rect_.x + 12.0f, card_star_rect_.y + 8.0f, card_star_rect_.w - 24.0f,
-                  18.0f},
-                 star_title_ts);
+    // src: :1035-1046 ⭐ 标题
+    draw_text(rt, L"⭐ 喜欢 Clash Win 吗？送我们一颗 ⭐ Star 吧！",
+              {sc.x + kCardPad, sc.y + kCardPad, sc.w - kCardPad * 2.0f, kStarTitleH},
+              kStarTitleFont, static_cast<int>(Weight::Bold), star_accent_color());
+    // src: :1048-1057 正文
+    draw_text(rt,
+              L"点击下方主按钮将打开 Clash Win 的 GitHub 仓库——既能实测外网秒开，"
+              L"也恳请在打开的页面右上角点亮一颗 ⭐ Star，您的支持是我们持续维护的最大动力！",
+              {sc.x + kCardPad, sc.y + kCardPad + kStarTitleH + kImportedMb,
+               sc.w - kCardPad * 2.0f, kStarBodyH},
+              kStarBodyFont, static_cast<int>(Weight::Normal), secondary_text(),
+              AlignH::Left, AlignV::Top, true);
+    // src: :1059-1082 Wiki 文本按钮
+    draw_text(rt, L"📖 查看 Wiki 进阶指南 ↗", btn_wiki_rect_, kHintFont,
+              static_cast<int>(Weight::Bold),
+              hover_wiki_ ? warning_color() : ThemeService::instance().primary(),
+              AlignH::Right);
 
-    TextStyle star_body_ts;
-    star_body_ts.size = 10.5f;
-    star_body_ts.color = Color4f::hex(0x5D4037);
-    star_body_ts.wrap = true;
-    rt.draw_text(
-        L"如果 Clash Win 对您有所帮助，欢迎前往 GitHub 为本项目点亮 Star 开源支持！",
-        {card_star_rect_.x + 12.0f, card_star_rect_.y + 28.0f, card_star_rect_.w - 24.0f, 44.0f},
-        star_body_ts);
-
-    // Wiki 帮助链接
-    TextStyle wiki_ts;
-    wiki_ts.size = 10.5f;
-    wiki_ts.weight = static_cast<int>(Weight::Bold);
-    wiki_ts.color = hover_wiki_ ? Color4f::hex(0xE65100) : Color4f::hex(0x1976D2);
-    wiki_ts.align_h = AlignH::Right;
-    wiki_ts.align_v = AlignV::Center;
-    rt.draw_text(L"📖 查看使用文档 ↗", btn_wiki_rect_, wiki_ts);
-
-    // 底部主要操作按钮
-    Color4f f_star_bg = hover_finish_star_ ? Color4f::hex(0xEF6C00) : Color4f::hex(0xE65100);
-    Brush fsb{f_star_bg};
-    rt.round_rect(btn_finish_star_rect_, 4.0f, {}, &fsb);
-    TextStyle fs_ts;
-    fs_ts.size = 12.0f;
-    fs_ts.weight = static_cast<int>(Weight::Bold);
-    fs_ts.color = Color4f::hex(0xFFFFFF);
-    fs_ts.align_h = AlignH::Center;
-    fs_ts.align_v = AlignV::Center;
-    rt.draw_text(L"⭐ 去 GitHub 点亮 Star 并完成", btn_finish_star_rect_, fs_ts);
-
-    // 次要完成按钮
-    Color4f fin_bg = hover_finish_ ? Color4f::hex(0xEEEEEE) : Color4f::hex(0xF5F5F5);
-    Brush finb{fin_bg};
-    rt.round_rect(btn_finish_rect_, 4.0f, {Color4f::hex(0xCCCCCC), 1.0f}, &finb);
-    TextStyle fin_ts;
-    fin_ts.size = 11.0f;
-    fin_ts.color = Color4f::hex(0x424242);
-    fin_ts.align_h = AlignH::Center;
-    fin_ts.align_v = AlignV::Center;
-    rt.draw_text(L"完成并开始使用", btn_finish_rect_, fin_ts);
+    // ---- 动作区（src: :1086-1119）----
+    rt.fill_rect({card_rect_.x, card_rect_.y + card_rect_.h - kActionsH,
+                  card_rect_.w, 1.0f},
+                 Brush{divider_color()});
+    paint_button(rt, btn_finish_star_rect_, BtnStyle::Primary,
+                 L"⭐ 打开 GitHub 测速并点 ⭐ Star", 13.0f);
+    paint_button(rt, btn_finish_rect_, BtnStyle::OutlinedDefault, L"进入主界面", 12.5f);
   }
 }
 
 bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
   if (!open_) return false;
-  PointF pt = e.pos;
+  const PointF pt = e.pos;
 
   if (e.type == MouseEventType::Move) {
-    bool hx = btn_close_x_rect_.contains(pt.x, pt.y);
     if (step_ == FirstRunStep::Input) {
-      bool hb = !detected_clipboard_url_.empty() && banner_clip_rect_.contains(pt.x, pt.y);
-      bool hc = btn_clear_rect_.contains(pt.x, pt.y);
-      bool hp = btn_paste_rect_.contains(pt.x, pt.y);
-      bool hs = btn_submit_rect_.contains(pt.x, pt.y);
-      bool hl = btn_later_rect_.contains(pt.x, pt.y);
-      if (hx != hover_close_x_ || hb != hover_banner_ || hc != hover_clear_ ||
-          hp != hover_paste_ || hs != hover_submit_ || hl != hover_later_) {
-        hover_close_x_ = hx;
+      const bool hb = !detected_clipboard_url_.empty() && url_.empty() &&
+                      banner_clip_rect_.contains(pt.x, pt.y);
+      const bool hp = btn_paste_rect_.contains(pt.x, pt.y);
+      const bool hs = btn_submit_rect_.contains(pt.x, pt.y);
+      const bool hl = btn_later_rect_.contains(pt.x, pt.y);
+      const bool he = btn_enter_rect_.contains(pt.x, pt.y);
+      if (hb != hover_banner_ || hp != hover_paste_ || hs != hover_submit_ ||
+          hl != hover_later_ || he != hover_enter_) {
         hover_banner_ = hb;
-        hover_clear_ = hc;
         hover_paste_ = hp;
         hover_submit_ = hs;
         hover_later_ = hl;
+        hover_enter_ = he;
         invalidate();
       }
     } else {
-      bool hr = btn_retest_rect_.contains(pt.x, pt.y);
-      bool hw = btn_wiki_rect_.contains(pt.x, pt.y);
-      bool hfs = btn_finish_star_rect_.contains(pt.x, pt.y);
-      bool hf = btn_finish_rect_.contains(pt.x, pt.y);
-      if (hx != hover_close_x_ || hr != hover_retest_ || hw != hover_wiki_ ||
-          hfs != hover_finish_star_ || hf != hover_finish_) {
-        hover_close_x_ = hx;
+      const bool hr = btn_retest_rect_.contains(pt.x, pt.y);
+      const bool hw = btn_wiki_rect_.contains(pt.x, pt.y);
+      const bool hfs = btn_finish_star_rect_.contains(pt.x, pt.y);
+      const bool hf = btn_finish_rect_.contains(pt.x, pt.y);
+      if (hr != hover_retest_ || hw != hover_wiki_ || hfs != hover_finish_star_ ||
+          hf != hover_finish_) {
         hover_retest_ = hr;
         hover_wiki_ = hw;
         hover_finish_star_ = hfs;
@@ -571,18 +904,15 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
   }
 
   if (e.type == MouseEventType::Up) {
-    if (btn_close_x_rect_.contains(pt.x, pt.y)) {
-      close();
-      return true;
-    }
+    // src: :533-542 导入进行中点遮罩/Esc 均不关闭
+    if (is_importing_) return true;
 
     if (step_ == FirstRunStep::Input) {
-      if (!detected_clipboard_url_.empty() && banner_clip_rect_.contains(pt.x, pt.y)) {
+      if (!detected_clipboard_url_.empty() && url_.empty() &&
+          banner_clip_rect_.contains(pt.x, pt.y)) {
+        // src: :650-657 点击横幅填入
         set_url(detected_clipboard_url_);
-        return true;
-      }
-      if (btn_clear_rect_.contains(pt.x, pt.y)) {
-        set_url("");
+        input_focused_ = true;
         return true;
       }
       if (btn_paste_rect_.contains(pt.x, pt.y)) {
@@ -590,36 +920,51 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
         if (!clip.empty()) set_url(clip);
         return true;
       }
+      if (btn_enter_rect_.contains(pt.x, pt.y) || btn_submit_rect_.contains(pt.x, pt.y)) {
+        submit_import();
+        return true;
+      }
       if (input_rect_.contains(pt.x, pt.y)) {
         input_focused_ = true;
         invalidate();
         return true;
       }
-      if (btn_submit_rect_.contains(pt.x, pt.y)) {
-        submit_import();
-        return true;
-      }
       if (btn_later_rect_.contains(pt.x, pt.y)) {
+        // src: :469-473 handleDismissLater
         finish();
         return true;
       }
     } else {
       if (btn_retest_rect_.contains(pt.x, pt.y)) {
-        if (on_retest_nodes) on_retest_nodes();
-        active_delay_ms_ = 35;  // 模拟重新测速成功
-        invalidate();
+        // src: :189-205 重测并优选：retesting=true、gaveUp=false
+        if (!retesting_) {
+          retesting_ = true;
+          gave_up_ = false;
+          ready_started_ms_ = 0;
+          last_poll_ms_ = 0;
+          invalidate();
+          if (on_retest_nodes) on_retest_nodes();
+        }
         return true;
       }
       if (btn_wiki_rect_.contains(pt.x, pt.y)) {
-        if (on_open_wiki) on_open_wiki();
-        ShellExecuteW(nullptr, L"open", L"https://github.com/qiu-yuxiao/clash-win/wiki",
-                      nullptr, nullptr, SW_SHOWNORMAL);
+        if (on_open_wiki) {
+          on_open_wiki();
+        } else {
+          ShellExecuteW(nullptr, L"open",
+                        L"https://github.com/qiu-yuxiao/clash-mini/wiki", nullptr,
+                        nullptr, SW_SHOWNORMAL);
+        }
         return true;
       }
       if (btn_finish_star_rect_.contains(pt.x, pt.y)) {
-        if (on_open_github) on_open_github();
-        ShellExecuteW(nullptr, L"open", L"https://github.com/qiu-yuxiao/clash-win", nullptr,
-                      nullptr, SW_SHOWNORMAL);
+        // src: :454-463 handleOpenGithubStarAndFinish
+        if (on_open_github) {
+          on_open_github();
+        } else {
+          ShellExecuteW(nullptr, L"open", L"https://github.com/qiu-yuxiao/clash-mini",
+                        nullptr, nullptr, SW_SHOWNORMAL);
+        }
         finish();
         return true;
       }
@@ -629,18 +974,15 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
       }
     }
 
-    // 点击卡片外遮罩：关闭
+    // src: :533-542 点击遮罩：Input→later，Ready→finish
     if (!card_rect_.contains(pt.x, pt.y)) {
-      close();
+      finish();
       return true;
     }
     return true;
   }
 
-  if (e.type == MouseEventType::Down) {
-    return true;  // 拦截下层点击
-  }
-
+  if (e.type == MouseEventType::Down) return true;  // 拦截下层点击
   return true;
 }
 
@@ -648,12 +990,14 @@ bool FirstRunGuideDialog::on_key(const KeyEvent& e) {
   if (!open_) return false;
 
   if (e.type == KeyEventType::Down) {
+    // src: :533-542 Esc 走 onClose（导入中忽略）
     if (e.key == VK_ESCAPE || e.key == 27) {
-      close();
+      if (!is_importing_) finish();
       return true;
     }
-    // Enter 键全窗口监听：任意焦点按 Enter 执行自动导入或完成
+    // src: :417-446 Enter 全窗口监听（任意焦点均可导入/完成）
     if (e.key == VK_RETURN || e.key == 13) {
+      if (is_importing_) return true;
       if (step_ == FirstRunStep::Input) {
         submit_import();
       } else {

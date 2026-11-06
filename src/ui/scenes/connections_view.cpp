@@ -17,7 +17,7 @@ using theme::ThemeService;
 namespace utf = clashwin::utf;
 
 // chains 分类色（← MUI 语义色映射到 defaultTheme：Proxy=primary/Direct=
-// success/Reject=error；原版为文字分类，色点为本任务近似）
+// success/Reject=error；Mini 原版为文字分类，色点由本组件自绘）
 Color4f chains_color(const std::string& cat) {
   if (cat == "Proxy") return ThemeService::instance().primary();
   if (cat == "Direct") return Color4f::hex(0x06943D);
@@ -33,8 +33,9 @@ void ConnRowWidget::bind(const ConnRow& row) {
 
 void ConnRowWidget::on_paint(IRenderTarget& rt) {
   const auto& svc = ThemeService::instance();
-  RectF r = bounds();
-  if (hover_) rt.fill_rect(r, Brush{Color4f::hex(0x000000, 0.04f)});
+  // 【PAINTFIX】局部坐标 {0,0,w,h}（同 title_bar：bounds() 会二次叠加原点）
+  RectF r{0, 0, bounds().w, bounds().h};
+  if (hover_) rt.fill_rect(r, Brush{Color4f::hex(0x000000, 0.04f)});  // src: MUI action.hover rgba(0,0,0,.04)
 
   // 协议色点（chains 分类；8px 圆点 x=4）
   Brush dot{chains_color(row_.chains_cat)};
@@ -52,13 +53,13 @@ void ConnRowWidget::on_paint(IRenderTarget& rt) {
   rt.draw_text(utf::utf8_to_utf16(row_.chains_cat), {r.x + 150, r.y, 60, r.h},
                ts);
   // 速率列（cur 增量）
-  ts.color = Color4f::hex(0x006064);
+  ts.color = Color4f::hex(0x006064);  // src: mini-traffic-panel.tsx:122 --download-text
   rt.draw_text(utf::utf8_to_utf16(
                    row_.cur_download > 0
                        ? std::to_string(static_cast<long long>(row_.cur_download))
                        : std::string("-")),
                {r.right() - 90, r.y, 40, r.h}, ts);
-  ts.color = Color4f::hex(0x996E00);
+  ts.color = Color4f::hex(0x996E00);  // src: index.scss:311 --upload-text hsl(38,100%,30%)
   rt.draw_text(utf::utf8_to_utf16(
                    row_.cur_upload > 0
                        ? std::to_string(static_cast<long long>(row_.cur_upload))
@@ -72,8 +73,8 @@ void ConnRowWidget::on_paint(IRenderTarget& rt) {
     xs.size = 8;
     xs.align_h = AlignH::Center;
     xs.align_v = AlignV::Center;
-    xs.color = close_hover_ ? Color4f::hex(0xFF3B30)
-                            : Color4f::hex(0x000000, 0.5f);
+    xs.color = close_hover_ ? Color4f::hex(0xFF3B30)  // src: _theme.tsx:8 error_color
+                            : Color4f::hex(0x000000, 0.5f);  // 豁免: 关闭图标缺省 50% 黑
     rt.draw_text(L"\uE711", {r.right() - 18, r.y, 18, r.h}, xs);
   }
 }
@@ -106,13 +107,13 @@ bool ConnRowWidget::on_mouse(const MouseEvent& e) {
 ConnectionsView::ConnectionsView(Widget* parent) : Widget(parent) {
   auto bar = std::make_unique<Row>();
   Row* bar_p = bar.get();
-  bar_p->set_padding(4, 0, 4, 0);
+  bar_p->set_padding(4, 0, 4, 0);  // 豁免: Mini 无对应物 — 工具条内距源码用 CSS 类无字面量（出处: connections 视图无 padding 常量）
   bar_p->spacing = 4;
   add_child(std::move(bar));
 
   auto badge = std::make_unique<Label>();
   badge_ = badge.get();
-  badge_->style.size = 11;
+  badge_->style.size = 11;  // ← 连接表徽标字号 11（MUI body2 小号）
   badge_->style.weight = static_cast<int>(Weight::Bold);
   badge_->set_text(L"0");
   bar_p->add_child(std::move(badge));
@@ -121,6 +122,8 @@ ConnectionsView::ConnectionsView(Widget* parent) : Widget(parent) {
   search_ = search.get();
   search_->flex_weight = 1;
   search_->set_placeholder(L"过滤连接...");
+  // 清空按钮（opt-in）：src: connections-panel.tsx:182 BaseSearchBox
+  search_->set_clear_button(true, L"清空输入框");
   search_->on_text_changed = [this](const std::wstring& t) {
     set_filter(clashwin::utf::utf16_to_utf8(t));
   };

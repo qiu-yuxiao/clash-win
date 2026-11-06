@@ -16,6 +16,14 @@ void ScrollList::set_content(int count, float item_height, Factory factory,
   overscan_ = overscan;
   offset_ = 0;
   rows_.clear();
+  // 数据晚于布局到达（如抽屉打开时才 reload）时立即物化，不等下一次 arrange
+  if (bounds().h > 0) {
+    sync_children(bounds().h);
+    float sb_w = show_scrollbar_ ? scrollbar_w_ : 0.0f;
+    for (auto& [idx, w] : rows_)
+      w->layout_tree({0, idx * item_height_ - offset_, bounds().w - sb_w,
+                      item_height_});
+  }
   invalidate();
 }
 
@@ -94,8 +102,9 @@ void ScrollList::on_arrange(const RectF& area) {
 bool ScrollList::on_mouse(const MouseEvent& e) {
   if (e.type == MouseEventType::Wheel) {
     if (!enabled()) return true;
-    float lines = static_cast<float>(e.wheel_delta) / 120.0f * 3.0f;
-    set_scroll_offset(offset_ + lines * item_height_);  // 正 delta = 向下滚
+    // Windows：向下滚 delta 为负 → offset 应增大（与 utility_modals 口径一致）
+    float lines = -static_cast<float>(e.wheel_delta) / 120.0f * 3.0f;
+    set_scroll_offset(offset_ + lines * item_height_);
     sync_children(bounds().h);
     // 行位置随 offset 更新
     float sb_w = show_scrollbar_ ? scrollbar_w_ : 0.0f;

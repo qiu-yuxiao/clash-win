@@ -82,6 +82,22 @@ YAML::Node apply_mandatory_dns_settings(const YAML::Node& config) {
     n.SetTag("?");
     dns_val["enable"] = n;
   }
+  // 【P0-6】DNS 监听端口避开 :53（同机 Clash Mini 内核默认占 0.0.0.0:53）。
+  // 两个内核同时 bind :53 时后启动者报 “Start DNS server(UDP) error ... permitted”，
+  // 表现为本内核解析失败、mixed-port 502。显式非 53 端口配置予以保留。
+  {
+    const YAML::Node ln = static_cast<const YAML::Node&>(dns_val)["listen"];
+    bool need = !ln.IsDefined() || !ln.IsScalar() || ln.IsNull();
+    if (!need) {
+      const std::string s = trim_copy(ln.Scalar());
+      need = s == ":53" || s == "0.0.0.0:53" || s == "127.0.0.1:53";
+    }
+    if (need) {
+      YAML::Node n("127.0.0.1:1053");
+      n.SetTag("!");
+      dns_val["listen"] = n;
+    }
+  }
   // 注：此处不补 dns.ipv6 —— 由 use_tun 作为唯一真源同步
   // 注：不设置 enhanced-mode / fake-ip-range —— 由 use_tun 在 TUN 场景写入，
   //     非 TUN 交由内核默认值，避免覆盖用户显式配置

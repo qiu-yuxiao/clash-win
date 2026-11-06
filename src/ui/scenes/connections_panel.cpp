@@ -49,8 +49,9 @@ void ConnPanelRowWidget::on_paint(IRenderTarget& rt) {
   // 1. 斑马纹交替背景（局部坐标 {0,0,w,h}，严禁 bounds().x/y）
   Color4f bg = (row_index_ % 2 == 0)
                    ? vars.theme_panel_bg
-                   : (theme.mode() == theme::ThemeMode::Light ? Color4f::hex(0xEEF4FF)
-                                                              : Color4f::hex(0x232B3F));
+                   : (theme.mode() == theme::ThemeMode::Light
+                          ? Color4f::hex(0xEEF4FF)  // src: connection-table.tsx:152 hover 行 light
+                          : Color4f::hex(0x232B3F));  // src: connection-table.tsx:152 dark
   if (hover_) {
     Color4f prim = theme.primary();
     bg = Color4f(prim.r, prim.g, prim.b, 0.08f);
@@ -66,9 +67,9 @@ void ConnPanelRowWidget::on_paint(IRenderTarget& rt) {
   if (cat == "Proxy") {
     dot_color = theme.primary();
   } else if (cat == "Reject") {
-    dot_color = Color4f::hex(0xFF3B30);
+    dot_color = Color4f::hex(0xFF3B30);  // src: _theme.tsx:8 error_color
   } else {
-    dot_color = Color4f::hex(0x06943D);
+    dot_color = Color4f::hex(0x06943D);  // src: _theme.tsx:10 success_color
   }
   Brush dot_brush{dot_color};
   rt.round_rect({4.0f, 6.0f, 8.0f, 8.0f}, 4.0f, {}, &dot_brush);
@@ -97,18 +98,23 @@ void ConnPanelRowWidget::on_paint(IRenderTarget& rt) {
   chains_ts.align_h = AlignH::Center;
   chains_ts.align_v = AlignV::Center;
   chains_ts.ellipsis = true;
-  rt.draw_text(utf::utf8_to_utf16(cat), {chains_x, 0, chains_w, bounds().h}, chains_ts);
+  // src: locales/zh/connections.json:37-39 chainsDirect/Reject/Proxy = 直连/封锁/代理
+  std::wstring cat_text = L"代理";
+  if (cat == "Direct") cat_text = L"直连";
+  else if (cat == "Reject") cat_text = L"封锁";
+  rt.draw_text(cat_text, {chains_x, 0, chains_w, bounds().h}, chains_ts);
 
   // 6. 悬停关闭按钮 ✕ (活跃连接时在最右侧 18px 呈现)
   if (show_close) {
     RectF close_rect{bounds().w - 18.0f, 2.0f, 16.0f, 16.0f};
     if (close_hover_) {
-      Brush ch_b{Color4f::hex(0xFF3B30, 0.15f)};
+      Brush ch_b{Color4f::hex(0xFF3B30, 0.15f)};  // src: _theme.tsx:8 error_color 15%
       rt.round_rect(close_rect, 3.0f, {}, &ch_b);
     }
     TextStyle close_ts;
     close_ts.size = 10.0f;
-    close_ts.color = close_hover_ ? Color4f::hex(0xFF3B30) : pal.secondary_text;
+    close_ts.color = close_hover_ ? Color4f::hex(0xFF3B30)  // src: _theme.tsx:8 error_color
+                                  : pal.secondary_text;
     close_ts.align_h = AlignH::Center;
     close_ts.align_v = AlignV::Center;
     rt.draw_text(L"✕", close_rect, close_ts);
@@ -139,7 +145,7 @@ bool ConnPanelRowWidget::on_mouse(const MouseEvent& e) {
 
   if (e.type == MouseEventType::Down) {
     if (e.buttons & kMouseRight) {
-      if (on_context_menu) on_context_menu(item_, pt);
+      if (on_context_menu) on_context_menu(item_, pt, global_bounds());
       return true;
     }
     return true;
@@ -152,7 +158,7 @@ bool ConnPanelRowWidget::on_mouse(const MouseEvent& e) {
     if (!is_closed_ && pt.x >= bounds().w - 20.0f) {
       if (on_close) on_close(item_);
     } else {
-      if (on_click) on_click(item_);
+      if (on_click) on_click(item_, global_bounds());
     }
     return true;
   }
@@ -165,7 +171,11 @@ ConnectionsPanel::ConnectionsPanel(Widget* parent) : Widget(parent) {
   // 1. 搜索框
   auto search = std::make_unique<TextField>();
   search_ = search.get();
-  search_->set_placeholder(L"过滤连接...");
+  // src: locales/zh/shared.json:64 「"filter": "过滤条件"」（base-search-box.tsx:117）
+  search_->set_placeholder(L"过滤条件");
+  // 清空按钮（opt-in）：src: connections-panel.tsx:182 BaseSearchBox
+  //   → base-search-box.tsx:121-140 endAdornment ClearRounded / resetInput tooltip
+  search_->set_clear_button(true, L"清空输入框");
   search_->on_text_changed = [this](const std::wstring& text) {
     set_filter(utf::utf16_to_utf8(text));
   };
@@ -196,6 +206,11 @@ ConnectionsPanel::ConnectionsPanel(Widget* parent) : Widget(parent) {
   list_ = list.get();
   list_->set_show_scrollbar(false);
   add_child(std::move(list));
+
+  // 4.1 外框 + 空态覆盖层（须在列表之上）
+  auto overlay = std::make_unique<ConnTableOverlay>();
+  table_overlay_ = overlay.get();
+  add_child(std::move(overlay));
 
   // 5. 右键菜单
   auto menu = std::make_unique<ContextMenu>();
@@ -282,6 +297,7 @@ void ConnectionsPanel::cycle_sort_chains() {
 
 void ConnectionsPanel::refresh_visible() {
   visible_items_.clear();
+  if (table_overlay_) table_overlay_->empty = true;
   if (!data_) {
     list_->set_content(0, kConnPanelRowH, nullptr);
     return;
@@ -334,6 +350,7 @@ void ConnectionsPanel::refresh_visible() {
   }
 
   // 4. 同步给 ScrollList 工厂
+  if (table_overlay_) table_overlay_->empty = visible_items_.empty();
   list_->set_content(static_cast<int>(visible_items_.size()), kConnPanelRowH,
                      [this](int idx) -> std::unique_ptr<Widget> {
                        if (idx < 0 || idx >= static_cast<int>(visible_items_.size()))
@@ -341,14 +358,15 @@ void ConnectionsPanel::refresh_visible() {
                        auto row = std::make_unique<ConnPanelRowWidget>();
                        row->bind(visible_items_[static_cast<size_t>(idx)], tab_ == Tab::Closed,
                                  static_cast<size_t>(idx));
-                       row->on_click = [this](const ConnItem& it) {
-                         detail_dialog_->open(it, tab_ == Tab::Closed);
+                       row->on_click = [this](const ConnItem& it, RectF row_global) {
+                         detail_dialog_->open(it, tab_ == Tab::Closed, row_global);
                        };
                        row->on_close = [this](const ConnItem& it) {
                          if (on_close_one) on_close_one(it.id);
                        };
-                       row->on_context_menu = [this](const ConnItem& it, PointF pt) {
-                         show_context_menu(it, pt);
+                       row->on_context_menu = [this](const ConnItem& it, PointF pt,
+                                                     RectF row_global) {
+                         show_context_menu(it, pt, row_global);
                        };
                        return row;
                      });
@@ -356,17 +374,18 @@ void ConnectionsPanel::refresh_visible() {
   invalidate();
 }
 
-void ConnectionsPanel::show_context_menu(const ConnItem& item, PointF anchor) {
+void ConnectionsPanel::show_context_menu(const ConnItem& item, PointF anchor, RectF row_global) {
   std::vector<MenuItem> items;
-  items.push_back({L"直连 (DIRECT)", false, false, L"DIRECT"});
-  items.push_back({L"代理 (PROXY)", false, false, L"PROXY"});
-  items.push_back({L"阻止 (REJECT)", false, false, L"REJECT"});
-  items.push_back({L"断开 (Disconnect)", tab_ == Tab::Closed, false, L"DEL"});
-  items.push_back({L"复制地址 (Copy Address)", false, false, L"Ctrl+C"});
-  items.push_back({L"查看详情 (View Detail)", false, false, L"Enter"});
+  // src: locales/zh/connections.json:42-47 六项文案（connection-table.tsx:493-534，无快捷键列）
+  items.push_back({L"设为全局直连", false, false, L""});
+  items.push_back({L"设为代理分流", false, false, L""});
+  items.push_back({L"封锁它 (REJECT)", false, false, L""});
+  items.push_back({L"断开此连接", tab_ == Tab::Closed, false, L""});
+  items.push_back({L"复制连接地址", false, false, L""});
+  items.push_back({L"查看详细信息", false, false, L""});
 
   context_menu_->open(items, anchor);
-  context_menu_->on_select = [this, item](int idx) {
+  context_menu_->on_select = [this, item, row_global](int idx) {
     switch (idx) {
       case 0:
         apply_quick_route(item, 0);  // Direct
@@ -384,7 +403,7 @@ void ConnectionsPanel::show_context_menu(const ConnItem& item, PointF anchor) {
         copy_address_to_clipboard(item.host_formatted());
         break;
       case 5:
-        detail_dialog_->open(item, tab_ == Tab::Closed);
+        detail_dialog_->open(item, tab_ == Tab::Closed, row_global);
         break;
     }
   };
@@ -408,6 +427,30 @@ void ConnectionsPanel::apply_quick_route(const ConnItem& item, int target_code) 
     core::quick_routing::add_quick_routing_rule(core::quick_routing::RuleType::Domain, item.host,
                                                 target);
   }
+}
+
+void ConnTableOverlay::on_paint(IRenderTarget& rt) {
+  const auto& vars = theme::ThemeService::instance().vars();
+  // src: connection-table.tsx:48 border '5px double var(--theme-border)' radius 4
+  //   CSS double = 两条 1.5px 线 + 2px 间隔（总 5px）
+  RectF r{0, 0, bounds().w, bounds().h};
+  auto stroke = [&](float inset) {
+    RectF rr{r.x + inset, r.y + inset, r.w - inset * 2, r.h - inset * 2};
+    rt.round_rect(rr, std::max(0.0f, 4.0f - inset), Pen{vars.theme_border, 1.5f}, nullptr);
+  };
+  stroke(0.75f);
+  stroke(3.25f);
+  if (!empty) return;
+  // src: base-empty.tsx:19-45 居中「空空如也」（shared.json:52），
+  //   图标 4em / 文字 1.25em / 色 alpha(text.secondary,.75)
+  TextStyle ts;
+  ts.size = 16.0f;
+  Color4f c = theme::ThemeService::instance().palette().secondary_text;
+  c.a *= 0.75f;
+  ts.color = c;
+  ts.align_h = AlignH::Center;
+  ts.align_v = AlignV::Center;
+  rt.draw_text(L"空空如也", r, ts);
 }
 
 void ConnectionsPanel::on_arrange(const RectF& area) {
@@ -448,6 +491,7 @@ void ConnectionsPanel::on_arrange(const RectF& area) {
   float list_h = area.h - 68.0f;
   if (list_h < 0) list_h = 0;
   list_->layout_tree({0, 68.0f, area.w, list_h});
+  if (table_overlay_) table_overlay_->layout_tree({0, 68.0f, area.w, list_h});
 
   // 5. 覆盖层 (详情弹窗占满本面板局部坐标空间)
   detail_dialog_->layout_tree({0, 0, area.w, area.h});
@@ -470,7 +514,7 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   float seg_x = tab_active_rect_.x;
   float seg_w = 140.0f;
   float seg_h = 18.0f;
-  Brush seg_bg{Color4f::hex(0x000000, 0.08f)};
+  Brush seg_bg{Color4f::hex(0x000000, 0.08f)};  // 豁免: Mini 无对应物 — 分段容器底 8% 黑（MUI 分段无 container bg）
   rt.round_rect({seg_x, 2.0f, seg_w, seg_h}, 4.0f, {}, &seg_bg);
 
   // 滑块指示背景
@@ -506,7 +550,8 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   rt.fill_rect({0, 67.0f, bounds().w, 1.0f}, Brush{vars.divider_color});
 
   // Host 表头
-  std::wstring host_title = L"域名/地址";
+  // src: locales/zh/connections.json:35 miniTable.hostColumn "链接目标"
+  std::wstring host_title = L"链接目标";
   if (sort_col_ == SortCol::Host) {
     if (sort_dir_ == SortDir::Asc) host_title += L" ▲";
     if (sort_dir_ == SortDir::Desc) host_title += L" ▼";
@@ -534,6 +579,17 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   th_chains_ts.align_h = AlignH::Center;
   th_chains_ts.align_v = AlignV::Center;
   rt.draw_text(chains_title, {bounds().w - 64.0f, 48.0f, 64.0f, 20.0f}, th_chains_ts);
+
+  // 空态：src: locales/zh/shared.json:52 「"empty": "空空如也"」（base-empty.tsx:16 textKey）
+  if (visible_items_.empty()) {
+    TextStyle empty_ts;
+    empty_ts.size = 20.0f;  // src: base-empty.tsx:36 fontSize '1.25em'（MUI body1 16px × 1.25）
+    empty_ts.color = Color4f(pal.secondary_text.r, pal.secondary_text.g, pal.secondary_text.b,
+                             0.75f);  // src: base-empty.tsx:32 alpha(text.secondary, .75)
+    empty_ts.align_h = AlignH::Center;
+    empty_ts.align_v = AlignV::Center;
+    rt.draw_text(L"空空如也", list_->bounds(), empty_ts);
+  }
 }
 
 bool ConnectionsPanel::on_mouse(const MouseEvent& e) {

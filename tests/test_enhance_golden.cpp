@@ -28,9 +28,9 @@ namespace {
 YAML::Node synthetic_clash_config() {
   return YAML::Load(
       "config_version: 2\n"
-      "mixed-port: 10801\n"
-      "socks-port: 10802\n"
-      "port: 10803\n"
+      "mixed-port: 10811\n"
+      "socks-port: 10812\n"
+      "port: 10813\n"
       "log-level: warning\n"
       "allow-lan: false\n"
       "ipv6: false\n"
@@ -38,12 +38,12 @@ YAML::Node synthetic_clash_config() {
       "tcp-concurrent: false\n"
       "dns:\n  enable: true\n  cache-size: 512\n"
       "profile:\n  store-selected: true\n  store-fake-ip: false\n"
-      "external-controller: 127.0.0.1:9098\n"
-      "external-controller-pipe: \\\\.\\pipe\\mini-mihomo\n"
+      "external-controller: 127.0.0.1:9108\n"
+      "external-controller-pipe: \\\\.\\pipe\\mini-mihomo-win\n"
       "tun:\n  enable: false\n  stack: gvisor\n  auto-route: true\n"
       "  strict-route: false\n  auto-detect-interface: true\n"
       "  dns-hijack:\n  - any:53\n  - tcp://any:53\n"
-      "secret: adapted-by-qiu-yuxiao\n");
+      "secret: adapted-by-clash-win\n");
 }
 
 EnhanceVergeOptions synthetic_verge() {
@@ -105,7 +105,7 @@ UT_TEST(t08_enhance_core_synthetic) {
   std::vector<std::string> keys;
   for (const auto& kv : c) keys.push_back(kv.first.Scalar());
   UT_CHECK(!keys.empty() && keys[0] == "mode");
-  UT_CHECK(c["mixed-port"].Scalar() == "10801");   // clash.yaml 覆盖订阅
+  UT_CHECK(c["mixed-port"].Scalar() == "10811");   // clash.yaml 覆盖订阅
   UT_CHECK(c["allow-lan"].Scalar() == "false");
   UT_CHECK(c["ipv6"].Scalar() == "true");          // use_tun 强制
   UT_CHECK(c["external-controller"].Scalar() == "");   // 开关关闭 → ''

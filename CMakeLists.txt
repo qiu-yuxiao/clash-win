@@ -19,6 +19,7 @@ add_library(clashwin_util STATIC
   src/util/log.cpp
   src/util/utf.cpp
   src/util/base64.cpp
+  src/util/ed25519.cpp
   src/util/str_utils.cpp
   src/util/uuid.cpp
   src/util/dirs.cpp
@@ -341,3 +342,34 @@ target_link_libraries(clashwin_test PRIVATE clashwin_app clashwin_util clashwin_
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 add_clashwin_copy_resources(clashwin_test)
 add_clashwin_copy_locales(clashwin_test)
+
+# ---------- NSIS 安装包（可选目标，不影响默认构建） ----------
+if(WIN32)
+  find_program(CLASHWIN_MAKENSIS makensis
+    HINTS
+      "$ENV{LOCALAPPDATA}/tauri/NSIS"
+      "$ENV{ProgramFiles}/NSIS"
+      "$ENV{ProgramFiles\(x86\)}/NSIS"
+  )
+  if(CLASHWIN_MAKENSIS)
+    if(CMAKE_CONFIGURATION_TYPES)
+      set(CLASHWIN_INSTALLER_CONFIG "$<CONFIG>")
+    else()
+      set(CLASHWIN_INSTALLER_CONFIG "Release")
+    endif()
+    add_custom_target(installer
+      COMMAND "${CMAKE_COMMAND}" -E echo "Running NSIS installer build..."
+      COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+              -File "${CMAKE_CURRENT_SOURCE_DIR}/installer/build_installer.ps1"
+              -Configuration "${CLASHWIN_INSTALLER_CONFIG}"
+              -Makensis "${CLASHWIN_MAKENSIS}"
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+      DEPENDS clashwin
+      USES_TERMINAL
+      COMMENT "Build ClashWin NSIS installer into dist/"
+    )
+    message(STATUS "已启用 installer 目标（makensis: ${CLASHWIN_MAKENSIS}）")
+  else()
+    message(STATUS "未找到 makensis，installer 目标未启用；可直接运行 installer/build_installer.ps1")
+  endif()
+endif()

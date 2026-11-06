@@ -118,4 +118,50 @@ void set_network_info_provider(std::shared_ptr<INetworkInfoProvider> provider) {
   g_provider = std::move(provider);
 }
 
+std::string detect_outbound_interface() {
+  ULONG size = 16 * 1024;
+  std::vector<char> buf(size);
+  auto* aa = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buf.data());
+  DWORD flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
+                GAA_FLAG_SKIP_DNS_SERVER | GAA_FLAG_INCLUDE_GATEWAYS;
+  if (GetAdaptersAddresses(AF_UNSPEC, flags, nullptr, aa, &size) ==
+      ERROR_BUFFER_OVERFLOW) {
+    buf.resize(size);
+    aa = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buf.data());
+  }
+  if (GetAdaptersAddresses(AF_UNSPEC, flags, nullptr, aa, &size) != NO_ERROR) {
+    return {};
+  }
+
+  std::string best;
+  int best_score = -1;
+  for (auto* a = aa; a; a = a->Next) {
+    if (a->OperStatus != IfOperStatusUp) continue;
+    if (a->IfType == IF_TYPE_SOFTWARE_LOOPBACK || a->IfType == IF_TYPE_TUNNEL) continue;
+    std::string name = utf::utf16_to_utf8(a->FriendlyName);
+    if (name.empty()) continue;
+    // 明确排除常见 Clash/TUN 虚拟网卡（部分版本会把 TUN 报成 Ethernet）
+    if (name.rfind("Mihomo", 0) == 0 || name.rfind("Clash", 0) == 0 ||
+        name.rfind("Meta", 0) == 0) {
+      continue;
+    }
+    bool has_v4 = false;
+    for (auto* u = a->FirstUnicastAddress; u; u = u->Next) {
+      if (u->Address.lpSockaddr && u->Address.lpSockaddr->sa_family == AF_INET) {
+        has_v4 = true;
+        break;
+      }
+    }
+    if (!has_v4) continue;
+    bool has_gw = a->FirstGatewayAddress != nullptr;
+    bool wireless = a->IfType == IF_TYPE_IEEE80211;
+    int score = (has_gw ? 4 : 0) + 2 + (wireless ? 1 : 0);
+    if (score > best_score) {
+      best_score = score;
+      best = name;
+    }
+  }
+  return best;
+}
+
 }  // namespace clashwin::system

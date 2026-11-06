@@ -42,14 +42,14 @@ bool CheckboxW::on_mouse(const MouseEvent& e) {
 void CheckboxW::on_paint(IRenderTarget& rt) {
   float box = box_;
   RectF bb{0, (bounds().h - box) / 2, box, box};
-  Pen border{checked_ ? check_color_ : Color4f::hex(0x000000, 0.54f), 1.5f};
-  Brush fill{checked_ ? check_color_ : Color4f::hex(0xFFFFFF)};
+  Pen border{checked_ ? check_color_ : Color4f::hex(0x000000, 0.54f), 1.5f};  // ← 未选中 54% 黑（MUI checkbox）
+  Brush fill{checked_ ? check_color_ : Color4f::hex(0xFFFFFF)};  // ← 未选中纸底白
   rt.round_rect(bb, 3, border, &fill);
   if (checked_) {
     TextStyle ts;
     ts.font_family = L"Segoe MDL2 Assets";
     ts.size = box - 4;
-    ts.color = Color4f::hex(0xFFFFFF);
+    ts.color = Color4f::hex(0xFFFFFF);  // ← MUI checkbox 勾选标记 contrastText
     ts.align_h = AlignH::Center;
     ts.align_v = AlignV::Center;
     rt.draw_text(std::wstring(1, L'\uE73E'), bb, ts);  // Check

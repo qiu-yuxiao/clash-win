@@ -48,5 +48,6 @@ ClashWin-Portable/
 Microsoft/
 clashwin_screenshot.png
 dist/
+installer/stage/
 tmp_test/
 viz/

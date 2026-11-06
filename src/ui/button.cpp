@@ -43,6 +43,15 @@ void Button::draw_button_bg(IRenderTarget& rt, const RectF& r) {
     last_fill_ = fill;
     return;
   }
+  if (state() != State::Disabled && paint_params.grad_count > 0) {
+    // src: button-styles.ts:38-39 retro-3d contained primary 135° 六停渐变
+    rt.fill_round_rect_gradient_angle(r, paint_params.radius, paint_params.grad,
+                                      paint_params.grad_count, paint_params.grad_angle);
+    if (paint_params.border.width > 0)
+      rt.round_rect(r, paint_params.radius, paint_params.border, nullptr);
+    last_fill_ = paint_params.grad[paint_params.grad_count / 2].color;
+    return;
+  }
   Color4f fill;
   switch (state()) {
     case State::Hover: fill = paint_params.fill_hover; break;
@@ -96,7 +105,9 @@ bool Button::on_mouse(const MouseEvent& e) {
     case MouseEventType::Up:
       if (!enabled()) return true;
       // capture 语义保证 Up 送达；移出按钮松开不触发点击
-      if (state_ == State::Pressed && bounds().contains(e.pos.x, e.pos.y)) {
+      // 【CLICKFIX】e.pos 局部坐标 vs 局部矩形（原 bounds() 父坐标致点击永不触发）
+      if (state_ == State::Pressed &&
+          RectF{0, 0, bounds().w, bounds().h}.contains(e.pos.x, e.pos.y)) {
         state_ = State::Hover;
         invalidate();
         if (on_click) on_click();

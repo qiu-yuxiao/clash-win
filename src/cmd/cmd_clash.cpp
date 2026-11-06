@@ -25,9 +25,8 @@ std::mutex& clash_patch_lock() {
 }
 
 Result<void> mgr_start() {
-  // start 路径：sidecar（服务模式装配属 T18/T23 的启动编排）
-  return core::CoreManager::instance().start_sidecar(
-      util::dirs::clash_mini_path());
+  // 统一启动：TUN + 非管理员 + 服务就绪 → Service；否则 Sidecar
+  return core::CoreManager::instance().start_auto(util::dirs::clash_mini_path());
 }
 
 Result<void> mgr_apply(core::CoreApiClientAdapter& api, core::CoreOps& ops) {
@@ -192,7 +191,7 @@ void install_cmd_clash(CommandService& svc) {
          }
          // ← lifecycle.rs prepare_startup_mode：TUN+非管理员必须走服务（T18 装配
          //   sysproxy 回退）；本阶段无 TUN 上下文时直接 sidecar
-         auto r = core::CoreManager::instance().start_sidecar(util::dirs::clash_mini_path());
+         auto r = core::CoreManager::instance().start_auto(util::dirs::clash_mini_path());
          if (r.is_err()) return CmdResult::err(r.error());
          events::EventBus::refresh_clash();
          return CmdResult::ok(Json::object());
@@ -220,7 +219,7 @@ void install_cmd_clash(CommandService& svc) {
          core::CoreApiClientAdapter api(&mihomo_unchecked());
          core::CoreOps ops;
          ops.start = [] {
-           return core::CoreManager::instance().start_sidecar(
+           return core::CoreManager::instance().start_auto(
                util::dirs::clash_mini_path());
          };
          ops.stop = [] { return core::CoreManager::instance().stop(); };

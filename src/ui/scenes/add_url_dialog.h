@@ -1,9 +1,15 @@
 #pragma once
-// 自定义分流规则弹窗（T21）：对齐 clashwin_modal_addurl.png（360×290 px）。
-// - 字段：规则输入框 (域名/IP) + 粘贴按钮 + 分流策略偏好三段开关 (DIRECT / PROXY / REJECT)
-// - 动作：点击"添加"通过 quick_routing 写入 profiles\Merge.yaml 的 prepend-rules 并触发 enhance
-// - 交互：Escape 关闭、Enter 提交、点击遮罩外部关闭
-// - 绘制：严格遵守 Direct2D 局部坐标规则 {0, y}
+// 添加网址弹窗（T21，按 Mini 3.2.2 源码 add-url-dialog.tsx 重做；不再按 png 反推）。
+// 结构（src: src/pages/_layout/components/add-url-dialog.tsx）：
+//   MUI Dialog（:189-205）：paper = get3DCardStyle('default')、p0、overflow hidden、
+//     width calc(100%-32px)、maxWidth 380；默认 backdrop rgba(0,0,0,.5)。
+//   DialogTitle（:206-216）：15px bold、px 2(16)、py 1.5(12)。
+//   DialogContent（:217-234）：px 2、pb 1；TextField multiline minRows 4 maxRows 10
+//     fullWidth，样式 get3DInputStyle。
+//   DialogActions（:235-250）：px 2、py 1.5、gap 1(8)；取消 = outlined default，
+//     添加 = contained primary。
+// 无 ✕ 按钮、无策略三段、无粘贴按钮（源码均无）；右键菜单为输入框上下文菜单
+// （:253-324 剪切/复制/粘贴/全选/清空）——待后续实现。
 #include <functional>
 #include <string>
 
@@ -24,6 +30,7 @@ class AddUrlDialog : public Widget {
   const std::string& payload() const { return payload_; }
   void set_payload(const std::string& p);
 
+  // 策略偏好（源码 addQuickRoutingRules 的默认行为；保留内部状态兼容旧调用）
   core::quick_routing::RuleTarget target() const { return target_; }
   void set_target(core::quick_routing::RuleTarget t);
 
@@ -43,34 +50,25 @@ class AddUrlDialog : public Widget {
 
   // 几何区域（供单测与命中检测）
   RectF card_rect() const { return card_rect_; }
+  RectF title_rect() const { return title_rect_; }
   RectF input_rect() const { return input_rect_; }
-  RectF paste_btn_rect() const { return btn_paste_rect_; }
-  RectF seg_rect() const { return seg_rect_; }
   RectF cancel_btn_rect() const { return btn_cancel_rect_; }
   RectF add_btn_rect() const { return btn_add_rect_; }
 
  private:
-  void do_paste();
   void do_submit();
 
   bool open_ = false;
-  std::string payload_ = "openai.com";
+  std::string payload_;
   core::quick_routing::RuleTarget target_ = core::quick_routing::RuleTarget::Proxy;
   std::string error_message_;
 
   RectF card_rect_;
-  RectF btn_close_x_rect_;
+  RectF title_rect_;
   RectF input_rect_;
-  RectF btn_paste_rect_;
-  RectF seg_rect_;
-  RectF seg_direct_rect_;
-  RectF seg_proxy_rect_;
-  RectF seg_reject_rect_;
   RectF btn_cancel_rect_;
   RectF btn_add_rect_;
 
-  bool hover_close_x_ = false;
-  bool hover_paste_ = false;
   bool hover_cancel_ = false;
   bool hover_add_ = false;
   bool input_focused_ = false;

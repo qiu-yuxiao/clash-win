@@ -6,6 +6,7 @@
 #include "cmd/cmd_support.h"
 #include "cmd/command_service.h"
 #include "cmd/verge_flags.h"
+#include "app/singleton.h"
 #include "clashwin/config/constants.h"
 #include "config/config.h"
 #include "core/autostart.h"
@@ -86,7 +87,7 @@ Result<void> process_flags(uint16_t flags, const IVerge& patch) {
       core::CoreApiClientAdapter api(&mihomo_unchecked());
       core::CoreOps ops;
       ops.start = [] {
-        return core::CoreManager::instance().start_sidecar(util::dirs::clash_mini_path());
+        return core::CoreManager::instance().start_auto(util::dirs::clash_mini_path());
       };
       ops.stop = [] { return core::CoreManager::instance().stop(); };
       auto r = mgr.restart_with_restore(api, ops);
@@ -113,8 +114,10 @@ Result<void> process_flags(uint16_t flags, const IVerge& patch) {
         }
       }
     }
+    // PAC 端口取运行时实际绑定的单实例端口（GUI 进程内即 bind 成功值；
+    // 独立 CLI 进程未启动服务器时回退到同一常量，二者不再分叉）
     auto view = system::make_verge_view(
-        patch, clash_port, config::consts::kSingletonPort);
+        patch, clash_port, app::current_singleton_port());
     auto& sysopt = system::Sysopt::instance();
     auto r = sysopt.update_sysproxy(view);
     if (r.is_err()) return r;

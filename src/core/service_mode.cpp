@@ -13,6 +13,7 @@
 
 #include <chrono>
 #include <thread>
+#include <vector>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -65,19 +66,22 @@ bool ServiceIpcAdapter::pipe_present() {
 Result<nlohmann::json> ServiceIpcAdapter::get_clash_logs() { return ipc_->get_clash_logs(); }
 
 // ---------- SCM ----------
+// ← Mini: src-tauri/src/core/service.rs:445 is_service_installed()
 bool is_service_installed() {
   SC_HANDLE scm = ::OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
   if (!scm) return false;
-  SC_HANDLE svc = ::OpenServiceW(scm, L"clash_verge_service", SERVICE_QUERY_STATUS);
+  SC_HANDLE svc = ::OpenServiceW(scm, kServiceNameW, SERVICE_QUERY_STATUS);
   if (svc) ::CloseServiceHandle(svc);
   ::CloseServiceHandle(scm);
   return svc != nullptr;
 }
 
+// ← Mini: src-tauri/src/core/service.rs:429-455 refresh() 的 StartRequired 分支
+//   （已安装但未运行 → 启动 + 等待就绪；本函数只回答 SCM STATE 是否为 RUNNING）
 bool is_service_running() {
   SC_HANDLE scm = ::OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
   if (!scm) return false;
-  SC_HANDLE svc = ::OpenServiceW(scm, L"clash_verge_service", SERVICE_QUERY_STATUS);
+  SC_HANDLE svc = ::OpenServiceW(scm, kServiceNameW, SERVICE_QUERY_STATUS);
   if (!svc) {
     ::CloseServiceHandle(scm);
     return false;
@@ -90,11 +94,45 @@ bool is_service_running() {
   return running;
 }
 
+// ← Mini: src-tauri/src/core/service.rs:470-475 ReinstallRequired / ForceReinstallRequired
+//   （服务已注册但二进制不可用 → 重装）。本函数只做前置判定，重装由 cmd_service 走 installer。
+bool is_service_binary_valid() {
+  SC_HANDLE scm = ::OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+  if (!scm) return false;
+  SC_HANDLE svc = ::OpenServiceW(scm, kServiceNameW, SERVICE_QUERY_CONFIG);
+  if (!svc) {
+    ::CloseServiceHandle(scm);
+    return false;
+  }
+  std::vector<BYTE> buf(8192);
+  auto cfg = reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(buf.data());
+  DWORD needed = 0;
+  bool ok = ::QueryServiceConfigW(svc, cfg, static_cast<DWORD>(buf.size()), &needed) != FALSE;
+  ::CloseServiceHandle(svc);
+  ::CloseServiceHandle(scm);
+  if (!ok) return false;
+  std::wstring raw = cfg->lpBinaryPathName ? cfg->lpBinaryPathName : L"";
+  if (raw.empty()) return false;
+  // 取可执行文件路径：带引号取引号内；否则截到 ".exe" 末尾
+  std::wstring path;
+  if (raw.front() == L'"') {
+    size_t end = raw.find(L'"', 1);
+    if (end == std::wstring::npos) return false;
+    path = raw.substr(1, end - 1);
+  } else {
+    size_t exe = raw.find(L".exe");
+    path = exe == std::wstring::npos ? raw : raw.substr(0, exe + 4);
+  }
+  if (path.empty()) return false;
+  DWORD attr = ::GetFileAttributesW(path.c_str());
+  return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+// ← Mini: src-tauri/src/core/service.rs:446-452（已安装未运行 → 启动服务并等待）
 Result<void> start_service() {
-  // ← service.rs:153-179 start_service（SCM 优先；ACCESS_DENIED → runas sc.exe start）
   SC_HANDLE scm = ::OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
   if (scm) {
-    SC_HANDLE svc = ::OpenServiceW(scm, L"clash_verge_service", SERVICE_START);
+    SC_HANDLE svc = ::OpenServiceW(scm, kServiceNameW, SERVICE_START);
     if (svc) {
       BOOL ok = ::StartServiceW(svc, 0, nullptr);
       DWORD gle = ::GetLastError();
@@ -111,7 +149,7 @@ Result<void> start_service() {
     }
   }
   // 提权回退（UAC 弹窗；F-07：System32 绝对路径）
-  std::wstring cmd = L"\"" + system32_sc_exe() + L"\" start clash_verge_service";
+  std::wstring cmd = L"\"" + system32_sc_exe() + L"\" start " + std::wstring(kServiceNameW);
   if (!shell_runas(cmd)) {
     return Result<void>::err({2312, "sc.exe start (runas) failed or cancelled"});
   }
@@ -119,6 +157,9 @@ Result<void> start_service() {
 }
 
 // ---------- 就绪判定 / 等待 ----------
+// ← Mini: src-tauri/src/core/service.rs:333 is_service_available()
+//   Mini 的"就绪"= IPC 路径可访问；我方同义（管道存在 + magic 握手），
+//   与 SCM STATE（is_service_running）分开判定，避免"已装未跑"被误判为就绪。
 bool is_service_ready(IServiceIpc& ipc) {
   if (!ipc.pipe_present()) return false;
   auto probe = ipc.magic_probe();
@@ -214,7 +255,12 @@ Result<void> start_with_service(IServiceIpc& ipc, const nlohmann::json& payload,
     return Result<void>::err({2313, "Cannot connect to Clash Verge Service: " + resp.error().message});
   }
   const auto& j = resp.value();
-  int code = j.value("code", 0);
+  // 两种返回：真实 ServiceIpc 已剥离 envelope（成功时 data 可能为 null）；
+  // 测试 Mock 仍返回 {code,message}。仅当确有 code 字段时按业务码判定。
+  int code = 0;
+  if (j.is_object() && j.contains("code") && j["code"].is_number_integer()) {
+    code = j["code"].get<int>();
+  }
   if (code > 0) {
     std::string msg = j.value("message", "");
     CWLOG_ERROR("Failed to start core via service: " + msg);
@@ -230,9 +276,13 @@ Result<void> stop_with_service(IServiceIpc& ipc) {
   if (resp.is_err()) {
     return Result<void>::err({2315, "Cannot connect to Clash Verge Service: " + resp.error().message});
   }
-  int code = resp.value().value("code", 0);
+  const auto& j = resp.value();
+  int code = 0;
+  if (j.is_object() && j.contains("code") && j["code"].is_number_integer()) {
+    code = j["code"].get<int>();
+  }
   if (code > 0) {
-    std::string msg = resp.value().value("message", "");
+    std::string msg = j.value("message", "");
     CWLOG_ERROR("Failed to stop core via service: " + msg);
     return Result<void>::err({2316, "stop_clash failed (code=" + std::to_string(code) + "): " + msg});
   }
@@ -261,6 +311,16 @@ StartupDecision decide_startup_mode(bool needs_tun, bool is_admin, bool service_
   d.use_service = false;
   d.fallback_sysproxy = true;
   return d;
+}
+
+// ---------- 服务状态五态 ----------
+ServiceState evaluate_state(IServiceProbe& probe) {
+  if (!probe.installed()) return ServiceState::Missing;
+  if (!probe.binary_valid()) return ServiceState::BinaryInvalid;
+  // 回归点：SCM 非 RUNNING 时，即使管道还在也必须判 Stopped，不得判 ready。
+  if (!probe.running()) return ServiceState::Stopped;
+  if (!probe.pipe_ready()) return ServiceState::NotReady;
+  return ServiceState::Ready;
 }
 
 }  // namespace clashwin::core::service_mode

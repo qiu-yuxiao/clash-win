@@ -58,6 +58,6 @@ std::wstring service_log_dir();        // <home>\logs\service
 std::wstring clash_latest_log();
 
 // ← dirs.rs::ipc_path
-std::wstring ipc_path();  // \\.\pipe\mini-mihomo
+std::wstring ipc_path();  // \\.\pipe\mini-mihomo-win（与 Clash Mini 的 mini-mihomo 管道错开）
 
 }  // namespace clashwin::util::dirs

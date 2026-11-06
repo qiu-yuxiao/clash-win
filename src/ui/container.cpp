@@ -47,6 +47,7 @@ void distribute_main_axis(const std::vector<Widget*>& kids, float avail_main,
     if (kids[i]->flex_weight > 0 && flex_weight_sum > 0) {
       slots[i].size = free_space * (kids[i]->flex_weight / flex_weight_sum);
       float min_main = is_row ? want[i].w : want[i].h;
+      if (kids[i]->shrink_to_free) min_main = 0;  // ellipsis 截断子可收缩
       if (slots[i].size < min_main) slots[i].size = min_main;
       flex_total += slots[i].size;
     } else {

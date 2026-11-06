@@ -266,7 +266,10 @@ bool PipeHttpClient::pipe_peek_valid(void* h) {
 // 打开管道：ERROR_PIPE_BUSY 重试 busy_retry_count × busy_retry_delay_ms
 //（← ipc.rs connect_to_socket：BUSY 24 次、其他错误 3 次，均带 125ms 延迟）
 Result<void*> PipeHttpClient::open_pipe_locked() {
-  const std::wstring name = pipe_name_;
+  // 允许调用方传裸服务名（如 clash-verge-service），此处统一补 \\.\pipe\ 前缀
+  const std::wstring name =
+      pipe_name_.rfind(L"\\\\.\\pipe\\", 0) == 0 ? pipe_name_
+                                                : L"\\\\.\\pipe\\" + pipe_name_;
   int busy_left = cfg_.busy_retry_count;
   int other_left = cfg_.open_retry_count;
   while (true) {
@@ -359,6 +362,7 @@ Result<HttpResponse> PipeHttpClient::send(const std::string& method,
   if (keep) {
     // 服务端要求关闭则不复用
     if (auto* cc = resp.value().header("connection"); cc && str_ieq(*cc, "close")) keep = false;
+    if (cfg_.force_connection_close) keep = false;
   }
   if (keep && !pipe_peek_valid(conn.handle)) keep = false;
   if (keep) {
@@ -391,8 +395,11 @@ Result<HttpResponse> PipeHttpClient::do_send(
     req += k + ": " + v + "\r\n";
   }
   if (!has_host) req += "Host: localhost\r\n";
-  req += "Content-Length: " + std::to_string(body.size()) + "\r\n";
-  req += "Connection: keep-alive\r\n\r\n";
+  if (!(cfg_.omit_content_length_when_empty && body.empty())) {
+    req += "Content-Length: " + std::to_string(body.size()) + "\r\n";
+  }
+  req += cfg_.force_connection_close ? "Connection: close\r\n\r\n"
+                                     : "Connection: keep-alive\r\n\r\n";
   req += body;
 
   // ---- 写出（累计超时） ----

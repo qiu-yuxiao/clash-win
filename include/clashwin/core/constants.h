@@ -9,7 +9,7 @@ namespace clashwin::core::consts {
 inline constexpr const char* kGoMemLimitDefault = "128MiB";
 inline constexpr const char* kGoGcDefault = "100";
 inline constexpr const char* kGoMaxProcsDefault = "2";
-// ← state.rs:56-63 启动参数（-d <home> -f <clash-win.yaml> -ext-ctl-pipe \\.\pipe\mini-mihomo）
+// ← state.rs:56-63 启动参数（-d <home> -f <clash-win.yaml> -ext-ctl-pipe \\.\pipe\mini-mihomo-win）
 
 // ---------- 服务等待（← constants.rs timing + service.rs wait_for_service_ipc） ----------
 inline constexpr int kServiceWaitMaxMs = 30000;       // SERVICE_WAIT_MAX：就绪预算

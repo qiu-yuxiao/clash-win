@@ -48,7 +48,7 @@ class CoreMonitor {
   struct Hooks {
     // 内核 API 存活（生产 = get_base_config 3s 超时；mock）
     std::function<bool()> api_alive;
-    // 内核进程存活（生产 = CoreManager::sidecar_alive）
+    // 内核进程存活（生产 = CoreManager::core_alive，模式感知）
     std::function<bool()> core_alive;
     // 内核重启（生产 = CoreManager restart_with_restore）
     std::function<Result<void>()> restart_core;
@@ -76,6 +76,9 @@ class CoreMonitor {
   void start();
   void stop();
   bool running() const { return running_.load(); }
+  // 非阻塞唤醒：仅通知守护线程尽快 tick，不在调用线程（UI 线程）做网络探测。
+  // ← 修复 WM_CLOSE→轻量模式路径同步 tick 造成的消息循环阻塞（AppHangB1）。
+  void kick();
 
   // 状态机单步（测试驱动；生产线程内部调用）
   enum class Action {
@@ -124,6 +127,7 @@ class CoreMonitor {
   Params params_;
 
   std::atomic<bool> running_{false};
+  std::atomic<bool> kick_{false};  // 非阻塞唤醒标志（kick() 置位，worker 消费）
   std::atomic<int> api_fail_count_{0};
   std::atomic<int> node_fail_count_{0};
   std::atomic<int> heal_fail_count_{0};

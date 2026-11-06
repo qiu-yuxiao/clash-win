@@ -31,12 +31,38 @@ class TextField : public Widget {
 
   std::function<void(const std::wstring&)> on_text_changed;
   std::function<void()> on_submit;          // Enter
-  std::function<void(PointF global)> on_context_menu;  // 右键（T13 接菜单）
+  std::function<void(PointF global)> on_context_menu;  // 右键（宿主建菜单）
   std::function<void()> on_focus_lost;
 
-  // 剪贴板钩子（全局注入；真实 Win32 剪贴板实现归 T13，测试注入桩）
+  // 剪贴板钩子（全局注入：生产由 MainWindow 接 Win32，测试注入桩）
   static void set_clipboard_hooks(
       std::function<std::wstring()> get_fn, std::function<void(const std::wstring&)> set_fn);
+
+  // ---- 清空按钮（opt-in，默认关；仅 Mini BaseSearchBox 场景开） ----
+  // src: base-search-box.tsx:121-140（endAdornment ClearRounded 18 / pr 4 /
+  //   disabled={!text} / opacity .5 / Tooltip shared.placeholders.resetInput）
+  // 台账 1029 调用点清单（只在这些点开，通用控件不全局开）：
+  //   - node_list.cpp 节点搜索（← proxy-head.tsx:149 BaseSearchBox）
+  //   - connections_panel.cpp 连接面板搜索（← connections-panel.tsx:182）
+  //   - connections_view.cpp 连接页搜索（同一 connections-panel 搜索语义）
+  //   - profile_import_card URL / 设置端口等普通 TextField 不传 onClear → 保持关
+  void set_clear_button(bool on, std::wstring tooltip = L"清空输入框");
+  bool clear_button() const { return clear_button_; }
+  RectF clear_button_rect() const;  // 局部坐标（点击/悬停判定）
+  std::wstring tooltip_text() const override;
+
+  // ---- 编辑命令（对应 Win32 EM_* / WM_CUT 等语义；台账 1670-1674） ----
+  bool can_undo() const { return false; }  // EM_CANUNDO：本控件无撤销栈 → 恒 false
+  bool can_cut() const;                    // EM_CUT：有选区才可用
+  bool can_copy() const;                   // EM_COPY：有选区才可用
+  bool can_paste() const;                  // EM_CANPASTE：编辑控件恒可粘贴
+  bool can_select_all() const;             // EM_SELALL：非空才可用（源码 disabled={!text}）
+  bool can_clear() const;                  // 清空：非空才可用（源码 disabled={!text}）
+  void cut();
+  void copy();
+  void paste();
+  void select_all();
+  void clear_text();
 
   // IME 预留接口
   void set_composition(const std::wstring& s, int comp_cursor) {
@@ -59,23 +85,26 @@ class TextField : public Widget {
 
   // 绘制参数（T12/T13 覆盖）
   TextStyle style_;
-  Color4f bg_ = Color4f::hex(0xFFFFFF);
-  Color4f border_ = Color4f::hex(0x000000, 0.23f);
-  Color4f border_focused_ = Color4f::hex(0x007AFF);
-  Color4f selection_bg_ = Color4f::hex(0x007AFF, 0.25f);
-  Color4f placeholder_color_ = Color4f::hex(0x000000, 0.38f);
-  Color4f caret_color_ = Color4f::hex(0x007AFF);
-  float radius_ = 4;
-  float height_ = 28;
-  static constexpr int kCaretBlinkMs = 500;
+  Color4f bg_ = Color4f::hex(0xFFFFFF);  // src: MUI background.paper #fff
+  Color4f border_ = Color4f::hex(0x000000, 0.23f);  // src: MUI OutlinedInput 23%
+  Color4f border_focused_ = Color4f::hex(0x007AFF);  // ← 聚焦主色缺省（主题注入前）
+  Color4f selection_bg_ = Color4f::hex(0x007AFF, 0.25f);  // ← MUI selection 主色 25%
+  Color4f placeholder_color_ = Color4f::hex(0x000000, 0.38f);  // src: MUI text.disabled
+  Color4f caret_color_ = Color4f::hex(0x007AFF);  // ← 光标主色缺省
+  float radius_ = 4;  // ← MUI shape.borderRadius 4
+  float border_w_ = 1;  // ← MUI OutlinedInput 缺省 1px；retro-3d outline 2px
+  float height_ = 28;  // ← 行内输入框高 28（源码 size=small 布局）
+  static constexpr int kCaretBlinkMs = 500;  // 豁免: Mini 无对应物 — 光标闪烁半周期（MUI InputBase 无闪烁字面量）
 
  private:
   void insert_text(const std::wstring& s);
   void erase_selection();
+  bool has_selection() const;
   int hit_index(float x);  // x → 光标 index（前缀宽测量）
   void clamp_scroll();
   // 光标 index 的像素 x（局部，含 scroll 偏移）
   float cursor_x(int index);
+  float text_right_pad() const;  // 右侧留白（清空按钮开启时 32，否则 8）
 
   std::wstring text_;
   std::wstring placeholder_;
@@ -84,6 +113,9 @@ class TextField : public Widget {
   int cursor_ = 0;
   int anchor_ = 0;
   float scroll_x_ = 0;
+  bool clear_button_ = false;
+  bool clear_hover_ = false;
+  std::wstring clear_tooltip_ = L"清空输入框";
 };
 
 }  // namespace clashwin::ui

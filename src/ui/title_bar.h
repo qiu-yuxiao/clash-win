@@ -12,6 +12,7 @@
 #include "container.h"
 #include "icon_w.h"
 #include "label.h"
+#include "theme/theme.h"
 #include "widget.h"
 
 namespace clashwin::ui::win {
@@ -40,7 +41,11 @@ class TitleBarButton : public Widget {
       case MouseEventType::Leave: hover_ = false; pressed_ = false; invalidate(); return true;
       case MouseEventType::Down: pressed_ = true; invalidate(); return true;
       case MouseEventType::Up:
-        if (pressed_ && bounds().contains(e.pos.x, e.pos.y) && on_click) on_click();
+        // 【CLICKFIX】e.pos 为局部坐标，须对 {0,0,w,h} 判定（原 bounds() 是父坐标，
+        // 非零 x/y 的按钮 Up 恒不命中 → on_click 从不触发）
+        if (pressed_ && RectF{0, 0, bounds().w, bounds().h}.contains(e.pos.x, e.pos.y) &&
+            on_click)
+          on_click();
         pressed_ = false;
         invalidate();
         return true;
@@ -50,22 +55,52 @@ class TitleBarButton : public Widget {
 
   void on_paint(IRenderTarget& rt) override {
     // 28×28 圆角 4（← window-controller btnSx）；hover：普通键灰 4%、关闭键红
-    RectF r = bounds();
+    // 【PAINTFIX】on_paint 约定局部坐标 {0,0,w,h}（paint 已平移原点）；此前直接
+    // 用 bounds()（父局部 x/y）→ 绘制原点二次叠加，四键全部画到窗外。
+    RectF r{0, 0, bounds().w, bounds().h};
+    const auto& svc = theme::ThemeService::instance();
     if (hover_) {
+      // ← window-controller.tsx:31-49 IconButton 未指定 color ⇒ MUI action.hover
+      //   （light rgba(0,0,0,.04) / dark rgba(255,255,255,.08)）；关闭键 :hover 红
       Brush bg = close_red_ ? Brush{Color4f::hex(0xFF0000)}
-                            : Brush{Color4f::hex(0x000000, 0.06f)};
+                            : Brush{svc.is_light() ? Color4f(0, 0, 0, 0.04f)
+                                                   : Color4f(1, 1, 1, 0.08f)};
       rt.round_rect(r, 4, {}, &bg);
     }
-    // 图标 16px 居中（← sx width 16）；hover 且关闭键 → 白色
+    // 图标 16px 居中（src: window-controller.tsx:32「width: 16, height: 16」）；
+    //   hover 且关闭键 → 白色
     TextStyle ts;
     ts.font_family = L"Segoe Fluent Icons";
-    ts.size = 10;  // MDL2 线性图标在此字号下视觉 ≈ 16px 框
-    ts.color = close_red_ && hover_ ? Color4f::hex(0xFFFFFF)
-                                    : Color4f::hex(0x000000, 0.75f);
+    ts.size = 16;  // src: window-controller.tsx:32 width 16
+    // ← MUI IconButton 默认 color=default ⇒ palette.action.active
+    //   （light rgba(0,0,0,.54) / dark rgba(255,255,255,.54)）
+    ts.color = close_red_ && hover_
+                   ? Color4f::hex(0xFFFFFF)
+                   : (svc.is_light() ? Color4f(0, 0, 0, 0.54f)
+                                     : Color4f(1, 1, 1, 0.54f));
     ts.align_h = AlignH::Center;
     ts.align_v = AlignV::Center;
     rt.draw_text(std::wstring(1, glyph_), r, ts);
   }
+};
+
+// AppIcon 16×16（src: _layout.tsx:1143-1154；位图资源 resources/icons/32x32.png）
+class TitleBarIcon : public Widget {
+ public:
+  explicit TitleBarIcon(Widget* parent = nullptr) : Widget(parent) {}
+
+  SizeF on_measure(float max_w, float max_h) override {
+    (void)max_w; (void)max_h;
+    return {16, 16};  // src: _layout.tsx:1149-1150 width/height 16px
+  }
+
+  // pointerEvents: 'none'（src: _layout.tsx:1152）
+  bool hit_self(PointF local) const override {
+    (void)local;
+    return false;
+  }
+
+  void on_paint(IRenderTarget& rt) override;
 };
 
 class TitleBar : public Row {
@@ -83,20 +118,17 @@ class TitleBar : public Row {
   void set_large_mode(bool large);  // 切换 □/restore 字形
   void set_version(const std::wstring& v);
 
-  // 齿轮键（T17：设置抽屉入口；宿主 set on_settings）
-  std::function<void()> on_settings;
-  TitleBarButton* btn_settings() const { return btn_settings_; }
-
   void on_paint(IRenderTarget& rt) override;  // 背景 + divider 底边
 
   // 按钮（测试/宿主触发交互用）
   TitleBarButton* btn_minimize() const { return btn_min_; }
   TitleBarButton* btn_large() const { return btn_large_; }
   TitleBarButton* btn_close() const { return btn_close_; }
+  TitleBarIcon* icon() const { return icon_; }
 
  private:
   Label* title_label_ = nullptr;
-  TitleBarButton* btn_settings_ = nullptr;
+  TitleBarIcon* icon_ = nullptr;
   TitleBarButton* btn_min_ = nullptr;
   TitleBarButton* btn_large_ = nullptr;
   TitleBarButton* btn_close_ = nullptr;

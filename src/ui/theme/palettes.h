@@ -62,6 +62,7 @@ struct CssVars {
   Color4f theme_input_bg;       // --theme-input-bg
   Color4f theme_input_border;   // --theme-input-border
   Color4f theme_border_outer;   // --theme-border-outer
+  Color4f list_bg;              // 内容区底色（src: _layout.tsx:1194 #fff/#181a1b）
 };
 // original 与其余 5 皮肤走不同分支（← use-custom-theme.ts:394-495 if/else）
 CssVars css_vars(ThemeMode mode, SkinId skin);

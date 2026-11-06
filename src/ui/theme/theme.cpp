@@ -142,6 +142,7 @@ ButtonPaint ThemeService::button_paint(const char* color_type) const {
         p.border = light ? Color4f::hex(0xD4AF37) : Color4f::hex(0x8A6D00);
       }
       p.fill_pressed = p.fill;  // active = inset bevel（无独立色）
+      // 禁用态：MUI Button.disabled 缺省（src: MUI palette action.disabledBackground / text.disabled）
       p.fill_disabled = light ? Color4f::hex(0xe0e0e0) : Color4f::hex(0x32323a);
       p.text_disabled = light ? Color4f::hex(0x9e9e9e) : Color4f::hex(0x6e6e75);
       p.border_w = 2;      // calc(2px * depth)
@@ -181,7 +182,7 @@ ButtonPaint ThemeService::button_paint(const char* color_type) const {
       break;
     }
     case SkinId::FrostedGlass: {
-      // ← :258-315：半透明 + backdropFilter（C++ 近似：无 blur，色保持）
+      // ← :258-315：半透明 + backdropFilter（D2D 无此滤镜，保留 alpha 色值）
       p.fill = is_primary ? with_alpha(primary(), 0.25f)
                        : (light ? Color4f::hex(0x000000, 0.06f)
                                 : Color4f::hex(0xFFFFFF, 0.08f));

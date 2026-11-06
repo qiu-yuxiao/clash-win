@@ -99,24 +99,30 @@ ProxyItem err_group() {
 Result<ProxyItem> ok_group(ProxyItem g) { return Result<ProxyItem>::ok(std::move(g)); }
 
 // ops 录制桩：记录 start/stop 顺序
+// 用 std::string 而非 const char*：vector<const char*> 的 == 比较指针地址，
+// 不同翻译单元的字符串字面量地址不同，会导致内容相同却判不等
 struct OpsRecorder {
-  std::vector<const char*> order;
+  std::vector<std::string> order;
   bool start_fails = false;
   bool stop_fails = false;
   CoreOps ops() {
+    auto start_func = [this]() -> Result<void> {
+      this->order.push_back("start");
+      if (this->start_fails) return Result<void>::err(Error{1, "start fail"});
+      return Result<void>::ok();
+    };
+    auto stop_func = [this]() -> Result<void> {
+      this->order.push_back("stop");
+      if (this->stop_fails) return Result<void>::err(Error{2, "stop fail"});
+      return Result<void>::ok();
+    };
     CoreOps o;
-    o.start = [this]() {
-      order.push_back("start");
-      if (start_fails) return Result<void>::err(Error{1, "start fail"});
-      return Result<void>::ok();
-    };
-    o.stop = [this]() {
-      order.push_back("stop");
-      if (stop_fails) return Result<void>::err(Error{2, "stop fail"});
-      return Result<void>::ok();
-    };
+    o.start = start_func;
+    o.stop = stop_func;
     return o;
   }
+  const std::vector<std::string>& get_order() const { return order; }
+  void clear() { order.clear(); }
 };
 
 RestoreTimings fast() {
@@ -146,7 +152,7 @@ UT_TEST(restore_snapshot_paths) {
     // select 一次命中快照节点
     UT_CHECK_EQ(api.select_calls, 1);
     UT_CHECK_EQ(api.last_select_node, std::string("HK-01"));
-    UT_CHECK(rec.order == std::vector<const char*>({"stop", "start"}));
+    UT_CHECK(rec.order == std::vector<std::string>({"stop", "start"}));
   }
   {
     // now 为空 → 无需恢复（不调 select）
@@ -289,14 +295,14 @@ UT_TEST(restart_ops_failure_propagation) {
     rec.stop_fails = true;
     auto r = m.restart_with_restore(api, rec.ops(), fast());
     UT_CHECK(r.is_err());
-    UT_CHECK(rec.order == std::vector<const char*>({"stop"}));  // start 未执行
+    UT_CHECK(rec.order == std::vector<std::string>({"stop"}));  // start 未执行
   }
   {
     OpsRecorder rec;
     rec.start_fails = true;
     auto r = m.restart_with_restore(api, rec.ops(), fast());
     UT_CHECK(r.is_err());
-    UT_CHECK(rec.order == std::vector<const char*>({"stop", "start"}));
+    UT_CHECK(rec.order == std::vector<std::string>({"stop", "start"}));
     UT_CHECK_EQ(api.select_calls, 0);  // 启动失败不恢复
   }
 }
@@ -334,7 +340,7 @@ UT_TEST(apply_config_paths) {
     OpsRecorder rec;
     api.reload_script = {Result<void>::err(Error{1103, "reload rejected"})};
     UT_CHECK(m.apply_config(api, "C:\\home\\clash-win.yaml", rec.ops(), fast()).is_ok());
-    UT_CHECK(rec.order == std::vector<const char*>({"stop", "start"}));
+    UT_CHECK(rec.order == std::vector<std::string>({"stop", "start"}));
     // reload 失败后 restart 内部快照 → select 恢复
     UT_CHECK_EQ(api.select_calls, 1);
     UT_CHECK_EQ(api.last_select_node, std::string("JP-02"));

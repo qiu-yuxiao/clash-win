@@ -14,20 +14,25 @@ inline constexpr const char* kWindowState = "window_state.json";
 inline constexpr const char* kProxyHeadState = "proxy_head_state.json";
 inline constexpr const char* kUnlockCache = "unlock_cache.json";
 
-// ---------- 应用（T11：版本显示 ← tauri.conf.json version 3.0.10） ----------
-inline constexpr const char* kAppVersion = "3.0.10";
+// ---------- 应用（品牌独立首发版本；v3.0.10 为错误定义，已废弃） ----------
+inline constexpr const char* kAppVersion = "0.1.0";
 
-// ---------- 端口（← constants.rs::network::ports，附录速查） ----------
-inline constexpr uint16_t kDefaultMixed = 10801;
-inline constexpr uint16_t kDefaultSocks = 10802;
-inline constexpr uint16_t kDefaultHttp = 10803;    // guard 兜底 7899（clash.rs:283）
-inline constexpr uint16_t kHttpGuardFallback = 7899;
-inline constexpr uint16_t kControllerPort = 9098;  // 冲突寻位起点
-inline constexpr uint16_t kSingletonPort = 33335;  // dev 33336 不移植（无 dev feature）
+// ---------- 端口（共存错开：全部避开 Clash Mini 默认值与其控制器扫描带） ----------
+// Clash Mini：mixed 10801 / socks 10802 / http 10803 / guard 兜底 7899 /
+// controller 9098（冲突时自 9098 向上寻位）/ 单实例 33335（dev 33336）。
+// Clash Win 专属端口带 10811-10814 + 9108 + 33337，绝不与上述值重合。
+inline constexpr uint16_t kDefaultMixed = 10811;
+inline constexpr uint16_t kDefaultSocks = 10812;
+inline constexpr uint16_t kDefaultHttp = 10813;    // guard 兜底 10814（Mini 原 7899 已错开）
+inline constexpr uint16_t kHttpGuardFallback = 10814;
+inline constexpr uint16_t kControllerPort = 9108;  // 冲突寻位起点（Mini 自 9098 起，仅在端口被占时向上跳过，不会劫持 9108）
+inline constexpr uint16_t kSingletonPort = 33337;  // 共存错开：避开 Clash Mini 的 33335（Release）/33336（Dev）
 
 // ---------- 控制器 / 管道 / 服务 ----------
-inline constexpr const char* kDefaultExternalController = "127.0.0.1:9098";
-inline constexpr const char* kDefaultSecret = "adapted-by-qiu-yuxiao";
+inline constexpr const char* kDefaultExternalController = "127.0.0.1:9108";
+// 共存差异化：必须不同于 Clash Mini 的 "adapted-by-qiu-yuxiao"，
+// 否则 is_port_conflict 探测会把对方内核误认成自家残留。
+inline constexpr const char* kDefaultSecret = "adapted-by-clash-win";
 inline constexpr const char* kDefaultStack = "gvisor";  // tun.stack（tun.rs 注释）
 
 // ---------- 配置版本（← migrate.rs） ----------

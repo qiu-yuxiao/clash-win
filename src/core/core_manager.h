@@ -39,7 +39,7 @@ struct SidecarLaunch {
   std::wstring core_path;   // mini-mihomo.exe 全路径
   std::wstring config_dir;  // -d：app_home_dir
   std::wstring config_file; // -f：clash-win.yaml（运行时产物）
-  std::wstring ipc_pipe;    // -ext-ctl-pipe：\\.\pipe\mini-mihomo
+  std::wstring ipc_pipe;    // -ext-ctl-pipe：\\.\pipe\mini-mihomo-win
   // Go 运行时三变量（进程环境缺失时取默认，同 std::env::var unwrap_or）
   std::string go_memlimit = consts::kGoMemLimitDefault;
   std::string go_gc = consts::kGoGcDefault;
@@ -160,16 +160,26 @@ class CoreManager {
   // ---- Sidecar 模式（← state.rs::start_core_by_sidecar / stop_core_by_sidecar） ----
   // 启动：kill_all 清残留 → 定位内核 → CreateProcessW（含 Go 三环境变量 + 管道重定向）
   // → 日志消费线程写 logs/sidecar/。已在运行时幂等 no-op。
-  // ipc_pipe：-ext-ctl-pipe 参数；空 = dirs::ipc_path()（\\.\pipe\mini-mihomo）。
+  // ipc_pipe：-ext-ctl-pipe 参数；空 = dirs::ipc_path()（\\.\pipe\mini-mihomo-win）。
   // 测试传独立管道名（绝不触碰用户实机内核管道）。
   Result<void> start_sidecar(const std::wstring& config_file,
                              const std::wstring& ipc_pipe = {});
+  // 统一启动入口（← lifecycle.rs prepare_startup_mode 接线）：
+  //   verge.enable_tun_mode && !is_admin && service 就绪 → Service 模式（SYSTEM 内核，
+  //   可建 Wintun/TUN）；否则 Sidecar。服务缺失 → 安装流程（唯一名 clash_verge_service）。
+  Result<void> start_auto(const std::wstring& config_file,
+                          const std::wstring& ipc_pipe = {});
   // 停止：TerminateProcess → 等待 ≤2s → kill_all 兜底；Service 模式走 clash_stop
   Result<void> stop();
 
   uint32_t sidecar_pid() const { return pid_; }
   // 子进程是否仍在运行（测试用）
   bool sidecar_alive() const;
+  // 模式感知的内核存活判定（CoreMonitor 用）：
+  //   Sidecar → child_ 句柄；Service → 服务 IPC /status 的 core_pid。
+  //   服务模式下内核归 SCM 服务持有，child_ 必为空，若仍用 sidecar_alive
+  //   会被守护线程每轮判死并触发 16s 循环重启（2026-11-05 实机复现）。
+  bool core_alive() const;
 
   // ---- 重启 + 节点恢复（← lifecycle.rs::restart_core） ----
   Result<void> restart_with_restore(ICoreApiClient& api, const CoreOps& ops,
@@ -190,6 +200,11 @@ class CoreManager {
 
  private:
   Result<void> stop_sidecar_locked();
+  // 调用方须已持有 lifecycle_（start_auto 内部先决策再分派）
+  Result<void> start_sidecar_locked(const std::wstring& config_file,
+                                    const std::wstring& ipc_pipe);
+  // Service 模式启动：确保服务已安装/已运行 → 等 IPC 就绪 → clash_start
+  Result<void> start_service_locked(const std::wstring& config_file);
 
   std::atomic<RunningMode> mode_{RunningMode::NotRunning};
   std::mutex lifecycle_;           // ← manager/mod.rs lifecycle_lock（串行化启停）

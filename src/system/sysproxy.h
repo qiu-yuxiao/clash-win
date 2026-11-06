@@ -38,6 +38,22 @@ struct AutoProxyState {
   std::wstring url;
 };
 
+// 进入系统代理前的 OS 全量快照（退出/切回手动时逐值还原）。
+// 注：Mini 的 sysopt.rs（ClashVerge/src-tauri/src/core/sysopt.rs:147-179）
+// 只改 enable/host/port，不备份原值；本项按验收要求做增强。
+struct SysProxySnapshot {
+  bool valid = false;
+  bool enable = false;
+  std::wstring server;             // ProxyServer 原串（"host:port"）
+  std::wstring bypass;             // ProxyOverride
+  std::wstring auto_config_url;    // AutoConfigURL；空 = 无 PAC
+  bool auto_detect = false;        // AutoDetect DWORD
+  bool proxy_server_present = true;
+  bool proxy_override_present = true;
+  bool auto_config_present = false;
+  bool auto_detect_present = false;
+};
+
 // 注册表语义访问层（生产 = WinINET 注册表 + 广播；测试 = mock）
 class ISysProxyAccess {
  public:
@@ -49,6 +65,13 @@ class ISysProxyAccess {
   virtual Result<AutoProxyState> read_autoproxy() = 0;
   // 写/清 AutoConfigURL 后广播（enable=false 时删除键）
   virtual Result<void> write_autoproxy(const AutoProxyState& a) = 0;
+
+  // 全量快照（含 AutoDetect）。默认实现由 read_sysproxy/read_autoproxy 组合，
+  // mock 无需改动；生产实现覆盖以保留原串与 AutoDetect。
+  virtual Result<SysProxySnapshot> read_snapshot();
+  virtual Result<void> write_snapshot(const SysProxySnapshot& s);
+  // true = 允许把备份落盘（崩溃后下次启动读回）。mock 默认 false（零磁盘污染）。
+  virtual bool persistent() const { return false; }
 };
 
 // 生产实现（WinINET 注册表 + InternetSetOption 广播 + RAS 条目同步）
@@ -88,7 +111,7 @@ class Sysopt {
     std::string system_proxy_bypass;     // utf8；空 = 无自定义
     std::string proxy_host = "127.0.0.1";
     uint16_t mixed_port = 0;             // ← verge_mixed_port 或 clash mixed_port
-    uint16_t pac_port = 33335;           // ← SINGLETON_SERVER（非 dev）
+    uint16_t pac_port = 33337;           // ← Clash Win 单实例端口（错开 Mini 33335/33336）
   };
 
   // ← sysopt.rs:129-197 update_sysproxy：
@@ -109,9 +132,19 @@ class Sysopt {
 
  private:
   Sysopt() = default;
+  // 进入系统代理前调用：无可恢复备份时快照 OS 原值并落盘
+  void ensure_backup_locked();
+  // 恢复原值 + 清备份（返回写失败以便上抛）
+  Result<void> restore_backup_locked();
+  bool load_backup_file();
+  void save_backup_file() const;
+  void clear_backup_file() const;
+
   std::mutex update_lock_;              // ← update_lock: TokioMutex
   std::atomic<bool> reset_flag_{false};  // ← reset_sysproxy: AtomicBool CAS
   ISysProxyAccess* access_ = nullptr;    // 不持有所有权
+  SysProxySnapshot backup_;              // 进入前 OS 原值（内存快照）
+  bool have_backup_ = false;
 };
 
 // VergeView 提取（← sysopt.rs:132-143 从 IVerge/clash 提取口径）：

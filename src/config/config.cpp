@@ -83,16 +83,24 @@ Result<void> Config::init(bool force_save) {
     }
   }
 
-  // 2. 非 admin 且服务未装 → TUN 强制关（config.rs:98-113）
+  // 2. 【P0-0】TUN 只允许“本次会话内用户显式开启”，启动时一律复位为关。
+  // 事故背景：上次会话遗留 enable_tun_mode=true，启动自动恢复 → 内核抢走
+  // 0.0.0.0/0（198.18.0.2）导致整机出网 502。与 Mini 共存的机器上绝不能再
+  // 把“上次状态”当成授权自动拉起 TUN。注意：用户在设置抽屉里手动切换 TUN
+  // 仍走 patch_verge 正常生效，这里只拦启动恢复路径。
   {
     auto v = verge_.latest_arc();
     bool tun_on = v->enable_tun_mode.value_or(false);
-    if (tun_on && !is_admin() && !is_service_installed()) {
+    if (tun_on) {
       verge_.edit_draft([](IVerge& d) { d.enable_tun_mode = false; });
       verge_.apply();
       auto r = verge::save_verge(*verge_.latest_arc());
-      if (!r.is_ok()) CWLOG_WARN("save verge after tun fix failed");
+      if (!r.is_ok()) CWLOG_WARN("save verge after startup tun reset failed");
+      CWLOG_INFO("[TUN] 启动复位：enable_tun_mode 上次为 true，已强制关闭"
+                 "（避免自动抢占默认路由；需在界面手动开启）");
     }
+    // 服务未装/非管理员仍是硬门槛（即使本次会话显式开 TUN 也不能生效）
+    (void)tun_on;
   }
 
   // 3. 孤立 profile 文件清理（config.rs:122-128）

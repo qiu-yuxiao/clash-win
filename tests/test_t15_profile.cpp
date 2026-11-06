@@ -189,9 +189,8 @@ UT_TEST(t15_import_card_ui) {
   UT_CHECK(!card.url_valid());
   card.url_field()->set_text(L"https://ok.example/sub?token=1");
   UT_CHECK(card.url_valid());
-  // name 可选
-  card.name_field()->set_text(L"我的订阅");
-  UT_CHECK(card.name() == "我的订阅");
+  // 源码仅一个 URL 输入（无名称输入，profile-import-card.tsx:138-167）
+  UT_CHECK(card.name().empty());
 
   // on_import 回调成功/失败消息
   UT_CHECK(card.on_import("https://ok.example/sub", ""));
@@ -209,9 +208,11 @@ UT_TEST(t15_import_card_pixel) {
   rt().clear({1, 1, 1, 1});
   card.paint_all(rt());
   rt().end_frame();
-  // 卡片底 theme-panel-bg #ffffff（original light）：非透明像素存在
-  Px p = pixel(120, 50);
-  UT_CHECK(p.b > 240 && p.r > 240);  // 白卡
+  // 卡片底 = get3DCardStyle('default') 135° 4 停靠渐变
+  // （src: button-styles.ts:538 light #FFFDE7→#FFF9C4→#FFF59D→#FFE082）
+  // 取标题行与 URL 输入框之间的卡面（y=21），避开输入框深色底与文字
+  Px p = pixel(120, 21);
+  UT_CHECK(p.r > 240 && p.g > 200 && p.b < 245);  // 浅金渐变卡
   // 标题 "导入订阅" 深色文本存在
   int dark = 0;
   for (int y = 2; y < 20; ++y)

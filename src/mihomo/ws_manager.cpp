@@ -4,6 +4,8 @@
 #include <nlohmann/json.hpp>
 
 #include "mihomo/pipe_ws.h"
+#include "util/log.h"
+#include "util/utf.h"
 
 #include <algorithm>
 #include <chrono>
@@ -156,6 +158,7 @@ struct WsManager::Channel {
   std::map<uint64_t, WsHandler> subs;  // 订阅者（引用计数即 subs.size()）
   std::shared_ptr<PipeWebSocket> ws;   // 共享底层 WS
   std::atomic<bool> reopen{false};     // configure() 后要求断开重连
+  bool logged_err = false;             // 仅 worker 线程读写：失败只报一次，成功清零
   std::atomic<bool> running{false};
   std::thread worker;
   // connections 通道专用：内核裸流 → snapshot/delta 信封（原版插件层职责）；
@@ -362,9 +365,15 @@ void WsManager::worker_loop(Channel* ch, WsManager* self, std::string ws_path) {
 
     auto r = ws->connect(pipe, ws_path, secret, cbs, kOpenTimeoutMs);
     if (r.is_ok()) {
+      chp->logged_err = false;
       std::lock_guard<std::mutex> lk(ch->mu);
       ch->ws = std::move(ws);
     } else {
+      if (!chp->logged_err) {
+        chp->logged_err = true;
+        CWLOG_WARN("WS connect failed: path=" + ws_path + " pipe=" +
+                   utf::utf16_to_utf8(pipe) + " err=" + r.error().message);
+      }
       std::this_thread::sleep_for(std::chrono::milliseconds(kReconnectDelayMs));
     }
   }

@@ -31,6 +31,8 @@ std::optional<SkinId> skin_from_name(const std::string& name) {
 // ---------- 色板（← _theme.tsx 全量照抄） ----------
 const Palette& base_palette(ThemeMode mode) {
   static const Palette kLight = {
+      // ← Mini: src/pages/_theme.tsx:3 primary_color '#007AFF'
+      //   运行期的 AccentColor 解析不在字面量层；此处按审计口径取字面量回退值。
       Color4f::hex(0x007AFF),  // primary_color
       Color4f::hex(0xFC9B76),  // secondary_color
       Color4f::hex(0x000000),  // primary_text
@@ -42,6 +44,7 @@ const Palette& base_palette(ThemeMode mode) {
       Color4f::hex(0xF5F5F5),  // background_color
   };
   static const Palette kDark = {
+      // ← Mini: src/pages/_theme.tsx:18 primary_color '#0A84FF'
       Color4f::hex(0x0A84FF),  // primary_color
       Color4f::hex(0xFF9F0A),  // secondary_color
       Color4f::hex(0xFFFFFF),  // primary_text
@@ -104,9 +107,15 @@ CssVars css_vars(ThemeMode mode, SkinId skin) {
     v.theme_input_border = light ? Color4f::hex(0xcbd5e1) : Color4f::hex(0x555555);
     v.theme_border_outer = light ? Color4f::hex(0x000000, 0.05f)
                                  : Color4f::hex(0x000000, 0.25f);
+    // src: _layout.tsx:1194 内容容器 background light #fff / dark #181a1b
+    v.list_bg = light ? Color4f::hex(0xffffff) : Color4f::hex(0x181a1b);
   } else {
-    // 其余 5 皮肤共用分支（:436-495）
+    // 其余 5 皮肤共用分支（← use-custom-theme.ts:456-500）
+    // src: use-custom-theme.ts:457-460 dark --theme-bg '#0f1423'
+    //   （旧值 0F1524 已按源码回退，出处: use-custom-theme.ts:457-460）
     v.theme_bg = light ? Color4f::hex(0xf0f5ff) : Color4f::hex(0x0f1423);
+    // src: _layout.tsx:1194 内容容器 background light #fff / dark #181a1b
+    v.list_bg = light ? Color4f::hex(0xffffff) : Color4f::hex(0x181a1b);
     v.theme_panel_bg = light ? Color4f::hex(0xffffff) : Color4f::hex(0x1e2438);
     v.theme_popover_bg = light ? Color4f::hex(0xffffff) : Color4f::hex(0x1e1e23);
     v.theme_border = light ? Color4f::hex(0xd0d7de) : Color4f::hex(0x30363d);

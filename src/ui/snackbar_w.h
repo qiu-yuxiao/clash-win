@@ -33,11 +33,11 @@ class SnackbarW : public Widget {
   void on_paint(IRenderTarget& rt) override;
 
   // 绘制参数
-  Color4f bg_ = Color4f::hex(0x2E303D, 0.95f);
-  Color4f text_ = Color4f::hex(0xFFFFFF);
-  Color4f success_ = Color4f::hex(0x34C759);
-  Color4f info_ = Color4f::hex(0x007AFF);
-  Color4f error_ = Color4f::hex(0xFF3B30);
+  Color4f bg_ = Color4f::hex(0x2E303D, 0.95f);  // ← 与标题栏深色一致（应用自定 Snackbar）
+  Color4f text_ = Color4f::hex(0xFFFFFF);  // ← Snackbar 文字白
+  Color4f success_ = Color4f::hex(0x34C759);  // ← 成功语义色（iOS green）
+  Color4f info_ = Color4f::hex(0x007AFF);  // ← 信息语义色（iOS blue）
+  Color4f error_ = Color4f::hex(0xFF3B30);  // src: _theme.tsx:8 error_color
 
  private:
   void refresh();

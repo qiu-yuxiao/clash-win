@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include <exception>
+
 #include "util/log.h"
 
 namespace clashwin::core {
@@ -37,13 +39,24 @@ void CoreMonitor::start() {
   worker_ = std::thread([this] {
     while (running_.load()) {
       int interval = current_interval_secs();
-      // 分片等待（stop 即时退出）
+      // 分片等待（stop/kick 即时退出）
       for (int waited = 0; running_.load() && waited < interval; waited += 1) {
         std::unique_lock<std::mutex> lock(m_);
-        cv_.wait_for(lock, std::chrono::seconds(1));
+        cv_.wait_for(lock, std::chrono::seconds(1),
+                     [this] { return !running_.load() || kick_.load(); });
+        if (kick_.exchange(false)) break;
       }
       if (!running_.load()) break;
-      tick_once();
+      // 守护线程绝不能因异常逃逸而 terminate：restart_core 钩子会同步执行
+      // enhance pipeline / 内核拉起，任一环节抛出 yaml/文件异常都会让整个进程
+      // 以 0xC0000409 abort。这里兜住并记录，下一轮继续自愈。
+      try {
+        tick_once();
+      } catch (const std::exception& ex) {
+        CWLOG_ERROR(std::string("CoreMonitor: tick 异常（已兜住继续运行）: ") + ex.what());
+      } catch (...) {
+        CWLOG_ERROR("CoreMonitor: tick 未知异常（已兜住继续运行）");
+      }
     }
   });
 }
@@ -52,6 +65,11 @@ void CoreMonitor::stop() {
   if (!running_.exchange(false)) return;
   cv_.notify_all();
   if (worker_.joinable()) worker_.join();
+}
+
+void CoreMonitor::kick() {
+  kick_.store(true);
+  cv_.notify_all();
 }
 
 void CoreMonitor::record_server_failure(const std::string& server) {

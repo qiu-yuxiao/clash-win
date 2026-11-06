@@ -18,6 +18,12 @@
 
 namespace clashwin::core::service_mode {
 
+// ---------- 唯一服务名（共存铁律） ----------
+// 与 Clash Mini 完全同名：clash_verge_service。禁止引入第二服务名；
+// 所有 SCM 调用与安装器校验都必须引用这两个常量。
+inline constexpr const wchar_t* kServiceNameW = L"clash_verge_service";
+inline constexpr const char* kServiceName = "clash_verge_service";
+
 // ---------- IPC 门面（mock 注入点；适配 T04 ServiceIpc） ----------
 struct IServiceIpc {
   virtual ~IServiceIpc() = default;
@@ -46,6 +52,8 @@ class ServiceIpcAdapter : public IServiceIpc {
 bool is_service_installed();
 // QueryServiceStatus == SERVICE_RUNNING
 bool is_service_running();
+// 服务已注册但 ImagePath 指向的二进制不存在（Mini 卸载后残留）；读 QueryServiceConfigW
+bool is_service_binary_valid();
 // StartServiceW；ERROR_ACCESS_DENIED 时回退 runas 提权 sc.exe start（← service.rs:153-179 UAC 语义）
 Result<void> start_service();
 
@@ -81,6 +89,26 @@ Result<void> stop_with_service(IServiceIpc& ipc);
 
 // 端口是否可绑定（已释放）；供测试与 start_with_service 内部轮询
 bool is_port_free(uint16_t port);
+
+// ---------- 服务状态五态（可注入探测；纯函数便于单测） ----------
+// ← 回归用例：管道在但 SCM 状态 STOPPED 时，不得判 ready（原缺陷）。
+enum class ServiceState { Missing, BinaryInvalid, Stopped, NotReady, Ready };
+
+struct IServiceProbe {
+  virtual ~IServiceProbe() = default;
+  virtual bool installed() = 0;     // OpenService 成功
+  virtual bool binary_valid() = 0;  // ImagePath 指向的文件存在
+  virtual bool running() = 0;       // QueryServiceStatus == RUNNING
+  virtual bool pipe_ready() = 0;    // 管道存在 + magic 握手成功
+};
+
+ServiceState evaluate_state(IServiceProbe& probe);
+inline bool state_requires_install(ServiceState s) {
+  return s == ServiceState::Missing || s == ServiceState::BinaryInvalid;
+}
+inline bool state_requires_start(ServiceState s) {
+  return s == ServiceState::Stopped || s == ServiceState::NotReady;
+}
 
 // ---------- 启动模式决策（← lifecycle.rs prepare_startup_mode + wait_for_service_ready） ----------
 struct StartupDecision {

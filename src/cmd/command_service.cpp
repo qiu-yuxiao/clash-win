@@ -54,15 +54,22 @@ CmdResult CommandService::invoke(const std::string& name, const Json& args) {
     timeout_ms = it->second.second;
   }
   // ← 01§5-A withIpcTimeout：超时返回错误（工作线程自然走完，与前端放弃语义一致）
-  std::future<CmdResult> fut = std::async(std::launch::async, [&handler, &args] {
+  // 注意：handler/args 必须按值捕获。原先按引用捕获时，超时返回后栈对象即失效，
+  // 后台线程继续访问会造成悬垂引用；而 std::async 的 future 析构会阻塞到任务结束，
+  // 使“超时”形同虚设（UI 线程被拖住 → AppHang）。这里改用 packaged_task + detach。
+  CmdHandler handler_copy = handler;
+  Json args_copy = args;
+  std::packaged_task<CmdResult()> task([handler_copy, args_copy]() {
     try {
-      return handler(args);
+      return handler_copy(args_copy);
     } catch (const std::exception& ex) {
       return CmdResult::err({errs::kIo, std::string("handler exception: ") + ex.what()});
     } catch (...) {
       return CmdResult::err({errs::kIo, "handler unknown exception"});
     }
   });
+  std::future<CmdResult> fut = task.get_future();
+  std::thread(std::move(task)).detach();
   if (fut.wait_for(std::chrono::milliseconds(timeout_ms)) != std::future_status::ready) {
     CWLOG_WARN("command timeout: " + name + " (" + std::to_string(timeout_ms) + "ms)");
     return CmdResult::err({errs::kTimeout, "command timeout: " + name});

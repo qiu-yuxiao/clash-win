@@ -5,9 +5,7 @@
 #include <memory>
 #include <string>
 
-namespace clashwin::consts {
-inline constexpr uint16_t kSingletonPort = 33336;
-}  // namespace clashwin::consts
+#include "clashwin/config/constants.h"
 
 namespace clashwin::ui::win {
 class MainWindow;
@@ -28,7 +26,7 @@ class App {
   App();
   ~App();
 
-  // 返回 false = 已有 ClashWin 实例占用 33336（本进程已唤醒已有实例并退出）
+  // 返回 false = 已有 Clash Win 实例占用单实例端口（本进程已唤醒已有实例并退出）
   bool init();
 
   // 标准消息循环，返回 wParam
@@ -37,7 +35,7 @@ class App {
  private:
   bool init_logger();
 
-  uint16_t singleton_port_ = consts::kSingletonPort;
+  uint16_t singleton_port_ = config::consts::kSingletonPort;
   bool wsa_inited_ = false;
   ui::win::MainWindow* main_window_ = nullptr;
   std::unique_ptr<system::Tray> tray_;

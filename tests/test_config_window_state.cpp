@@ -186,7 +186,7 @@ UT_TEST(t03_ws_save_sync_json_shape) {
   std::string s((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
   // 与实机 window_state.json 单行形态一致
   UT_CHECK(s.find('\n') == std::string::npos);
-  UT_CHECK(s.find("\"height\":860.0") != std::string::npos);
+  UT_CHECK(s.find("\"height\":860") != std::string::npos);  // 整值 double 写为 int（jnum 整数化）
   UT_CHECK(s.find("\"width\":271.3333333333333") != std::string::npos);
   // x/y 缺省时不写键
   window_state::save_sync(path, 300, 500, std::nullopt, std::nullopt);

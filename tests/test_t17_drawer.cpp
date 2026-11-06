@@ -43,45 +43,42 @@ UT_TEST(t17_drawer_open_close_and_mask) {
   UT_CHECK(!drawer.is_open());
   drawer.set_open(true);
   UT_CHECK(drawer.is_open());
-  // 面板顶部留标题栏 30px
+  // src: _layout.tsx:1403-1424 抽屉 = 内容区全窗覆盖层 {0,0,271,680}
   RectF panel = drawer.panel()->bounds();
-  UT_CHECK(near_f(panel.y, 30));
+  UT_CHECK(near_f(panel.x, 0) && near_f(panel.y, 0));
   UT_CHECK(near_f(panel.w, 271));
-  // 遮罩点击关闭（点击面板外=顶部 30px 区）
-  MouseEvent up{MouseEventType::Up, {135, 10}};
+  UT_CHECK(near_f(panel.h, 680));
+  // src: _layout.tsx:1403 条件渲染、无 backdrop → 面板外点击不关闭
+  MouseEvent up{MouseEventType::Up, {135, 600}};
   route_mouse_event(&drawer, up);
-  UT_CHECK(!drawer.is_open());
+  UT_CHECK(drawer.is_open());
   clear_input_state();
 }
 
 UT_TEST(t17_left_column_layout_pixels) {
   make_offscreen(271, 680, 96);
   auto& svc = ThemeService::instance();
-  svc.init(SkinId::Original, ThemeMode::Light);
+  svc.init(SkinId::Retro3d, ThemeMode::Light);
   SettingsDrawer drawer;
   drawer.layout_tree({0, 0, 271, 680});
   drawer.set_open(true);
-  // 卡宽 = 271 - 2*6 边距 = 259（单列全宽；大窗两列形态留 T20）
-  UT_CHECK(near_f(drawer.profile_card()->bounds().w, 259));
-  // 绘制：遮罩 + 面板 + 卡片底
+  // 卡宽 = 240 - pr 8 - borderRight 1 = 231（src: _layout.tsx:1428-1436）
+  UT_CHECK(near_f(drawer.profile_card()->bounds().w, 231));
+  // 面板 4px double 边框占 4 DIP，padding 12 从边框内侧起算 → 12+4=16
+  UT_CHECK(near_f(drawer.profile_card()->bounds().x, 16));
+  UT_CHECK(near_f(drawer.profile_card()->bounds().y, 16));
   rt().begin_frame();
   rt().clear({1, 1, 1, 1});
   drawer.paint_all(rt());
   rt().end_frame();
-  // 遮罩半透明黑混白（顶部 30px 区）≈ (140,140,140)
-  Px mask = pixel(135, 10);
-  UT_CHECK(mask.r > 100 && mask.r < 190);
-  // 卡片底 #ffffff（original panel）：卡全局 y = 面板30 + 局部36 = 66 起
-  Px card = pixel(135, 72);
-  UT_CHECK(card.r > 240);
-  // 订阅卡橙标题存在（标题全局 y 66-86）
-  int orange = 0;
-  for (int y = 66; y < 86; ++y)
-    for (int x = 8; x < 200; ++x) {
-      Px p = pixel(x, y);
-      if (p.r > 200 && p.g > 100 && p.g < 190 && p.b < 90) ++orange;
-    }
-  UT_CHECK(orange > 3);
+  // 面板 light theme-panel 渐变（src: index.scss:147）→ 亮金，r≈255
+  // 取卡外顶部 padding 区（y=6），避开卡内控件（日志钮 primary 蓝）
+  Px panel = pixel(135, 6);
+  UT_CHECK(panel.r > 240 && panel.b < 240);
+  // 左列 borderRight 1px divider（x = 12 + 240 = 252）：比相邻面板更暗
+  Px div = pixel(252, 600);
+  Px near_px = pixel(246, 600);  // 注意：windows.h 把 near 定义为空宏
+  UT_CHECK(div.r < near_px.r - 8);
 }
 
 UT_TEST(t17_takeover_routing_callbacks) {
@@ -115,10 +112,13 @@ UT_TEST(t17_takeover_routing_callbacks) {
   // 恢复成功回调
   drawer.takeover_card()->seg_->apply = [](const std::string&) { return true; };
 
-  // 分流 PRX → rule_fallback=proxy + patch_clash_mode("rule")
+  // 分流「添加网址」→ rule_fallback=addurl（_layout.tsx:391-396：0=proxy/1=direct/2=addurl）
+  bool addurl_called = false;
+  drawer.on_add_rule = [&]() { addurl_called = true; };
   drawer.routing_card()->seg_->on_change.operator()(2);
-  UT_CHECK(log.has("rule_fallback", "proxy"));
+  UT_CHECK(log.has("rule_fallback", "addurl"));
   UT_CHECK(log.has("clash_mode", "rule"));
+  UT_CHECK(addurl_called);
 }
 
 UT_TEST(t17_basic_card_callbacks) {
@@ -147,11 +147,10 @@ UT_TEST(t17_basic_card_callbacks) {
   drawer.basic_card()->port_field_->set_text(L"1080");
   drawer.basic_card()->save_btn_->on_click();
   UT_CHECK(log.has("verge_mixed_port", 1080));
-  // 非法值（<1024）→ 不发
-  int before = log.count("verge_mixed_port");
+  // Mini 无取值范围校验（src: use-minimal-settings.ts:87-104），任意 int 直传
   drawer.basic_card()->port_field_->set_text(L"80");
   drawer.basic_card()->save_btn_->on_click();
-  UT_CHECK_EQ(log.count("verge_mixed_port"), before);
+  UT_CHECK(log.has("verge_mixed_port", 80));
 }
 
 UT_TEST(t17_theme_card_skin_mode_sliders) {

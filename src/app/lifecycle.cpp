@@ -155,7 +155,9 @@ bool Lifecycle::entry_lightweight_mode(bool force) {
     tray_->update_lite_mode_menu(true);
   }
 
-  system::CoreMonitor::instance().tick_once();
+  // 不在 UI 线程同步 tick（tick_once 内含 api_alive/node_healthy 网络探测，
+  // 会阻塞消息循环 → AppHangB1）；改为唤醒守护线程，非阻塞。
+  system::CoreMonitor::instance().kick();
   return true;
 }
 
@@ -195,7 +197,7 @@ bool Lifecycle::exit_lightweight_mode() {
     tray_->update_lite_mode_menu(false);
   }
 
-  system::CoreMonitor::instance().tick_once();
+  system::CoreMonitor::instance().kick();
   return true;
 }
 
@@ -343,7 +345,9 @@ bool Lifecycle::restart_app() {
           }
         }
       });
-      (void)config::Config::instance().profiles().data_arc()->save_file();
+      auto& profs = config::Config::instance().profiles();
+      profs.apply();
+      (void)profs.data_arc()->save_file();
     }
   }
 

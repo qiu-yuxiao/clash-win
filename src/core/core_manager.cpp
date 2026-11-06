@@ -7,6 +7,9 @@
 
 #include "config/config.h"
 #include "config/proxy_head_state.h"
+#include "core/service_mode.h"
+#include "mihomo/service_ipc.h"
+#include "system/service_runner.h"
 #include "util/dirs.h"
 #include "util/log.h"
 #include "util/node.h"
@@ -58,8 +61,10 @@ std::wstring build_sidecar_env_block(const SidecarLaunch& s) {
       }
       // "=" 开头的保留项（驱动器当前目录设置）传入 lpEnvironment 会触发
       // ERROR_INVALID_PARAMETER(87)，构造自定义环境块时必须剔除
+      // 先取长度再移动：move 后 entry.size() 未指定（实测 0），曾致环境块步进错位
+      const size_t entry_len = entry.size();
       if (!is_go && !entry.empty() && entry[0] != L'=') entries.push_back(std::move(entry));
-      p += entry.size() + 1;
+      p += entry_len + 1;
     }
     ::FreeEnvironmentStringsW(envs);
   }
@@ -398,9 +403,28 @@ bool CoreManager::sidecar_alive() const {
   return ::WaitForSingleObject(child_, 0) == WAIT_TIMEOUT;
 }
 
+bool CoreManager::core_alive() const {
+  if (mode_.load() != RunningMode::Service) return sidecar_alive();
+  // 服务模式：内核是 SCM 服务的子进程，本进程没有 child_ 句柄，
+  // 只能问服务 /status 的 core_pid（null = 未运行）。
+  mihomo::ServiceIpc ipc;
+  if (!ipc.connect().is_ok()) return false;
+  auto st = ipc.get_status();
+  if (!st.is_ok() || !st.value().is_object()) return false;
+  const auto& d = st.value();
+  if (!d.contains("core_pid")) return false;
+  if (d["core_pid"].is_number()) return d["core_pid"].get<long long>() != 0;
+  return false;
+}
+
 Result<void> CoreManager::start_sidecar(const std::wstring& config_file,
                                         const std::wstring& ipc_pipe) {
   std::lock_guard<std::mutex> lock(lifecycle_);
+  return start_sidecar_locked(config_file, ipc_pipe);
+}
+
+Result<void> CoreManager::start_sidecar_locked(const std::wstring& config_file,
+                                               const std::wstring& ipc_pipe) {
   // ← lifecycle.rs:39-47 幂等：已有内核运行时 no-op
   if (mode_.load() != RunningMode::NotRunning) {
     CWLOG_INFO("start_core called while a core is running; treated as no-op");
@@ -484,6 +508,136 @@ Result<void> CoreManager::start_sidecar(const std::wstring& config_file,
   return Result<void>::ok();
 }
 
+Result<void> CoreManager::start_auto(const std::wstring& config_file,
+                                     const std::wstring& ipc_pipe) {
+  std::lock_guard<std::mutex> lock(lifecycle_);
+  if (mode_.load() != RunningMode::NotRunning) {
+    CWLOG_INFO("start_auto called while a core is running; treated as no-op");
+    return Result<void>::ok();
+  }
+  bool needs_tun = false;
+  if (auto v = config::Config::instance().verge().latest_arc()) {
+    needs_tun = v->enable_tun_mode.value_or(false);
+  }
+  const bool is_admin_user = config::Config::instance().is_admin();
+  auto runner = system::get_service_runner();
+  const bool service_ready = runner->is_available();
+  auto decision = service_mode::decide_startup_mode(needs_tun, is_admin_user,
+                                                    service_ready);
+  CWLOG_INFO(std::string("core start decision: needs_tun=") + (needs_tun ? "1" : "0") +
+             " is_admin=" + (is_admin_user ? "1" : "0") +
+             " service_ready=" + (service_ready ? "1" : "0") + " → " +
+             (decision.use_service ? "Service" : "Sidecar"));
+
+  if (!decision.use_service) {
+    // TUN 请求 + 非管理员：即使 service 当下不可用，也先走安装/启动流程；
+    // 仍失败则明确告警（BUG-298 铁律：禁止静默降级）
+    if (needs_tun && !is_admin_user) {
+      auto r = start_service_locked(config_file);
+      if (r.is_ok()) return r;
+      CWLOG_WARN("TUN requested but service unavailable: " + r.error().message +
+                 " → fallback Sidecar (TUN will fail)");
+      notify("service_unavailable",
+             "clash_verge_service 不可用，TUN 无法启用（已回退 Sidecar）: " +
+                 r.error().message);
+    }
+    return start_sidecar_locked(config_file, ipc_pipe);
+  }
+  return start_service_locked(config_file);
+}
+
+Result<void> CoreManager::start_service_locked(const std::wstring& config_file) {
+  if (config_file.empty()) {
+    return Result<void>::err({2301, "config file path is empty"});
+  }
+  // ← Mini: src-tauri/src/core/manager/lifecycle.rs:151-176 prepare_startup_mode()
+  //          + :183-235 wait_for_service_ready()（含 installer UAC）
+  //   链路：未安装 / ImagePath 失效 → UAC 安装 → 复核注册 → 启动 → IPC 就绪 → 起内核。
+  // 先清用户态残留（服务侧 start_clash 内部也会 stop_clash）
+  std::set<uint32_t> exclude = {::GetCurrentProcessId()};
+  kill_all_mini_cores(exclude);
+
+  auto runner = system::get_service_runner();
+  // 服务缺失 / 已注册但 ImagePath 失效（Mini 卸载后的残壳）→ 安装流程（唯一名 clash_verge_service，需 UAC）
+  const bool installed = runner->is_installed();
+  const bool binary_ok = installed && service_mode::is_service_binary_valid();
+  if (!installed || !binary_ok) {
+    CWLOG_WARN(installed ? "clash_verge_service ImagePath 失效 → 启动安装流程（唯一服务名）"
+                         : "clash_verge_service 未安装 → 启动安装流程（唯一服务名）");
+    notify("service_missing", installed
+                                  ? "clash_verge_service 的 ImagePath 已失效（Clash Mini 可能已卸载），正在安装共用服务（需要 UAC 确认）"
+                                  : "clash_verge_service 未安装，正在启动安装程序（需要 UAC 确认）");
+    auto ir = runner->run_installer(true);
+    if (ir.is_err()) {
+      notify("service_install_error", "安装共用服务 clash_verge_service 失败（UAC 取消或安装器错误）：" +
+                                          ir.error().message);
+      return ir;
+    }
+    if (!runner->is_installed()) {
+      notify("service_install_error", "安装器已执行但 clash_verge_service 仍未注册，请重试或先通过 Clash Mini 安装");
+      return Result<void>::err({2316, "installer ran but clash_verge_service is still not registered"});
+    }
+  }
+  if (!runner->is_available()) {
+    auto sr = runner->start_service();
+    if (sr.is_err()) {
+      notify("service_start_error", "clash_verge_service 启动失败（可能需要 UAC）：" + sr.error().message);
+      return sr;
+    }
+    constexpr int kServiceReadyWaitMs = 5000;  // ← service.rs wait_for_ready 上限
+    if (!runner->wait_for_ready(kServiceReadyWaitMs)) {
+      notify("service_start_error",
+             "clash_verge_service 已启动但 IPC 未就绪（5s 超时）；请确认服务以 SYSTEM 运行后重试");
+      return Result<void>::err(
+          {2317, "clash_verge_service not ready after start (IPC probe timeout)"});
+    }
+  }
+
+  mihomo::ServiceIpc ipc;
+  auto cr = ipc.connect();
+  if (cr.is_err()) {
+    return Result<void>::err({2318, "connect service pipe failed: " + cr.error().message});
+  }
+  service_mode::ServiceIpcAdapter adapter(&ipc);
+
+  auto core = locate_core_path();
+  if (core.empty()) {
+    return Result<void>::err({2302, "mini-mihomo core not found (cores/ and sidecar both missing)"});
+  }
+  auto home = util::dirs::app_home_dir();
+  auto payload = service_mode::build_clash_config_payload(
+      utf::utf16_to_utf8(core), utf::utf16_to_utf8(util::dirs::ipc_path()),
+      utf::utf16_to_utf8(config_file), utf::utf16_to_utf8(home),
+      service_mode::default_log_config());
+
+  // mixed-port（verge 优先，clash 兜底）用于 stop 后端口释放轮询
+  uint16_t port = 0;
+  if (auto v = config::Config::instance().verge().latest_arc()) {
+    port = v->verge_mixed_port.value_or(0);
+  }
+  if (port == 0) {
+    auto& clash = config::Config::instance().clash();
+    auto arc = clash.latest_arc();
+    if (arc) {
+      try {
+        const auto& m = arc->mapping();
+        if (m.IsMap() && m["mixed-port"]) {
+          port = static_cast<uint16_t>(m["mixed-port"].as<int>());
+        }
+      } catch (...) {
+        port = 0;
+      }
+    }
+  }
+
+  auto sr = service_mode::start_with_service(adapter, payload, port);
+  if (sr.is_err()) return sr;
+  mode_.store(RunningMode::Service);
+  pid_ = 0;  // 内核归 SCM 服务持有，非本进程子进程
+  CWLOG_INFO("Service started core successfully (elevated SYSTEM, TUN-capable)");
+  return Result<void>::ok();
+}
+
 Result<void> CoreManager::stop_sidecar_locked() {
   // ← state.rs:126-154
   if (child_) {
@@ -513,8 +667,17 @@ Result<void> CoreManager::stop() {
     return stop_sidecar_locked();
   }
   if (m == RunningMode::Service) {
-    // Service 模式停止归 service_mode（T09 装配完整链路）；此处降级清残留
-    CWLOG_INFO("stopping service-mode core: delegating to kill_all cleanup");
+    // ← service.rs::stop_core_by_service：DELETE /clash/stop；失败再 kill_all 兜底
+    mihomo::ServiceIpc ipc;
+    if (ipc.connect().is_ok()) {
+      service_mode::ServiceIpcAdapter adapter(&ipc);
+      auto sr = service_mode::stop_with_service(adapter);
+      if (sr.is_err()) {
+        CWLOG_WARN("stop via service failed (fallback kill_all): " + sr.error().message);
+      }
+    } else {
+      CWLOG_WARN("stop service core: connect service pipe failed (fallback kill_all)");
+    }
     std::set<uint32_t> exclude = {::GetCurrentProcessId()};
     kill_all_mini_cores(exclude);
     mode_.store(RunningMode::NotRunning);

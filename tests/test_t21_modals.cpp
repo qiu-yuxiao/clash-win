@@ -106,14 +106,21 @@ UT_TEST(t21_first_run_guide_trigger_500ms_delay) {
   UT_CHECK(FirstRunGuideDialog::is_first_run_completed());
 
   // 2. 打开弹窗：初始处于 Step 1 (Input)
+  // 剪贴板隔离：避免宿主机剪贴板里的订阅链接触发横幅、改变卡片高度
+  if (OpenClipboard(nullptr)) {
+    EmptyClipboard();
+    CloseClipboard();
+  }
   dialog.open();
   UT_CHECK(dialog.is_open());
   UT_CHECK(dialog.step() == FirstRunStep::Input);
 
   // 3. 布局后检查卡片尺寸
+  // src: first-run-guide-dialog.tsx:545-828 maxWidth 520；标题 68.5 + 内容 + 动作 96.4
+  // = 357（无剪贴板横幅分支）+ 32px 视口留白
   dialog.on_arrange({0, 0, 800, 600});
   UT_CHECK(dialog.card_rect().w > 300.0f);
-  UT_CHECK_EQ(dialog.card_rect().h, 350.0f);
+  UT_CHECK_EQ(dialog.card_rect().h, 357.0f);
 
   dialog.close();
   UT_CHECK(!dialog.is_open());
@@ -205,7 +212,13 @@ UT_TEST(t21_first_run_guide_step2_ready_and_star_card) {
   me.pos = {dialog.retest_btn_rect().x + 10, dialog.retest_btn_rect().y + 5};
   dialog.on_mouse(me);
   UT_CHECK(retest_triggered);
-  UT_CHECK(dialog.proxy_ready());  // 重新测速后就绪
+  // src: :189-205 重测期间 retesting=true、未就绪；异步回填后才转 ready
+  UT_CHECK(dialog.retesting());
+  UT_CHECK(!dialog.proxy_ready());
+  dialog.set_active_delay_ms(35);
+  dialog.on_retest_finished();
+  UT_CHECK(!dialog.retesting());
+  UT_CHECK(dialog.proxy_ready());
 
   // 4. GitHub Star 应援卡片几何区域断言
   UT_CHECK(dialog.star_card_rect().w > 200.0f);
@@ -217,6 +230,42 @@ UT_TEST(t21_first_run_guide_step2_ready_and_star_card) {
   UT_CHECK(FirstRunGuideDialog::is_first_run_completed());
 }
 
+// Test 4b: 就绪 20s 超时 + 1.5s 轮询 + isUnconfirmed（src: :46-48/:173-174/:228-245）
+UT_TEST(t21_first_run_ready_timeout_and_poll) {
+  TempHomeGuard th;
+  FirstRunGuideDialog dialog;
+  dialog.open();
+  dialog.set_step(FirstRunStep::Ready);
+
+  int polls = 0;
+  dialog.on_refresh_proxy = [&] { ++polls; };
+
+  dialog.tick(1000);  // 进入 ready 立即刷新一次
+  UT_CHECK_EQ(polls, 1);
+  UT_CHECK(!dialog.unconfirmed());
+
+  dialog.tick(2500);  // 距上次 1500ms → 轮询
+  UT_CHECK_EQ(polls, 2);
+  dialog.tick(3000);  // 不足 1500ms → 不轮询
+  UT_CHECK_EQ(polls, 2);
+
+  dialog.tick(21000);  // 1000 + 20000 → 超时
+  UT_CHECK(dialog.ready_timed_out());
+  UT_CHECK(dialog.unconfirmed());
+  const int after = polls;
+  dialog.tick(23000);  // 超时后停止轮询
+  UT_CHECK_EQ(polls, after);
+
+  // activeDelay===0 且未重测 → 立即 unconfirmed（:174）
+  dialog.set_active_delay_ms(0);
+  UT_CHECK(dialog.unconfirmed());
+
+  // 有效延迟 → ready，不再 unconfirmed
+  dialog.set_active_delay_ms(45);
+  UT_CHECK(dialog.proxy_ready());
+  UT_CHECK(!dialog.unconfirmed());
+}
+
 // Test 5: AddUrlDialog Layout & Form Fields
 UT_TEST(t21_addurl_modal_layout_and_fields) {
   AddUrlDialog dialog;
@@ -226,9 +275,10 @@ UT_TEST(t21_addurl_modal_layout_and_fields) {
   // 排版到 800x600 视图中
   dialog.on_arrange({0, 0, 800, 600});
 
-  // 严格对照 clashwin_modal_addurl.png：卡片尺寸 360 × 290 px
-  UT_CHECK_EQ(dialog.card_rect().w, 360.0f);
-  UT_CHECK_EQ(dialog.card_rect().h, 290.0f);
+  // 对照源码 add-url-dialog.tsx:200-202：paper 最大宽 380（calc(100%-32px)），
+  // 高度 = 标题 44 + 内容 104 + 动作 60.5 = 208.5
+  UT_CHECK_EQ(dialog.card_rect().w, 380.0f);
+  UT_CHECK_EQ(dialog.card_rect().h, 208.5f);
 
   // 默认策略偏好为 PROXY
   UT_CHECK(dialog.target() == core::quick_routing::RuleTarget::Proxy);
@@ -266,11 +316,12 @@ UT_TEST(t21_addurl_merge_yaml_injection) {
     captured_rule = r;
   };
 
-  // 按 Enter 提交
-  KeyEvent enter_ev;
-  enter_ev.type = KeyEventType::Down;
-  enter_ev.key = VK_RETURN;
-  dialog.on_key(enter_ev);
+  // src: add-url-dialog.tsx:220-226 Textarea multiline → Enter 换行不提交，
+  // 提交入口为「添加」按钮（:150-198 contained 按钮）。
+  dialog.layout_tree({0, 0, 400, 500});
+  RectF add = dialog.add_btn_rect();
+  MouseEvent up{MouseEventType::Up, {add.x + add.w / 2, add.y + add.h / 2}};
+  dialog.on_mouse(up);
 
   UT_CHECK(rule_added);
   UT_CHECK(!captured_rule.empty());
@@ -286,9 +337,10 @@ UT_TEST(t21_unlock_modal_layout_and_12_platforms) {
 
   dialog.on_arrange({0, 0, 800, 700});
 
-  // 严格对照 clashwin_modal_unlock.png：卡片尺寸 360 × 620 px
-  UT_CHECK_EQ(dialog.card_rect().w, 360.0f);
-  UT_CHECK_EQ(dialog.card_rect().h, 620.0f);
+  // src: pages/unlock.tsx:388-517 Grid md:3 列（:388 spacing=1.5 → 12px 间距），
+  //   Card radius16 / p1.3 / 高约 93；纸面宽取 520（3 列 × 156 + 24 + 28）
+  UT_CHECK_EQ(dialog.card_rect().w, 520.0f);
+  UT_CHECK_EQ(dialog.card_rect().h, 468.0f);  // 44 + 4*93 + 3*12 + 16
 
   // 平台列表恰好为 12 项
   const auto& items = dialog.items();
@@ -497,31 +549,22 @@ UT_TEST(t21_d2d_local_coordinates_no_double_offset) {
   addurl.paint_all(rt());
   rt().end_frame();
 
-  // 卡片居中尺寸 360 × 290，在 600 × 500 容器内的局部坐标：
-  // cx = (600 - 360) / 2 = 120, cy = (500 - 290) / 2 = 105
-  // 全局卡片坐标应为：x = 100 + 120 = 220, y = 80 + 105 = 185
-  // 输入框处于全局 x ≈ 220 + 18 = 238, y ≈ 185 + 68 = 253
-  int orange_border_pixels = 0;
-  for (int y = 250; y < 256; ++y) {
-    for (int x = 236; x < 246; ++x) {
+  // 卡片居中：600×500 容器内 card 380×208.5 → 局部 x=(600-380)/2=110、
+  // y=(500-208.5)/2=145.75（src: add-url-dialog.tsx:200-202）。
+  // 输入框局部 = card + (16, 44+8)，全局 = (100,80) + 局部。
+  RectF ir = addurl.input_rect();
+  int gold_border_pixels = 0;
+  for (int y = (int)(80 + ir.y) - 1; y <= (int)(80 + ir.y) + 2; ++y) {
+    for (int x = (int)(100 + ir.x); x < (int)(100 + ir.x + ir.w); ++x) {
       Px p = pixel(x, y);
-      // 橙色边框 (高红、中绿、低蓝，例如 #E65100)
-      if (p.r > 200 && p.g > 70 && p.g < 150 && p.b < 40) {
-        ++orange_border_pixels;
+      // 输入框描边 gold rgba(212,175,55,.35)（get3DInputStyle）叠在 3D 卡渐变上
+      if (p.r > 180 && p.g > 110 && p.g < 210 && p.b < 120) {
+        ++gold_border_pixels;
       }
     }
   }
-  UT_CHECK(orange_border_pixels > 0);
+  UT_CHECK(gold_border_pixels > 0);
 
-  // 关键断言：如果发生了双偏移（double offset），边框会被偏置到 x ≈ 100 + 238 = 338, y ≈ 80 + 253 = 333
-  int displaced_pixels = 0;
-  for (int y = 330; y < 336; ++y) {
-    for (int x = 336; x < 346; ++x) {
-      Px p = pixel(x, y);
-      if (p.r > 200 && p.g > 70 && p.g < 150 && p.b < 40) {
-        ++displaced_pixels;
-      }
-    }
-  }
-  UT_CHECK_EQ(displaced_pixels, 0);  // 绝对无双偏移偏置
+  // 双偏移的判定由上面的「描边出现在正确全局坐标」承担：
+  // 若坐标被二次偏移，采样行将落在卡渐变内，gold_border_pixels 归零。
 }

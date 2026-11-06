@@ -70,7 +70,7 @@ UT_TEST(t14_traffic_series_window_and_peak) {
   UT_CHECK(s.peak() == 4000);
 }
 
-UT_TEST(t14_traffic_dedup_and_disable) {
+UT_TEST(t14_traffic_sample_1000ms_and_disable) {
   TrafficPane pane;
   pane.layout_tree({0, 0, 271, 135});
   int64_t clock = 1000;
@@ -80,18 +80,24 @@ UT_TEST(t14_traffic_dedup_and_disable) {
 
   UT_CHECK(pane.on_traffic_json(traffic_payload(100, 200)));
   UT_CHECK_EQ(fired, 1);
-  // 50ms 内去重
-  clock += 30;
-  UT_CHECK(!pane.on_traffic_json(traffic_payload(300, 400)));
+  UT_CHECK_EQ(pane.series().size(), 1u);
+  // src: traffic-graph.tsx:16 采样间隔 1000ms：1s 内 payload 只缓存、不入窗
+  clock += 300;
+  UT_CHECK(pane.on_traffic_json(traffic_payload(300, 400)));
   UT_CHECK_EQ(fired, 1);
-  clock += 100;
+  UT_CHECK_EQ(pane.series().size(), 1u);
+  clock += 800;
   UT_CHECK(pane.on_traffic_json(traffic_payload(300, 400)));
   UT_CHECK_EQ(fired, 2);
-  // 失焦停采
+  UT_CHECK_EQ(pane.series().size(), 2u);
+  // 失焦只停“绘制”，采样/累计继续（P0-5）：帧仍入窗、但不触发重绘
   pane.set_enabled(false);
-  clock += 100;
-  UT_CHECK(!pane.on_traffic_json(traffic_payload(500, 600)));
+  clock += 1200;
+  UT_CHECK(pane.on_traffic_json(traffic_payload(500, 600)));
+  UT_CHECK_EQ(fired, 2);
+  UT_CHECK_EQ(pane.series().down().back(), 600.0f);
   pane.set_enabled(true);
+  UT_CHECK_EQ(fired, 3);
 }
 
 UT_TEST(t14_traffic_text_format) {
@@ -116,11 +122,9 @@ UT_TEST(t14_traffic_text_format) {
       if (pixel(x, y).r < 120) ++dark;
   std::printf("dbg traffic dark=%d\n", dark);
   {
-    Widget* drow = pane.child(1);
-    Widget* dlabel = drow->child(0);
-    std::printf("dbg row=(%f,%f,%f,%f) label=(%f,%f,%f,%f) lvis=%d\n",
-                drow->bounds().x, drow->bounds().y, drow->bounds().w,
-                drow->bounds().h, dlabel->bounds().x, dlabel->bounds().y,
+    Widget* dlabel = pane.child(1);  // 文字段直挂 pane（child0=graph）
+    std::printf("dbg label=(%f,%f,%f,%f) lvis=%d\n",
+                dlabel->bounds().x, dlabel->bounds().y,
                 dlabel->bounds().w, dlabel->bounds().h,
                 (int)dlabel->visible());
     rt().begin_frame();
@@ -139,14 +143,15 @@ UT_TEST(t14_traffic_text_format) {
 UT_TEST(t14_traffic_mini_layout) {
   make_offscreen(271, 126, 96);
   TrafficPane pane;
-  pane.layout_tree({0, 0, 271, 126});
+  pane.layout_tree({0, 0, 271, 100});  // src: _layout.tsx:1768 迷你窗面板高 100
   pane.on_traffic_json(traffic_payload(100, 200));
   pane.set_mini(true);
-  pane.layout_tree({0, 0, 271, 126});
-  // Mini：指标行卸载、图占满（graph bounds = 全区）
+  pane.layout_tree({0, 0, 271, 100});
+  // src: _layout.tsx:1764-1782 迷你窗仍渲染 MiniTrafficPanel 四卡（不隐藏）
   RectF g = pane.graph()->bounds();
-  UT_CHECK(near_f(g.h, 126));
-  UT_CHECK(!pane.child(1)->visible());
+  UT_CHECK(g.h > 0);
+  UT_CHECK(g.h < 100);  // 图让出底部指标区（2 行卡 + mt）
+  UT_CHECK(pane.child(1)->visible());
 }
 
 UT_TEST(t14_conn_snapshot_and_delta) {

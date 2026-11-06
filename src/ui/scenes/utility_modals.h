@@ -13,12 +13,14 @@
 #include <vector>
 
 #include "events/event_bus.h"
+#include "ui/context_menu.h"
 #include "ui/widget.h"
 
 namespace clashwin::ui::scene {
 
 // ==========================================
 // 1. EditProfileModal（配置编辑弹窗）
+//   src: layout-dialogs.tsx:119-245（Mini 原生 Dialog：名称/订阅地址/更新周期）
 // ==========================================
 class EditProfileModal : public Widget {
  public:
@@ -60,14 +62,12 @@ class EditProfileModal : public Widget {
   int interval_mins_ = 1440;
 
   RectF card_rect_;
-  RectF btn_close_x_rect_;
   RectF name_input_rect_;
   RectF url_input_rect_;
   RectF interval_input_rect_;
   RectF btn_cancel_rect_;
   RectF btn_save_rect_;
 
-  bool hover_close_x_ = false;
   bool hover_cancel_ = false;
   bool hover_save_ = false;
   int focused_field_ = 0;  // 0: none, 1: name, 2: url, 3: interval
@@ -79,18 +79,22 @@ class EditProfileModal : public Widget {
 class ClientUpdateModal : public Widget {
  public:
   explicit ClientUpdateModal(Widget* parent = nullptr);
-  ~ClientUpdateModal() override = default;
+  ~ClientUpdateModal() override;
 
   void open(const std::string& current_ver, const std::string& latest_ver,
-            const std::string& changelog);
+            const std::string& changelog, const std::string& download_url = "");
   void close();
   bool is_open() const { return open_; }
 
   const std::string& current_version() const { return current_version_; }
   const std::string& latest_version() const { return latest_version_; }
   const std::string& changelog() const { return changelog_; }
+  const std::string& download_url() const { return download_url_; }
   int progress() const { return progress_; }
   void set_progress(int p, const std::string& msg = "");
+
+  // 接收并处理 "client-update-progress" 事件（← use-client-update.ts:73-105）
+  void handle_progress_event(const std::string& status, int progress, const std::string& msg);
 
   bool is_downloading() const { return is_downloading_; }
   void set_downloading(bool dl) { is_downloading_ = dl; invalidate(); }
@@ -109,13 +113,19 @@ class ClientUpdateModal : public Widget {
   RectF update_btn_rect() const { return btn_update_rect_; }
 
  private:
+  void subscribe_events();
+  void unsubscribe_events();
+
   bool open_ = false;
   bool is_downloading_ = false;
   std::string current_version_ = "v3.2.1";
   std::string latest_version_ = "v3.2.2";
   std::string changelog_;
+  std::string download_url_;
+  std::string status_ = "idle";
   int progress_ = 0;
   std::string status_msg_;
+  uint64_t listener_id_ = 0;
 
   RectF card_rect_;
   RectF btn_close_x_rect_;
@@ -218,6 +228,14 @@ class LogViewerModal : public Widget {
   size_t incoming_count() const { return incoming_queue_.size(); }
   void clear_logs();
 
+  // src: logs.tsx:116-121 / :133-142（shared.actions.pause/resume；logs.actions.showDescending/Ascending）
+  std::wstring tooltip_text() const override {
+    if (hover_pause_) return paused_ ? L"继续" : L"暂停";
+    if (hover_order_) return desc_ ? L"按时间正序" : L"按时间倒序";
+    if (hover_clear_) return L"清除";
+    return {};
+  }
+
   bool is_paused() const { return paused_; }
   void set_paused(bool p) { paused_ = p; invalidate(); }
 
@@ -248,6 +266,7 @@ class LogViewerModal : public Widget {
   bool paused_ = false;
   bool desc_ = false;
   std::string level_filter_ = "all";  // all, debug, info, warn, error
+  MenuList* lvl_menu_ = nullptr;      // 级别下拉弹出列表（logs.tsx:179-191）
   std::string search_query_;
 
   std::deque<LogEntry> logs_;           // 环形截断 1000 条

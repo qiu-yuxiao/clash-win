@@ -6,7 +6,9 @@
 namespace clashwin::ui {
 
 void TooltipHost::hover(Widget* target, PointF global) {
-  std::wstring t = target ? target->tooltip_text() : std::wstring();
+  // 命中控件无提示时沿父链上溯（Label 等不吞鼠标，提示挂在父容器上）
+  std::wstring t;
+  for (Widget* w = target; w && t.empty(); w = w->parent()) t = w->tooltip_text();
   if (t.empty()) {
     leave();
     return;
@@ -32,6 +34,7 @@ void TooltipHost::leave() {
 
 void TooltipHost::tick_now(int64_t now_ms) {
   now_ = now_ms;
+  if (hover_start_ >= 0) place(anchor_);  // 父级重排可能覆盖 bounds，每帧重贴
   if (hover_start_ >= 0 && now_ - hover_start_ >= kShowDelayMs) {
     if (!visible()) {
       place(anchor_);

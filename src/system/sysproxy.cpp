@@ -6,8 +6,13 @@
 #include <ras.h>
 
 #include <chrono>
+#include <filesystem>
+#include <fstream>
+
+#include <nlohmann/json.hpp>
 
 #include "system/guard_monitor.h"
+#include "util/dirs.h"
 #include "util/log.h"
 #include "util/utf.h"
 
@@ -53,6 +58,133 @@ void Sysopt::wait_idle() {
   std::lock_guard<std::mutex> lock(update_lock_);
 }
 
+// ---------- 快照默认实现（mock 走此路径，无需磁盘） ----------
+Result<SysProxySnapshot> ISysProxyAccess::read_snapshot() {
+  auto sp = read_sysproxy();
+  if (sp.is_err()) return Result<SysProxySnapshot>::err(sp.error());
+  auto ap = read_autoproxy();
+  if (ap.is_err()) return Result<SysProxySnapshot>::err(ap.error());
+  SysProxySnapshot s;
+  s.valid = true;
+  s.enable = sp.value().enable;
+  s.server = sp.value().host +
+             (sp.value().port ? L":" + std::to_wstring(sp.value().port) : L"");
+  s.bypass = sp.value().bypass;
+  s.auto_config_url = ap.value().url;
+  s.auto_config_present = !ap.value().url.empty();
+  return Result<SysProxySnapshot>::ok(s);
+}
+
+Result<void> ISysProxyAccess::write_snapshot(const SysProxySnapshot& s) {
+  SysProxyState sp;
+  sp.enable = s.enable;
+  sp.bypass = s.bypass;
+  size_t colon = s.server.rfind(L':');
+  if (colon != std::wstring::npos) {
+    sp.host = s.server.substr(0, colon);
+    sp.port = static_cast<uint16_t>(_wtoi(s.server.substr(colon + 1).c_str()));
+  } else {
+    sp.host = s.server;
+  }
+  auto r = write_sysproxy(sp);
+  if (r.is_err()) return r;
+  AutoProxyState ap;
+  ap.url = s.auto_config_url;
+  ap.enable = !ap.url.empty();
+  return write_autoproxy(ap);
+}
+
+namespace {
+std::wstring backup_file_path() {
+  return util::dirs::app_home_dir() + L"\\sysproxy_backup.json";
+}
+}  // namespace
+
+bool Sysopt::load_backup_file() {
+  if (!access_ || !access_->persistent()) return false;
+  std::ifstream in(backup_file_path());
+  if (!in) return false;
+  try {
+    nlohmann::json j;
+    in >> j;
+    SysProxySnapshot s;
+    s.valid = j.value("valid", false);
+    if (!s.valid) return false;
+    s.enable = j.value("enable", false);
+    s.server = utf::utf8_to_utf16(j.value("server", std::string()));
+    s.bypass = utf::utf8_to_utf16(j.value("bypass", std::string()));
+    s.auto_config_url = utf::utf8_to_utf16(j.value("auto_config_url", std::string()));
+    s.auto_detect = j.value("auto_detect", false);
+    s.proxy_server_present = j.value("proxy_server_present", true);
+    s.proxy_override_present = j.value("proxy_override_present", true);
+    s.auto_config_present = j.value("auto_config_present", false);
+    s.auto_detect_present = j.value("auto_detect_present", false);
+    backup_ = s;
+    have_backup_ = true;
+    CWLOG_INFO("sysproxy: loaded pre-existing backup: " +
+               utf::utf16_to_utf8(backup_file_path()));
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
+void Sysopt::save_backup_file() const {
+  nlohmann::json j;
+  j["valid"] = backup_.valid;
+  j["enable"] = backup_.enable;
+  j["server"] = utf::utf16_to_utf8(backup_.server);
+  j["bypass"] = utf::utf16_to_utf8(backup_.bypass);
+  j["auto_config_url"] = utf::utf16_to_utf8(backup_.auto_config_url);
+  j["auto_detect"] = backup_.auto_detect;
+  j["proxy_server_present"] = backup_.proxy_server_present;
+  j["proxy_override_present"] = backup_.proxy_override_present;
+  j["auto_config_present"] = backup_.auto_config_present;
+  j["auto_detect_present"] = backup_.auto_detect_present;
+  std::ofstream out(backup_file_path(), std::ios::trunc);
+  if (!out) {
+    CWLOG_WARN("sysproxy: failed to persist backup file");
+    return;
+  }
+  out << j.dump(2);
+  CWLOG_INFO("sysproxy: backup persisted: " + utf::utf16_to_utf8(backup_file_path()));
+}
+
+void Sysopt::clear_backup_file() const {
+  std::error_code ec;
+  std::filesystem::remove(backup_file_path(), ec);
+}
+
+void Sysopt::ensure_backup_locked() {
+  if (have_backup_) return;
+  if (load_backup_file()) return;
+  auto r = access_->read_snapshot();
+  if (r.is_err() || !r.value().valid) {
+    CWLOG_WARN("sysproxy: snapshot current OS proxy failed (no restore point)");
+    return;
+  }
+  backup_ = r.value();
+  have_backup_ = true;
+  if (access_->persistent()) save_backup_file();
+  CWLOG_INFO("sysproxy: snapshot saved: server=[" + utf::utf16_to_utf8(backup_.server) +
+             "] enable=" + (backup_.enable ? "1" : "0"));
+}
+
+Result<void> Sysopt::restore_backup_locked() {
+  // ← 先停 guard（避免旧值被守护线程补写回注册表）
+  SysproxyGuard::instance().set_guard_type(GuardType::None);
+  auto r = access_->write_snapshot(backup_);
+  if (r.is_err()) {
+    CWLOG_WARN("sysproxy: restore original settings failed: " + r.error().message);
+    return r;
+  }
+  CWLOG_INFO("sysproxy: restored original OS proxy settings (server=[" +
+             utf::utf16_to_utf8(backup_.server) + "])");
+  clear_backup_file();
+  have_backup_ = false;
+  return Result<void>::ok();
+}
+
 Result<void> Sysopt::update_sysproxy(const VergeView& v) {
   std::lock_guard<std::mutex> lock(update_lock_);
   if (!access_) {
@@ -60,6 +192,14 @@ Result<void> Sysopt::update_sysproxy(const VergeView& v) {
     // 触发真实注册表写）；生产 App::init 必装配 wininet_access。
     CWLOG_WARN("sysproxy: access 未装配，跳过 OS 写入（update 留痕）");
     return Result<void>::ok();
+  }
+
+  // 进入系统代理（master 开）前先备份 OS 原值；master 关且有备份 → 逐值还原
+  // （Mini sysopt.rs 只清 enable，此处按验收要求恢复 ProxyServer 等原值）
+  if (v.enable_system_proxy) {
+    ensure_backup_locked();
+  } else if (have_backup_) {
+    return restore_backup_locked();
   }
 
   // ← sysopt.rs:147-179 master switch 分派
@@ -141,9 +281,18 @@ Result<void> Sysopt::reset_sysproxy() {
   }
   // ← sysopt.rs:217 close proxy guard（必须在锁内，Guard 停止后不再补写）
   SysproxyGuard::instance().set_guard_type(GuardType::None);
-  // ← sysopt.rs:219-232：直接双关（bypass/URL 保留原值，仅 enable=false）
+  // 有进入前备份 → 逐值还原原值（含 ProxyServer/ProxyOverride）
+  if (have_backup_) return restore_backup_locked();
+  // ← sysopt.rs:219-232：无备份时直接双关；server/bypass 保留当前值
+  //   （Mini 是保留 inner_proxy 的 host/port；此处从 OS 读回，避免写空串）
   SysProxyState sys;
   sys.enable = false;
+  auto cur = access_->read_sysproxy();
+  if (cur.is_ok()) {
+    sys.host = cur.value().host;
+    sys.port = cur.value().port;
+    sys.bypass = cur.value().bypass;
+  }
   AutoProxyState auto_proxy;
   auto_proxy.enable = false;
   auto r1 = access_->write_sysproxy(sys);
@@ -176,6 +325,21 @@ void broadcast_proxy_change() {
   // ← census §124：PROXY_SETTINGS_CHANGED + REFRESH（浏览器立即感知）
   InternetSetOptionW(nullptr, INTERNET_OPTION_SETTINGS_CHANGED, nullptr, 0);
   InternetSetOptionW(nullptr, INTERNET_OPTION_REFRESH, nullptr, 0);
+}
+
+// Internet Settings 写句柄：优先 KEY_SET_VALUE；被安全软件（360 等）以
+// KEY_SET_VALUE 单独拒绝（ERROR_ACCESS_DENIED）时用 KEY_READ|KEY_WRITE
+// 组合权限重试（KEY_WRITE 含 KEY_SET_VALUE，走同一 ACL 路径）。
+LONG open_inet_settings_write(HKEY* out) {
+  LONG rc = RegOpenKeyExW(HKEY_CURRENT_USER, kInetSettingsKey, 0, KEY_SET_VALUE,
+                          out);
+  if (rc == ERROR_SUCCESS) return rc;
+  LONG rc2 = RegOpenKeyExW(HKEY_CURRENT_USER, kInetSettingsKey, 0,
+                           KEY_READ | KEY_WRITE, out);
+  if (rc2 == ERROR_SUCCESS) return rc2;
+  CWLOG_WARN("sysproxy: open write denied, KEY_SET_VALUE rc=" +
+             std::to_string(rc) + " KEY_READ|KEY_WRITE rc=" + std::to_string(rc2));
+  return rc2;
 }
 
 // RAS 条目同步（← 任务卡完成标准①：LAN + 每个 RAS 条目 PER_CONN_OPTION）。
@@ -246,8 +410,8 @@ class WininetSysProxyAccess : public ISysProxyAccess {
 
   Result<void> write_sysproxy(const SysProxyState& s) override {
     HKEY key = nullptr;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, kInetSettingsKey, 0, KEY_SET_VALUE,
-                      &key) != ERROR_SUCCESS) {
+    LONG rc = open_inet_settings_write(&key);
+    if (rc != ERROR_SUCCESS) {
       return Result<void>::err({kErrIo, "open Internet Settings failed"});
     }
     DWORD enable = s.enable ? 1 : 0;
@@ -289,8 +453,8 @@ class WininetSysProxyAccess : public ISysProxyAccess {
 
   Result<void> write_autoproxy(const AutoProxyState& a) override {
     HKEY key = nullptr;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, kInetSettingsKey, 0, KEY_SET_VALUE,
-                      &key) != ERROR_SUCCESS) {
+    LONG rc = open_inet_settings_write(&key);
+    if (rc != ERROR_SUCCESS) {
       return Result<void>::err({kErrIo, "open Internet Settings failed"});
     }
     if (a.enable && !a.url.empty()) {
@@ -299,6 +463,84 @@ class WininetSysProxyAccess : public ISysProxyAccess {
                      static_cast<DWORD>((a.url.size() + 1) * sizeof(wchar_t)));
     } else {
       RegDeleteValueW(key, L"AutoConfigURL");  // ← 清 PAC（键删除）
+    }
+    RegCloseKey(key);
+    broadcast_proxy_change();
+    return Result<void>::ok();
+  }
+
+  bool persistent() const override { return true; }
+
+  // 全量快照：保留原串（不拆 host:port），并带上 AutoDetect 与"键是否存在"
+  Result<SysProxySnapshot> read_snapshot() override {
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, kInetSettingsKey, 0, KEY_READ, &key) !=
+        ERROR_SUCCESS) {
+      return Result<SysProxySnapshot>::err({kErrIo, "open Internet Settings failed"});
+    }
+    auto rd_str = [&](const wchar_t* name, bool& present) -> std::wstring {
+      wchar_t buf[2048] = {};
+      DWORD size = sizeof(buf), type = 0;
+      if (RegQueryValueExW(key, name, nullptr, &type,
+                           reinterpret_cast<BYTE*>(buf), &size) == ERROR_SUCCESS &&
+          type == REG_SZ) {
+        present = true;
+        return buf;
+      }
+      present = false;
+      return {};
+    };
+    auto rd_dword = [&](const wchar_t* name, bool& present) -> DWORD {
+      DWORD v = 0, size = sizeof(v), type = 0;
+      if (RegQueryValueExW(key, name, nullptr, &type, reinterpret_cast<BYTE*>(&v),
+                           &size) == ERROR_SUCCESS &&
+          type == REG_DWORD) {
+        present = true;
+        return v;
+      }
+      present = false;
+      return 0;
+    };
+    SysProxySnapshot s;
+    s.valid = true;
+    bool enable_present = false;
+    s.enable = rd_dword(L"ProxyEnable", enable_present) != 0;
+    s.server = rd_str(L"ProxyServer", s.proxy_server_present);
+    s.bypass = rd_str(L"ProxyOverride", s.proxy_override_present);
+    s.auto_config_url = rd_str(L"AutoConfigURL", s.auto_config_present);
+    s.auto_detect = rd_dword(L"AutoDetect", s.auto_detect_present) != 0;
+    RegCloseKey(key);
+    return Result<SysProxySnapshot>::ok(s);
+  }
+
+  // 逐值还原（含"原来不存在则删除键"）
+  Result<void> write_snapshot(const SysProxySnapshot& s) override {
+    HKEY key = nullptr;
+    LONG rc = open_inet_settings_write(&key);
+    if (rc != ERROR_SUCCESS) {
+      return Result<void>::err({kErrIo, "open Internet Settings failed"});
+    }
+    DWORD enable = s.enable ? 1 : 0;
+    RegSetValueExW(key, L"ProxyEnable", 0, REG_DWORD,
+                   reinterpret_cast<const BYTE*>(&enable), sizeof(enable));
+    auto put_or_del_sz = [&](const wchar_t* name, const std::wstring& v, bool present) {
+      if (present) {
+        RegSetValueExW(key, name, 0, REG_SZ,
+                       reinterpret_cast<const BYTE*>(v.c_str()),
+                       static_cast<DWORD>((v.size() + 1) * sizeof(wchar_t)));
+      } else {
+        RegDeleteValueW(key, name);
+      }
+    };
+    put_or_del_sz(L"ProxyServer", s.server, s.proxy_server_present);
+    put_or_del_sz(L"ProxyOverride", s.bypass, s.proxy_override_present);
+    put_or_del_sz(L"AutoConfigURL", s.auto_config_url, s.auto_config_present);
+    if (s.auto_detect_present) {
+      DWORD ad = s.auto_detect ? 1 : 0;
+      RegSetValueExW(key, L"AutoDetect", 0, REG_DWORD,
+                     reinterpret_cast<const BYTE*>(&ad), sizeof(ad));
+    } else {
+      RegDeleteValueW(key, L"AutoDetect");
     }
     RegCloseKey(key);
     broadcast_proxy_change();

@@ -46,6 +46,9 @@ bool reserved_text(const std::string& s) {
 }  // namespace
 
 bool is_string_key(const YAML::Node& key) {
+  // 未定义节点（键不存在）必须先行拦截：yaml-cpp 的 IsScalar()/Type() 对
+  // 未定义节点会抛 YAML::InvalidNode，穿透到线程边界就会 terminate → 0xC0000409。
+  if (!key.IsDefined()) return false;
   if (!key.IsScalar()) return false;             // 复合键：serde as_str → None
   if (key.IsNull()) return false;
   const std::string& tag = key.Tag();

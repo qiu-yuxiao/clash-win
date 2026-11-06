@@ -44,10 +44,10 @@ class Modal : public Widget {
   }
 
   // 绘制参数
-  Color4f mask_ = Color4f::hex(0x000000, 0.50f);
-  Color4f dialog_bg_ = Color4f::hex(0xFFFFFF);
-  Color4f title_text_ = Color4f::hex(0x000000, 0.87f);
-  float radius_ = 8;
+  Color4f mask_ = Color4f::hex(0x000000, 0.50f);  // src: MUI Dialog backdrop rgba(0,0,0,.5)
+  Color4f dialog_bg_ = Color4f::hex(0xFFFFFF);  // src: MUI background.paper #fff
+  Color4f title_text_ = Color4f::hex(0x000000, 0.87f);  // src: MUI text.primary
+  float radius_ = 8;  // ← MUI Dialog paper 圆角 8
 
  private:
   void build_tree();  // dialog Column: title_row / content / buttons_row

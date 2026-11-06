@@ -1,10 +1,13 @@
 // 订阅导入卡实现（T15 / T27：订阅列表 + 行内更新/删除 + 右键菜单入口）。
+// 数值/颜色出处逐条对应 pages/_layout/components/profile-import-card.tsx。
 #include "profile_import_card.h"
 
 #include <algorithm>
+#include <cmath>
 #include <ctime>
 
 #include "../theme/theme.h"
+#include "util/log.h"
 #include "util/parse_traffic.h"
 #include "util/utf.h"
 
@@ -32,93 +35,163 @@ std::string fmt_date(uint64_t unix_secs) {
   return buf;
 }
 
+// MUI action.hover 缺省值（src: MUI theme palette action.hover）
+Color4f action_hover(bool light) {
+  return light ? Color4f::hex(0x000000, 0.04f)  // light rgba(0,0,0,0.04)
+               : Color4f::hex(0xFFFFFF, 0.08f); // dark  rgba(255,255,255,0.08)
+}
+
 }  // namespace
 
 // ---------------- ProfileRowWidget ----------------
+// src: profile-import-card.tsx:217-366 行容器
 void ProfileRowWidget::bind(const config::PrfItem& item, bool active) {
   uid_ = item.uid.value_or("");
   name_ = item.name.value_or("");
   type_ = item.itype.value_or("");
   active_ = active;
+  // src: :205 isHighlighted = isActive || uid === 'L_Direct_Imports'
+  highlighted_ = active || uid_ == "L_Direct_Imports";
   has_extra_ = item.extra.has_value();
+  const auto t = item.type();
+  has_line2_ = (t == config::PrfType::Remote && has_extra_) ||
+               t == config::PrfType::Local;
+  used_.clear();
+  date_.clear();
+  progress_ = 0;
+  has_total_ = false;
   if (item.extra) {
     const auto& e = *item.extra;
-    sub_line_ = "↑" + fmt_bytes(e.upload) + " ↓" + fmt_bytes(e.download) + " / " +
-                fmt_bytes(e.total) + "   " + fmt_date(e.expire);
+    used_ = fmt_bytes(e.download + e.upload) + " / " + fmt_bytes(e.total);
+    date_ = fmt_date(e.expire);
+    // src: :209-215 Math.round(((download+upload)*100)/(total+0.01))，上限 100
     progress_ = e.total > 0
-                    ? static_cast<int>(std::min<uint64_t>(
-                          100, (e.download + e.upload) * 100 / (e.total + 1)))
+                    ? static_cast<int>(std::min(
+                          100.0,
+                          std::round((e.download + e.upload) * 100.0 /
+                                     (static_cast<double>(e.total) + 0.01))))
                     : 0;
-  } else if (item.type() == config::PrfType::Local) {
-    sub_line_ = "本地文件   " + fmt_date(static_cast<uint64_t>(item.updated.value_or(0)));
+    has_total_ = e.total > 0;
+  } else if (t == config::PrfType::Local) {
+    // src: profile-import-card.tsx:330-334 L_Direct_Imports → 「节点数: N」，其余 → 「本地文件」
+    if (item.uid.value_or("") == "L_Direct_Imports") {
+      const std::string desc = item.desc.value_or("");
+      used_ = "节点数: " +
+              ((desc.empty() || desc == "本地手动导入的代理节点") ? "0" : desc);
+    } else {
+      used_ = "本地文件";
+    }
+    date_ = fmt_date(static_cast<uint64_t>(item.updated.value_or(0)));
   }
   invalidate();
 }
 
 void ProfileRowWidget::on_paint(IRenderTarget& rt) {
-  const auto& svc = ThemeService::instance();
-  const auto& pal = svc.palette();
-  const auto& vars = svc.vars();
-
-  Brush bg{vars.theme_panel_bg};
-  rt.round_rect({0, 0, bounds().w, bounds().h}, 5.0f,
-                {vars.theme_border, 1.0f}, &bg);
-  if (active_) {
-    rt.fill_rect({0, 2, 3, bounds().h - 4}, Brush{pal.primary_color});
+  const bool light = ThemeService::instance().is_light();
+  const auto& pal = ThemeService::instance().palette();
+  // 行可视高 = 步进 - 行 mb4 - 列表 gap4（:225-226, :200）
+  const float h = std::min(bounds().h, kProfileRowVisualH);
+  RectF r{0, 0, bounds().w, h};
+  // bgcolor light #ffffff / dark #282A36（src: :229-230）；整行 hover（src: :235-237）
+  Brush bg{hover_row_ || hover_update_ || hover_delete_
+               ? action_hover(light)
+               : (light ? Color4f::hex(0xFFFFFF) : Color4f::hex(0x282A36))};
+  // src: :233 boxShadow '0 1px 3px rgba(0,0,0,0.05)'（引擎无阴影 → 下移 1px 偏移层）
+  Brush row_shadow{Color4f::hex(0x000000, 0.05f)};
+  rt.round_rect({r.x, r.y + 1.0f, r.w, r.h}, 6.0f, Pen{Color4f(0, 0, 0, 0), 0},
+                &row_shadow);
+  rt.round_rect(r, 6.0f, Pen{Color4f(0, 0, 0, 0), 0}, &bg);  // radius 6 :227
+  // borderLeft 3px solid primary.main（激活）/transparent（:231-232）
+  if (highlighted_) {
+    rt.fill_rect({0.0f, 0.0f, 3.0f, h}, Brush{ThemeService::instance().primary()});
   }
 
-  TextStyle name_ts;
-  name_ts.size = 12;
-  name_ts.weight = static_cast<int>(active_ ? Weight::Bold : Weight::Normal);
-  name_ts.color = active_ ? pal.primary_color : pal.primary_text;
-  name_ts.align_v = AlignV::Center;
-  rt.draw_text(utf::utf8_to_utf16(name_.empty() ? "未命名配置" : name_),
-               {8, 3, bounds().w - 54, 18}, name_ts);
+  // 行内 p: '6px 8px'（:225）+ 左边框 3
+  const float x0 = 3.0f + 8.0f;
+  const float w = bounds().w;
 
-  if (!sub_line_.empty()) {
-    TextStyle sub_ts;
-    sub_ts.size = 9.5f;
-    sub_ts.color = pal.secondary_text;
-    sub_ts.align_v = AlignV::Center;
-    rt.draw_text(utf::utf8_to_utf16(sub_line_),
-                 {8, 21, bounds().w - 54, 14}, sub_ts);
-  }
-  if (progress_ > 0) {
-    rt.fill_rect({8, bounds().h - 5, bounds().w - 16, 2},
-                 Brush{Color4f::hex(0x000000, 0.08f)});
-    rt.fill_rect({8, bounds().h - 5,
-                  (bounds().w - 16) * static_cast<float>(progress_) / 100.0f, 2},
-                 Brush{pal.primary_color});
-  }
-
-  // 行内动作：↻ 更新（remote）/ ✕ 删除
-  TextStyle act_ts;
-  act_ts.size = 12;
-  act_ts.align_h = AlignH::Center;
-  act_ts.align_v = AlignV::Center;
+  // 动作图标：删除恒有（error.main），更新仅 remote（:274-292）
+  const float icon = 12.0f;                     // fontSize 12
+  const float del_x = w - 8.0f - icon;
+  const float upd_x = del_x - 2.0f - icon;      // gap 0.25 = 2px（:270）
+  const RectF line1{0, 6.0f, w, 18.0f};         // p 上 6、13px 行高 18
+  TextStyle action_ts;
+  action_ts.size = icon;
+  action_ts.align_h = AlignH::Center;
+  action_ts.align_v = AlignV::Center;
+  action_ts.color = pal.error_color;            // color: 'error.main'
+  rt.draw_text(L"✕", {del_x, 6.0f, icon, 18.0f}, action_ts);
   if (type_ == "remote") {
-    act_ts.color = hover_update_ ? pal.primary_color : pal.secondary_text;
-    rt.draw_text(L"↻", {bounds().w - 48, 0, 20, bounds().h}, act_ts);
+    action_ts.color = active_ ? ThemeService::instance().primary()
+                              : pal.secondary_text;  // :280
+    rt.draw_text(L"↻", {upd_x, 6.0f, icon, 18.0f}, action_ts);
   }
-  act_ts.color = hover_delete_ ? Color4f::hex(0xFF3B30) : pal.secondary_text;
-  rt.draw_text(L"✕", {bounds().w - 26, 0, 20, bounds().h}, act_ts);
+
+  // 名称：13px、高亮 600 / 否则 400、primary.main / text.primary、maxWidth 70%（src: :249-259）
+  TextStyle name_ts;
+  name_ts.size = 13;
+  name_ts.weight = highlighted_ ? 600 : 400;
+  name_ts.color = highlighted_ ? ThemeService::instance().primary()
+                               : pal.primary_text;
+  name_ts.align_v = AlignV::Center;
+  name_ts.ellipsis = true;
+  const float name_w = std::min(w * 0.70f, upd_x - 4.0f - x0);
+  rt.draw_text(utf::utf8_to_utf16(name_.empty() ? "未命名配置" : name_),
+               {x0, 6.0f, name_w, 18.0f}, name_ts);
+
+  if (has_line2_) {
+    // 第二行 11px text.secondary、mt 0.25 = 2px（:297-342）
+    TextStyle sub;
+    sub.size = 11;
+    sub.color = pal.secondary_text;
+    sub.align_v = AlignV::Center;
+    rt.draw_text(utf::utf8_to_utf16(used_), {x0, 26.0f, w * 0.62f, 15.0f}, sub);
+    TextStyle right = sub;
+    right.align_h = AlignH::Right;
+    rt.draw_text(utf::utf8_to_utf16(date_), {w - 8.0f - w * 0.34f, 26.0f,
+                                            w * 0.34f, 15.0f}, right);
+    // 进度条：h2、action.hover 底、radius1、mt 0.5=4、primary.main（src: :345-363）
+    if (type_ == "remote" && has_total_) {
+      const float bar_y = 45.0f;
+      const float bar_w = w - x0 - 8.0f;
+      Brush track{action_hover(light)};
+      Brush fill{ThemeService::instance().primary()};
+      rt.round_rect({x0, bar_y, bar_w, 2.0f}, 1.0f,
+                    Pen{Color4f(0, 0, 0, 0), 0},  // 豁免: 无边框哨兵
+                    &track);
+      rt.fill_rect({x0, bar_y, bar_w * progress_ / 100.0f, 2.0f}, fill);
+    }
+  }
 }
 
 bool ProfileRowWidget::on_mouse(const MouseEvent& e) {
-  const bool over_update = type_ == "remote" && e.pos.x >= bounds().w - 52 &&
-                           e.pos.x < bounds().w - 30;
-  const bool over_delete = e.pos.x >= bounds().w - 30;
-  if (e.type == MouseEventType::Move) {
-    if (hover_update_ != over_update || hover_delete_ != over_delete) {
-      hover_update_ = over_update;
-      hover_delete_ = over_delete;
-      invalidate();
+  const float w = bounds().w;
+  const float del_x = w - 8.0f - 12.0f;
+  const float upd_x = del_x - 2.0f - 12.0f;
+  const bool over_delete = e.pos.x >= del_x - 4 && e.pos.x <= del_x + 14 &&
+                           e.pos.y >= 2 && e.pos.y <= 26;
+  const bool over_update = type_ == "remote" && e.pos.x >= upd_x - 4 &&
+                           e.pos.x <= upd_x + 14 && e.pos.y >= 2 && e.pos.y <= 26;
+  if (e.type == MouseEventType::Move || e.type == MouseEventType::Enter) {
+    bool changed = false;
+    if (hover_row_ != true) {
+      hover_row_ = true;  // src: :235-237 &:hover 整行底色
+      changed = true;
     }
+    if (hover_update_ != over_update) {
+      hover_update_ = over_update;
+      changed = true;
+    }
+    if (hover_delete_ != over_delete) {
+      hover_delete_ = over_delete;
+      changed = true;
+    }
+    if (changed) invalidate();
     return true;
   }
   if (e.type == MouseEventType::Down) {
     if (e.buttons & kMouseRight) {
-      if (on_context) on_context();
+      if (on_context) on_context(to_global(e.pos));
       return true;
     }
     if (e.buttons & kMouseLeft) {
@@ -133,59 +206,83 @@ bool ProfileRowWidget::on_mouse(const MouseEvent& e) {
     }
   }
   if (e.type == MouseEventType::Leave) {
-    hover_update_ = hover_delete_ = false;
+    hover_row_ = hover_update_ = hover_delete_ = false;
     invalidate();
   }
   return false;
 }
 
 // ---------------- ProfileImportCard ----------------
+// src: profile-import-card.tsx:94-369 卡容器 p1 + get3DCardStyle('default')
 ProfileImportCard::ProfileImportCard(Widget* parent) : Widget(parent) {
-  // 纵向：标题行 / URL 行 / 名称行 / 订阅列表 / 消息行
+  // 标题：variant subtitle2 / 13px bold / mb 0.75=6（src: :113-117）
   auto title = std::make_unique<Label>();
   title_ = title.get();
-  title_->style.size = 12;
-  title_->style.weight = static_cast<int>(Weight::Bold);
+  title_->style.size = 13;
+  title_->style.weight = 700;  // src: :116 fontWeight 'bold'
   title_->set_text(L"订阅与机场配置");
   title_->flex_weight = 0;
   add_child(std::move(title));
 
-  auto url_row = std::make_unique<Row>();
-  url_row->spacing = 4;
+  // URL TextField：multiline 1–4 行、fs13、py4、get3DInputStyle（:138-167）
+  // 豁免: 引擎 TextField 为单行，按 1 行高 27 布局（源码 minRows=1）
   auto uf = std::make_unique<TextField>();
   url_field_ = uf.get();
-  url_field_->flex_weight = 1;
-  url_field_->set_placeholder(L"订阅链接...");
-  url_row->add_child(std::move(uf));
-  auto btn = std::make_unique<Button>(L"导入");
+  url_field_->set_placeholder(L"填入订阅链接/节点配置...");
+  url_field_->style_.size = 13;
+  url_field_->bg_ = ThemeService::instance().is_light()
+                        ? Color4f::hex(0xFFFDE7, 0.8f)    // :742-744
+                        : Color4f::hex(0x1A160E, 0.4f);
+  url_field_->border_ = ThemeService::instance().is_light()
+                            ? Color4f::hex(0xD4AF37, 0.35f)  // :753-755
+                            : Color4f::hex(0xD4AF37, 0.25f);
+  url_field_->border_focused_ = ThemeService::instance().is_light()
+                                    ? Color4f::hex(0xB8860B)  // :772
+                                    : Color4f::hex(0xFFA000);
+  url_field_->style_.color = ThemeService::instance().text_primary();
+  url_field_->placeholder_color_ = ThemeService::instance().palette().secondary_text;
+  url_field_->radius_ = 4;   // MUI OutlinedInput 缺省 radius
+  url_field_->border_w_ = 2;  // src: button-styles.ts:752 calc(2px * depth)
+  url_field_->height_ = 27;  // src: :158-163 py4 + 13px*1.4375 + py4 ≈ 27
+  // 右键：5 项编辑命令菜单（_layout.tsx:1859-1932）
+  url_field_->on_context_menu = [this](PointF anchor) {
+    if (on_url_context_menu) on_url_context_menu(anchor);
+  };
+  add_child(std::move(uf));
+
+  // 导入按钮：contained primary、fs12、h24、px2（:175-190）
+  auto btn = std::make_unique<Button>(L"导入节点信息");
   import_btn_ = btn.get();
-  btn->themed_ = true;
-  btn->theme_color_type_ = "primary";
+  btn->themed_ = false;
+  btn->text_style.size = 12;
+  btn->text_style.weight = 700;  // src: button-styles.ts:78 fontWeight 'bold'
+  btn->text_style.align_h = AlignH::Center;
+  btn->text_style.align_v = AlignV::Center;
+  // src: button-styles.ts:38-39 contained primary 135° 六停
+  //   #FFE082 0% / #FFD54F 20% / #FFC107 45% / #FFB300 70% / #D4AF37 85% / #B8860B 100%
+  btn->paint_params.grad[0] = {0.00f, Color4f::hex(0xFFE082)};
+  btn->paint_params.grad[1] = {0.20f, Color4f::hex(0xFFD54F)};
+  btn->paint_params.grad[2] = {0.45f, Color4f::hex(0xFFC107)};
+  btn->paint_params.grad[3] = {0.70f, Color4f::hex(0xFFB300)};
+  btn->paint_params.grad[4] = {0.85f, Color4f::hex(0xD4AF37)};
+  btn->paint_params.grad[5] = {1.00f, Color4f::hex(0xB8860B)};
+  btn->paint_params.grad_count = 6;
+  btn->paint_params.fill_disabled = Color4f::hex(0x000000, 0.12f);
+  btn->paint_params.text_normal = Color4f::hex(0x2C1F03);
+  // src: button-styles.ts:36 borderColor light #8A6D00 / dark #634E00；:81 2px
+  btn->paint_params.border =
+      Pen{ThemeService::instance().is_light() ? Color4f::hex(0x8A6D00)
+                                              : Color4f::hex(0x634E00),
+          2};
+  btn->paint_params.radius = 6.0f;                             // :549
   btn->on_click = [this] { do_import(); };
-  url_row->add_child(std::move(btn));
-  url_row->flex_weight = 0;
-  add_child(std::move(url_row));
+  add_child(std::move(btn));
 
-  auto name_row = std::make_unique<Row>();
-  name_row->spacing = 4;
-  auto nf = std::make_unique<TextField>();
-  name_field_ = nf.get();
-  name_field_->flex_weight = 1;
-  name_field_->set_placeholder(L"名称（可选）");
-  name_row->add_child(std::move(nf));
-  name_row->flex_weight = 0;
-  add_child(std::move(name_row));
-
+  // 列表：maxHeight 110、gap 0.5（src: :194-201 overflowY auto → 滚动条可见）
   auto list = std::make_unique<ScrollList>();
   list_ = list.get();
   list_->set_show_scrollbar(true);
   add_child(std::move(list));
-
-  auto msg = std::make_unique<Label>();
-  message_ = msg.get();
-  message_->style.size = 10;
-  message_->flex_weight = 0;
-  add_child(std::move(msg));
 }
 
 ProfileImportCard::~ProfileImportCard() = default;
@@ -198,7 +295,7 @@ std::string ProfileImportCard::url() const {
 }
 
 std::string ProfileImportCard::name() const {
-  return utf::utf16_to_utf8(name_field_->text());
+  return "";  // 源码无名称输入（仅 URL 一个 TextField）
 }
 
 bool ProfileImportCard::url_valid() const {
@@ -209,24 +306,11 @@ bool ProfileImportCard::url_valid() const {
 }
 
 void ProfileImportCard::do_import() {
-  if (!url_valid()) {
-    set_message(L"请输入有效的 http(s) 订阅链接", true);
-    return;
-  }
+  // ← Verge 前端口径：导入框同时接受 http(s) 订阅链接与直连节点，
+  //   解析在命令链路（from_url → from_url_direct）完成。此处仅要求非空。
+  if (url().empty()) return;
   bool ok = on_import ? on_import(url(), name()) : false;
-  if (ok) {
-    set_message(L"导入成功", false);
-    reload_profiles();
-  } else {
-    set_message(L"导入失败（详见通知）", true);
-  }
-}
-
-void ProfileImportCard::set_message(const std::wstring& msg, bool error) {
-  message_->set_text(msg);
-  msg_error_ = error;
-  message_->style.color = error ? Color4f::hex(0xFF3B30) : Color4f::hex(0x06943D);
-  message_->invalidate();
+  if (ok) reload_profiles();
 }
 
 void ProfileImportCard::set_profiles(const std::vector<config::PrfItem>& items,
@@ -279,36 +363,71 @@ void ProfileImportCard::rebuild_rows() {
       row->on_delete = [this, uid] {
         if (on_delete_profile) on_delete_profile(uid);
       };
-      row->on_context = [this, uid] {
-        if (on_context_action) on_context_action("menu", uid);
+      row->on_context = [this, uid](PointF anchor) {
+        if (on_context_menu) on_context_menu(uid, anchor);
       };
     }
     return row;
   }, 1);
 }
 
+const config::PrfItem* ProfileImportCard::find_item(const std::string& uid) const {
+  for (const auto& it : profiles_) {
+    if (it.uid && *it.uid == uid) return &it;
+  }
+  return nullptr;
+}
+
+float ProfileImportCard::preferred_height() const {
+  const float list_h =
+      std::min(kProfileListMaxH, kProfileRowH * static_cast<float>(profiles_.size()));
+  return kProfileCardChromeH + list_h;
+}
+
 void ProfileImportCard::on_arrange(const RectF& area) {
   set_bounds(area);
-  float y = 0;
-  title_->layout_tree({0, y, area.w, 20});
-  y += 20;
-  url_field_->layout_tree({0, y + 2, area.w - 62, 24});
-  import_btn_->layout_tree({area.w - 58, y, 58, 28});
-  y += 30;
-  name_field_->layout_tree({0, y, area.w, 24});
-  y += 28;
-  float list_h = std::max(0.0f, area.h - y - 18.0f);
-  list_->layout_tree({0, y, area.w, list_h});
-  message_->layout_tree({0, area.h - 16, area.w, 16});
+  const float w = area.w;
+  const float x = 8.0f;   // p1
+  // src: :113-114 subtitle2 line-height 1.57 × 13px ≈ 20.4，mb 0.75=6（:110）
+  title_->layout_tree({x, 8.0f, w - x * 2, 20.4f});
+  // src: :153-166 minRows=1 multiline → py4 + 18.6 + py4 ≈ 27
+  url_field_->layout_tree({x, 34.4f, w - x * 2, 27.0f});
+  const float list_y = 97.4f;  // 34.4+27+gap4+btn24+mb8（src: :130-136/:135/:192）
+  // 按钮 px2=16 两侧 + 12px 文本约 72 → 宽 104（源码无固定宽，按内容居中）
+  import_btn_->layout_tree({(w - 104.0f) / 2, 65.4f, 104.0f, 24.0f});
+  float list_h = std::max(0.0f, area.h - list_y - 8.0f);
+  list_->layout_tree({x, list_y, w - x * 2, list_h});
 }
 
 void ProfileImportCard::on_paint(IRenderTarget& rt) {
-  const auto& svc = ThemeService::instance();
-  Brush bg{svc.vars().theme_panel_bg};
-  rt.round_rect({0, 0, bounds().w, bounds().h}, 6,
-                {svc.vars().theme_border, 1}, &bg);
-  title_->style.color =
-      title_color_.value_or(svc.palette().primary_text);
+  // 卡片底 = get3DCardStyle('default')（src: button-styles.ts:534-565）：
+  //   radius 6、135° 4 停靠渐变 light #FFFDE7@0/#FFF9C4@35/#FFF59D@70/#FFE082@100
+  //   （dark #FFF59D@0/#FBC02D@35/#F57F17@70/#E65100@100）、底缘 bevel 线
+  //   #B8860B(light)/#755500(dark)。
+  const bool light = ThemeService::instance().is_light();
+  GradientStop stops[4];
+  if (light) {
+    stops[0] = {0.00f, Color4f::hex(0xFFFDE7)};
+    stops[1] = {0.35f, Color4f::hex(0xFFF9C4)};
+    stops[2] = {0.70f, Color4f::hex(0xFFF59D)};
+    stops[3] = {1.00f, Color4f::hex(0xFFE082)};
+  } else {
+    stops[0] = {0.00f, Color4f::hex(0xFFF59D)};
+    stops[1] = {0.35f, Color4f::hex(0xFBC02D)};
+    stops[2] = {0.70f, Color4f::hex(0xF57F17)};
+    stops[3] = {1.00f, Color4f::hex(0xE65100)};
+  }
+  RectF r{0, 0, bounds().w, bounds().h};
+  // src: button-styles.ts:538-540 135°
+  rt.fill_round_rect_gradient_angle(r, 6.0f, stops, 4, 135.0f);
+  // src: button-styles.ts:540 bevelShadowDark
+  Brush bevel{light ? Color4f::hex(0xB8860B) : Color4f::hex(0x755500)};
+  rt.fill_rect({6.0f, r.h - 1.0f, r.w - 12.0f, 1.0f}, bevel);
+  // 标题色：retro-3d 暗色 #2C1F03，其余 inherit → text.primary（src: :121）
+  const bool retro_dark =
+      ThemeService::instance().skin() == theme::SkinId::Retro3d && !light;
+  title_->style.color = title_color_.value_or(
+      retro_dark ? Color4f::hex(0x2C1F03) : ThemeService::instance().text_primary());
 }
 
 }  // namespace clashwin::ui::scene

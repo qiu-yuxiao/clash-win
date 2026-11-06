@@ -22,6 +22,8 @@ static void expect_rgb(const Color4f& c, uint32_t rgb, const char* what,
 UT_TEST(t12_palette_light_values) {
   // ← _theme.tsx defaultTheme
   const auto& p = tw::base_palette(ThemeMode::Light);
+  // primary 取 Mini 字面量回退值：_theme.tsx:3 primary_color '#007AFF'，
+  // 运行期 AccentColor 解析失败时回退此值（use-custom-theme.ts:172-175）；与 palettes.cpp 同步。
   expect_rgb(p.primary_color, 0x007AFF, "light primary #007AFF");
   expect_rgb(p.secondary_color, 0xFC9B76, "light secondary #FC9B76");
   expect_rgb(p.primary_text, 0x000000, "light primary_text");
@@ -36,7 +38,7 @@ UT_TEST(t12_palette_light_values) {
 UT_TEST(t12_palette_dark_values) {
   // ← _theme.tsx defaultDarkTheme
   const auto& p = tw::base_palette(ThemeMode::Dark);
-  expect_rgb(p.primary_color, 0x0A84FF, "dark primary #0A84FF");
+  expect_rgb(p.primary_color, 0x0A84FF, "dark primary #0A84FF");  // src: _theme.tsx:18
   expect_rgb(p.secondary_color, 0xFF9F0A, "dark secondary #FF9F0A");
   expect_rgb(p.primary_text, 0xFFFFFF, "dark primary_text");
   expect_rgb(p.error_color, 0xFF453A, "dark error #FF453A");
@@ -119,7 +121,7 @@ UT_TEST(t12_button_paint_table_all_skins) {
   expect_rgb(m.border, 0xd1d5db, "modern-flat border #d1d5db");
   UT_CHECK_EQ(m.radius, 6.0f);
   auto mp = ThemeService::instance().button_paint("primary");
-  expect_rgb(mp.fill, 0x007AFF, "modern-flat primary = palette.primary light");
+  expect_rgb(mp.fill, 0x007AFF, "modern-flat primary = palette.primary light #007AFF");
 
   ThemeService::instance().init(SkinId::FrostedGlass, ThemeMode::Light);
   auto f = ThemeService::instance().button_paint("default");

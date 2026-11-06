@@ -8,7 +8,7 @@
 //     Localhost=经 127.0.0.1:<mixed-port>（← network.rs verge_mixed_port →
 //     clash mixed-port 回退链，端口由注入的 resolver 提供）
 //   - 可中断：cancel_event 有信号时在阶段边界中止；各阶段有超时
-//   - User-Agent 可指定（默认 clash-verge/v3.0.10 ← CARGO_PKG_VERSION）
+//   - User-Agent 可指定（默认 clash-verge/v0.1.0 ← kAppVersion）
 //   - 响应大小上限 50MB（kSubscriptionMaxBytes），默认总超时 20s
 //     （connect 上限 min(t,10)，← network.rs connect_timeout）
 //   - 响应体必须为合法 UTF-8（← String::from_utf8 严格语义）
@@ -75,7 +75,7 @@ Result<UrlParts> parse_http_url(const std::string& url);
 struct HttpOptions {
   ProxyType proxy_type = ProxyType::None;
   std::optional<uint64_t> timeout_seconds;  // nullopt → 20（kProfileTimeoutSeconds）
-  std::optional<std::string> user_agent;    // nullopt → "clash-verge/v3.0.10"
+  std::optional<std::string> user_agent;    // nullopt → "clash-verge/v0.1.0"
   bool accept_invalid_certs = false;        // ← danger_accept_invalid_certs
   size_t max_response_bytes = 50u << 20;    // 50MB
   int max_redirects = 10;                   // ← redirect::Policy::limited(10)
@@ -89,6 +89,13 @@ struct HttpOptions {
 Result<HttpResponse> http_get(const std::string& url, const HttpOptions& opts);
 Result<HttpResponse> http_post(const std::string& url, std::string body,
                                const HttpOptions& opts);
+
+// 流式下载到文件（← network.rs create_request + reqwest Response::chunk 循环）：
+// 分块落盘并逐块回调 downloaded/total；total=0 表示服务端未给 Content-Length。
+// 重定向/代理/超时/中断语义与 http_get 一致，唯一区别是不把响应体留在内存。
+Result<void> http_download_file(
+    const std::string& url, const std::wstring& dest_path, const HttpOptions& opts,
+    std::function<void(uint64_t downloaded, uint64_t total)> on_progress);
 
 // ---------- 订阅响应头解析纯函数（供单测；← prfitem.rs from_url） ----------
 

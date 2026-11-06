@@ -1,4 +1,4 @@
-// 流量面板实现（T14）。
+// 流量面板实现（T14）。数值全部 src 标注（retro-3d 默认皮肤，button-styles.ts:11）。
 #include "traffic_pane.h"
 
 #include <windows.h>
@@ -17,11 +17,111 @@ using theme::ThemeService;
 
 namespace {
 int64_t default_now_ms() { return static_cast<int64_t>(GetTickCount64()); }
+
+inline bool light_mode() { return ThemeService::instance().is_light(); }
+
+// src: _layout.tsx:1774 padding: 宽窗 '8px 12px 2px 12px' / 窄窗 '3px 6px 2px 6px'
+constexpr float kPadTopWide = 8.0f, kPadXWide = 12.0f;
+constexpr float kPadTopNarrow = 3.0f, kPadXNarrow = 6.0f;
+constexpr float kPadBottom = 2.0f;
+// src: _layout.tsx:1776 gap: isMinimalWidth ? '6px' : 0
+constexpr float kGapNarrow = 6.0f;
+// src: mini-traffic-panel.tsx:71-79 宽窗指标行：h22 / mt 0.5 / pt 0.5 / px 1 / gap 1
+constexpr float kMetricsH = 22.0f;
+constexpr float kMetricsMtWide = 4.0f;
+constexpr float kMetricsPtWide = 4.0f;
+constexpr float kMetricsPxWide = 8.0f;
+constexpr float kMetricsGapWide = 8.0f;
+// src: mini-traffic-panel.tsx:100 卡内 px 0.5 = 4px
+constexpr float kCardPadX = 4.0f;
+// src: mini-traffic-panel.tsx:76 mt 0.25=2px；:78 px 0.25=2px；:81-86 窄窗
+//   column/gap 0；:99 卡高 18px
+constexpr float kCardH = 18.0f, kRowMtop = 2.0f, kRowPx = 2.0f;
+constexpr float kCardR = 6.0f;    // src: button-styles.ts:549 borderRadius 6px
+constexpr float kRunGap = 2.4f;   // src: mini-traffic-panel.tsx:98 gap 0.3=2.4px
+constexpr float kIconBox = 14.0f;  // src: mini-traffic-panel.tsx:114 fontSize 14
+
+// 卡渐变（src: button-styles.ts get3DCardStyle retro-3d，135°，4 停靠）
+void download_stops(GradientStop* s) {
+  if (light_mode()) {  // :531
+    s[0] = {0.0f, Color4f::hex(0xECEFF1)};
+    s[1] = {0.35f, Color4f::hex(0xCFD8DC)};
+    s[2] = {0.70f, Color4f::hex(0x90A4AE)};
+    s[3] = {1.0f, Color4f::hex(0x78909C)};
+  } else {  // :532
+    s[0] = {0.0f, Color4f::hex(0x263238)};
+    s[1] = {0.40f, Color4f::hex(0x37474F)};
+    s[2] = {0.75f, Color4f::hex(0x455A64)};
+    s[3] = {1.0f, Color4f::hex(0x1C252C)};
+  }
+}
+void upload_stops(GradientStop* s) {
+  if (light_mode()) {  // :524
+    s[0] = {0.0f, Color4f::hex(0xFFE0B2)};
+    s[1] = {0.35f, Color4f::hex(0xFFCC80)};
+    s[2] = {0.70f, Color4f::hex(0xFFA726)};
+    s[3] = {1.0f, Color4f::hex(0xFB8C00)};
+  } else {  // :525
+    s[0] = {0.0f, Color4f::hex(0xE65100)};
+    s[1] = {0.40f, Color4f::hex(0xD84315)};
+    s[2] = {0.75f, Color4f::hex(0xBF360C)};
+    s[3] = {1.0f, Color4f::hex(0x800000)};
+  }
+}
+// src: button-styles.ts:533/:526 bevelShadowDark（boxShadow 底缘 :556-565）
+inline Color4f download_bevel() {
+  return Color4f::hex(light_mode() ? 0x78909C : 0x263238);
+}
+inline Color4f upload_bevel() {
+  return Color4f::hex(light_mode() ? 0xB38F1E : 0x705407);
+}
+
+// 文字/图标色（src: mini-traffic-panel.tsx；--download-text/--upload-text 仅
+// original 皮肤定义 index.scss:298-312，retro-3d 走 CSS var fallback 值）
+inline Color4f dl_icon_color() {   // :111-113
+  return Color4f::hex(light_mode() ? 0x0084FF : 0x80D8FF);
+}
+inline Color4f ul_icon_color() {   // :240-241
+  return Color4f::hex(light_mode() ? 0xE65100 : 0xFFD54F);
+}
+inline Color4f dl_text_color() {   // prefix/unit :121-123,150-152
+  return Color4f::hex(light_mode() ? 0x006064 : 0x80D8FF);
+}
+inline Color4f dl_value_color() {  // :138-140
+  return Color4f::hex(light_mode() ? 0x00363A : 0xFFFFFF);
+}
+inline Color4f dl_unit_color() {   // :150-152
+  return Color4f::hex(light_mode() ? 0x006064 : 0xE0F7FA);
+}
+inline Color4f ul_text_color() {   // prefix :250-251
+  return Color4f::hex(light_mode() ? 0x7B5200 : 0xFFD54F);
+}
+inline Color4f ul_value_color() {  // :266
+  return Color4f::hex(light_mode() ? 0x3E2723 : 0xFFFFFF);
+}
+inline Color4f ul_unit_color() {   // :277-278
+  return Color4f::hex(light_mode() ? 0x7B5200 : 0xFFECB3);
+}
+
+// ArrowDownward/UpwardRounded 近似（src: :108/:236 fontSize 14）
+void draw_arrow(IRenderTarget& rt, const PointF& c, bool down,
+                const Color4f& col) {
+  Pen p{col, 1.5f};
+  if (down) {
+    rt.draw_line({c.x, c.y - 5.0f}, {c.x, c.y + 4.0f}, p);
+    rt.draw_line({c.x - 3.5f, c.y}, {c.x, c.y + 4.0f}, p);
+    rt.draw_line({c.x + 3.5f, c.y}, {c.x, c.y + 4.0f}, p);
+  } else {
+    rt.draw_line({c.x, c.y + 5.0f}, {c.x, c.y - 4.0f}, p);
+    rt.draw_line({c.x - 3.5f, c.y}, {c.x, c.y - 4.0f}, p);
+    rt.draw_line({c.x + 3.5f, c.y}, {c.x, c.y - 4.0f}, p);
+  }
+}
 }  // namespace
 
 void TrafficSeries::append(double up, double down) {
   points_.emplace_back(up, down);
-  if (points_.size() > kTrafficMaxPoint + 2) points_.pop_front();  // ← :75
+  if (points_.size() > kTrafficMaxPoint + 2) points_.pop_front();  // src: traffic-graph.tsx:22,75
   double v = std::max(up, down);
   if (v > peak_) peak_ = v;
 }
@@ -40,55 +140,39 @@ std::vector<float> TrafficSeries::down() const {
   return v;
 }
 
+bool TrafficSeries::has_traffic() const {  // src: traffic-graph.tsx:24-27
+  for (auto& p : points_)
+    if (p.first != 0 || p.second != 0) return true;
+  return false;
+}
+
 TrafficPane::TrafficPane(Widget* parent) : Widget(parent) {
   now_ms_ = [] { return static_cast<int64_t>(GetTickCount64()); };
   auto graph = std::make_unique<CanvasGraph>();
   graph_ = graph.get();
-  graph_->flex_weight = 1;
-  // ← traffic-graph.tsx:122-123：down=primary.main / up=secondary.main
-  const auto& pal = theme::ThemeService::instance().palette();
-  graph_->down_color_ = pal.primary_color;
-  graph_->up_color_ = pal.secondary_color;
+  graph_->flex_weight = 1;  // src: mini-traffic-panel.tsx:58 flex 1
+  // 折线色 = 主题 token（src: traffic-graph.tsx:122-123 down=primary.main
+  //   up=secondary.main）；α：down .9(:14) up .8(:11)。on_paint 每帧刷新。
+  graph_->bg_ = Color4f(0, 0, 0, 0);  // src: traffic-graph.tsx:163 仅 clearRect，画布透明
   add_child(std::move(graph));
 
-  // 指标区：↓ 下载行 + ↑ 上传行（窄窗两行 ← '@media max-width 560px' column）
-  auto mkrow = [&]() {
-    auto row = std::make_unique<Row>();
-    row->set_padding(4, 1, 4, 1);
-    row->spacing = 4;
-    return row;
+  // 12 个文字段（src: mini-traffic-panel.tsx 每卡 prefix 9px bold(:119) +
+  //   value 13px bold(:136) + unit 8px normal(:147)）
+  auto mk = [&](Label*& slot, float size, bool bold) {
+    auto lb = std::make_unique<Label>();
+    slot = lb.get();
+    slot->style.size = size;
+    slot->style.weight = bold ? static_cast<int>(Weight::Bold)
+                              : static_cast<int>(Weight::Normal);
+    slot->style.align_v = AlignV::Center;
+    slot->style.wrap = false;
+    add_child(std::move(lb));
   };
-  auto down_row = mkrow();
-  auto dl = std::make_unique<Label>();
-  down_label_ = dl.get();
-  down_label_->style.size = 13;
-  down_label_->style.weight = static_cast<int>(Weight::Bold);
-  down_label_->flex_weight = 1;
-  down_row->add_child(std::move(dl));
-  auto dt = std::make_unique<Label>();
-  down_total_label_ = dt.get();
-  down_total_label_->style.size = 9;
-  down_total_label_->style.align_h = AlignH::Right;
-  down_total_label_->flex_weight = 1;
-  down_row->add_child(std::move(dt));
-  down_row->flex_weight = 0;
-  add_child(std::move(down_row));
-
-  auto up_row = mkrow();
-  auto ul = std::make_unique<Label>();
-  up_label_ = ul.get();
-  up_label_->style.size = 13;
-  up_label_->style.weight = static_cast<int>(Weight::Bold);
-  up_label_->flex_weight = 1;
-  up_row->add_child(std::move(ul));
-  auto ut = std::make_unique<Label>();
-  up_total_label_ = ut.get();
-  up_total_label_->style.size = 9;
-  up_total_label_->style.align_h = AlignH::Right;
-  up_total_label_->flex_weight = 1;
-  up_row->add_child(std::move(ut));
-  up_row->flex_weight = 0;
-  add_child(std::move(up_row));
+  mk(dl_prefix_, 9, true); mk(dl_value_, 13, true); mk(dl_unit_, 8, false);
+  mk(dt_prefix_, 9, true); mk(dt_value_, 13, true); mk(dt_unit_, 8, false);
+  mk(ul_prefix_, 9, true); mk(ul_value_, 13, true); mk(ul_unit_, 8, false);
+  mk(ut_prefix_, 9, true); mk(ut_value_, 13, true); mk(ut_unit_, 8, false);
+  refresh_labels();  // 初值即显（Mini：无流量也显示 0.00 B/s）
 }
 
 TrafficPane::~TrafficPane() = default;
@@ -103,23 +187,41 @@ bool TrafficPane::on_traffic_payload(const std::string& payload_text) {
 
 bool TrafficPane::on_traffic_json(const nlohmann::json& j) {
   if (!j.is_object() || !j.contains("up") || !j.contains("down")) return false;
-  // 50ms 去重（← T14 卡①；WS 1s 一条通常不触发）
-  int64_t now = now_ms_ ? now_ms_() : 0;
-  if (last_payload_ms_ >= 0 && now - last_payload_ms_ < kTrafficDedupMs)
-    return false;
-  last_payload_ms_ = now;
-  if (!enabled_) return false;  // 失焦停采（开关）
 
+  // src: traffic-graph.tsx:65-79 —— 10fps 到达的 payload 只做缓存，
+  //   sampleIntervalMs=1000 采一次；零流量守卫：本次为 0 且历史全 0 时不入窗。
+  int64_t now = now_ms_ ? now_ms_() : 0;
   double up = j.value("up", 0.0);
   double down = j.value("down", 0.0);
   down_total_ = static_cast<double>(j.value("downTotal", 0.0));
   up_total_ = static_cast<double>(j.value("upTotal", 0.0));
+  if (last_sample_ms_ >= 0 && now - last_sample_ms_ < kTrafficSampleMs)
+    return true;  // 已缓存（总量已更新），等下一个 1s 采样点
+  last_sample_ms_ = now;
+
+  bool retained = series_.has_traffic();
+  if (up == 0 && down == 0 && !retained) return true;  // 零流量且无历史：不入窗
   series_.append(up, down);
+  if (!enabled_) return true;  // 数据已入窗，跳过重绘
+
   graph_->set_series(series_.up(), series_.down(),
                      static_cast<float>(std::max(series_.peak(), 1.0)));
   refresh_labels();
   for (auto& [id, cb] : subs_) cb();
   return true;
+}
+
+void TrafficPane::set_enabled(bool on) {
+  if (enabled_ == on) return;
+  enabled_ = on;
+  if (!on) return;  // 失焦：保留数据，停止重绘
+  // 回到前台立即用已累计的序列补一次绘制，避免恢复瞬间仍显示旧值
+  if (graph_) {
+    graph_->set_series(series_.up(), series_.down(),
+                       static_cast<float>(std::max(series_.peak(), 1.0)));
+  }
+  refresh_labels();
+  for (auto& [id, cb] : subs_) cb();
 }
 
 void TrafficPane::refresh_labels() {
@@ -131,44 +233,199 @@ void TrafficPane::refresh_labels() {
       series_.size() ? series_.down().back() : 0.0f);
   auto [uv, uu] = clashwin::util::parse_traffic(
       series_.size() ? series_.up().back() : 0.0f);
-  down_text_ = wide(dv) + L" " + wide(du) + L"/s";
-  up_text_ = wide(uv) + L" " + wide(uu) + L"/s";
-  down_label_->set_text(L"↓ 下载: " + down_text_);
-  up_label_->set_text(L"↑ 上传: " + up_text_);
   auto [dtv, dtu] = clashwin::util::parse_traffic(down_total_);
   auto [utv, utu] = clashwin::util::parse_traffic(up_total_);
-  down_total_label_->set_text(L"总计: " + wide(dtv) + L" " + wide(dtu));
-  up_total_label_->set_text(L"总计: " + wide(utv) + L" " + wide(utu));
+  // src: mini-traffic-panel.tsx:128-157 下载速率卡「下载: 值 单位/s」
+  dl_prefix_->set_text(L"下载:");
+  dl_value_->set_text(wide(dv));
+  dl_unit_->set_text(wide(du) + L"/s");
+  // :176-213 下载总量卡「总量: 值 单位」（无 /s）
+  dt_prefix_->set_text(L"总量:");
+  dt_value_->set_text(wide(dtv));
+  dt_unit_->set_text(wide(dtu));
+  // :245-283 上传速率卡
+  ul_prefix_->set_text(L"上传:");
+  ul_value_->set_text(wide(uv));
+  ul_unit_->set_text(wide(uu) + L"/s");
+  // :302-337 上传总量卡
+  ut_prefix_->set_text(L"总量:");
+  ut_value_->set_text(wide(utv));
+  ut_unit_->set_text(wide(utu));
+  down_text_ = wide(dv) + L" " + wide(du) + L"/s";
+  up_text_ = wide(uv) + L" " + wide(uu) + L"/s";
 }
 
 void TrafficPane::set_mini(bool mini) {
   if (mini_ == mini) return;
   mini_ = mini;
-  // Mini：只留流量条（指标行卸载近似 = 不可见），CanvasGraph 占满
-  for (size_t i = 1; i < child_count(); ++i)
-    child(i)->set_visible(!mini);
+  // src: _layout.tsx:1764-1782 迷你窗同样渲染 MiniTrafficPanel（四卡常驻），
+  //   仅面板总高改为 TRAFFIC_PANE_HEIGHT_MINIMAL=100；不隐藏任何指标卡
+  invalidate();
+}
+
+void TrafficPane::set_narrow(bool narrow) {
+  if (narrow_ == narrow) return;
+  narrow_ = narrow;
   invalidate();
 }
 
 void TrafficPane::on_arrange(const RectF& area) {
   set_bounds(area);
-  // 【坐标约定】子布局局部坐标
-  float metrics_h = mini_ ? 0 : kTrafficMetricsH * 2;
-  float graph_h = std::max(area.h - metrics_h, 0.0f);
-  child(0)->layout_tree({0, 0, area.w, graph_h});
-  float y = graph_h;
-  for (size_t i = 1; i < child_count(); ++i) {
-    child(i)->layout_tree({0, y, area.w, kTrafficMetricsH});
-    y += kTrafficMetricsH;
+  // 【坐标约定】widget 树 = 逻辑 DIP（src 的 CSS px 直接用）
+  const float w = area.w;
+  const float h = area.h;
+  // src: _layout.tsx:1774/1776 宽窄分支 padding + gap（窄窗 gap 6 计入图高损耗）
+  const float pad_top = narrow_ ? kPadTopNarrow : kPadTopWide;
+  const float pad_x = narrow_ ? kPadXNarrow : kPadXWide;
+  const float gap = narrow_ ? kGapNarrow : 0.0f;
+  // src: mini-traffic-panel.tsx:71-87 宽窗(>560) 单行 22px 横排；
+  //   ≤560/窄窗走 column，宽窗 pt 0.5 另加 4px
+  const bool horiz = !narrow_ && w > 560.0f;
+  const float mt = narrow_ ? kRowMtop : kMetricsMtWide;
+  const float pt = narrow_ ? 0.0f : kMetricsPtWide;
+  const float rows_h = gap + mt + pt + (horiz ? kMetricsH : 2 * kCardH);
+  graph_rect_ = {pad_x, pad_top, w - 2 * pad_x,
+                 h - pad_top - kPadBottom - rows_h};
+  child(0)->layout_tree(graph_rect_);
+  metrics_border_y_ = horiz || !narrow_ ? graph_rect_.bottom() + mt : -1.0f;
+
+  const float ul_y = h - kPadBottom - kCardH;
+  const float dl_y = ul_y - kCardH;
+  const float px = narrow_ ? kRowPx : kMetricsPxWide;
+  const float x0 = pad_x + px;
+  if (horiz) {
+    // 四卡单行：下载组[速率|总量] + 8px + 上传组[速率|总量]
+    const float cw = (w - 2 * x0 - kMetricsGapWide) / 4.0f;
+    const float row_y = graph_rect_.bottom() + mt + pt;
+    dl_l_ = {x0, row_y, cw, kCardH};
+    dl_r_ = {x0 + cw, row_y, cw, kCardH};
+    ul_l_ = {x0 + 2 * cw + kMetricsGapWide, row_y, cw, kCardH};
+    ul_r_ = {x0 + 3 * cw + kMetricsGapWide, row_y, cw, kCardH};
+  } else {
+    // 卡行：下载行在上、上传行贴底（:81-86 column；组间 gap 0）
+    const float cw = (w - 2 * x0) / 2.0f;  // 两卡 flex 1 等分（:97）
+    dl_l_ = {x0, dl_y, cw, kCardH};
+    dl_r_ = {x0 + cw, dl_y, cw, kCardH};
+    ul_l_ = {x0, ul_y, cw, kCardH};
+    ul_r_ = {x0 + cw, ul_y, cw, kCardH};
   }
+
+  // 卡内：justifyContent center（:95-96），段间 gap 2.4（:98）；速率卡带图标
+  auto place = [&](Label* p1, Label* p2, Label* p3, const RectF& card,
+                   PointF* icon) {
+    float gw = 0;
+    float widths[3] = {p1->measure(0, 0).w, p2->measure(0, 0).w,
+                       p3->measure(0, 0).w};
+    for (float x : widths) gw += x;
+    gw += 2 * kRunGap;
+    if (icon) gw += kIconBox + kRunGap;
+    float cx = card.x + (card.w - gw) / 2.0f;
+    if (icon) {
+      *icon = {cx + kIconBox / 2.0f, card.y + card.h / 2.0f};
+      cx += kIconBox + kRunGap;
+    }
+    Label* lbs[3] = {p1, p2, p3};
+    for (int i = 0; i < 3; ++i) {
+      lbs[i]->layout_tree({cx, card.y, widths[i] + 2, card.h});
+      cx += widths[i] + kRunGap;
+    }
+  };
+  place(dl_prefix_, dl_value_, dl_unit_, dl_l_, &dl_icon_);
+  place(dt_prefix_, dt_value_, dt_unit_, dl_r_, nullptr);
+  place(ul_prefix_, ul_value_, ul_unit_, ul_l_, &ul_icon_);
+  place(ut_prefix_, ut_value_, ut_unit_, ul_r_, nullptr);
 }
 
 void TrafficPane::on_paint(IRenderTarget& rt) {
-  // 指标区文字色（← --download-text #006064 / --upload-text hsl(38,100%,30%)）
-  down_label_->style.color = Color4f::hex(0x006064);
-  up_label_->style.color = Color4f::hex(0x996E00);  // hsl(38,100%,30%) 近似
-  down_total_label_->style.color = Color4f::hex(0x006064);
-  up_total_label_->style.color = Color4f::hex(0x996E00);
+  // 折线/参考线色随主题刷新
+  // src: traffic-graph.tsx:122-123 down=primary.main α.9(:14) up=secondary.main α.8(:11)
+  //   :121+MUI 默认 divider=rgba(0,0,0,.12)/rgba(255,255,255,.12) × α.15(:8)
+  if (graph_) {
+    const auto& pal = ThemeService::instance().palette();
+    auto mul = [](Color4f c, float a) { c.a *= a; return c; };
+    graph_->down_color_ = mul(pal.primary_color, 0.9f);
+    graph_->up_color_ = mul(pal.secondary_color, 0.8f);
+    graph_->line_ = light_mode() ? Color4f(0, 0, 0, 0.018f)
+                                 : Color4f(1, 1, 1, 0.018f);
+  }
+  if (graph_rect_.w <= 0) return;
+
+  // 面板底：src: _layout.tsx:1773 background 'inherit'（无自绘渐变，
+  //   由宿主内容底色透出；此前藏青渐变系像素误读，已删）
+
+  const bool light = light_mode();
+  const float pad_x = narrow_ ? kPadXNarrow : kPadXWide;
+  if (!narrow_ && metrics_border_y_ >= 0) {
+    // src: mini-traffic-panel.tsx:74-75 borderTop 1px divider × depth-factor 1
+    rt.fill_rect({pad_x, metrics_border_y_, bounds().w - 2 * pad_x, 1},
+                 Brush{light ? Color4f(0, 0, 0, 0.12f)
+                             : Color4f(1, 1, 1, 0.12f)});
+  }
+  if (!narrow_) {
+    // src: :77-80 bgcolor action.hover + borderRadius 1(=8px)
+    Pen none{Color4f(0, 0, 0, 0), 0};
+    Brush bg{light ? Color4f(0, 0, 0, 0.04f) : Color4f(1, 1, 1, 0.08f)};
+    rt.round_rect(graph_rect_, kCardR + 2, none, &bg);
+  }
+
+  // 成对卡（:102-104/:171-173 内角半径 0 → 左卡 TL|BL、右卡 TR|BR）
+  GradientStop dstops[4], ustops[4];
+  download_stops(dstops);
+  upload_stops(ustops);
+  rt.fill_round_rect_gradient_angle(dl_l_, kCardR, dstops, 4, 135.f, 0x9);
+  rt.fill_round_rect_gradient_angle(dl_r_, kCardR, dstops, 4, 135.f, 0x6);
+  rt.fill_round_rect_gradient_angle(ul_l_, kCardR, ustops, 4, 135.f, 0x9);
+  rt.fill_round_rect_gradient_angle(ul_r_, kCardR, ustops, 4, 135.f, 0x6);
+  // 底缘 bevel 线（src: button-styles.ts:556-565 boxShadow 底部 1-2px）
+  Pen dl_pen{download_bevel(), 1.0f}, ul_pen{upload_bevel(), 1.0f};
+  rt.draw_line({dl_l_.x + kCardR, dl_l_.bottom() - 0.5f},
+               {dl_r_.right() - kCardR, dl_l_.bottom() - 0.5f}, dl_pen);
+  rt.draw_line({ul_l_.x + kCardR, ul_l_.bottom() - 0.5f},
+               {ul_r_.right() - kCardR, ul_l_.bottom() - 0.5f}, ul_pen);
+  // src: button-styles.ts:556-565 多层盒阴影：顶部内高光、底缘双层 bevel、
+  //   gold glow、下沿 3px 深阴影（自上而下逐层降透明）
+  auto decorate = [&](const RectF& l, const RectF& r, Color4f bevel) {
+    const float top_y = l.y + 1.0f;
+    rt.draw_line({l.x + kCardR, top_y}, {r.right() - kCardR, top_y},
+                 Pen{light ? Color4f(1, 1, 1, 0.80f) : Color4f(1, 1, 1, 0.08f), 1.0f});
+    for (int i = 1; i <= 2; ++i) {
+      Color4f b = bevel;
+      b.a = 0.45f / static_cast<float>(i);
+      rt.draw_line({l.x + kCardR, l.bottom() - 0.5f + i},
+                   {r.right() - kCardR, l.bottom() - 0.5f + i},
+                   Pen{b, 1.0f});
+    }
+    for (int i = 1; i <= 2; ++i) {
+      Color4f b = bevel;
+      b.a = 0.35f / static_cast<float>(i);
+      rt.draw_line({l.x + kCardR, l.bottom() + 2.0f + i},
+                   {r.right() - kCardR, l.bottom() + 2.0f + i},
+                   Pen{b, 1.0f});
+    }
+    for (int i = 1; i <= 2; ++i) {
+      Color4f g = bevel;
+      g.a = 0.12f / static_cast<float>(i);
+      rt.round_rect({l.x - i, l.y - i, r.right() - l.x + 2 * i, l.h + 2 * i},
+                   kCardR + i, Pen{g, 1.0f}, nullptr);
+    }
+  };
+  decorate(dl_l_, dl_r_, download_bevel());
+  decorate(ul_l_, ul_r_, upload_bevel());
+
+  // 图标（src: :108-116 下载箭头 / :236-244 上传箭头；总量卡无图标）
+  draw_arrow(rt, dl_icon_, true, dl_icon_color());
+  draw_arrow(rt, ul_icon_, false, ul_icon_color());
+
+  // 文字段色随主题（Label 子件在 on_paint 后绘制，此处刷新即生效）
+  auto setc = [](Label* lb, Color4f c) { lb->style.color = c; };
+  setc(dl_prefix_, dl_text_color()); setc(dl_value_, dl_value_color());
+  setc(dl_unit_, dl_unit_color());
+  setc(dt_prefix_, dl_text_color()); setc(dt_value_, dl_value_color());
+  setc(dt_unit_, dl_unit_color());
+  setc(ul_prefix_, ul_text_color()); setc(ul_value_, ul_value_color());
+  setc(ul_unit_, ul_unit_color());
+  setc(ut_prefix_, ul_text_color()); setc(ut_value_, ul_value_color());
+  setc(ut_unit_, ul_unit_color());
 }
 
 uint64_t TrafficPane::subscribe(std::function<void()> cb) {

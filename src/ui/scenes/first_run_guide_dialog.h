@@ -1,13 +1,13 @@
 #pragma once
-// 首次运行新手向导弹窗（T21）：对齐 Clash Mini v3.2.1 首发体验（first-run-guide-dialog.tsx）。
-// - 双步流：Step 1（欢迎与订阅链接导入）-> Step 2（就绪仪表盘）
-// - 剪贴板自动嗅探：探测 http://, https://, clash:// 并在顶部显示气泡横幅
-// - Enter 键全局监听：任意位置按 Enter 即执行自动导入
-// - BUG-311 守护释放：is_importing 守卫在状态变更前释放，不阻断后续测速优选
-// - BUG-310 自动接管：导入成功后若系统代理与 TUN 均未开启，自动开启系统代理
-// - Step 2 节点测速：2.5s 测速超时判定，就绪显示 ⚡ xx ms 绿标，超时展示"🔄 重新测速并优选节点"兜底
-// - 暖金 GitHub ⭐ Star 应援卡片 + Wiki 帮助文档链接
-// - 严格遵守 Direct2D 局部坐标规则 {0, y}
+// 首次运行新手向导弹窗（T21）：按 ClashVerge
+// src/pages/_layout/components/first-run-guide-dialog.tsx 源码重写。
+// - 卡片：get3DCardStyle(default) 3D 金卡 + paper maxWidth 520 / borderRadius 8
+// - 双步流：STEP 1 导入（标题/步骤胶囊/特性胶囊/剪贴板横幅/凹陷输入框/双列按钮）
+//   → STEP 2 就绪（绿色仪表卡 + 暖金 Star 卡 + 双列按钮）
+// - 无 ✕ 关闭、无“清除”按钮（源码仅遮罩/Esc/稍后/完成出口）
+// - 剪贴板嗅探 http(s)/clash://，Enter 全局提交
+// - BUG-311 守卫提前释放；BUG-310 导入成功后自动接管系统代理
+#include <cstdint>
 #include <functional>
 #include <string>
 
@@ -19,6 +19,13 @@ enum class FirstRunStep {
   Input,  // STEP 1 / 2
   Ready   // STEP 2 / 2
 };
+
+// ← services/delay.ts:33 NODE_DELAY_MAX_MS（与后端判死阈值统一，严禁漂移）
+inline constexpr int kReadyDelayMaxMs = 5000;
+// src: first-run-guide-dialog.tsx:46 READY_TIMEOUT_MS = 20_000
+inline constexpr int64_t kReadyTimeoutMs = 20000;
+// src: first-run-guide-dialog.tsx:48 READY_POLL_INTERVAL_MS = 1_500
+inline constexpr int64_t kReadyPollIntervalMs = 1500;
 
 class FirstRunGuideDialog : public Widget {
  public:
@@ -54,14 +61,27 @@ class FirstRunGuideDialog : public Widget {
   int active_delay_ms() const { return active_delay_ms_; }
   void set_active_delay_ms(int ms);
 
-  bool proxy_ready() const { return active_delay_ms_ > 0 && active_delay_ms_ < 5000; }
+  // src: first-run-guide-dialog.tsx:169-170 proxyReady（activeDelay > 0 且 < 5000）
+  bool proxy_ready() const {
+    return active_delay_ms_ > 0 && active_delay_ms_ < kReadyDelayMaxMs;
+  }
+  // src: first-run-guide-dialog.tsx:173-174 isUnconfirmed
+  bool unconfirmed() const;
+  bool ready_timed_out() const { return gave_up_; }  // src: :230 setGaveUp(true)
   bool takeover_active() const { return takeover_active_; }
   void set_takeover_active(bool active) { takeover_active_ = active; }
+  bool retesting() const { return retesting_; }
+
+  // 就绪计时/轮询驱动（窗口 WM_TIMER 每 250ms 调；src: :228-245）
+  void tick(int64_t now_ms);
+  // 重测异步结束 → retesting_=false，计时/轮询恢复（src: :203 finally）
+  void on_retest_finished();
 
   // 动作回调
   std::function<bool(const std::string& url)> on_import;
   std::function<void(bool)> on_patch_system_proxy;
   std::function<void()> on_retest_nodes;
+  std::function<void()> on_refresh_proxy;  // ← refreshProxy（proxies 上下文重载）
   std::function<void()> on_open_wiki;
   std::function<void()> on_open_github;
   std::function<void()> on_dismiss;
@@ -95,16 +115,20 @@ class FirstRunGuideDialog : public Widget {
   bool is_importing_ = false;
   std::string error_message_;
 
-  std::string active_node_name_ = "香港 01 | BGP [专线]";
-  int active_delay_ms_ = 0;  // 0 表示测速中或未测出
+  std::string active_node_name_;
+  int active_delay_ms_ = -1;  // -1=null 未测出；0=测速失败（src: :143-166）
   bool takeover_active_ = false;
   bool retesting_ = false;
+  // src: :228-245 20s 超时 + 1.5s 轮询
+  bool gave_up_ = false;
+  int64_t ready_started_ms_ = 0;  // 0=未开始计时
+  int64_t last_poll_ms_ = 0;
+  bool auto_retested_ = false;    // src: :209-212 autoRetestedRef
 
   RectF card_rect_;
-  RectF btn_close_x_rect_;
   RectF banner_clip_rect_;
   RectF input_rect_;
-  RectF btn_clear_rect_;
+  RectF btn_enter_rect_;
   RectF btn_paste_rect_;
   RectF btn_submit_rect_;
   RectF btn_later_rect_;
@@ -117,16 +141,15 @@ class FirstRunGuideDialog : public Widget {
   RectF btn_finish_star_rect_;
   RectF btn_finish_rect_;
 
-  bool hover_close_x_ = false;
   bool hover_banner_ = false;
   bool hover_paste_ = false;
-  bool hover_clear_ = false;
   bool hover_submit_ = false;
   bool hover_later_ = false;
   bool hover_retest_ = false;
   bool hover_wiki_ = false;
   bool hover_finish_star_ = false;
   bool hover_finish_ = false;
+  bool hover_enter_ = false;
   bool input_focused_ = false;
 };
 

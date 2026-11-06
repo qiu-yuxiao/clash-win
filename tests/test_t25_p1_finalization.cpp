@@ -2,7 +2,7 @@
 // 测试覆盖：
 //   1. t25_service_mock_reinstall
 //   2. t25_service_mock_repair
-//   3. t25_service_mock_install_uninstall
+//   3. t25_service_mock_install_uninstall（含唯一服务名断言）
 //   4. t25_service_available_command
 //   5. t25_network_mock_provider
 //   6. t25_network_interfaces_info_schema
@@ -21,6 +21,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -29,6 +30,7 @@
 #include "cmd/cmd_support.h"
 #include "cmd/command_service.h"
 #include "config/runtime_state.h"
+#include "core/service_mode.h"
 #include "enhance/enhance.h"
 #include "system/icon_cache.h"
 #include "system/network_info.h"
@@ -144,69 +146,87 @@ struct ScopedTempDir {
 
 }  // namespace
 
-// 1. t25_service_mock_reinstall
+// 1. t25_service_mock_reinstall（共存：重装被禁用，不触碰 runner）
 UT_TEST(t25_service_mock_reinstall) {
   auto mock = std::make_shared<MockServiceRunner>();
   system::set_service_runner(mock);
 
   auto res = cmd::CommandService::instance().invoke("reinstall_service", {});
-  UT_CHECK(res.is_ok());
+  UT_CHECK(!res.is_ok());
 
-  // reinstall sequence: uninstall -> install -> start -> wait_ready
-  std::vector<std::string> expected = {"uninstall", "install", "start", "wait_ready"};
-  UT_CHECK_EQ(mock->log, expected);
+  // 绝不执行 uninstall -> install 覆盖序列：runner 零调用
+  UT_CHECK(mock->log.empty());
 
   // Restore default runner
   system::set_service_runner(nullptr);
 }
 
-// 2. t25_service_mock_repair
+// 2. t25_service_mock_repair（共存：修复/强制重装被禁用）
 UT_TEST(t25_service_mock_repair) {
   auto mock = std::make_shared<MockServiceRunner>();
   system::set_service_runner(mock);
 
-  // Normal repair
   auto res = cmd::CommandService::instance().invoke("repair_service", {});
-  UT_CHECK(res.is_ok());
-  std::vector<std::string> expected = {"uninstall", "install", "start", "wait_ready"};
-  UT_CHECK_EQ(mock->log, expected);
-
-  // Failure propagation during install
-  mock->log.clear();
-  mock->installer_fail = true;
-  auto fail_res = cmd::CommandService::instance().invoke("repair_service", {});
-  UT_CHECK(!fail_res.is_ok());
+  UT_CHECK(!res.is_ok());
+  UT_CHECK(mock->log.empty());
 
   system::set_service_runner(nullptr);
 }
 
-// 3. t25_service_mock_install_uninstall
+// 3. t25_service_mock_install_uninstall（共存条件式：缺失可安装同名服务；
+//    已存在绝不触发安装；uninstall 禁用；无第二服务名）
 UT_TEST(t25_service_mock_install_uninstall) {
   auto mock = std::make_shared<MockServiceRunner>();
   system::set_service_runner(mock);
 
-  // Case A: Not yet installed -> install -> start -> wait_ready
+  // Case A: 缺失 → 安装成功 → 重新查询 → 启动
   mock->installed = false;
   mock->log.clear();
   auto r1 = cmd::CommandService::instance().invoke("install_service", {});
   UT_CHECK(r1.is_ok());
-  std::vector<std::string> exp1 = {"is_installed", "install", "start", "wait_ready"};
+  std::vector<std::string> exp1 = {"is_installed", "install", "is_installed", "start", "wait_ready"};
   UT_CHECK_EQ(mock->log, exp1);
+  UT_CHECK(mock->installed);  // 安装的是同名服务
 
-  // Case B: Already installed -> skip install -> start -> wait_ready
+  // Case A2: 缺失 → 安装失败（UAC 取消/安装器错误）→ 不启动
+  mock->installed = false;
+  mock->installer_fail = true;
+  mock->log.clear();
+  auto r1b = cmd::CommandService::instance().invoke("install_service", {});
+  UT_CHECK(!r1b.is_ok());
+  std::vector<std::string> exp1b = {"is_installed", "install"};
+  UT_CHECK_EQ(mock->log, exp1b);
+  mock->installer_fail = false;
+
+  // Case B: 已存在且就绪 → 只查询，绝不触发安装
   mock->installed = true;
+  mock->available = true;
   mock->log.clear();
   auto r2 = cmd::CommandService::instance().invoke("install_service", {});
   UT_CHECK(r2.is_ok());
-  std::vector<std::string> exp2 = {"is_installed", "start", "wait_ready"};
+  std::vector<std::string> exp2 = {"is_installed", "is_available"};
   UT_CHECK_EQ(mock->log, exp2);
 
-  // Case C: Uninstall
+  // Case B2: 已存在但未就绪 → 查询后仅启动，绝不触发安装
+  mock->available = false;
+  mock->log.clear();
+  auto r2b = cmd::CommandService::instance().invoke("install_service", {});
+  UT_CHECK(r2b.is_ok());
+  std::vector<std::string> exp2b = {"is_installed", "is_available", "start", "wait_ready"};
+  UT_CHECK_EQ(mock->log, exp2b);
+
+  // Case C: Uninstall → 共存禁用，runner 零调用
   mock->log.clear();
   auto r3 = cmd::CommandService::instance().invoke("uninstall_service", {});
-  UT_CHECK(r3.is_ok());
-  std::vector<std::string> exp3 = {"uninstall"};
-  UT_CHECK_EQ(mock->log, exp3);
+  UT_CHECK(!r3.is_ok());
+  UT_CHECK(mock->log.empty());
+
+  // 共存铁律：唯一服务名 clash_verge_service，无第二名称；
+  // 真实 runner 卸载器路径恒拒绝（校验先于任何文件系统/进程操作，测试环境安全）
+  UT_CHECK(std::wstring_view(core::service_mode::kServiceNameW) == L"clash_verge_service");
+  UT_CHECK(std::string(core::service_mode::kServiceName) == "clash_verge_service");
+  system::DefaultServiceCommandRunner real_runner;
+  UT_CHECK(real_runner.run_installer(false).is_err());
 
   system::set_service_runner(nullptr);
 }
@@ -615,4 +635,78 @@ UT_TEST(t25_i18n_13_locales_help_menu_sync) {
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// 服务状态五态（可注入探测；不依赖 SCM/真实管道）
+// ---------------------------------------------------------------------------
+namespace {
+class MockServiceProbe : public core::service_mode::IServiceProbe {
+ public:
+  bool inst = true;  // installed
+  bool bin = true;   // ImagePath 文件存在
+  bool run = true;   // SCM STATE == RUNNING
+  bool pipe = true;  // 管道存在 + 握手成功
+  bool installed() override { return inst; }
+  bool binary_valid() override { return bin; }
+  bool running() override { return run; }
+  bool pipe_ready() override { return pipe; }
+};
+}  // namespace
+
+// ① 未安装 → Missing（应走 UAC 安装）
+UT_TEST(t25_service_state_missing) {
+  MockServiceProbe probe;
+  probe.inst = false;
+  const auto st = core::service_mode::evaluate_state(probe);
+  UT_CHECK(st == core::service_mode::ServiceState::Missing);
+  UT_CHECK(core::service_mode::state_requires_install(st));
+  UT_CHECK(!core::service_mode::state_requires_start(st));
+}
+
+// ② 已安装但 ImagePath 文件不存在（Mini 卸载残壳）→ BinaryInvalid（应重装）
+UT_TEST(t25_service_state_binary_invalid) {
+  MockServiceProbe probe;
+  probe.bin = false;
+  const auto st = core::service_mode::evaluate_state(probe);
+  UT_CHECK(st == core::service_mode::ServiceState::BinaryInvalid);
+  UT_CHECK(core::service_mode::state_requires_install(st));
+}
+
+// ③ STOPPED → Stopped（可启动；调用方应执行 start_service）
+UT_TEST(t25_service_state_stopped_startable) {
+  MockServiceProbe probe;
+  probe.run = false;
+  probe.pipe = false;
+  const auto st = core::service_mode::evaluate_state(probe);
+  UT_CHECK(st == core::service_mode::ServiceState::Stopped);
+  UT_CHECK(core::service_mode::state_requires_start(st));
+  UT_CHECK(!core::service_mode::state_requires_install(st));
+}
+
+// ④ RUNNING + 管道就绪 → Ready
+UT_TEST(t25_service_state_ready) {
+  MockServiceProbe probe;
+  const auto st = core::service_mode::evaluate_state(probe);
+  UT_CHECK(st == core::service_mode::ServiceState::Ready);
+}
+
+// ⑤ RUNNING 但管道未就绪 → NotReady（可等待/启动，不得判 Ready）
+UT_TEST(t25_service_state_running_but_pipe_not_ready) {
+  MockServiceProbe probe;
+  probe.pipe = false;
+  const auto st = core::service_mode::evaluate_state(probe);
+  UT_CHECK(st == core::service_mode::ServiceState::NotReady);
+  UT_CHECK(core::service_mode::state_requires_start(st));
+}
+
+// 回归：管道在但服务 STOPPED → 必须判 Stopped，绝不能判 Ready（原缺陷）
+UT_TEST(t25_service_state_pipe_present_but_stopped_not_ready) {
+  MockServiceProbe probe;
+  probe.run = false;   // SCM STOPPED
+  probe.pipe = true;   // 残留管道仍在
+  const auto st = core::service_mode::evaluate_state(probe);
+  UT_CHECK(st == core::service_mode::ServiceState::Stopped);
+  UT_CHECK(st != core::service_mode::ServiceState::Ready);
+  UT_CHECK(core::service_mode::state_requires_start(st));
 }

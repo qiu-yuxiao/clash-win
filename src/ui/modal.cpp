@@ -11,10 +11,10 @@ void Modal::build_tree() {
   auto dlg = std::make_unique<Column>();
   dialog_ = dlg.get();
   dialog_->spacing = 12;
-  dialog_->set_padding(20, 16, 20, 16);
+  dialog_->set_padding(20, 16, 20, 16);  // ← MUI Dialog 内容内距 p2.5/py2
   auto tl = std::make_unique<Label>();
   title_label_ = tl.get();
-  title_label_->style.size = 16;
+  title_label_->style.size = 16;  // ← MUI DialogTitle 字号 16
   title_label_->style.weight = static_cast<int>(Weight::Medium);
   title_label_->style.color = title_text_;
   dialog_->add_child(std::move(tl));

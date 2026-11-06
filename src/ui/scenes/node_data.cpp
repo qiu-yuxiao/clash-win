@@ -5,8 +5,13 @@
 
 #include <algorithm>
 #include <cctype>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 
 #include "cmd/cmd_support.h"
+#include "config/config.h"
+#include "events/event_bus.h"
 #include "util/log.h"
 #include "util/utf.h"
 
@@ -16,7 +21,7 @@ namespace utf = clashwin::utf;
 
 std::wstring format_delay(int delay) {
   // ← services/delay.ts formatDelay（0/≥timeout 且 ≤1e5 = Timeout；>1e5 = Error）
-  if (delay == -1) return L"-";
+  if (delay == -1) return L"";  // src: proxy-item.tsx:215「{delayValue >= 0 && …}」未测空白
   if (delay == -2) return L"testing";
   if (delay == 0 || (delay >= kNodeDelayMaxMs && delay <= 100000)) return L"Timeout";
   if (delay > 100000) return L"Error";
@@ -32,6 +37,16 @@ bool NodeData::load() {
   }
   std::map<std::string, mihomo::ProxyItem> items;
   if (hooks_.fetch_proxies && hooks_.fetch_proxies(&items)) {
+    // src: delay.ts:283-295 缓存过期后回落到 kernel history 最后一条记录
+    proxy_history_.clear();
+    for (const auto& [name, item] : items) {
+      ProxyHistory h;
+      if (!item.history.empty()) {
+        h.delay = static_cast<int>(item.history.back().delay);
+        h.time = item.history.back().time;
+      }
+      proxy_history_[name] = std::move(h);
+    }
     // 细节合并：成员顺序按 group.all，type 从 get_proxies 细节取
     rows_.clear();
     rows_.reserve(all.size());
@@ -92,13 +107,34 @@ bool NodeData::test_group() {
   return true;
 }
 
+namespace {
+// RFC3339 → epoch ms（无时区按 UTC，等价 JS Date.parse 的 Z 分支）
+bool parse_iso_time_ms(const std::string& s, int64_t* out) {
+  if (s.size() < 19) return false;
+  std::tm tm{};
+  std::istringstream iss(s.substr(0, 19));
+  iss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
+  if (iss.fail()) return false;
+  *out = static_cast<int64_t>(_mkgmtime(&tm)) * 1000;
+  return true;
+}
+}  // namespace
+
 int NodeData::row_delay(const std::string& name) const {
-  auto it = delay_cache_.find(name);
-  if (it == delay_cache_.end()) return -1;
-  // TTL 30min：读时惰性判过期（← delay.ts:68/260 now-updatedAt>TTL）
   int64_t now = hooks_.now_ms ? hooks_.now_ms() : 0;
-  if (now - it->second.second > kDelayCacheTtlMs) return -1;
-  return it->second.first;
+  auto it = delay_cache_.find(name);
+  if (it != delay_cache_.end() && now - it->second.second <= kDelayCacheTtlMs)
+    return it->second.first;
+  // src: delay.ts:284-295 缓存过期 → 内核 history 最后一条；过旧(>10min)按 0 判死
+  auto h = proxy_history_.find(name);
+  if (h != proxy_history_.end() && h->second.delay >= 0) {
+    int64_t rec = 0;
+    if (parse_iso_time_ms(h->second.time, &rec)) {
+      if (now - rec > kHistoryFallbackMaxAgeMs) return 0;
+    }
+    return h->second.delay;
+  }
+  return -1;
 }
 
 uint64_t NodeData::subscribe(std::function<void()> cb) {
@@ -144,8 +180,24 @@ DataHooks NodeData::production_hooks(const std::string& group) {
     auto r = cmd::mihomo();
     if (!r.is_ok()) return false;
     // 组测速结果由内核回灌 backend-delay-results 事件（T05 WS/事件链）
-    return static_cast<bool>(
-        r.value()->delay_group(g, "", kNodeDelayMaxMs).is_ok());
+    // test_url 与 cmd_profile 探针同源：verge.default_latency_test 优先
+    std::string url = "https://cp.cloudflare.com/generate_204";
+    try {
+      const auto& verge = *config::Config::instance().verge().latest_arc();
+      url = verge.default_latency_test.value_or(url);
+    } catch (...) {}
+    auto dr = r.value()->delay_group(g, url, kNodeDelayMaxMs);
+    if (!dr.is_ok()) {
+      CWLOG_WARN("test_group delay_group 失败: " + dr.error().message);
+      return false;
+    }
+    CWLOG_INFO("test_group 完成，返回节点数=" +
+               std::to_string(dr.value().size()));
+    // HTTP 响应即全量结果 → 直接发事件回灌缓存
+    std::vector<std::pair<std::string, uint32_t>> vec;
+    for (const auto& [name, ms] : dr.value()) vec.emplace_back(name, ms);
+    events::EventBus::backend_delay_results(g, vec);
+    return true;
   };
   h.now_ms = [] { return static_cast<int64_t>(GetTickCount64()); };
   return h;

@@ -2,6 +2,11 @@
 #include "widget.h"
 
 #include <algorithm>
+#include <cassert>
+#include <format>
+#include <typeinfo>
+
+#include "util/log.h"
 
 namespace clashwin::ui {
 
@@ -27,12 +32,16 @@ Widget::~Widget() {
 }
 
 void Widget::add_child(std::unique_ptr<Widget> w) {
+  // 【所有权约定】w 的所有权移交本树；调用方传入 std::move(x) 后不得再使用 x。
+  //   x 为空时此处必为 use-after-move（曾致 AV 0xC0000005），debug 下直接断言。
+  assert(w != nullptr && "add_child: 传入空 unique_ptr（典型为 std::move 后复用）");
   w->parent_ = this;
   children_.push_back(std::move(w));
   on_child_added(children_.back().get());
 }
 
 void Widget::insert_child(size_t index, std::unique_ptr<Widget> w) {
+  assert(w != nullptr && "insert_child: 传入空 unique_ptr（典型为 std::move 后复用）");
   w->parent_ = this;
   index = std::min(index, children_.size());
   children_.insert(children_.begin() + static_cast<long>(index),
@@ -97,8 +106,16 @@ RectF Widget::global_bounds() const {
 // ---------- 状态 ----------
 void Widget::set_visible(bool v) {
   if (visible_ == v) return;
+  bool was = visible_;
   visible_ = v;
   invalidate();
+  if (v && !was) {
+    // 【LAYOUTFIX】父容器 arrange 跳过不可见子 → 本 widget bounds 从未被布局
+    // （0×0）。转为可见时自根重排整树，否则抽屉/覆盖层显示后不可见（无内容）。
+    Widget* r = this;
+    while (r->parent_) r = r->parent_;
+    r->relayout();
+  }
   if (!v && g_hover &&
       (g_hover == this || [&] {
          for (Widget* a = g_hover; a; a = a->parent_)  // hover 在本子树内？
@@ -117,9 +134,16 @@ void Widget::set_enabled(bool e) {
 
 bool Widget::focused() const { return g_focus == this; }
 
-void Widget::request_focus() { g_focus = this; }
+void Widget::request_focus() {
+  if (g_focus != this && g_focus && g_focus->on_focus_lost)
+    g_focus->on_focus_lost();  // MUI onBlur：焦点被接管
+  g_focus = this;
+}
 void Widget::blur() {
-  if (g_focus == this) g_focus = nullptr;
+  if (g_focus == this) {
+    g_focus = nullptr;
+    if (on_focus_lost) on_focus_lost();  // src: MUI onBlur（失焦提交，:232）
+  }
 }
 
 // ---------- 布局 ----------
@@ -141,8 +165,11 @@ void Widget::relayout() {
 }
 
 void Widget::on_arrange(const RectF& area) {
-  RectF content{area.x + padding_.l, area.y + padding_.t,
-                area.w - padding_.h(), area.h - padding_.v()};
+  // 【坐标约定】同 Column/Row/Stack：子 layout_tree 传本 widget 局部坐标
+  //（global_bounds 由父链累加；叠加 area.x/y 会使 area≠0 时子件双重偏移
+  //  ——traffic Box 的 TrafficPane 曾被偏到窗外致底栏整体不可见）
+  RectF content{padding_.l, padding_.t, area.w - padding_.h(),
+                area.h - padding_.v()};
   for (auto& c : children_) c->layout_tree(content);
 }
 

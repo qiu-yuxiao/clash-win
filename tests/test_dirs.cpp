@@ -5,6 +5,7 @@
 #include <shlobj.h>
 
 #include <cstdlib>
+#include <cstdio>
 #include <fstream>
 #include <string>
 
@@ -101,6 +102,32 @@ UT_TEST(dirs_log_dirs_create_under_override) {
 
   std::wstring sidecar = dirs::sidecar_log_dir();
   UT_CHECK_EQ(sidecar, root + L"\\logs\\sidecar");
+  if (GetFileAttributesW(sidecar.c_str()) == INVALID_FILE_ATTRIBUTES) {
+    std::printf("  [diag-dirs] root=%S home=%S sidecar=%S attr-err=%lu tmp=%S\n",
+                root.c_str(), dirs::app_home_dir().c_str(), sidecar.c_str(),
+                GetLastError(), temp_root().c_str());
+    std::printf("  [diag-dirs] parent-exists=%d\n",
+                GetFileAttributesW(temp_root().c_str()) != INVALID_FILE_ATTRIBUTES);
+    std::wstring logs = root + L"\\logs";
+    std::printf("  [diag-dirs] lvl root=%d logs=%d sidecar=%d\n",
+                GetFileAttributesW(root.c_str()) != INVALID_FILE_ATTRIBUTES,
+                GetFileAttributesW(logs.c_str()) != INVALID_FILE_ATTRIBUTES,
+                GetFileAttributesW(sidecar.c_str()) != INVALID_FILE_ATTRIBUTES);
+    SetLastError(0);
+    BOOL ok = CreateDirectoryW(root.c_str(), nullptr);
+    std::printf("  [diag-dirs] direct mkdir ok=%d err=%lu\n", (int)ok,
+                GetLastError());
+    // 多路径探针：定位 360/行为防护的拦截范围
+    for (const wchar_t* p : {L"C:\\Users\\Public\\clashwin_probe",
+                             L"C:\\clashwin_probe",
+                             L"C:\\Users\\sun_y\\clashwin_probe",
+                             L"C:\\Users\\sun_y\\Documents\\clashwin_probe"}) {
+      SetLastError(0);
+      BOOL r = CreateDirectoryW(p, nullptr);
+      DWORD e = GetLastError();
+      std::printf("  [diag-probe] %S ok=%d err=%lu\n", p, (int)r, e);
+    }
+  }
   UT_CHECK(GetFileAttributesW(sidecar.c_str()) != INVALID_FILE_ATTRIBUTES);
 
   std::wstring service = dirs::service_log_dir();
@@ -115,7 +142,7 @@ UT_TEST(dirs_log_dirs_create_under_override) {
 
 UT_TEST(dirs_fixed_paths) {
   // ← dirs.rs::ipc_path / service_path
-  UT_CHECK_EQ(dirs::ipc_path(), L"\\\\.\\pipe\\mini-mihomo");
+  UT_CHECK_EQ(dirs::ipc_path(), L"\\\\.\\pipe\\mini-mihomo-win");
   std::wstring res = dirs::app_resources_dir();
   UT_CHECK_EQ(dirs::service_path(), res + L"\\clash-verge-service.exe");
   // sidecar 兜底内核：<exe>\mini-mihomo.exe

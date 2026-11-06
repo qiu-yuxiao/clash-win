@@ -1,10 +1,10 @@
 mode: rule
-mixed-port: 10801
+mixed-port: 10811
 allow-lan: true
 log-level: warning
 ipv6: true
 external-controller: ''
-secret: adapted-by-qiu-yuxiao
+secret: adapted-by-clash-win
 unified-delay: true
 bind-address: '*'
 find-process-mode: strict
@@ -64,7 +64,7 @@ rules:
 - GEOIP,CN,DIRECT
 - IP-CIDR6,::/0,PROXY
 - MATCH,DIRECT
-external-controller-pipe: \\.\pipe\mini-mihomo
+external-controller-pipe: \\.\pipe\mini-mihomo-win
 external-controller-cors:
   allow-private-network: true
   allow-origins:
@@ -465,7 +465,7 @@ rule-providers:
     proxy: PROXY
 dns:
   enable: true
-  listen: :53
+  listen: 127.0.0.1:1053
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
   fake-ip-filter-mode: blacklist

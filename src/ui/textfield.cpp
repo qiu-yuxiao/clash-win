@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <utility>
 
 namespace clashwin::ui {
 
@@ -35,6 +36,71 @@ void TextField::set_text(const std::wstring& t) {
 std::wstring TextField::selection() const {
   int lo = std::min(cursor_, anchor_), hi = std::max(cursor_, anchor_);
   return text_.substr(static_cast<size_t>(lo), static_cast<size_t>(hi - lo));
+}
+
+bool TextField::has_selection() const { return cursor_ != anchor_; }
+
+// ---- 清空按钮（opt-in） ----
+void TextField::set_clear_button(bool on, std::wstring tooltip) {
+  clear_button_ = on;
+  clear_tooltip_ = std::move(tooltip);
+  if (!on) clear_hover_ = false;
+  invalidate();
+}
+
+RectF TextField::clear_button_rect() const {
+  constexpr float kBox = 24.0f;  // src: base-search-box.tsx:126-136 IconButton small 24
+  return {bounds().w - 4.0f - kBox, (bounds().h - kBox) * 0.5f, kBox, kBox};
+}
+
+float TextField::text_right_pad() const {
+  // 清空按钮 24 + 右内距 4 + 文本右内距 4 ≈ 32（src: base-search-box.tsx:123 pr 4）
+  return clear_button_ ? 32.0f : 8.0f;
+}
+
+std::wstring TextField::tooltip_text() const {
+  // 仅悬停在 ✕ 上时给 resetInput 提示（src: base-search-box.tsx:126）
+  if (clear_button_ && clear_hover_) return clear_tooltip_;
+  return Widget::tooltip_text();
+}
+
+// ---- 编辑命令（EM_* 等价） ----
+bool TextField::can_cut() const { return has_selection(); }
+bool TextField::can_copy() const { return has_selection(); }
+bool TextField::can_paste() const { return true; }  // src: _layout.tsx:1908 粘贴项无 disabled
+bool TextField::can_select_all() const { return !text_.empty(); }
+bool TextField::can_clear() const { return !text_.empty(); }
+
+void TextField::cut() {
+  if (!has_selection()) return;
+  if (clip_set()) clip_set()(selection());
+  erase_selection();
+}
+
+void TextField::copy() {
+  if (!has_selection()) return;
+  if (clip_set()) clip_set()(selection());
+}
+
+void TextField::paste() {
+  if (!clip_get()) return;
+  std::wstring s = clip_get()();
+  s.erase(std::remove(s.begin(), s.end(), L'\r'), s.end());
+  s.erase(std::remove(s.begin(), s.end(), L'\n'), s.end());
+  if (!s.empty()) insert_text(s);
+}
+
+void TextField::select_all() {
+  request_focus();
+  anchor_ = 0;
+  cursor_ = static_cast<int>(text_.size());
+  invalidate();
+}
+
+void TextField::clear_text() {
+  if (text_.empty()) return;
+  request_focus();
+  set_text(L"");
 }
 
 SizeF TextField::on_measure(float max_w, float max_h) {
@@ -168,15 +234,45 @@ void TextField::insert_text(const std::wstring& s) {
 // ---- 鼠标 ----
 bool TextField::on_mouse(const MouseEvent& e) {
   if (e.type == MouseEventType::Down) {
+    if (e.buttons & kMouseRight) {
+      // 右键：焦点 + 选区外点击移动光标（Win32 编辑控件行为），再交给宿主弹菜单
+      request_focus();
+      int idx = hit_index(e.pos.x);
+      if (idx < std::min(cursor_, anchor_) || idx > std::max(cursor_, anchor_))
+        cursor_ = anchor_ = idx;
+      clamp_scroll();
+      invalidate();
+      if (on_context_menu) on_context_menu(to_global(e.pos));
+      return true;
+    }
+    // ✕ 命中（非空才可点；空值时 disabled，点击落到输入区）：
+    //   src: base-search-box.tsx:132-133 disabled={!text}
+    if (clear_button_ && !text_.empty() &&
+        clear_button_rect().contains(e.pos.x, e.pos.y)) {
+      clear_text();
+      return true;
+    }
     request_focus();
     int idx = hit_index(e.pos.x);
     cursor_ = anchor_ = idx;
-    scroll_x_ = scroll_x_;  // 点击不滚
     invalidate();
     return true;
   }
   if (e.type == MouseEventType::Move) {
-    // 左键拖动扩选（简化：无 capture 时也生效）
+    if (clear_button_) {
+      bool h = !text_.empty() && clear_button_rect().contains(e.pos.x, e.pos.y);
+      if (h != clear_hover_) {
+        clear_hover_ = h;
+        invalidate();
+      }
+    }
+    return false;
+  }
+  if (e.type == MouseEventType::Leave) {
+    if (clear_hover_) {
+      clear_hover_ = false;
+      invalidate();
+    }
     return false;
   }
   if (e.type == MouseEventType::Up) {
@@ -214,7 +310,7 @@ float TextField::cursor_x(int index) {
 
 void TextField::clamp_scroll() {
   if (bounds().w <= 0) return;
-  float vis = bounds().w - 16;
+  float vis = bounds().w - 8 - text_right_pad();
   float cx = 8;
   if (ITextEngine* eng = text_engine()) {
     SizeF w = eng->measure_text(text_.substr(0, static_cast<size_t>(cursor_)),
@@ -230,12 +326,13 @@ void TextField::clamp_scroll() {
 void TextField::on_paint(IRenderTarget& rt) {
   RectF r{0, 0, bounds().w, bounds().h};
   Brush bg_b{bg_};
-  rt.round_rect(r, radius_, {focused() ? border_focused_ : border_, 1}, &bg_b);
+  rt.round_rect(r, radius_, {focused() ? border_focused_ : border_, border_w_}, &bg_b);
 
   TextStyle ts = style_;
   ts.wrap = false;
   ts.ellipsis = false;
-  RectF text_r{8, 0, r.w - 16, r.h};
+  // 右侧给清空按钮让位（src: base-search-box.tsx:123 input pr 4）
+  RectF text_r{8, 0, r.w - 8 - text_right_pad(), r.h};
   ts.align_v = AlignV::Center;
 
   if (text_.empty() && composition_.empty()) {
@@ -243,28 +340,27 @@ void TextField::on_paint(IRenderTarget& rt) {
       ts.color = placeholder_color_;
       rt.draw_text(placeholder_, text_r, ts);
     }
-    return;
-  }
-
-  rt.push_clip(text_r);
-  // 选区高亮
-  int lo = std::min(cursor_, anchor_), hi = std::max(cursor_, anchor_);
-  if (lo != hi && focused()) {
-    float x0 = 8, x1 = 8;
-    if (ITextEngine* eng = text_engine()) {
-      x0 = 8 + eng->measure_text(text_.substr(0, static_cast<size_t>(lo)), ts, 0).w;
-      x1 = 8 + eng->measure_text(text_.substr(0, static_cast<size_t>(hi)), ts, 0).w;
-    }
-    Brush sel_b{selection_bg_};
-    rt.fill_rect({x0 - scroll_x_, 3, x1 - x0, r.h - 6}, sel_b);
-  }
-  // 文本 / composition 预编辑串
-  if (!composition_.empty()) {
-    rt.draw_text(composition_, {text_r.x - scroll_x_, 0, text_r.w, r.h}, ts);
   } else {
-    rt.draw_text(text_, {text_r.x - scroll_x_, 0, text_r.w, r.h}, ts);
+    rt.push_clip(text_r);
+    // 选区高亮
+    int lo = std::min(cursor_, anchor_), hi = std::max(cursor_, anchor_);
+    if (lo != hi && focused()) {
+      float x0 = 8, x1 = 8;
+      if (ITextEngine* eng = text_engine()) {
+        x0 = 8 + eng->measure_text(text_.substr(0, static_cast<size_t>(lo)), ts, 0).w;
+        x1 = 8 + eng->measure_text(text_.substr(0, static_cast<size_t>(hi)), ts, 0).w;
+      }
+      Brush sel_b{selection_bg_};
+      rt.fill_rect({x0 - scroll_x_, 3, x1 - x0, r.h - 6}, sel_b);
+    }
+    // 文本 / composition 预编辑串
+    if (!composition_.empty()) {
+      rt.draw_text(composition_, {text_r.x - scroll_x_, 0, text_r.w, r.h}, ts);
+    } else {
+      rt.draw_text(text_, {text_r.x - scroll_x_, 0, text_r.w, r.h}, ts);
+    }
+    rt.pop_clip();
   }
-  rt.pop_clip();
 
   // 光标（focused 时）
   if (focused()) {
@@ -280,6 +376,18 @@ void TextField::on_paint(IRenderTarget& rt) {
       }
     }
     rt.fill_rect({cx, 5, 1.5f, r.h - 10}, Brush{caret_color_});
+  }
+
+  // ✕ 清空按钮：空值 opacity .5（disabled），非空 1.0，悬停提亮
+  // src: base-search-box.tsx:126-136（ClearRounded 18 / disabled / opacity）
+  if (clear_button_) {
+    TextStyle cts = ts;
+    cts.size = 15.0f;  // ← ClearRounded fontSize 18 的视觉近似（图标框 24）
+    cts.align_h = AlignH::Center;
+    cts.align_v = AlignV::Center;
+    cts.color = style_.color;
+    cts.color.a = text_.empty() ? 0.5f : (clear_hover_ ? 1.0f : 0.9f);
+    rt.draw_text(L"✕", clear_button_rect(), cts);
   }
 }
 

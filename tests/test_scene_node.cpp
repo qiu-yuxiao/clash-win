@@ -80,7 +80,8 @@ UT_TEST(t13_delay_tier_mapping) {
   UT_CHECK(delay_tier(4999) == DelayTier::Slow);
   UT_CHECK(delay_tier(5000) == DelayTier::Timeout);
   // 文本 ← formatDelay
-  UT_CHECK(format_delay(-1) == L"-");
+  // src: proxy-item.tsx:215 未测（-1）不渲染数字/连字符，整段空白
+  UT_CHECK(format_delay(-1) == L"");
   UT_CHECK(format_delay(-2) == L"testing");
   UT_CHECK(format_delay(0) == L"Timeout");
   UT_CHECK(format_delay(250) == L"250");
@@ -185,8 +186,8 @@ UT_TEST(t13_takeover_segmented_apply_and_bounce) {
 UT_TEST(t13_quick_bar_callbacks) {
   QuickBar bar;
   bar.layout_tree({0, 0, 271, 30});
-  int tests = 0, pins = 0, gears = 0;
-  bar.on_test_group = [&] { ++tests; };
+  int pins = 0, gears = 0;
+  // ⚡ 测速钮已按 Mini 改版移入 NodeList（node_list.cpp），QuickBar 仅剩图钉/齿轮
   bar.on_toggle_pin = [&] { ++pins; };
   bar.on_open_settings = [&] { ++gears; };
   bar.set_node_text(L"node-a");
@@ -198,7 +199,6 @@ UT_TEST(t13_quick_bar_callbacks) {
     icon->on_click();
   UT_CHECK_EQ(pins, 1);
   UT_CHECK_EQ(gears, 1);
-  UT_CHECK_EQ(tests, 0);
 }
 
 UT_TEST(t13_node_list_filter_and_sort) {
@@ -214,22 +214,20 @@ UT_TEST(t13_node_list_filter_and_sort) {
   NodeList list;
   list.bind(&data);
   list.layout_tree({0, 0, 271, 500});
-  // 组头 1 + 4 节点
-  UT_CHECK_EQ(list.visible_count(), 5u);
+  // 无组头（1:1 Mini：列表直接是节点行）+ 4 节点
+  UT_CHECK_EQ(list.visible_count(), 4u);
 
-  // 过滤（大小写不敏感）："be" → Beta；组头恒在
+  // 过滤（大小写不敏感）："be" → Beta
   list.set_filter("be");
-  UT_CHECK_EQ(list.visible_count(), 2u);
+  UT_CHECK_EQ(list.visible_count(), 1u);
   list.set_filter("");
-  UT_CHECK_EQ(list.visible_count(), 5u);
+  UT_CHECK_EQ(list.visible_count(), 4u);
 
-  // 排序：延迟升序、Unknown/Timeout 沉底
-  list.toggle_sort();
+  // 排序初值 = 按延迟（src: use-head-state.ts:21 sortType: 1），Unknown/Timeout 沉底
   UT_CHECK(list.sorted_by_delay());
-  // visible: [-1(组头), alpha(120), Beta(450), gamma(5200 超时沉底), delta(未测沉底)]
+  // visible: [alpha(120), Beta(450), gamma(5200 超时沉底), delta(未测沉底)]
   // 经 ScrollList 行工厂验证顺序：取物化行绘制不可直接断言顺序——
-  // 通过 visible_row 语义（组头 -1 在首）+ 排序后 delta/gamma 沉底
-  // （用再过滤验证排序稳定：过滤掉 alpha 后 Beta 在 gamma 前）
+  // 用再过滤验证排序稳定：过滤掉 alpha 后 Beta 在 gamma 前
   list.set_filter("a");
   UT_CHECK(list.visible_count() >= 3u);
   list.toggle_sort();
@@ -244,7 +242,7 @@ UT_TEST(t13_node_row_pixels_271) {
 
   // 节点行：selected（primary 浅底）+ 延迟 120（绿）
   NodeRowWidget row;
-  row.bind(false, "VMESS", "node-alpha.example.com", 120, true);
+  row.bind("VMESS", "node-alpha.example.com", 120, true);
   row.layout_tree({0, 0, 271, kNodeRowH});
   rt().begin_frame();
   rt().clear({1, 1, 1, 1});
@@ -257,11 +255,11 @@ UT_TEST(t13_node_row_pixels_271) {
   // 选中底 alpha(primary,0.15) 混白 ≈ (218,233,252)
   Px bg = pixel(30, 10);
   UT_CHECK(bg.b > 200 && bg.b < 256 && bg.r > 180);
-  // 左列类型区（x<55）：灰字区底色同上；x=56 处 divider 2px
+  // 左列类型区（x<55）：灰字区底色同上；x=54 处 divider 2px
   Px div = pixel(54, 19);
-  UT_CHECK(div.r < 240);  // divider rgba(0,0,0,0.06) 混底变深
-  // 行底 2px divider
-  Px bottom = pixel(130, 37);
+  UT_CHECK(div.r < 240);  // divider rgba(0,0,0,0.12) 混底变深（proxy-item.tsx:121）
+  // 行底 2px divider（kNodeRowH=26 → 底 2px 在 y24-25）
+  Px bottom = pixel(130, 25);
   UT_CHECK(bottom.r < 240);
   // 延迟列（右 65px 区，11px 绿字 #06943D 有像素）
   int green = 0;
@@ -274,7 +272,7 @@ UT_TEST(t13_node_row_pixels_271) {
 
   // 未测节点：延迟列 '-'（灰 text.secondary）
   NodeRowWidget row2;
-  row2.bind(false, "VMESS", "plain", -1, false);
+  row2.bind("VMESS", "plain", -1, false);
   row2.index_in_group = 1;  // 奇数行 rgba(0,120,215,.04)
   row2.layout_tree({0, 0, 271, kNodeRowH});
   rt().begin_frame();
@@ -292,7 +290,7 @@ UT_TEST(t13_node_row_retro3d_selected_bg) {
   auto& svc = ThemeService::instance();
   svc.init(SkinId::Retro3d, ThemeMode::Light);
   NodeRowWidget row;
-  row.bind(false, "VMESS", "n", -1, true);
+  row.bind("VMESS", "n", -1, true);
   row.layout_tree({0, 0, 271, kNodeRowH});
   rt().begin_frame();
   rt().clear({1, 1, 1, 1});
@@ -303,26 +301,37 @@ UT_TEST(t13_node_row_retro3d_selected_bg) {
   svc.init(SkinId::Retro3d, ThemeMode::Light);
 }
 
-UT_TEST(t13_group_head_row) {
-  make_offscreen(271, 120, 96);
-  auto& svc = ThemeService::instance();
-  svc.init(SkinId::ModernFlat, ThemeMode::Light);
-  NodeRowWidget head;
-  head.bind(true, "PROXY", "current-node", -1, false);
-  head.layout_tree({0, 0, 271, kNodeRowH});
-  rt().begin_frame();
-  rt().clear({1, 1, 1, 1});
-  head.on_paint(rt());
-  rt().end_frame();
-  // 分组头：橙浅底 alpha(primary,0.15) + 橙字（← 截图选中橙行）
-  Px bg = pixel(60, 8);
-  UT_CHECK(bg.b > 200 && bg.r > 180);
-  // 橙字（primary #007AFF）有像素：名称区扫描蓝色像素
-  int blue = 0;
-  for (int y = 10; y < 30; ++y)
-    for (int x = 60; x < 200; ++x) {
-      Px p = pixel(x, y);
-      if (p.b > 180 && p.r < 120) ++blue;
-    }
-  UT_CHECK(blue > 3);
+UT_TEST(t13_no_group_head) {
+  MockState st;
+  NodeData data = make_data(st);
+  data.load();
+  NodeList list;
+  list.bind(&data);
+  list.layout_tree({0, 0, 271, 500});
+  // Mini 单组扁平列表，无分组头行：src: use-render-list.ts:144
+  UT_CHECK_EQ(list.visible_count(), 3u);
+  UT_CHECK(!list.empty_state_visible());
+}
+
+UT_TEST(t13_empty_state) {
+  MockState st;
+  st.all.clear();
+  NodeData data = make_data(st);
+  data.load();
+  NodeList list;
+  list.bind(&data);
+  list.layout_tree({0, 0, 271, 500});
+  // 无代理 → Inbox + "No Proxies"：src: proxy-render.tsx:63-78
+  UT_CHECK_EQ(list.visible_count(), 0u);
+  UT_CHECK(list.empty_state_visible());
+  // 过滤到空同样显示空态
+  MockState st2;
+  NodeData data2 = make_data(st2);
+  data2.load();
+  NodeList list2;
+  list2.bind(&data2);
+  list2.layout_tree({0, 0, 271, 500});
+  list2.set_filter("zzz-no-match");
+  UT_CHECK_EQ(list2.visible_count(), 0u);
+  UT_CHECK(list2.empty_state_visible());
 }

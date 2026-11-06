@@ -75,6 +75,7 @@ class D2dRenderTarget : public IRenderTarget, public ITextEngine {
 
   // 位图登记（T12 icon_store 调用；draw_bitmap 按 id 引用）
   void register_bitmap(uint64_t id, IWICBitmapSource* src);
+  bool has_bitmap(uint64_t id) const;  // 设备重建后位图清空，需重新登记
 
   // 测试专用：读取 WIC 位图像素（BGRA），仅离屏后端
   bool read_pixels(std::vector<uint8_t>& bgra, int& w, int& h);
@@ -84,6 +85,16 @@ class D2dRenderTarget : public IRenderTarget, public ITextEngine {
   void fill_rect(const RectF& r, const Brush& b) override;
   void round_rect(const RectF& r, float radius, const Pen& p,
                   const Brush* fill) override;
+  void fill_round_rect_gradient(const RectF& r, float radius,
+                                const GradientStop* stops, int count) override;
+  void fill_round_rect_gradient_angle(const RectF& r, float radius,
+                                      const GradientStop* stops, int count,
+                                      float css_angle_deg,
+                                      int corner_mask = 0xF) override;
+  void fill_round_rect_radial(const RectF& r, float radius,
+                              const GradientStop* stops, int count,
+                              float cx_ratio, float cy_ratio,
+                              float rx, float ry) override;
   void draw_line(const PointF& a, const PointF& b, const Pen& p) override;
   void draw_text(const std::wstring& text, const RectF& r,
                  const TextStyle& ts) override;

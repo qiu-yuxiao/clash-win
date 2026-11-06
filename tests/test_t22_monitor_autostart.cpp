@@ -1,8 +1,8 @@
 // T22 单元与集成测试：
 //   - AutostartManager 开机自启对账、Run 注册表写入引号包裹及 --silent、幂等清理与 schtasks 迁移标记
 //   - CommandService get_auto_launch_status / patch_verge_config 装配
-//   - Port Guard 端口范围校验与 0 值回退默认（10801/10802/7899）
-//   - Controller Conflict 控制器 9098 端口冲突自动上移探测与自身内核保留
+//   - Port Guard 端口范围校验与 0 值回退默认（10811/10812/10814）
+//   - Controller Conflict 控制器 9108 端口冲突自动上移探测与自身内核保留
 //   - CoreMonitor 15s/3s/5s 节奏状态机、连续判死自愈、3 次重启/5 次警报升级阶梯
 //   - 手杀内核后持久化 profiles.yaml 选定节点保底恢复
 //
@@ -250,9 +250,9 @@ UT_TEST(t22_port_guard_zero_and_boundary_clamping) {
   n["socks-port"] = 0;
   n["port"] = 0;
 
-  UT_CHECK_EQ(IClashTemp::guard_mixed_port(n), 10801);
-  UT_CHECK_EQ(IClashTemp::guard_socks_port(n), 10802);
-  UT_CHECK_EQ(IClashTemp::guard_port(n), 7899);
+  UT_CHECK_EQ(IClashTemp::guard_mixed_port(n), 10811);
+  UT_CHECK_EQ(IClashTemp::guard_socks_port(n), 10812);
+  UT_CHECK_EQ(IClashTemp::guard_port(n), 10814);
 
   // Rust as u16 截断行为验证 (65537 -> 1)
   n["mixed-port"] = "65537";
@@ -260,7 +260,7 @@ UT_TEST(t22_port_guard_zero_and_boundary_clamping) {
 
   // 非法非数字字面量回退默认值
   n["mixed-port"] = "invalid_port";
-  UT_CHECK_EQ(IClashTemp::guard_mixed_port(n), 10801);
+  UT_CHECK_EQ(IClashTemp::guard_mixed_port(n), 10811);
 
   // 正常端口保留
   n["mixed-port"] = 20800;
