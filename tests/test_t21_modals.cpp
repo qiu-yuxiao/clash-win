@@ -15,6 +15,8 @@
 
 #include <windows.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -772,4 +774,104 @@ UT_TEST(t21_notice_status_mapping) {
   }
   clear();
   uninstall_notice_handler();
+}
+
+// 测试用文本引擎：14px 等宽近似（每字符 7px、行高 fontSize×1.43），
+// 用来验证「消息折行 → 条目高度增长」；真机走 DWrite。
+namespace {
+class FakeWrapEngine : public ITextEngine {
+ public:
+  SizeF measure_text(const std::wstring& text, const TextStyle& ts,
+                     float max_w) override {
+    if (text.empty()) return {0, 0};
+    const float cw = 7.0f;
+    const float limit = max_w > 0 ? max_w : 1e9f;  // 像素宽上限
+    size_t lines = 1;
+    float cur = 0;
+    for (wchar_t c : text) {
+      if (c == L'\n') {
+        ++lines;
+        cur = 0;
+        continue;
+      }
+      cur += cw;
+      if (cur > limit) {  // 放不下 → 换行
+        ++lines;
+        cur = cw;
+      }
+    }
+    return {std::min(cur, limit), static_cast<float>(lines) * ts.size * 1.43f};
+  }
+};
+}  // namespace
+
+// ← notice-manager.tsx:196-200 onContextMenu（右键复制）+ :178-212
+//   MUI Alert message 块（minWidth:0 / overflow:auto）长文案自动折行，条目变高。
+UT_TEST(t21_snackbar_wrap_and_right_click_copy) {
+  using clashwin::events::NoticeItem;
+  using clashwin::events::NoticeService;
+
+  FakeWrapEngine fake;
+  set_text_engine(&fake);
+
+  SnackbarW bar;
+  bar.set_position("top-right");
+  bar.set_bounds({0, 0, 600, 900});  // 宽窗 → 条目封顶 360，消息可用宽 360-104=256
+
+  // 单行：仍是 MUI Alert filled 的 48（6+36+6）
+  std::vector<NoticeItem> one;
+  one.push_back({1, "info", 0, "short"});
+  bar.set_items(one);
+  UT_CHECK_EQ(bar.item_rects()[0].h, 48.0f);
+
+  // 长文案 → 折行 → 条目变高（不省略、不截断）
+  const std::string long_msg(120, 'x');  // 120 字符 / 每行 36 → 4 行
+  std::vector<NoticeItem> two;
+  two.push_back({1, "info", 0, "short"});
+  two.push_back({2, "error", 0, long_msg});
+  bar.set_items(two);
+  const float h0 = bar.item_rects()[0].h;
+  const float h1 = bar.item_rects()[1].h;
+  UT_CHECK_EQ(h0, 48.0f);
+  UT_CHECK(h1 > 48.0f);
+  // 4 行 × 20.02 + 16(消息 padding) + 12(卡片 padding) = 108.1 → 取整 108
+  UT_CHECK_EQ(h1, 108.0f);
+  // 第二条 y = 20 + 48 + gap 10
+  UT_CHECK_EQ(bar.item_rects()[1].y, 78.0f);
+
+  // bottom 锚点：最新一条贴底，高度按各自折行算
+  bar.set_position("bottom-right");
+  bar.layout_items();
+  UT_CHECK_EQ(bar.item_rects()[1].y, 900.0f - 20.0f - h1);
+  UT_CHECK_EQ(bar.item_rects()[0].y, 900.0f - 20.0f - h1 - 10.0f - h0);
+
+  // 右键 → 复制该条全文（不关闭）；用完清场避免污染其它用例
+  for (const auto& stale : NoticeService::instance().snapshot())
+    NoticeService::instance().hide(stale.id);
+  NoticeService::instance().push("info", long_msg, 0);
+  bar.set_position("top-right");
+  bar.attach(NoticeService::instance());
+  bar.layout_items();
+  UT_CHECK_EQ(bar.visible_count(), 1u);
+  const RectF item = bar.item_rects()[0];
+  MouseEvent rd;
+  rd.type = MouseEventType::Down;
+  rd.buttons = kMouseRight;
+  rd.pos = {item.x + 20.0f, item.y + 10.0f};  // 落在消息区（不在关闭按钮上）
+  UT_CHECK(bar.on_mouse(rd));
+  // 关闭按钮上右键同样冒泡到 Alert 根 → 复制而非关闭（← :196-200）
+  MouseEvent rd2 = rd;
+  rd2.pos = {item.x + item.w - 8.0f - 15.0f, item.y + 10.0f + 15.0f};
+  UT_CHECK(bar.on_mouse(rd2));
+  // 两条通知都还在（右键不关闭）
+  const auto snap = NoticeService::instance().snapshot();
+  bool long_still_there = false;
+  for (const auto& it : snap)
+    if (it.message == long_msg) long_still_there = true;
+  UT_CHECK(long_still_there);
+
+  for (const auto& stale : NoticeService::instance().snapshot())
+    NoticeService::instance().hide(stale.id);
+  bar.set_items({});
+  set_text_engine(nullptr);
 }

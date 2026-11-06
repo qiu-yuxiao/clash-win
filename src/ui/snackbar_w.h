@@ -10,6 +10,10 @@
 //   MUI Alert filled 度量：padding 6px 16px / radius 4px / icon 22px + marginRight 12
 //   / message padding 8px 0 / fontSize 14 lineHeight 1.43 / action padding 4px 0 0 16px
 //   + marginRight -8px。
+// 消息块（.MuiAlert-message）minWidth:0 / overflow:auto → 长文案**自动折行**，
+//   条目高度随行数增长（不截断、不省略）。
+// 右键（onContextMenu :196-200）：复制该条全文 + copySuccess 提示 1000ms
+//   （← resolveNoticeCopyText :100-129 + handleNoticeCopy :178-193）。
 // 通知位置取 verge.notice_position（缺省 "top-right"，config/verge.rs:353）。
 #include <string>
 #include <vector>
@@ -45,6 +49,9 @@ class SnackbarW : public Widget {
   static constexpr float kItemH = 48;      // 6 + 36 + 6（MUI Alert filled 单行）
   static constexpr float kRadius = 4;      // MUI Alert borderRadius
   static constexpr float kIconSize = 22;   // .MuiAlert-icon fontSize 22
+  static constexpr float kLineH = 20.02f;  // fontSize 14 × lineHeight 1.43
+  static constexpr float kMsgPadY = 8;     // .MuiAlert-message padding 8px 0
+  static constexpr float kPadY = 6;        // Alert root padding 6px 16px
 
   SizeF on_measure(float max_w, float max_h) override;
   void on_arrange(const RectF& area) override;
@@ -55,8 +62,15 @@ class SnackbarW : public Widget {
   const std::vector<RectF>& item_rects() const { return item_rects_; }
   void layout_items();  // 依 bounds + position_ 计算 item_rects_
 
+  // 条目高度（按消息在 item_w 内折行的行数算；单行 = kItemH）
+  static float item_height(const std::string& message, float item_w);
+
  private:
   void refresh();
+  // 消息可用宽（Alert root padding 16 + 图标 22+12 + action 30+16-8）
+  static float message_width(float item_w);
+  // 右键复制该条全文 + copySuccess 提示（← :178-193）
+  static void copy_notice(const std::string& text);
   // 关闭按钮命中盒（绝对条目矩形，自身坐标系）
   static RectF close_rect(const RectF& item);
 
