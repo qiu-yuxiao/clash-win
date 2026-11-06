@@ -17,6 +17,7 @@ struct ID2D1RenderTarget;
 struct ID2D1HwndRenderTarget;
 struct ID2D1SolidColorBrush;
 struct ID2D1Bitmap;
+struct ID2D1Layer;
 struct IDWriteFactory;
 struct IDWriteTextFormat;
 struct IWICImagingFactory;
@@ -103,6 +104,8 @@ class D2dRenderTarget : public IRenderTarget, public ITextEngine {
   void draw_bitmap(uint64_t id, const RectF& r, float opacity) override;
   void push_clip(const RectF& r) override;
   void pop_clip() override;
+  void push_opacity(float alpha) override;
+  void pop_opacity() override;
   void set_origin(const PointF& global_origin) override;
   PointF origin() const override { return origin_; }
   float scale() const override;
@@ -136,6 +139,11 @@ class D2dRenderTarget : public IRenderTarget, public ITextEngine {
   std::unordered_map<uint64_t, IDWriteTextFormat*> formats_;
   std::unordered_map<uint64_t, ID2D1Bitmap*> bitmaps_;
   std::unordered_map<uint64_t, SizeF> measure_cache_;
+  // 不透明度层：D2D 的 layer 资源可重复使用（同一次 BeginDraw 内可多次
+  // Push/Pop），只保留一个；opacity_pushed_ 逐层记录「是否真推了 layer」
+  // （满不透明/创建失败时为空推），保证 Push/Pop 严格配对。
+  ID2D1Layer* opacity_layer_ = nullptr;
+  std::vector<bool> opacity_pushed_;
 };
 
 }  // namespace clashwin::ui

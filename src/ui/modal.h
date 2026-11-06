@@ -2,11 +2,13 @@
 // Modal（T10）：模态遮罩 + 居中对话框底座（标题/内容/按钮排）。
 // 对照 MUI Dialog：全屏半透明遮罩吞掉下层全部点击（z_order=1000 顶层），
 // 点遮罩默认关闭（on_mask_click 可拦截）；按钮排 [取消, 确定] 左→右。
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
 
 #include "container.h"
+#include "overlay_fade.h"
 #include "label.h"
 
 namespace clashwin::ui {
@@ -43,6 +45,11 @@ class Modal : public Widget {
     return open_ && Widget::hit_self(local);
   }
 
+  // 过渡进度（测试断言用）：1 = 完全显示，0 = 完全隐藏。
+  // 与 open_ 是两个概念：close() 后 open_ 立即为 false（交互/回调语义立刻生效），
+  // 但画面还要淡出 195ms 才消失（← MUI Fade leave）。
+  float fade() const { return fade_.value(); }
+
   // 绘制参数
   Color4f mask_ = Color4f::hex(0x000000, 0.50f);  // src: MUI Dialog backdrop rgba(0,0,0,.5)
   Color4f dialog_bg_ = Color4f::hex(0xFFFFFF);  // src: MUI background.paper #fff
@@ -54,6 +61,9 @@ class Modal : public Widget {
   void layout_dialog();
 
   bool open_ = false;
+  // MUI Fade 过渡：整棵 Modal（遮罩 + 纸面）作为一层按 alpha 合成，
+  // 与 <Fade> 包裹 Dialog 完全等价（遮罩 alpha .5 再乘 fade）。
+  OverlayFade fade_;
   std::wstring title_;
   Widget* content_ = nullptr;        // add_child 转移所有权
   SizeF dialog_size_{};

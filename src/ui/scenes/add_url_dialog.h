@@ -14,6 +14,7 @@
 #include <string>
 
 #include "core/quick_routing.h"
+#include "ui/overlay_fade.h"
 #include "ui/widget.h"
 
 namespace clashwin::ui::scene {
@@ -59,6 +60,8 @@ class AddUrlDialog : public Widget {
   void do_submit();
 
   bool open_ = false;
+  // ← MUI Dialog 缺省 Fade 过渡（enter 225ms / leave 195ms）
+  OverlayFade fade_;
   std::string payload_;
   core::quick_routing::RuleTarget target_ = core::quick_routing::RuleTarget::Proxy;
   std::string error_message_;

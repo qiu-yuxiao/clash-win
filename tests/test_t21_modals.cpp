@@ -599,6 +599,10 @@ UT_TEST(t21_d2d_local_coordinates_no_double_offset) {
   // 将弹窗挂载在非零全局坐标：x = 100, y = 80
   addurl.layout_tree({100, 80, 600, 500});
 
+  // 等 MUI Fade 淡入（225ms）结束再取像素：open() 起是不透明度 0→1，
+  // 立刻绘制会是空的（这正是 MUI 的行为，不是坐标问题）。
+  ::Sleep(OverlayFade::kEnterMs + 40);
+
   rt().begin_frame();
   rt().clear({1, 1, 1, 1});
   addurl.paint_all(rt());

@@ -191,6 +191,7 @@ add_library(clashwin_ui STATIC
   src/ui/scroll_list.cpp
   src/ui/context_menu.cpp
   src/ui/modal.cpp
+  src/ui/overlay_fade.cpp
   src/ui/snackbar_w.cpp
   src/ui/notice_handler.cpp
   src/ui/tooltip_w.cpp

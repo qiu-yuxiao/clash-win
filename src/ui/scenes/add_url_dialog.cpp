@@ -71,6 +71,7 @@ void AddUrlDialog::open() {
   hover_cancel_ = false;
   hover_add_ = false;
   input_focused_ = true;  // src: :220 autoFocus
+  fade_.show();           // ← MUI Dialog 缺省 Fade（enter 225ms）
   invalidate();
 }
 
@@ -79,6 +80,7 @@ void AddUrlDialog::close() {
   open_ = false;
   input_focused_ = false;
   payload_.clear();  // src: add-url-dialog.tsx:49-53 handleClose setText('')
+  fade_.hide();      // ← MUI Fade leave 195ms：画面延后消失，交互立刻失效
   invalidate();
   if (on_dismiss) on_dismiss();
 }
@@ -139,7 +141,9 @@ void AddUrlDialog::on_arrange(const RectF& area) {
 }
 
 void AddUrlDialog::on_paint(IRenderTarget& rt) {
-  if (!open_) return;
+  if (fade_.advance()) invalidate();  // 自续帧，直到过渡结束
+  set_opacity(fade_.value());        // 每帧同步整棵子树的不透明度
+  if (fade_.hidden()) return;
   // 1. backdrop（src: MUI Dialog 默认 backdrop rgba(0,0,0,.5)；组件库默认值）
   rt.fill_rect({0, 0, bounds().w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
 

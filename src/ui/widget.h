@@ -78,6 +78,10 @@ class Widget {
   void set_visible(bool v);
   bool enabled() const { return enabled_; }
   void set_enabled(bool e);
+  // 子树整体不透明度（0..1）：<1 时该 widget 与其全部子节点在一次合成里
+  // 按 alpha 混合（← MUI Fade 过渡树）。用于 Dialog / Menu 的淡入淡出。
+  float opacity() const { return opacity_; }
+  void set_opacity(float a);
   bool focused() const;                 // route 层焦点 == 本 widget
   void request_focus();                 // wants_key 才有意义
   void blur();
@@ -163,6 +167,7 @@ class Widget {
   Padding padding_{};
   bool visible_ = true;
   bool enabled_ = true;
+  float opacity_ = 1.0f;  // 子树不透明度（← MUI Fade）
   int z_order_ = 0;
   std::wstring tooltip_text_;
 

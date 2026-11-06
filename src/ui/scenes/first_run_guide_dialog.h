@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "ui/overlay_fade.h"
 #include "ui/widget.h"
 
 namespace clashwin::ui::scene {
@@ -112,6 +113,7 @@ class FirstRunGuideDialog : public Widget {
 
  private:
   bool open_ = false;
+  OverlayFade fade_;  // ← MUI Dialog 缺省 Fade（enter 225 / leave 195）
   FirstRunStep step_ = FirstRunStep::Input;
   std::string url_;
   std::string detected_clipboard_url_;

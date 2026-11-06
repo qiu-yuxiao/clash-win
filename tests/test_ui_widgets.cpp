@@ -4,6 +4,7 @@
 #include "ui/button.h"
 #include "ui/checkbox_w.h"
 #include "ui/icon_w.h"
+#include "ui/overlay_fade.h"
 #include "ui/segmented.h"
 #include "ui/slider.h"
 #include "ui/switch_w.h"
@@ -297,4 +298,47 @@ UT_TEST(ui_widget_icon_mapping) {
   icon.set_icon("settings");
   icon.layout_tree({0, 0, 20, 20});
   UT_CHECK(icon.glyph_for("settings") != 0);
+}
+
+// ← MUI theme.transitions.duration：Dialog 淡入 225ms（enteringScreen）、
+//   淡出 195ms（leavingScreen）。这是 Mini 所有 <Dialog> 的缺省过渡。
+UT_TEST(ui_overlay_fade_enter_leave_timing) {
+  using clashwin::ui::OverlayFade;
+  OverlayFade f;
+  UT_CHECK(f.hidden());
+  UT_CHECK(!f.animating());
+
+  // 进入：0 → 1，225ms
+  f.show_at(1000);
+  UT_CHECK(f.animating());
+  UT_CHECK(near_f(f.value(), 0.0f));
+  f.advance_at(1000 + 112);  // 112/225 ≈ 0.498
+  UT_CHECK(f.value() > 0.45f && f.value() < 0.55f);
+  f.advance_at(1000 + 225);
+  UT_CHECK(!f.animating());
+  UT_CHECK(near_f(f.value(), 1.0f));
+
+  // 退出：1 → 0，195ms（比进入快，MUI 缺省不对称）
+  f.hide_at(2000);
+  UT_CHECK(f.animating());
+  f.advance_at(2000 + 97);  // 97/195 ≈ 0.497 → 1-0.497 ≈ 0.503
+  UT_CHECK(f.value() > 0.4f && f.value() < 0.6f);
+  f.advance_at(2000 + 195);
+  UT_CHECK(f.hidden());
+  UT_CHECK(!f.animating());
+
+  // jump_to：跳过过渡（首帧直出）
+  f.jump_to(1.0f);
+  UT_CHECK(near_f(f.value(), 1.0f) && !f.animating());
+  f.jump_to(0.0f);
+  UT_CHECK(f.hidden());
+
+  // Widget::set_opacity 钳位与「<1 才合成」的判定口径
+  Button b(L"x");
+  b.set_opacity(0.5f);
+  UT_CHECK(near_f(b.opacity(), 0.5f));
+  b.set_opacity(-1.0f);
+  UT_CHECK(near_f(b.opacity(), 0.0f));
+  b.set_opacity(2.0f);
+  UT_CHECK(near_f(b.opacity(), 1.0f));
 }

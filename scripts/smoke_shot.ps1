@@ -4,6 +4,7 @@ param(
   [string]$Exe = "C:\Users\sun_y\Documents\AntiGravity_Projects\ClashWin\build\bin\Release\clashwin.exe",
   [string]$Out = "C:\Users\sun_y\Documents\AntiGravity_Projects\ClashWin\ui_diag\shot.png",
   [int]$WaitSec = 9,
+  [string]$ProcName = "clashwin",   # 像素对照时传 clash-mini 抓上游窗口（只读，不干扰）
   [switch]$NoLaunch
 )
 $ErrorActionPreference = 'Continue'
@@ -55,7 +56,7 @@ if (-not $NoLaunch) {
   Start-Sleep -Seconds $WaitSec
 }
 
-$p = Get-Process clashwin -ErrorAction SilentlyContinue | Select-Object -First 1
+$p = Get-Process $ProcName -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $p) { Write-Output "NOT_RUNNING"; exit 1 }
 Write-Output ("PID=" + $p.Id)
 $ws = [CwShot]::Wins([uint32]$p.Id)
@@ -65,7 +66,7 @@ foreach ($h in $ws) { Write-Output ([CwShot]::Info($h)) }
 $target = $ws[0]
 for ($k=1; $k -lt $ws.Count; $k++) {
   $s = [CwShot]::Info($ws[$k])
-  if ($s -match 'title=Clash') { $target = $ws[$k] }
+  if ($s -match 'title=(Clash|Mini)') { $target = $ws[$k] }
 }
 $ok = [CwShot]::Shot($target, $Out)
 Write-Output ("SHOT ok=" + $ok + " -> " + $Out)

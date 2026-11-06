@@ -67,14 +67,17 @@ void Modal::open(std::unique_ptr<Widget> content, const SizeF& dialog_size,
   open_ = true;
   dialog_->set_visible(true);
   layout_dialog();  // 立即居中落位（on_arrange 只在根重排时触发）
+  fade_.show();  // ← MUI duration.enteringScreen 225ms
   invalidate();
   if (on_open) on_open();
 }
 
 void Modal::close() {
   if (!open_) return;
+  // open_ 立刻置 false：命中、回调、on_mask_click 语义与旧实现一致；
+  // 画面另行淡出 195ms（MUI leave），由 on_paint 自续帧推进。
   open_ = false;
-  dialog_->set_visible(false);
+  fade_.hide();  // ← MUI duration.leavingScreen 195ms
   invalidate();
   if (on_close) on_close();
 }
@@ -113,14 +116,19 @@ bool Modal::on_mouse(const MouseEvent& e) {
 }
 
 void Modal::on_paint(IRenderTarget& rt) {
-  if (!open_) return;
+  if (fade_.advance()) invalidate();  // 自续帧，直到过渡结束
+  set_opacity(fade_.value());        // 遮罩 + 纸面统一按 fade 合成（MUI <Fade> 同构）
+  if (fade_.hidden()) {  // 淡出完成 → 纸面撤下，本帧不画
+    dialog_->set_visible(false);
+    return;
+  }
   rt.fill_rect({0, 0, bounds().w, bounds().h}, Brush{mask_});
 }
 
 void Modal::on_arrange(const RectF& area) {
   set_bounds(area);
   if (open_) layout_dialog();
-  else dialog_->set_visible(false);
+  else if (fade_.hidden()) dialog_->set_visible(false);
 }
 
 }  // namespace clashwin::ui

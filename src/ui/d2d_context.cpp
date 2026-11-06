@@ -191,6 +191,8 @@ void D2dRenderTarget::destroy() {
   formats_.clear();
   measure_cache_.clear();  // 【FONTSIZE-FIX】测量含 dpi 因子，重建时一并失效
   bitmaps_.clear();
+  if (opacity_layer_) { opacity_layer_->Release(); opacity_layer_ = nullptr; }
+  opacity_pushed_.clear();
   if (hwnd_rt_) { hwnd_rt_->Release(); hwnd_rt_ = nullptr; }
   if (wic_rt_) { wic_rt_->Release(); wic_rt_ = nullptr; }
   if (wic_bitmap_) { wic_bitmap_->Release(); wic_bitmap_ = nullptr; }
@@ -605,6 +607,33 @@ void D2dRenderTarget::pop_clip() {
   if (active_rt_) active_rt_->PopAxisAlignedClip();
 }
 
+// ---- 不透明度层（← MUI Fade：Dialog entering 225ms / leaving 195ms） ----
+void D2dRenderTarget::push_opacity(float alpha) {
+  if (!active_rt_) return;
+  if (alpha >= 0.999f) {  // 满不透明 → 免合成，但仍占栈位保证配对
+    opacity_pushed_.push_back(false);
+    return;
+  }
+  if (alpha < 0.0f) alpha = 0.0f;
+  if (!opacity_layer_ &&
+      FAILED(active_rt_->CreateLayer(nullptr, &opacity_layer_))) {
+    opacity_layer_ = nullptr;
+    opacity_pushed_.push_back(false);  // 退化：不合成，也不破坏配对
+    return;
+  }
+  D2D1_LAYER_PARAMETERS p = D2D1::LayerParameters();
+  p.opacity = alpha;
+  active_rt_->PushLayer(&p, opacity_layer_);
+  opacity_pushed_.push_back(true);
+}
+
+void D2dRenderTarget::pop_opacity() {
+  if (!active_rt_ || opacity_pushed_.empty()) return;
+  const bool pushed = opacity_pushed_.back();
+  opacity_pushed_.pop_back();
+  if (pushed) active_rt_->PopLayer();
+}
+
 float D2dRenderTarget::scale() const { return dpi_ / 96.0f; }
 SizeF D2dRenderTarget::size() const { return logical_size_; }
 bool D2dRenderTarget::is_lost() const { return lost_; }
@@ -620,6 +649,10 @@ bool D2dRenderTarget::end_frame() {
   if (FAILED(hr))
   if (hr == D2DERR_RECREATE_TARGET) {
     lost_ = true;
+    // layer 与 target 同生命周期：设备丢失后必须一起丢弃，否则重建目标后
+    // 继续用旧 layer 会返回 D2DERR_WRONG_STATE。
+    if (opacity_layer_) { opacity_layer_->Release(); opacity_layer_ = nullptr; }
+    opacity_pushed_.clear();
     CWLOG_WARN("D2dRenderTarget: D2DERR_RECREATE_TARGET（设备丢失，待重建）");
     return false;
   }

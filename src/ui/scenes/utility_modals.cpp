@@ -51,6 +51,7 @@ EditProfileModal::EditProfileModal(Widget* parent) : Widget(parent) {
 void EditProfileModal::open(const std::string& name, const std::string& url, int interval,
                             bool is_local) {
   open_ = true;
+  fade_.show();
   name_ = name;
   url_ = url;
   interval_mins_ = interval;  // src: _layout.tsx:973 直接取 option.update_interval（0=禁用）
@@ -64,6 +65,7 @@ void EditProfileModal::open(const std::string& name, const std::string& url, int
 void EditProfileModal::close() {
   if (!open_) return;
   open_ = false;
+  fade_.hide();  // 画面延后 195ms 消失，交互立刻失效
   invalidate();
   if (on_dismiss) on_dismiss();
 }
@@ -96,7 +98,9 @@ void EditProfileModal::on_paint(IRenderTarget& rt) {
   //   标题 h6(20) bold mb2(16)；字段 label body2(14) bold mb.5(4)、gap2(16)；
   //   输入 get3DInputStyle outline 2px；mb3(24)；按钮 h28 px16 fs12，
   //   右对齐 gap1.5(12)，顺序 取消→保存
-  if (!open_) return;
+  if (fade_.advance()) invalidate();  // 自续帧，直到过渡结束
+  set_opacity(fade_.value());        // 每帧同步整棵子树的不透明度
+  if (fade_.hidden()) return;
 
   const bool light = ThemeService::instance().is_light();
   const auto& pal = ThemeService::instance().palette();
@@ -349,6 +353,7 @@ void ClientUpdateModal::handle_progress_event(const std::string& status, int pro
 void ClientUpdateModal::open(const std::string& current_ver, const std::string& latest_ver,
                              const std::string& changelog, const std::string& download_url) {
   open_ = true;
+  fade_.show();
   current_version_ = current_ver;
   latest_version_ = latest_ver;
   changelog_ = changelog;
@@ -366,6 +371,7 @@ void ClientUpdateModal::open(const std::string& current_ver, const std::string& 
 void ClientUpdateModal::close() {
   if (!open_) return;
   open_ = false;
+  fade_.hide();  // 画面延后 195ms 消失，交互立刻失效
   invalidate();
   if (on_dismiss) on_dismiss();
 }
@@ -398,7 +404,9 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
   //   MUI Dialog paper（theme-panel 类、radius 8）+ h6 标题 + body2 版本两行 +
   //   changelog 框（13px pre-wrap）+ 进度条（8px，状态≠idle 时显示）+
   //   关闭（outlined）/立即更新（contained primary）按钮（downloading 时禁用）。
-  if (!open_) return;
+  if (fade_.advance()) invalidate();  // 自续帧，直到过渡结束
+  set_opacity(fade_.value());        // 每帧同步整棵子树的不透明度
+  if (fade_.hidden()) return;
 
   rt.fill_rect({0, 0, bounds().w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
 
@@ -585,6 +593,7 @@ CoreUpdateModal::~CoreUpdateModal() {
 
 void CoreUpdateModal::open(const std::string& current_ver, const std::string& latest_ver) {
   open_ = true;
+  fade_.show();
   current_version_ = current_ver;
   latest_version_ = latest_ver;
   progress_ = 0;
@@ -599,6 +608,7 @@ void CoreUpdateModal::open(const std::string& current_ver, const std::string& la
 void CoreUpdateModal::close() {
   if (!open_) return;
   open_ = false;
+  fade_.hide();  // 画面延后 195ms 消失，交互立刻失效
   invalidate();
   if (on_dismiss) on_dismiss();
 }
@@ -660,7 +670,9 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
   // 1:1 对齐 layout-dialogs.tsx:412-553 Core Update Dialog（「Mini 无对应物」
   // 的旧注释有误：Mini 具备本对话框）。MUI Dialog paper + h6 标题 + body2
   // 版本两行 + 进度条（状态≠idle）+ 关闭/升级按钮（busy 时禁用）。
-  if (!open_) return;
+  if (fade_.advance()) invalidate();  // 自续帧，直到过渡结束
+  set_opacity(fade_.value());        // 每帧同步整棵子树的不透明度
+  if (fade_.hidden()) return;
 
   const auto& vars = ThemeService::instance().vars();
   rt.fill_rect({0, 0, bounds().w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
@@ -853,6 +865,7 @@ LogViewerModal::LogViewerModal(Widget* parent) : Widget(parent) {
 
 void LogViewerModal::open() {
   open_ = true;
+  fade_.show();
   flush_incoming();
   hover_close_x_ = false;
   hover_pause_ = false;
@@ -864,6 +877,7 @@ void LogViewerModal::open() {
 void LogViewerModal::close() {
   if (!open_) return;
   open_ = false;
+  fade_.hide();  // 画面延后 195ms 消失，交互立刻失效
   invalidate();
   if (on_dismiss) on_dismiss();
 }
@@ -962,7 +976,9 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
   // Mini 的日志为 MUI Dialog（src/pages/_layout/components/layout-dialogs.tsx:556），
   // 默认 Backdrop = rgba(0,0,0,0.5)（@mui/material/Backdrop/Backdrop.js:48）；
   // 点遮罩/按 Esc 均关闭（layout-dialogs.tsx:558 `onClose={() => setLogsOpen(false)}`）。
-  if (!open_) return;
+  if (fade_.advance()) invalidate();  // 自续帧，直到过渡结束
+  set_opacity(fade_.value());        // 每帧同步整棵子树的不透明度
+  if (fade_.hidden()) return;
 
   // 豁免: Mini 无对应物 — 本查看器为 ClashWin 自加的终端风日志查看器，
   //   Mini 日志页无终端配色字面量（出处: layout-dialogs.tsx:565-594 无终端配色）。

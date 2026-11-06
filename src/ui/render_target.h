@@ -154,6 +154,12 @@ class IRenderTarget {
   virtual void draw_bitmap(uint64_t id, const RectF& r, float opacity) = 0;
   virtual void push_clip(const RectF& r) = 0;
   virtual void pop_clip() = 0;
+  // 子树整体不透明度：范围内的绘制按 alpha 与背景合成一次（← MUI Fade 过渡，
+  // Dialog / Menu 淡入淡出）。D2D 侧用 PushLayer(opacity) 实现；
+  // 缺省 no-op —— 测试替身与不需合成的实现可直接继承。
+  // 调用必须成对且各自负责，异常路径不存在（纯绘制）。
+  virtual void push_opacity(float alpha) { (void)alpha; }
+  virtual void pop_opacity() {}
   // 绘制原点（全局逻辑坐标）：on_paint 约定用局部坐标 {0,0,w,h}，
   // Widget::paint 在调用前把 origin 设为该 widget 的全局原点（实现经
   // transform 平移），使局部绘制自动落到全局正确位置。

@@ -133,6 +133,14 @@ void Widget::set_enabled(bool e) {
   invalidate();
 }
 
+void Widget::set_opacity(float a) {
+  if (a < 0.0f) a = 0.0f;
+  if (a > 1.0f) a = 1.0f;
+  if (opacity_ == a) return;
+  opacity_ = a;
+  invalidate();
+}
+
 bool Widget::focused() const { return g_focus == this; }
 
 void Widget::request_focus() {
@@ -186,6 +194,8 @@ void Widget::paint(IRenderTarget& rt, const RectF& clip) {
   // clip 随 origin 局部化（visible 是全局矩形；push 在新 transform 下
   // 才不会错位——嵌套时旧实现会把内容裁光）
   rt.push_clip({visible.x - g.x, visible.y - g.y, visible.w, visible.h});
+  const bool faded = opacity_ < 0.999f;
+  if (faded) rt.push_opacity(opacity_);
   on_paint(rt);
   // 绘制顺序：z_order 升序稳定（同序按加入顺序 → 后加者在上）
   std::vector<Widget*> ordered;
@@ -198,6 +208,7 @@ void Widget::paint(IRenderTarget& rt, const RectF& clip) {
   for (Widget* c : ordered) {
     c->paint(rt, visible);
   }
+  if (faded) rt.pop_opacity();
   rt.set_origin(prev_origin);
   rt.pop_clip();
 }

@@ -14,6 +14,7 @@
 
 #include "events/event_bus.h"
 #include "ui/context_menu.h"
+#include "ui/overlay_fade.h"
 #include "ui/widget.h"
 #include "ui/i18n_text.h"  // F-D01
 
@@ -57,6 +58,7 @@ class EditProfileModal : public Widget {
 
  private:
   bool open_ = false;
+  OverlayFade fade_;  // ← MUI Dialog 缺省 Fade（enter 225 / leave 195）
   bool is_local_ = false;
   std::string name_;
   std::string url_;
@@ -118,6 +120,7 @@ class ClientUpdateModal : public Widget {
   void unsubscribe_events();
 
   bool open_ = false;
+  OverlayFade fade_;  // ← MUI Dialog 缺省 Fade（enter 225 / leave 195）
   bool is_downloading_ = false;
   std::string current_version_;  // open() 必赋值（不设陈旧占位，避免误显示旧版本号）
   std::string latest_version_;
@@ -178,6 +181,7 @@ class CoreUpdateModal : public Widget {
   void unsubscribe_events();
 
   bool open_ = false;
+  OverlayFade fade_;  // ← MUI Dialog 缺省 Fade（enter 225 / leave 195）
   bool is_upgrading_ = false;
   std::string current_version_ = "v1.19.27";
   std::string latest_version_ = "v1.19.28";
@@ -264,6 +268,7 @@ class LogViewerModal : public Widget {
   bool matches_filter(const LogEntry& entry) const;
 
   bool open_ = false;
+  OverlayFade fade_;  // ← MUI Dialog 缺省 Fade（enter 225 / leave 195）
   bool paused_ = false;
   bool desc_ = false;
   std::string level_filter_ = "all";  // all, debug, info, warn, error
