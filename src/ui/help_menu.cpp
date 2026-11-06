@@ -6,6 +6,7 @@
 
 #include "cmd/command_service.h"
 #include "events/event_bus.h"
+#include "events/notice.h"
 #include "util/log.h"
 #include "util/utf.h"
 #include "ui/i18n_text.h"  // F-D01
@@ -61,16 +62,27 @@ void HelpMenu::execute_action(HelpAction action, HWND hwnd) {
       events::EventBus::instance().publish("ui:open_guide", "");
       break;
     case HelpAction::ExportDiagnostics: {
-      run_command_async("export_diagnostic_bundle", [] {
+      // ← help-menu-button.tsx:156-180：常驻 info「正在生成诊断包」→ success「已导出：{{path}}」
+      //   （隐藏 info 在 finally 里，与源码 hideNotice(waitId) 同序）
+      const uint64_t wait_id = events::NoticeService::instance().push(
+          "info", tr8("layout.components.helpMenu.generatingDiagnostics"), 0);
+      run_command_async("export_diagnostic_bundle", [wait_id] {
         auto res = cmd::CommandService::instance().invoke("export_diagnostic_bundle", {});
         if (!res.is_ok()) {
           CWLOG_WARN("export_diagnostic_bundle failed: " + res.error().message);
+          events::NoticeService::instance().hide(wait_id);
           return;
         }
         if (res.value().is_string()) {
           std::string p = res.value().get<std::string>();
+          events::NoticeService::instance().hide(wait_id);
+          events::NoticeService::instance().push(
+              "success",
+              tr8("layout.components.helpMenu.diagnosticsExported", {{"path", p}}));
           (void)cmd::CommandService::instance().invoke("show_in_folder", {{"path", p}});
+          return;
         }
+        events::NoticeService::instance().hide(wait_id);
       });
       break;
     }

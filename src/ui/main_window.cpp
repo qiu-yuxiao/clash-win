@@ -18,6 +18,7 @@
 #include "cmd/command_service.h"
 #include "events/event_bus.h"
 #include "events/event_names.h"
+#include "ui/i18n_text.h"  // F-D01：通知文案走 locales，不硬编码中文
 #include "events/notice.h"
 #include "update/client_updater.h"  // install_app_update（B-D44 更新流收口）
 #include "theme/theme.h"
@@ -134,6 +135,8 @@ std::optional<std::pair<double, double>> LargeModeController::load(
 
 // ---------- 创建 ----------
 bool MainWindow::create(bool show_immediately) {
+  // UI 线程标记：通知可能由后台线程 push，SnackbarW 据此决定是否转投 UI 线程
+  UiPostbox::instance().mark_ui_thread();
   // exe 目录（几何文件落此处；与 T03 app_home_dir 口径一致）
   wchar_t exe[MAX_PATH] = {};
   GetModuleFileNameW(nullptr, exe, MAX_PATH);
@@ -334,6 +337,9 @@ void MainWindow::build_widget_tree() {
   snackbar_ = snack.get();
   root_.add_child(std::move(snack));
   snackbar_->attach(events::NoticeService::instance());
+  // 后端状态串 → 本地化 toast（← pages/_layout/utils/notification-handlers.ts）。
+  // 【缺口修复】EventBus::notice_message 此前零订阅者 → 导入/校验/服务结果全静默。
+  install_notice_handler();
 
   auto tb = std::make_unique<TitleBar>(this);
   title_bar_ = tb.get();
@@ -605,13 +611,19 @@ void MainWindow::build_scene() {
     settings_drawer_->on_patch_verge =
         [this](const std::string& k, const nlohmann::json& v) {
           auto& svc = cmd::CommandService::instance();
-          if (k == "clash_allow_lan") {
-            svc.invoke("patch_clash_config",
-                       nlohmann::json::object({{"allow-lan", v}}));
-            return;
-          }
-          if (k == "clash_ipv6") {
-            svc.invoke("patch_clash_config", nlohmann::json::object({{"ipv6", v}}));
+          // ← use-minimal-settings.ts:71-83：常驻 info「正在调整」→ success settings.mini.updated
+          //   / error 原文，finally 里 hideNotice。Allow LAN / IPv6 走 patch_clash_config。
+          if (k == "clash_allow_lan" || k == "clash_ipv6") {
+            const uint64_t wait_id = events::NoticeService::instance().push(
+                "info", tr8("layout.notices.adjusting"), 0);
+            const std::string field = (k == "clash_allow_lan") ? "allow-lan" : "ipv6";
+            auto r = svc.invoke("patch_clash_config", nlohmann::json::object({{field, v}}));
+            events::NoticeService::instance().hide(wait_id);
+            if (r.is_ok()) {
+              events::NoticeService::instance().push("success", tr8("settings.mini.updated"));
+            } else {
+              events::NoticeService::instance().push("error", r.error().message);
+            }
             return;
           }
           auto r = svc.invoke("patch_verge_config", nlohmann::json::object({{k, v}}));
@@ -630,16 +642,26 @@ void MainWindow::build_scene() {
           return r.is_ok();
         };
     settings_drawer_->on_select_profile = [](const std::string& uid) {
-      cmd::CommandService::instance().invoke(
+      auto r = cmd::CommandService::instance().invoke(
           "patch_profiles_config", nlohmann::json::object({{"current", uid}}));
+      // ← _layout.tsx:929-935：成功 profileSwitched（1000ms）/ 失败原文
+      if (r.is_ok()) events::EventBus::notice_message("profile_switched::ok", "");
+      else events::EventBus::notice_message("update_failed", r.error().message);
     };
     settings_drawer_->on_update_profile = [](const std::string& uid) {
-      cmd::CommandService::instance().invoke(
+      // ← _layout.tsx:938-952：info「正在更新订阅」→ success「订阅更新成功」/ error 原文
+      events::EventBus::notice_message("update_subscription::info", "");
+      auto r = cmd::CommandService::instance().invoke(
           "update_profile", nlohmann::json::object({{"index", uid}}));
+      if (r.is_ok()) events::EventBus::notice_message("update_subscription::ok", "");
+      else events::EventBus::notice_message("update_failed", r.error().message);
     };
     settings_drawer_->on_delete_profile = [](const std::string& uid) {
-      cmd::CommandService::instance().invoke(
+      // ← _layout.tsx:954-963：success common.deleteSuccess / error 原文
+      auto r = cmd::CommandService::instance().invoke(
           "delete_profile", nlohmann::json::object({{"index", uid}}));
+      if (r.is_ok()) events::EventBus::notice_message("profile_deleted::ok", "");
+      else events::EventBus::notice_message("update_failed", r.error().message);
     };
     // 编辑订阅保存 → patch_profile（← _layout.tsx:1021-1028；payload 见
     // src/cmd/cmd_profile.cpp:339-359）
@@ -732,14 +754,14 @@ void MainWindow::build_scene() {
         if (!r.is_ok()) {
           // ← use-client-update.ts:46-50 clientCheckFailed
           events::NoticeService::instance().push(
-              "error", "检查更新失败: " + r.error().message);
+              "error", tr8("layout.notices.clientCheckFailed", {{"message", r.error().message}}));
           UiPostbox::instance().post([this] { settings_drawer_->set_app_update_checking(false); });
           return;
         }
         const auto& v = r.value();
         if (!v.value("has_update", false)) {
           // ← use-client-update.ts:43-45 clientUpToDate
-          events::NoticeService::instance().push("info", "当前已是最新版本");
+          events::NoticeService::instance().push("info", tr8("layout.notices.clientUpToDate"));
           UiPostbox::instance().post([this] { settings_drawer_->set_app_update_checking(false); });
           return;
         }
@@ -774,7 +796,7 @@ void MainWindow::build_scene() {
         if (!r.is_ok()) {
           // ← use-core-update.ts:78-82 coreCheckFailed
           events::NoticeService::instance().push(
-              "error", "检查内核更新失败: " + r.error().message);
+              "error", tr8("layout.notices.coreCheckFailed", {{"message", r.error().message}}));
           UiPostbox::instance().post([this] { settings_drawer_->set_core_update_checking(false); });
           return;
         }
@@ -785,7 +807,7 @@ void MainWindow::build_scene() {
         };
         if (latest.empty() || strip(cur) == strip(latest)) {
           // ← use-core-update.ts:69-71 coreUpToDate
-          events::NoticeService::instance().push("info", "当前内核已是最新版本");
+          events::NoticeService::instance().push("info", tr8("layout.notices.coreUpToDate"));
           UiPostbox::instance().post([this] { settings_drawer_->set_core_update_checking(false); });
           return;
         }
@@ -814,7 +836,8 @@ void MainWindow::build_scene() {
               "download_app_update",
               nlohmann::json::object({{"url", url}, {"sha256", sha}, {"signature", sig}}));
           if (!r.is_ok()) {
-            const std::string msg = "更新失败: " + r.error().message;
+            const std::string msg =
+                tr8("layout.notices.clientUpdateFailed", {{"message", r.error().message}});
             // ← use-client-update.ts:114-123 clientUpdateFailed（进度行 + 通知双显）
             events::NoticeService::instance().push("error", msg);
             UiPostbox::instance().post([this, msg] {
@@ -829,7 +852,7 @@ void MainWindow::build_scene() {
           auto ir = update::ClientUpdater::instance().install_app_update(installer);
           if (!ir.is_ok()) {
             events::NoticeService::instance().push(
-                "error", "更新失败: " + ir.error().message);
+                "error", tr8("layout.notices.clientUpdateFailed", {{"message", ir.error().message}}));
             return;
           }
           // Mini 同款：立即退出（updater.rs:853 std::process::exit(0)）
@@ -855,7 +878,8 @@ void MainWindow::build_scene() {
             // ← use-core-update.ts:107-118 coreStartFailed（进度行）+
             //   coreUpgradeStartFailed（通知）
             events::NoticeService::instance().push(
-                "error", "启动内核升级失败: " + r.error().message);
+                "error",
+                tr8("layout.notices.coreUpgradeStartFailed", {{"message", r.error().message}}));
             UiPostbox::instance().post([this, msg] {
               if (core_update_) core_update_->handle_progress_event("error", 0, msg);
             });

@@ -7,10 +7,29 @@
 #include "events/notice.h"
 #include "util/log.h"
 
+#include <chrono>
 #include <future>
+#include <mutex>
+#include <string>
 #include <thread>
+#include <unordered_map>
 
 namespace clashwin::cmd {
+
+namespace {
+// ← services/cmds.ts:17-20 IPC_TIMEOUT_NOTICE_THROTTLE_MS：同 label 5s 只弹一次
+constexpr int64_t kIpcTimeoutNoticeThrottleMs = 5000;
+
+// ← services/cmds.ts:96-109 ipcTimeoutNoticeLabels 节流表
+std::mutex& ipc_timeout_mu() {
+  static std::mutex m;
+  return m;
+}
+std::unordered_map<std::string, int64_t>& ipc_timeout_labels() {
+  static std::unordered_map<std::string, int64_t> m;
+  return m;
+}
+}  // namespace
 
 CommandService& CommandService::instance() {
   static CommandService svc;
@@ -72,6 +91,24 @@ CmdResult CommandService::invoke(const std::string& name, const Json& args) {
   std::thread(std::move(task)).detach();
   if (fut.wait_for(std::chrono::milliseconds(timeout_ms)) != std::future_status::ready) {
     CWLOG_WARN("command timeout: " + name + " (" + std::to_string(timeout_ms) + "ms)");
+    // ← services/cmds.ts:84-110：超时要给用户看得见的反馈（否则界面像「点了没反应」），
+    //   同 label 5 秒内只弹一次，避免超时风暴刷屏。
+    const std::string msg =
+        "[" + name + "] IPC call timed out after " + std::to_string(timeout_ms) + "ms";
+    bool emit = false;
+    {
+      std::lock_guard<std::mutex> lock(ipc_timeout_mu());
+      const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::steady_clock::now().time_since_epoch())
+                              .count();
+      auto& labels = ipc_timeout_labels();
+      auto it = labels.find(name);
+      if (it == labels.end() || now - it->second >= kIpcTimeoutNoticeThrottleMs) {
+        labels[name] = now;
+        emit = true;
+      }
+    }
+    if (emit) events::EventBus::notice_message("ipc_timeout", msg);
     return CmdResult::err({errs::kTimeout, "command timeout: " + name});
   }
   return fut.get();

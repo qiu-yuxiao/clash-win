@@ -42,4 +42,12 @@ inline std::wstring tr(const char* key,
       clashwin::i18n::I18n::instance().t(key, args));
 }
 
+// UTF-8 版本：通知条（NoticeService 内部存 UTF-8）等非绘制场景用，
+// 省掉 utf16 往返。
+inline std::string tr8(const char* key,
+                       const std::map<std::string, std::string>& args = {}) {
+  ensure_i18n();
+  return clashwin::i18n::I18n::instance().t(key, args);
+}
+
 }  // namespace clashwin::ui

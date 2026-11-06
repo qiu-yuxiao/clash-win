@@ -17,6 +17,7 @@
 #include "util/dirs.h"
 #include "util/utf.h"
 
+#include <algorithm>
 #include <atomic>
 #include <fstream>
 
@@ -61,7 +62,22 @@ void restore_previous_profile(const std::string& prev) {
 }
 
 void notify_invalid(const core::validate::ValidationOutcome& o) {
-  events::EventBus::notice_message("config_validate::error", o.message);
+  core::validate::handle_validation_notice(o, core::validate::ValidationNoticeTarget::Runtime,
+                                          "运行时配置");
+}
+
+// ← save_profile.rs:88-105 profile_affects_runtime：
+//   current 自身，或 current 的 merge/script/rules/proxies/groups 子项 → 影响运行时
+bool profile_affects_runtime(const config::IProfiles& profiles, const std::string& index) {
+  const auto& cur = profiles.current;
+  if (!cur.has_value()) return false;
+  if (*cur == index) return true;
+  const config::PrfItem* item = profiles.get_item(*cur);
+  if (!item || !item->option.has_value()) return false;
+  const auto& o = *item->option;
+  return (o.merge && *o.merge == index) || (o.script && *o.script == index) ||
+         (o.rules && *o.rules == index) || (o.proxies && *o.proxies == index) ||
+         (o.groups && *o.groups == index);
 }
 }  // namespace
 
@@ -403,8 +419,14 @@ void install_cmd_profile(CommandService& svc) {
            return CmdResult::err({errs::kBadArgs, "index/data required"});
          }
          auto latest = config::Config::instance().profiles().latest_arc();
-         const config::PrfItem* item = latest->get_item(index->get<std::string>());
+         const std::string index_str = index->get<std::string>();
+         const config::PrfItem* item = latest->get_item(index_str);
          if (!item || !item->file) return CmdResult::err({errs::kBadArgs, "the file field is null"});
+         // ← save_profile.rs:29-31：merge 按 itype，script 按 itype 或 .js 后缀
+         const bool is_merge_file = item->itype.has_value() && *item->itype == "merge";
+         const bool is_script_file = (item->itype.has_value() && *item->itype == "script") ||
+                                     item->file->size() >= 3 &&
+                                         item->file->compare(item->file->size() - 3, 3, ".js") == 0;
          std::wstring path = util::dirs::app_profiles_dir() + L"\\" + utf::utf8_to_utf16(*item->file);
          std::string original;
          {
@@ -416,6 +438,19 @@ void install_cmd_profile(CommandService& svc) {
            }
          }
          const std::string& content = data->get<std::string>();
+         // ← save_profile.rs:46-56：内容相同（CRLF 归一后）直接返回 Valid，不写盘不校验
+         if (original == content) {
+           return CmdResult::ok(validation_outcome_to_json(core::validate::ValidationOutcome{}));
+         }
+         {
+           std::string a = original;
+           std::string b = content;
+           std::replace(a.begin(), a.end(), '\r', '\n');
+           std::replace(b.begin(), b.end(), '\r', '\n');
+           if (a == b) {
+             return CmdResult::ok(validation_outcome_to_json(core::validate::ValidationOutcome{}));
+           }
+         }
          {
            std::ofstream f(path, std::ios::binary);
            if (!f.is_open()) return CmdResult::err({errs::kIo, "open for write failed"});
@@ -444,12 +479,19 @@ void install_cmd_profile(CommandService& svc) {
            // ← 失败回写原文
            std::ofstream f(path, std::ios::binary);
            f << original;
-           notify_invalid(outcome);
+           // ← save_profile.rs:114-120：按文件种类选通知对象与文案
+           const auto target = is_script_file
+                                   ? core::validate::ValidationNoticeTarget::Script
+                                   : (is_merge_file
+                                          ? core::validate::ValidationNoticeTarget::Merge
+                                          : core::validate::ValidationNoticeTarget::Runtime);
+           const char* file_type =
+               is_script_file ? "脚本文件" : (is_merge_file ? "合并配置文件" : "YAML配置文件");
+           core::validate::handle_validation_notice(outcome, target, file_type);
            return CmdResult::ok(validation_outcome_to_json(outcome));
          }
-         // ← 影响运行时则 update_config_forced
-         if (latest->current.has_value() && *latest->current == *item->file) {
-           // current 存的是 uid；仅在保存的是当前 profile 文件时刷新
+         // ← 影响运行时则 update_config_forced（save_profile.rs:88-105）
+         if (profile_affects_runtime(*latest, index_str)) {
            auto refresh = update_config_forced();
            if (!refresh.is_valid()) notify_invalid(refresh);
          }

@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,7 @@
 #include "ui/scenes/unlock_dialog.h"
 #include "ui/scenes/utility_modals.h"
 #include "ui/snackbar_w.h"
+#include "ui/notice_handler.h"
 #include "ui/text_viewer.h"
 #include "ui/theme/theme.h"
 #include "util/dirs.h"
@@ -310,13 +312,6 @@ UT_TEST(t21_addurl_merge_yaml_injection) {
   dialog.set_payload("api.anthropic.com");
   dialog.set_target(core::quick_routing::RuleTarget::Proxy);
 
-  bool rule_added = false;
-  std::string captured_rule;
-  dialog.on_rule_added = [&](const std::string& r) {
-    rule_added = true;
-    captured_rule = r;
-  };
-
   // src: add-url-dialog.tsx:220-226 Textarea multiline → Enter 换行不提交，
   // 提交入口为「添加」按钮（:150-198 contained 按钮）。
   dialog.layout_tree({0, 0, 400, 500});
@@ -324,10 +319,67 @@ UT_TEST(t21_addurl_merge_yaml_injection) {
   MouseEvent up{MouseEventType::Up, {add.x + add.w / 2, add.y + add.h / 2}};
   dialog.on_mouse(up);
 
-  UT_CHECK(rule_added);
-  UT_CHECK(!captured_rule.empty());
-  UT_CHECK(captured_rule.find("anthropic.com") != std::string::npos);
   UT_CHECK(!dialog.is_open());  // 提交成功后自动关闭
+
+  // 规则确实落到 Merge.yaml 的 prepend-rules（← quick-routing.ts:151-178 置顶写入）
+  const auto merge = clashwin::util::dirs::app_profiles_dir() + L"\\Merge.yaml";
+  std::ifstream in(std::filesystem::path(merge), std::ios::binary);
+  UT_CHECK(in.is_open());
+  std::string body((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  UT_CHECK(body.find("anthropic.com") != std::string::npos);
+
+  // ← add-url-dialog.tsx:62-70：count > 0 → success「已添加 {{count}} 条规则」
+  bool has_success = false;
+  for (const auto& n : clashwin::events::NoticeService::instance().snapshot()) {
+    if (n.type == "success" && !n.message.empty()) has_success = true;
+    clashwin::events::NoticeService::instance().hide(n.id);
+  }
+  UT_CHECK(has_success);
+}
+
+// ← add-url-dialog.tsx:54-72：addQuickRoutingRules 支持多行/逗号/分号批量；
+//   count==0 → info「没有新增规则」（不再静默、也不再只加第一条）
+UT_TEST(t21_addurl_batch_multiline_and_no_change) {
+  TempHomeGuard th;
+  {
+    AddUrlDialog dialog;
+    dialog.open();
+    // 三个不同主域：换行 + 分号混排（extract_domain_suffix 会把 a/b.example.com
+    // 归并成同一个 example.com，所以这里刻意用不同二级域）
+    dialog.set_payload("a.example.com\nb.other.net;c.third.org");
+    dialog.layout_tree({0, 0, 400, 500});
+    RectF add = dialog.add_btn_rect();
+    MouseEvent up{MouseEventType::Up, {add.x + add.w / 2, add.y + add.h / 2}};
+    dialog.on_mouse(up);
+    UT_CHECK(!dialog.is_open());
+  }
+  const auto merge = clashwin::util::dirs::app_profiles_dir() + L"\\Merge.yaml";
+  std::ifstream in(std::filesystem::path(merge), std::ios::binary);
+  UT_CHECK(in.is_open());
+  std::string body((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  UT_CHECK(body.find("example.com") != std::string::npos);
+  UT_CHECK(body.find("other.net") != std::string::npos);
+  UT_CHECK(body.find("third.org") != std::string::npos);
+
+  for (const auto& n : clashwin::events::NoticeService::instance().snapshot())
+    clashwin::events::NoticeService::instance().hide(n.id);
+
+  // 重复输入同一条 → 去重后 count==0 → info
+  {
+    AddUrlDialog dialog;
+    dialog.open();
+    dialog.set_payload("a.example.com");
+    dialog.layout_tree({0, 0, 400, 500});
+    RectF add = dialog.add_btn_rect();
+    MouseEvent up{MouseEventType::Up, {add.x + add.w / 2, add.y + add.h / 2}};
+    dialog.on_mouse(up);
+  }
+  bool has_info = false;
+  for (const auto& n : clashwin::events::NoticeService::instance().snapshot()) {
+    if (n.type == "info" && !n.message.empty()) has_info = true;
+    clashwin::events::NoticeService::instance().hide(n.id);
+  }
+  UT_CHECK(has_info);
 }
 
 // Test 7: UnlockDialog 12 Platforms & Badges
@@ -639,4 +691,85 @@ UT_TEST(t21_snackbar_alert_layout_and_close) {
   UT_CHECK_EQ(NoticeService::instance().snapshot().size(), size_t(1));
   UT_CHECK(NoticeService::instance().snapshot()[0].id != first_id);
   bar.set_items({});
+}
+
+// ← src/pages/_layout/utils/notification-handlers.ts:12-88（27 条 status → toast 映射）
+// ← src/services/notice-service.ts:169-280（prefixedRaw：译文 + 空格 + 明细）
+UT_TEST(t21_notice_status_mapping) {
+  using clashwin::events::NoticeService;
+
+  auto clear = [] {
+    auto items = NoticeService::instance().snapshot();
+    for (const auto& it : items) NoticeService::instance().hide(it.id);
+  };
+  clear();
+
+  // 1) key + 明细 → prefixedRaw（译文后跟一个空格再跟原文）
+  UT_CHECK(dispatch_notice("import_sub_url::ok", ""));
+  {
+    auto s = NoticeService::instance().snapshot();
+    UT_CHECK_EQ(s.size(), size_t(1));
+    UT_CHECK_EQ(s[0].type, std::string("success"));
+    UT_CHECK_EQ(s[0].duration_ms, 3000);          // success 缺省 3000
+    UT_CHECK(!s[0].message.empty());
+  }
+  clear();
+
+  // 2) 无 key 的错误：直接显示后端原文（Mini: showNotice.error(msg)）
+  UT_CHECK(dispatch_notice("import_sub_url::error", "下载超时"));
+  {
+    auto s = NoticeService::instance().snapshot();
+    UT_CHECK_EQ(s.size(), size_t(1));
+    UT_CHECK_EQ(s[0].type, std::string("error"));
+    UT_CHECK_EQ(s[0].message, std::string("下载超时"));
+    UT_CHECK_EQ(s[0].duration_ms, 8000);          // error 缺省 8000
+  }
+  clear();
+
+  // 3) 细分校验状态各有独立文案（同一 kind 不同 target 不串味）
+  UT_CHECK(dispatch_notice("config_validate::merge_syntax_error", "bad merge"));
+  UT_CHECK(dispatch_notice("config_validate::script_syntax_error", "SyntaxError: x"));
+  {
+    auto s = NoticeService::instance().snapshot();
+    UT_CHECK_EQ(s.size(), size_t(2));
+    UT_CHECK(s[0].message != s[1].message);
+    // 明细按 prefixedRaw 追加在译文之后
+    UT_CHECK(s[0].message.find("bad merge") != std::string::npos);
+    UT_CHECK(s[1].message.find("SyntaxError: x") != std::string::npos);
+  }
+  clear();
+
+  // 4) 参数型：connections.notices.copied 插值 {{address}}，时长 2000
+  UT_CHECK(dispatch_notice("copied", "1.2.3.4:443"));
+  {
+    auto s = NoticeService::instance().snapshot();
+    UT_CHECK_EQ(s.size(), size_t(1));
+    UT_CHECK_EQ(s[0].duration_ms, 2000);
+    UT_CHECK(s[0].message.find("1.2.3.4:443") != std::string::npos);
+  }
+  clear();
+
+  // 5) 时长覆盖：profile_switched 2500
+  UT_CHECK(dispatch_notice("profile_switched", "手动路径控制规则已置顶生效: DOMAIN,x"));
+  {
+    auto s = NoticeService::instance().snapshot();
+    UT_CHECK_EQ(s.size(), size_t(1));
+    UT_CHECK_EQ(s[0].duration_ms, 2500);
+  }
+  clear();
+
+  // 6) 未登记状态 → 不弹（仅告警日志），返回 false
+  UT_CHECK(!dispatch_notice("nope::status", "x"));
+  UT_CHECK_EQ(NoticeService::instance().snapshot().size(), size_t(0));
+
+  // 7) EventBus 端到端：notice_message → 订阅 → toast
+  install_notice_handler();
+  clashwin::events::EventBus::notice_message("install_service::ok", "");
+  {
+    auto s = NoticeService::instance().snapshot();
+    UT_CHECK_EQ(s.size(), size_t(1));
+    UT_CHECK_EQ(s[0].type, std::string("success"));
+  }
+  clear();
+  uninstall_notice_handler();
 }

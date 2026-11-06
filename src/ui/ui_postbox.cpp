@@ -23,6 +23,7 @@ struct UiPostbox::Impl {
   std::deque<std::function<void()>> queue;
   std::atomic<uint64_t> next_id{1};
   std::unordered_map<uint64_t, uint64_t> bus_ids;  // postbox id → bus id
+  DWORD ui_thread_id = 0;                          // mark_ui_thread() 记录
 };
 
 UiPostbox::UiPostbox() : impl_(new Impl) {
@@ -76,6 +77,17 @@ void UiPostbox::post(std::function<void()> fn) {
     impl_->queue.push_back(std::move(fn));
   }
   if (impl_->hwnd && need_wake) PostMessageW(impl_->hwnd, kWmDispatch, 0, 0);
+}
+
+void UiPostbox::mark_ui_thread() {
+  std::lock_guard<std::mutex> lk(impl_->mu);
+  impl_->ui_thread_id = GetCurrentThreadId();
+}
+
+bool UiPostbox::on_ui_thread() const {
+  std::lock_guard<std::mutex> lk(impl_->mu);
+  // 未标记（纯测试 / 未建窗口）→ 视为 UI 线程，调用方直接执行
+  return impl_->ui_thread_id == 0 || impl_->ui_thread_id == GetCurrentThreadId();
 }
 
 uint64_t UiPostbox::subscribe_ui(

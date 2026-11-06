@@ -192,6 +192,7 @@ add_library(clashwin_ui STATIC
   src/ui/context_menu.cpp
   src/ui/modal.cpp
   src/ui/snackbar_w.cpp
+  src/ui/notice_handler.cpp
   src/ui/tooltip_w.cpp
   src/ui/canvas_graph.cpp
   src/ui/text_viewer.cpp

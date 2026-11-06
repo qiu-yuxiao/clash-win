@@ -85,4 +85,21 @@ class Validator {
 // 返回 check 文件路径
 Result<std::wstring> make_check_copy(const std::wstring& source);
 
+// ---------- 校验失败通知状态（← validate.rs:527-583）----------
+// 校验对象：Runtime=运行配置、Merge=覆写碎片、Script=JavaScript 覆写脚本。
+// 同一种错误在不同对象上要给出不同文案（例：YamlSyntax 在 Merge 上是「覆写文件语法错误」，
+// 在 Script 上是「脚本文件错误」，在 Runtime 上是「YAML 语法错误」）。
+enum class ValidationNoticeTarget { Runtime, Merge, Script };
+
+// ← validate.rs:531-553 const fn notice_key：kind × target → 状态串
+const char* notice_status(ValidationErrorKind kind, ValidationNoticeTarget target);
+
+// ← validate.rs:555-583 handle_validation_notice：
+//   Invalid → 记 warn 日志 + notice_message(细分状态, msg)
+//   Busy    → 只记日志（并发竞争不是真错误，弹窗会误导用户"任务失败"）
+//   Skipped → notice_message("config_validate::error", 原因)
+//   Valid   → 无动作
+void handle_validation_notice(const ValidationOutcome& outcome, ValidationNoticeTarget target,
+                              const char* file_type);
+
 }  // namespace clashwin::core::validate

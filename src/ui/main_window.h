@@ -28,6 +28,7 @@
 #include "container.h"
 #include "tooltip_w.h"
 #include "snackbar_w.h"
+#include "notice_handler.h"
 #include "main_scene.h"
 #include "scenes/connection_data.h"
 #include "scenes/node_data.h"

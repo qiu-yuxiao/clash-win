@@ -9,6 +9,7 @@
 #include "events/notice.h"
 #include "icon_w.h"
 #include "theme/theme.h"
+#include "ui_postbox.h"
 #include "util/utf.h"
 
 namespace clashwin::ui {
@@ -64,6 +65,12 @@ void SnackbarW::set_items(std::vector<events::NoticeItem> items) {
 }
 
 void SnackbarW::refresh() {
+  // 通知来源可能是后台线程（命令超时、更新检查、内核事件）：widget 树只能在
+  // UI 线程改，非 UI 线程一律转投。（未建窗口的测试场景 on_ui_thread() 恒真）
+  if (!UiPostbox::instance().on_ui_thread()) {
+    UiPostbox::instance().post([this] { refresh(); });
+    return;
+  }
   items_ = events::NoticeService::instance().snapshot();
   layout_items();
   invalidate();

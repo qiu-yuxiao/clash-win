@@ -6,10 +6,12 @@
 #include "util/dirs.h"
 #include "util/log.h"
 #include "util/utf.h"
+#include "events/event_bus.h"
 
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <thread>
 
@@ -338,6 +340,61 @@ Result<std::wstring> make_check_copy(const std::wstring& source) {
     return Result<std::wstring>::err({2324, "copy to clash-win-check.yaml failed: " + ec.message()});
   }
   return Result<std::wstring>::ok(dst);
+}
+
+// ← validate.rs:531-553 const fn notice_key
+const char* notice_status(ValidationErrorKind kind, ValidationNoticeTarget target) {
+  switch (kind) {
+    case ValidationErrorKind::FileMissing:
+      return "config_validate::file_not_found";
+    case ValidationErrorKind::FileRead:
+      return target == ValidationNoticeTarget::Script ? "config_validate::script_error"
+                                                      : "config_validate::yaml_read_error";
+    case ValidationErrorKind::YamlSyntax:
+      switch (target) {
+        case ValidationNoticeTarget::Merge: return "config_validate::merge_syntax_error";
+        case ValidationNoticeTarget::Script: return "config_validate::script_error";
+        default: return "config_validate::yaml_syntax_error";
+      }
+    case ValidationErrorKind::YamlMapping:
+      switch (target) {
+        case ValidationNoticeTarget::Merge: return "config_validate::merge_mapping_error";
+        case ValidationNoticeTarget::Script: return "config_validate::script_error";
+        default: return "config_validate::yaml_mapping_error";
+      }
+    case ValidationErrorKind::ScriptSyntax: return "config_validate::script_syntax_error";
+    case ValidationErrorKind::ScriptMissingMain: return "config_validate::script_missing_main";
+    case ValidationErrorKind::ProcessTerminated: return "config_validate::process_terminated";
+    case ValidationErrorKind::CoreRejected:
+    case ValidationErrorKind::Timeout:
+    default:
+      return "config_validate::error";
+  }
+}
+
+// ← validate.rs:555-583 handle_validation_notice
+void handle_validation_notice(const ValidationOutcome& outcome, ValidationNoticeTarget target,
+                              const char* file_type) {
+  const char* ft = file_type ? file_type : "config";
+  switch (outcome.status) {
+    case ValidationStatus::Invalid: {
+      const char* status = notice_status(outcome.kind, target);
+      CWLOG_WARN(std::format("{} 验证失败: {}", ft, outcome.message));
+      events::EventBus::notice_message(status, outcome.message);
+      break;
+    }
+    case ValidationStatus::Busy:
+      // 并发竞争态，非真实配置错误：另一路 update_config_forced 正在持锁验证。
+      // 只记日志，不弹 notice 避免误导用户为"任务失败"。
+      CWLOG_WARN(std::format("{} 验证跳过（并发竞争）: {}", ft, outcome.display()));
+      break;
+    case ValidationStatus::Skipped:
+      CWLOG_WARN(std::format("{} 验证跳过: {}", ft, outcome.display()));
+      events::EventBus::notice_message("config_validate::error", outcome.display());
+      break;
+    case ValidationStatus::Valid:
+      break;
+  }
 }
 
 }  // namespace clashwin::core::validate

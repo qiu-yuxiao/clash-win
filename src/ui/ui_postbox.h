@@ -25,6 +25,11 @@ class UiPostbox {
   // 任意后台闭包 → UI 线程执行
   void post(std::function<void()> fn);
 
+  // UI 线程标记与判定：主窗口构造时 mark_ui_thread()；未标记时 on_ui_thread()
+  // 恒为 true（测试/单线程场景直接执行，不引入消息循环依赖）。
+  void mark_ui_thread();
+  bool on_ui_thread() const;
+
   // UI 线程排空消息队列（测试驱动；生产由 GetMessage 循环自然处理）
   static void pump();
 

@@ -244,7 +244,9 @@ void EventBus::notify_profile_changed(const std::string& uid) {
   instance().publish(names::kProfileChanged, Payload(uid));
 }
 void EventBus::notice_message(const char* status, const std::string& message) {
-  instance().publish(names::kNoticeMessage, Payload{status, message});
+  // ← Mini: Handle::notice_message(status, msg) 只带两个字段
+  instance().publish(names::kNoticeMessage,
+                     Payload{{"status", status ? status : ""}, {"message", message}});
 }
 void EventBus::backend_delay_results(
     const std::string& group, const std::vector<std::pair<std::string, uint32_t>>& results) {

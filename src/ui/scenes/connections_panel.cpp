@@ -29,7 +29,9 @@ void copy_address_to_clipboard(const std::string& address) {
     }
     CloseClipboard();
   }
-  events::EventBus::notice_message("copied", "已复制: " + address);
+  // ← connection-table.tsx:301 showNotice.success('connections.notices.copied', { address }, 2000)
+  //   载荷给地址原文，文案插值与时长由 notice_handler 的表驱动。
+  events::EventBus::notice_message("copied", address);
 }
 }  // namespace
 

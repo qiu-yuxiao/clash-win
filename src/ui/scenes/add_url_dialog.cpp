@@ -9,6 +9,7 @@
 #include "util/str_utils.h"
 #include "util/utf.h"
 #include "ui/i18n_text.h"  // F-D01
+#include "events/notice.h"
 
 namespace clashwin::ui::scene {
 
@@ -99,18 +100,18 @@ void AddUrlDialog::do_submit() {
     close();
     return;
   }
-  auto res = core::quick_routing::add_quick_routing_rule(
-      core::quick_routing::RuleType::Domain, val, target_);
-  if (res.ok) {
-    error_message_.clear();
-    std::string r = res.rule;
-    close();
-    if (on_rule_added) on_rule_added(r);
+  // ← add-url-dialog.tsx:54-72：批量解析（换行/逗号/分号），返回新增条数。
+  //   count > 0 → success「已添加 {{count}} 条规则」；count == 0 → info「没有新增规则」；
+  //   异常 → error 原文。此前 Win 只走单条接口，多行输入只加第一条，且无任何提示。
+  const int count = core::quick_routing::add_quick_routing_rules(val);
+  error_message_.clear();
+  if (count > 0) {
+    events::NoticeService::instance().push(
+        "success", tr8("settings.mini.addUrlSuccess", {{"count", std::to_string(count)}}));
   } else {
-    // src: :74-76 showNotice.error(message)
-    error_message_ = res.error.empty() ? "添加分流规则失败" : res.error;
-    invalidate();
+    events::NoticeService::instance().push("info", tr8("settings.mini.addUrlNoChange"));
   }
+  close();
 }
 
 void AddUrlDialog::on_arrange(const RectF& area) {

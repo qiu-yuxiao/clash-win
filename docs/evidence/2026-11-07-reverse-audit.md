@@ -57,15 +57,56 @@
    条目 radius 4、padding 6/16、icon 22、action 关闭按钮）；
    位置读 `verge.notice_position`（缺省 `top-right`）。
 4. **版本位仍写 3.2.2** → 按长期裁决统一改 `0.1.0`（标题栏/诊断包/安装包名）。
+5. **`EventBus::notice_message` 全仓零订阅者**（本轮最大缺口）
+   → 后端所有「状态串 + 明细」（`import_sub_url::*`、`config_validate::*`、
+   `install_service::*`）发出去没人接，用户侧表现为**「点导入没反应、切配置没反应、
+   装服务没反应」**。
+   修：新增 `ui/notice_handler.*` —— 1:1 复刻
+   `pages/_layout/utils/notification-handlers.ts` 的 27 条 status 表，补 Win 侧
+   自有的 `install_service::*` / `profile_switched*` / `update_subscription::*` /
+   `profile_deleted::ok` / `copied` / `ipc_timeout`，共 **37 条规则**；
+   文案走 `locales`（13 语言），语义按 `notice-service.ts:169-280`：
+   `key`+明细 →「译文 + 空格 + 原文」，参数型 → `t(key, {param})`，无 key → 原文。
+6. **校验错误状态无细分**（`validate.rs:531-583` 的 `notice_key`）
+   → Win 一律 `config_validate::error`，用户看到的是通用文案。
+   修：`core/validate` 新增 `ValidationNoticeTarget` + `notice_status()` +
+   `handle_validation_notice()`（Invalid 细分 26 种、Busy 只记日志、Skipped 通用）；
+   `save_profile_file` 按文件种类（脚本 / 合并 / YAML）选 target，与
+   `save_profile.rs:110-140` 一致。
+7. **`save_profile_file` 两处偏差**
+   - 「内容未变」短路缺失（`save_profile.rs:46-56`）→ 每次保存都重写+重校验；
+   - 判断「是否影响运行时」用 `current == item.file`（`current` 存的是 uid，永不相等）
+     → **编辑当前配置后从不刷新运行时**。改为 `profile_affects_runtime()`
+     （current 自身或其 merge/script/rules/proxies/groups 子项，见 `save_profile.rs:88-105`）。
+8. **快捷规则弹窗只加第一条**（`add-url-dialog.tsx:54-72` 是批量）
+   → Win 走单条接口，多行/逗号输入只生效一条，且成功/无变化都无提示。
+   修：改用 `add_quick_routing_rules()` 批量；`count>0` → success「已添加 {{count}} 条」、
+   `count==0` → info「没有新增规则」（原先只有内联红字，源码是 toast）。
+9. **命令超时无任何反馈**（`cmds.ts:84-110` `withIpcTimeout`）
+   → Win 只写日志；UI 卡住时用户毫无线索。
+   修：`CommandService::invoke` 超时时按 label 5s 节流推 `ipc_timeout` 通知
+   （原文 `[label] IPC call timed out after Nms`）。
+10. **帮助菜单导出诊断包无反馈**（`help-menu-button.tsx:156-180`）
+    → 修：常驻 info「正在生成诊断包…」→ success「诊断包已导出：{{path}}」。
+11. **基础设置开关无反馈**（`use-minimal-settings.ts:71-83`）
+    → Allow LAN / IPv6 改完静默。修：info「正在调整」→ success「已更新」/ error 原文。
+12. **配置增删改切换无反馈**（`_layout.tsx:929-963`）
+    → 切换 / 更新订阅（info→success）/ 删除 全部无声。已按源码补 4 条状态。
+13. **通知条跨线程改控件树**（新增风险，顺手修）
+    → `SnackbarW::refresh` 可能在后台线程被调（命令超时、更新检查）。
+    修：`UiPostbox::mark_ui_thread()/on_ui_thread()`，非 UI 线程转投；
+    未标记（测试）恒直接执行，不引入消息循环依赖。
 
 ## 四、已查实、**尚未修**（需按轻重排期，个案讨论）
 
 | # | 缺口 | Mini 证据 | 影响 |
 |---|---|---|---|
-| A | 通知覆盖面：Mini 121 处 `showNotice`，Win 仅 10 处 | `grep -rn showNotice src/` = 121 | 大量操作无任何反馈（复制地址、测速未执行/失败、服务安装进度、帮助菜单等） |
-| B | 通知右键复制文案 | `notice-manager.tsx:150-156,196-200` | 用户无法一键复制错误信息 |
-| C | 通知多行折行 | MUI Alert message 自动换行 | Win 当前单行省略号，长错误被截断 |
-| D | MUI 过渡动画（Dialog/Menu Fade 等） | `_theme.tsx` transitions | Win 全部瞬时出现（长期全局性偏差，需统一决策） |
+| A | **活跃节点卡的延迟 Chip 不可点**（点一下测单节点延迟） | `active-node-card.tsx:311-344` `onClick={handleTestDelay}`，测速中显示 spinner +「测试中...」 | Win 只能看不能测；配套 3 条通知（`testingInProgress` / `testNotExecuted` / `testFailed`）无从触发 |
+| B | 通知覆盖面剩余约 40 处（121 → 已覆盖 37 条状态 + 10 处直推） | `grep -rn showNotice src/` | 主要是边缘操作（解锁页检测超时、极简设置端口保存等） |
+| C | 通知右键复制文案 | `notice-manager.tsx:150-156,196-200` | 用户无法一键复制错误信息 |
+| D | 通知多行折行 | MUI Alert message 自动换行 | Win 当前单行省略号，长错误被截断 |
+| E | MUI 过渡动画（Dialog/Menu Fade 等） | `_theme.tsx` transitions | Win 全部瞬时出现（长期全局性偏差，需统一决策） |
+| F | 剪贴板「复制订阅链接」菜单项缺失 | `_layout.tsx:987-1020` | 无该入口（通知键 `layout.notices.profileLinkCopied` 已在位） |
 
 ## 五、测试环境纪律（本轮踩坑）
 
