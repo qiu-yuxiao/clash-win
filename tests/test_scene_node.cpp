@@ -361,3 +361,50 @@ UT_TEST(t13_empty_state) {
   UT_CHECK_EQ(list2.visible_count(), 0u);
   UT_CHECK(list2.empty_state_visible());
 }
+
+UT_TEST(t13_scroll_top_button) {
+  // ← src/components/layout/scroll-top-button.tsx:10-40
+  //   + proxy-groups.tsx:172（scrollTop > 100 显示）/ :212-220（点击回顶）
+  MockState st;
+  st.all.clear();
+  st.types.clear();
+  for (int i = 0; i < 40; ++i) {
+    const std::string n = "node-" + std::to_string(i);
+    st.all.push_back(n);
+    st.types[n] = "VMESS";
+  }
+  st.now = st.all.front();
+  NodeData data = make_data(st);
+  data.load();
+  NodeList list;
+  list.bind(&data);
+  list.layout_tree({0, 0, 271, 200});
+
+  ScrollTopButton* top = list.scroll_top_button();
+  UT_CHECK(top != nullptr);
+  UT_CHECK(!top->shown());      // 初始未滚动 → 不显示
+  UT_CHECK(!top->interactive());
+
+  // 滚过 100px 阈值 → 淡入
+  list.list()->set_scroll_offset(101);
+  UT_CHECK(top->shown());
+  Sleep(260);                   // MUI enteringScreen 225ms
+  rt().begin_frame();
+  rt().clear({1, 1, 1, 1});
+  top->on_paint(rt());
+  rt().end_frame();
+  UT_CHECK(top->alpha() > 0.9f);
+  UT_CHECK(top->interactive());
+
+  // 点击 → 回顶并淡出（:212-220）
+  top->on_click();
+  UT_CHECK_EQ(list.list()->scroll_offset(), 0.0f);
+  UT_CHECK(!top->shown());
+  Sleep(220);
+  rt().begin_frame();
+  rt().clear({1, 1, 1, 1});
+  top->on_paint(rt());
+  rt().end_frame();
+  UT_CHECK(top->alpha() <= 0.05f);
+  UT_CHECK(!top->interactive());  // visibility:hidden → 不参与命中
+}

@@ -34,6 +34,10 @@ inline constexpr float kListInset = 8;       // src: proxy-groups.tsx:327 mx: 1 
 inline constexpr float kListPadTop = 4;      // src: proxy-head.tsx:77 mb 0.5(=4)
 inline constexpr float kNodeBorderW = 2;     // src: proxy-item.tsx:75 borderBottom 2px
 inline constexpr float kNodeSelectBorderW = 3;  // src: proxy-item.tsx 选中 borderLeft 3px
+// 滚动置顶按钮几何 ← scroll-top-button.tsx:18-19 / proxy-groups.tsx:171
+inline constexpr float kScrollTopBtnSize = 40;   // IconButton padding 8×2 + icon 24
+inline constexpr float kScrollTopInset = 20;     // bottom/right 20px
+inline constexpr float kScrollTopShowPx = 100;   // proxy-groups.tsx:172 scrollTop > 100
 
 // 五档延迟色（← formatDelayColor → MUI 色名 → defaultTheme 色值）
 Color4f delay_tier_color(DelayTier tier);
@@ -53,6 +57,45 @@ class NodeRowWidget : public Widget {
   int delay_ = -1;
   bool selected_ = false;
   bool hover_ = false;
+};
+
+// 滚动置顶按钮 ← src/components/layout/scroll-top-button.tsx:10-40
+//   · position absolute / bottom 20 / right 20（相对整个节点列容器外框）
+//   · MUI IconButton 默认尺寸：padding 8 + 图标 24 → 40×40 圆形（borderRadius 50%）
+//   · 底色 light rgba(0,0,0,.1) / dark rgba(255,255,255,.1)，hover 各 .2
+//   · <Fade in={show}>：MUI 默认 enteringScreen 225ms / leavingScreen 195ms
+//   · 图标 KeyboardArrowUp；显隐阈值 scrollTop > 100（proxy-groups.tsx:172）
+class ScrollTopButton : public Widget {
+ public:
+  explicit ScrollTopButton(Widget* parent = nullptr);
+
+  // 显隐（等价 <Fade in=…>）：切换时启动淡入/淡出
+  void set_shown(bool show);
+  bool shown() const { return shown_; }
+  // 淡出完成前仍参与绘制；alpha==0 时不可点击（MUI Fade 退出后 visibility:hidden）
+  bool interactive() const { return alpha_ > 0.0f; }
+  float alpha() const { return alpha_; }
+
+  std::function<void()> on_click;
+
+  SizeF on_measure(float max_w, float max_h) override;
+  void on_arrange(const RectF& area) override;
+  void on_paint(IRenderTarget& rt) override;
+  bool on_mouse(const MouseEvent& e) override;
+  // MUI <Fade> 退出后 visibility:hidden → 不参与命中（点击穿透回列表）
+  Widget* hit_test(PointF global) override;
+
+ private:
+  void advance_anim(int64_t now_ms);
+
+  IconW* icon_ = nullptr;
+  bool shown_ = false;
+  bool hover_ = false;
+  float alpha_ = 0.0f;
+  float anim_from_ = 0.0f;
+  float anim_to_ = 0.0f;
+  int64_t anim_start_ms_ = 0;
+  int64_t anim_dur_ms_ = 0;
 };
 
 class NodeList : public Widget {
@@ -75,6 +118,7 @@ class NodeList : public Widget {
   bool empty_state_visible() const;
   ScrollList* list() const { return list_; }
   TextField* search_box() const { return search_; }
+  ScrollTopButton* scroll_top_button() const { return scroll_top_; }
 
   // 点击节点回调（NodeData::select 由宿主接，失败回弹由 NodeList 处理：
   // select 失败时不更新选中态）
@@ -94,6 +138,7 @@ class NodeList : public Widget {
   IconW* sort_btn_ = nullptr;   // src: proxy-head.tsx:109-140 3 态排序钮
   IconW* empty_icon_ = nullptr;   // src: proxy-render.tsx:75 InboxRounded 2.5em
   Label* empty_label_ = nullptr;  // src: proxy-render.tsx:76 "No Proxies"
+  ScrollTopButton* scroll_top_ = nullptr;  // ← scroll-top-button.tsx（proxy-groups.tsx:330）
   std::string filter_;
   int sort_type_ = 1;  // src: use-head-state.ts:21 sortType 初值 1（按延迟）
   // visible_：rows_ 索引（无分组头）

@@ -240,6 +240,100 @@ bool NodeRowWidget::on_mouse(const MouseEvent& e) {
   return false;
 }
 
+// ---------- ScrollTopButton ----------
+// ← src/components/layout/scroll-top-button.tsx:10-40 + proxy-groups.tsx:171-176,212-220
+ScrollTopButton::ScrollTopButton(Widget* parent) : Widget(parent) {
+  auto ic = std::make_unique<IconW>();
+  icon_ = ic.get();
+  icon_->set_icon("keyboardarrowup");  // ← KeyboardArrowUpIcon
+  icon_->size_ = 24;                   // MUI SvgIcon 默认 fontSize medium = 1.5rem
+  add_child(std::move(ic));
+}
+
+void ScrollTopButton::set_shown(bool show) {
+  if (shown_ == show) return;
+  shown_ = show;
+  // <Fade in={show}>：MUI 默认进入 225ms / 退出 195ms（theme.transitions.duration）
+  anim_from_ = alpha_;
+  anim_to_ = show ? 1.0f : 0.0f;
+  anim_start_ms_ = static_cast<int64_t>(::GetTickCount64());
+  anim_dur_ms_ = show ? 225 : 195;
+  invalidate();
+}
+
+void ScrollTopButton::advance_anim(int64_t now_ms) {
+  if (anim_from_ == anim_to_) return;
+  const float p = anim_dur_ms_ <= 0
+                      ? 1.0f
+                      : std::min(1.0f, static_cast<float>(now_ms - anim_start_ms_) /
+                                           static_cast<float>(anim_dur_ms_));
+  alpha_ = anim_from_ + (anim_to_ - anim_from_) * p;
+  if (p >= 1.0f) alpha_ = anim_to_;
+}
+
+SizeF ScrollTopButton::on_measure(float, float) {
+  return {kScrollTopBtnSize, kScrollTopBtnSize};
+}
+
+void ScrollTopButton::on_arrange(const RectF& area) {
+  set_bounds(area);
+  // 图标居中：padding 8 使 24px 图标居中于 40×40 圆
+  const float pad = (kScrollTopBtnSize - 24.0f) / 2.0f;
+  icon_->layout_tree({pad, pad, 24, 24});
+}
+
+void ScrollTopButton::on_paint(IRenderTarget& rt) {
+  advance_anim(static_cast<int64_t>(::GetTickCount64()));
+  if (alpha_ > 0.0f) invalidate();  // 自续帧（同 NodeRowWidget 圆点动画路径）
+  // 子控件由 Widget::paint 自动绘制（带自身原点半移），父层只调色与显隐
+  if (icon_) {
+    icon_->set_visible(alpha_ > 0.0f);
+    Color4f ic = ThemeService::instance().text_primary();
+    ic.a = alpha_;  // <Fade> 统一作用于整颗按钮
+    icon_->color_ = ic;
+  }
+  if (alpha_ <= 0.0f) return;
+
+  const auto& svc = ThemeService::instance();
+  // backgroundColor: theme.palette.mode==='dark' ? rgba(255,255,255,.1) : rgba(0,0,0,.1)
+  // hover 各 .2（scroll-top-button.tsx:22-30）
+  const bool light = svc.is_light();
+  const Color4f rgb = light ? Color4f(0, 0, 0, 1) : Color4f(1, 1, 1, 1);
+  const float bg_a = (hover_ ? 0.2f : 0.1f) * alpha_;
+  Brush bg{with_alpha_bg(rgb, bg_a)};
+  const RectF r{0, 0, kScrollTopBtnSize, kScrollTopBtnSize};
+  rt.round_rect(r, kScrollTopBtnSize / 2.0f, Pen{Color4f(0, 0, 0, 0), 0.0f}, &bg);
+}
+
+bool ScrollTopButton::on_mouse(const MouseEvent& e) {
+  if (!interactive()) return false;  // 淡出完成后不可点
+  if (e.type == MouseEventType::Move) {
+    if (!hover_) {
+      hover_ = true;
+      invalidate();
+    }
+    return true;
+  }
+  if (e.type == MouseEventType::Leave) {
+    if (hover_) {
+      hover_ = false;
+      invalidate();
+    }
+    return true;
+  }
+  if (e.type == MouseEventType::Down) return true;  // 拿 capture，否则 Up 被祖先截走
+  if (e.type == MouseEventType::Up) {
+    if (on_click) on_click();
+    return true;
+  }
+  return false;
+}
+
+Widget* ScrollTopButton::hit_test(PointF global) {
+  if (!interactive()) return nullptr;  // visibility:hidden → 穿透回列表
+  return Widget::hit_test(global);
+}
+
 // ---------- NodeList ----------
 NodeList::NodeList(Widget* parent) : Widget(parent) {
   const auto& pal = ThemeService::instance().palette();
@@ -347,6 +441,24 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   el->set_text(L"No Proxies");  // src: proxy-render.tsx:76
   el->set_visible(false);
   add_child(std::move(el));
+
+  // 滚动置顶按钮：src: proxy-groups.tsx:330 <ScrollTopButton show={showScrollTop}
+  //   onClick={scrollToTop}/>，显隐由列表滚动位置驱动（:172 scrollTop > 100）
+  auto stb = std::make_unique<ScrollTopButton>();
+  scroll_top_ = stb.get();
+  scroll_top_->set_shown(false);
+  scroll_top_->on_click = [this] {
+    if (list_) list_->set_scroll_offset(0);  // ← :212-220 scrollTo({top:0})
+    scroll_top_->set_shown(false);
+  };
+  add_child(std::move(stb));
+
+  if (list_) {
+    list_->on_scroll = [this] {
+      if (!list_ || !scroll_top_) return;
+      scroll_top_->set_shown(list_->scroll_offset() > kScrollTopShowPx);
+    };
+  }
 }
 
 NodeList::~NodeList() = default;
@@ -459,6 +571,8 @@ void NodeList::sync_list() {
   if (empty_label_ && empty_label_->visible() != empty)
     empty_label_->set_visible(empty);
   list_->on_arrange(list_->bounds());
+  // 内容变短后 offset 会被 clamp，显隐需随之回算（Mini scroll 事件同样会触发）
+  if (scroll_top_) scroll_top_->set_shown(list_->scroll_offset() > kScrollTopShowPx);
 }
 
 bool NodeList::empty_state_visible() const {
@@ -486,6 +600,13 @@ void NodeList::on_arrange(const RectF& area) {
     const float top = center_y - total / 2.0f;
     empty_icon_->layout_tree({(area.w - icon_sz) / 2.0f, top, icon_sz, icon_sz});
     empty_label_->layout_tree({(area.w - ls.w) / 2.0f, top + icon_sz, ls.w, ls.h});
+  }
+
+  // 滚动置顶按钮：absolute bottom 20 / right 20（相对整个节点列容器）
+  if (scroll_top_) {
+    scroll_top_->layout_tree({area.w - kScrollTopInset - kScrollTopBtnSize,
+                              area.h - kScrollTopInset - kScrollTopBtnSize,
+                              kScrollTopBtnSize, kScrollTopBtnSize});
   }
 }
 
