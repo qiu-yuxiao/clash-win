@@ -281,15 +281,10 @@ Result<void> Sysopt::reset_sysproxy() {
   SysproxyGuard::instance().set_guard_type(GuardType::None);
   // ← B-D40：对齐 Mini（M:core/sysopt.rs:217-235）reset 仅双关 enable，
   //   保留自身 ProxyServer/ProxyOverride（不读 OS 原值、不还原备份）。
-  //   旧的 sysproxy_backup.json 全量还原已随 update 一同移除。
+  //   B-D41：write_sysproxy(false) 走 crate unset_proxy——仅 FLAGS=DIRECT，
+  //   SERVER/BYPASS 注册表值原样保留（等价 Mini「保留 inner_proxy host/port」）。
   SysProxyState sys;
   sys.enable = false;
-  auto cur = access_->read_sysproxy();
-  if (cur.is_ok()) {
-    sys.host = cur.value().host;
-    sys.port = cur.value().port;
-    sys.bypass = cur.value().bypass;
-  }
   AutoProxyState auto_proxy;
   auto_proxy.enable = false;
   auto r1 = access_->write_sysproxy(sys);
@@ -319,9 +314,91 @@ constexpr wchar_t kInetSettingsKey[] =
     L"Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
 
 void broadcast_proxy_change() {
-  // ← census §124：PROXY_SETTINGS_CHANGED + REFRESH（浏览器立即感知）
-  InternetSetOptionW(nullptr, INTERNET_OPTION_SETTINGS_CHANGED, nullptr, 0);
+  // ← sysproxy-rs f0775f6 src/windows.rs:169-176 notify_proxy_change：
+  //   INTERNET_OPTION_PROXY_SETTINGS_CHANGED + REFRESH（B-D41 与 crate 同构）
+  InternetSetOptionW(nullptr, INTERNET_OPTION_PROXY_SETTINGS_CHANGED, nullptr, 0);
   InternetSetOptionW(nullptr, INTERNET_OPTION_REFRESH, nullptr, 0);
+}
+
+// B-D41：与 sysproxy-rs（f0775f6 src/windows.rs）同构的写入路径——
+// 不直接 RegSetValueExW，统一走 InternetSetOptionW(INTERNET_OPTION_PER_
+// CONNECTION_OPTION)（LAN pszConnection=null + 每个 RAS 条目），由 WinInet
+// 落注册表（FLAGS→ProxyEnable/AutoDetect、SERVER→ProxyServer、
+// BYPASS→ProxyOverride），通知口径与读取路径（winreg 语义）一致。
+
+// RAS 拨号/VPN 条目枚举（← windows.rs:287-359 get_ras_connections）
+std::vector<std::wstring> enumerate_ras_names() {
+  std::vector<std::wstring> names;
+  DWORD bytes = 0, entries = 0;
+  if (RasEnumEntriesW(nullptr, nullptr, nullptr, &bytes, &entries) !=
+          ERROR_BUFFER_OVERFLOW ||
+      entries == 0 || bytes == 0) {
+    return names;  // 无 RAS 条目（常见形态，不报错）
+  }
+  std::vector<char> buf(bytes);
+  auto* arr = reinterpret_cast<RASENTRYNAMEW*>(buf.data());
+  arr->dwSize = sizeof(RASENTRYNAMEW);
+  if (RasEnumEntriesW(nullptr, nullptr, arr, &bytes, &entries) != ERROR_SUCCESS) {
+    return names;
+  }
+  for (DWORD i = 0; i < entries; ++i) names.emplace_back(arr[i].szEntryName);
+  return names;
+}
+
+// 一组 PER_CONN 选项 → LAN + 全部 RAS 条目（← windows.rs:153-166 apply_option
+// + 各 set/unset 函数里的 RAS 循环；任一失败返回 err，与 crate `?` 传播一致）
+Result<void> apply_per_conn(INTERNET_PER_CONN_OPTIONW* opts, DWORD count) {
+  INTERNET_PER_CONN_OPTION_LISTW list = {};
+  list.dwSize = sizeof(list);
+  list.dwOptionCount = count;
+  list.pOptions = opts;
+  list.pszConnection = nullptr;  // 局域网 LAN 代理设置
+  if (!InternetSetOptionW(nullptr, INTERNET_OPTION_PER_CONNECTION_OPTION,
+                          &list, sizeof(list))) {
+    return Result<void>::err({kErrIo, "InternetSetOption per-conn (LAN) failed"});
+  }
+  for (const auto& name : enumerate_ras_names()) {  // 拨号连接/VPN 代理设置
+    list.pszConnection = const_cast<LPWSTR>(name.c_str());
+    if (!InternetSetOptionW(nullptr, INTERNET_OPTION_PER_CONNECTION_OPTION,
+                            &list, sizeof(list))) {
+      return Result<void>::err(
+          {kErrIo, "InternetSetOption per-conn (RAS) failed"});
+    }
+  }
+  return Result<void>::ok();
+}
+
+// ← windows.rs:110-151 set_global_proxy：FLAGS=PROXY|DIRECT + SERVER + BYPASS
+Result<void> set_global_proxy(const std::wstring& server,
+                              const std::wstring& bypass) {
+  INTERNET_PER_CONN_OPTIONW opts[3] = {};
+  opts[0].dwOption = INTERNET_PER_CONN_FLAGS;
+  opts[0].Value.dwValue = PROXY_TYPE_PROXY | PROXY_TYPE_DIRECT;
+  opts[1].dwOption = INTERNET_PER_CONN_PROXY_SERVER;
+  opts[1].Value.pszValue = const_cast<LPWSTR>(server.c_str());
+  opts[2].dwOption = INTERNET_PER_CONN_PROXY_BYPASS;
+  opts[2].Value.pszValue = const_cast<LPWSTR>(bypass.c_str());
+  return apply_per_conn(opts, 3);
+}
+
+// ← windows.rs:69-104 set_auto_proxy：
+//   FLAGS=AUTO_DETECT|AUTO_PROXY_URL|DIRECT + AUTOCONFIG_URL
+Result<void> set_auto_proxy(const std::wstring& url) {
+  INTERNET_PER_CONN_OPTIONW opts[2] = {};
+  opts[0].dwOption = INTERNET_PER_CONN_FLAGS;
+  opts[0].Value.dwValue =
+      PROXY_TYPE_AUTO_DETECT | PROXY_TYPE_AUTO_PROXY_URL | PROXY_TYPE_DIRECT;
+  opts[1].dwOption = INTERNET_PER_CONN_AUTOCONFIG_URL;
+  opts[1].Value.pszValue = const_cast<LPWSTR>(url.c_str());
+  return apply_per_conn(opts, 2);
+}
+
+// ← windows.rs:34-63 unset_proxy：仅 FLAGS=DIRECT（不动 SERVER/BYPASS 值）
+Result<void> unset_proxy() {
+  INTERNET_PER_CONN_OPTIONW opts[1] = {};
+  opts[0].dwOption = INTERNET_PER_CONN_FLAGS;
+  opts[0].Value.dwValue = PROXY_TYPE_DIRECT;
+  return apply_per_conn(opts, 1);
 }
 
 // Internet Settings 写句柄：优先 KEY_SET_VALUE；被安全软件（360 等）以
@@ -339,43 +416,35 @@ LONG open_inet_settings_write(HKEY* out) {
   return rc2;
 }
 
-// RAS 条目同步（← 任务卡完成标准①：LAN + 每个 RAS 条目 PER_CONN_OPTION）。
-// sysproxy-rs 经 wininet per-connection option 覆盖 RAS 拨号条目；此处遍历
-// RasEnumEntriesW 逐条以条目名为 connection 构造 INTERNET_PER_CONN_OPTION_LISTW
-// 后 InternetSetOptionW 写入，与 LAN 注册表写入（write_sysproxy）保持同值。
-// 无 RAS 拨号条目时为 no-op（常见形态，不报错）。
-void sync_ras_entries(const SysProxyState& s) {
-  DWORD entries = 0, bytes = 0;
-  if (RasEnumEntriesW(nullptr, nullptr, nullptr, &bytes, &entries) !=
-          ERROR_BUFFER_OVERFLOW ||
-      entries == 0 || bytes == 0) {
-    return;  // 无 RAS 条目（常见形态）
+// RAS 条目同步已并入 apply_per_conn（B-D41：写路径与 sysproxy-rs 同构，
+// LAN + 每个 RAS 条目统一经 PER_CONN_OPTION 写入）。
+
+// B-D41：读回解析与 crate 同构（windows.rs:254-282 parse_proxy_address）——
+// host:port 右起最后一个冒号拆分；[IPv6] 去方括号；无法解析端口 → 主机名+80。
+// 返回是否解析出端口（false → port 用调用方缺省）。
+void parse_proxy_address(const std::wstring& address, std::wstring& host,
+                         uint16_t& port) {
+  size_t colon = address.rfind(L':');
+  if (colon != std::wstring::npos) {
+    const std::wstring p = address.substr(colon + 1);
+    bool digits = !p.empty();
+    for (wchar_t c : p)
+      if (c < L'0' || c > L'9') { digits = false; break; }
+    if (digits) {
+      unsigned long v = wcstoul(p.c_str(), nullptr, 10);
+      if (v <= 65535) {
+        host = address.substr(0, colon);
+        // 去除 IPv6 方括号: "[::1]" → "::1"
+        if (host.size() >= 2 && host.front() == L'[' && host.back() == L']')
+          host = host.substr(1, host.size() - 2);
+        port = static_cast<uint16_t>(v);
+        return;
+      }
+    }
   }
-  std::vector<char> buf(bytes);
-  auto* names = reinterpret_cast<RASENTRYNAMEW*>(buf.data());
-  names->dwSize = sizeof(RASENTRYNAMEW);
-  if (RasEnumEntriesW(nullptr, nullptr, names, &bytes, &entries) != ERROR_SUCCESS) {
-    return;
-  }
-  const std::wstring server = s.host + (s.port ? L":" + std::to_wstring(s.port) : L"");
-  const std::wstring bypass = s.bypass.empty() ? kDefaultBypass : s.bypass;
-  INTERNET_PER_CONN_OPTIONW opt[3] = {};
-  opt[0].dwOption = INTERNET_PER_CONN_FLAGS;
-  opt[0].Value.dwValue = s.enable ? (PROXY_TYPE_PROXY | PROXY_TYPE_DIRECT)
-                                  : PROXY_TYPE_DIRECT;
-  opt[1].dwOption = INTERNET_PER_CONN_PROXY_SERVER;
-  opt[1].Value.pszValue = const_cast<LPWSTR>(server.c_str());
-  opt[2].dwOption = INTERNET_PER_CONN_PROXY_BYPASS;
-  opt[2].Value.pszValue = const_cast<LPWSTR>(bypass.c_str());
-  INTERNET_PER_CONN_OPTION_LISTW list = {};
-  list.dwSize = sizeof(list);
-  list.dwOptionCount = 3;
-  list.pOptions = opt;
-  for (DWORD i = 0; i < entries; ++i) {
-    list.pszConnection = const_cast<LPWSTR>(names[i].szEntryName);
-    InternetSetOptionW(nullptr, INTERNET_OPTION_PER_CONNECTION_OPTION, &list,
-                       sizeof(list));
-  }
+  // 回退：无端口的主机名等边缘情况（crate URL 解析兜底 → 默认 80）
+  host = address;
+  port = 80;
 }
 
 class WininetSysProxyAccess : public ISysProxyAccess {
@@ -407,40 +476,61 @@ class WininetSysProxyAccess : public ISysProxyAccess {
     };
     SysProxyState s;
     s.enable = rd_dword(L"ProxyEnable") != 0;
-    // ← network.rs get_sys_proxy：server = "host:port"（读回拆分）
+    // ← crate（windows.rs:180-222 get_system_proxy）读回口径：
+    //   server 串含 '='（多协议 http=..;https=..）→ 优先 http= 分量；
+    //   否则整体按 host:port 拆分；空串 → host 空、port 0
     std::wstring server = rd_str(L"ProxyServer");
     s.bypass = rd_str(L"ProxyOverride");
     RegCloseKey(key);
-    size_t colon = server.rfind(L':');
-    if (colon != std::wstring::npos) {
-      s.host = server.substr(0, colon);
-      s.port = static_cast<uint16_t>(_wtoi(server.substr(colon + 1).c_str()));
-    } else {
-      s.host = server;
+    if (!server.empty()) {
+      std::wstring value = server;
+      if (server.find(L'=') != std::wstring::npos) {
+        // 优先查找 http 代理，缺省取第一段
+        value.clear();
+        size_t start = 0;
+        while (start <= server.size()) {
+          size_t semi = server.find(L';', start);
+          std::wstring part = server.substr(
+              start, semi == std::wstring::npos ? std::wstring::npos : semi - start);
+          // trim（crate 对 part 做 trim 后比对前 5 字节 "http="）
+          size_t b = part.find_first_not_of(L" \t");
+          size_t e = part.find_last_not_of(L" \t");
+          std::wstring t = b == std::wstring::npos
+                               ? std::wstring()
+                               : part.substr(b, e - b + 1);
+          if (t.size() >= 5) {
+            bool http_prefix = true;
+            const wchar_t kHttp[] = L"http=";
+            for (int i = 0; i < 5; ++i) {
+              wchar_t c = t[i];
+              if (c >= L'A' && c <= L'Z') c = c - L'A' + L'a';
+              if (c != kHttp[i]) { http_prefix = false; break; }
+            }
+            if (http_prefix) { value = t.substr(5); break; }
+          }
+          if (value.empty()) value = t;  // or_else 第一段
+          if (semi == std::wstring::npos) break;
+          start = semi + 1;
+        }
+        size_t eq = value.find(L'=');
+        if (eq != std::wstring::npos) value = value.substr(eq + 1);
+      }
+      parse_proxy_address(value, s.host, s.port);
     }
     return Result<SysProxyState>::ok(s);
   }
 
+  // B-D41：写路径与 sysproxy-rs f0775f6 同构（windows.rs:225-230
+  // Sysproxy::set_system_proxy）——enable → set_global_proxy（FLAGS=
+  // PROXY|DIRECT + SERVER + BYPASS，LAN+RAS）；disable → unset_proxy
+  // （仅 FLAGS=DIRECT，SERVER/BYPASS 值保留不动，与 Mini reset 语义一致）。
+  // bypass 原样透传（Mini get_bypass 保证非空；crate 亦原样写入）。
   Result<void> write_sysproxy(const SysProxyState& s) override {
-    HKEY key = nullptr;
-    LONG rc = open_inet_settings_write(&key);
-    if (rc != ERROR_SUCCESS) {
-      return Result<void>::err({kErrIo, "open Internet Settings failed"});
-    }
-    DWORD enable = s.enable ? 1 : 0;
-    // ← network.rs server 串口径 "host:port"
-    std::wstring server =
+    const std::wstring server =
         s.host + (s.port ? L":" + std::to_wstring(s.port) : L"");
-    RegSetValueExW(key, L"ProxyEnable", 0, REG_DWORD,
-                   reinterpret_cast<const BYTE*>(&enable), sizeof(enable));
-    RegSetValueExW(key, L"ProxyServer", 0, REG_SZ,
-                   reinterpret_cast<const BYTE*>(server.c_str()),
-                   static_cast<DWORD>((server.size() + 1) * sizeof(wchar_t)));
-    RegSetValueExW(key, L"ProxyOverride", 0, REG_SZ,
-                   reinterpret_cast<const BYTE*>(s.bypass.c_str()),
-                   static_cast<DWORD>((s.bypass.size() + 1) * sizeof(wchar_t)));
-    RegCloseKey(key);
-    sync_ras_entries(s);
+    Result<void> r =
+        s.enable ? set_global_proxy(server, s.bypass) : unset_proxy();
+    if (r.is_err()) return r;
     broadcast_proxy_change();
     return Result<void>::ok();
   }
@@ -454,30 +544,25 @@ class WininetSysProxyAccess : public ISysProxyAccess {
     wchar_t buf[2048] = {};
     DWORD size = sizeof(buf), type = 0;
     AutoProxyState a;
+    // ← crate（windows.rs:238-240）：enable = AutoConfigURL 值存在
+    //   （get_value is_ok），与串是否为空无关
     if (RegQueryValueExW(key, L"AutoConfigURL", nullptr, &type,
                          reinterpret_cast<BYTE*>(buf), &size) == ERROR_SUCCESS &&
         type == REG_SZ) {
       a.url = buf;
-      a.enable = !a.url.empty();
+      a.enable = true;
     }
     RegCloseKey(key);
     return Result<AutoProxyState>::ok(a);
   }
 
+  // B-D41：与 crate 同构（windows.rs:246-251 Autoproxy::set_auto_proxy）——
+  // enable → set_auto_proxy（FLAGS=AUTO_DETECT|AUTO_PROXY_URL|DIRECT +
+  // AUTOCONFIG_URL，LAN+RAS）；disable → unset_proxy（仅 FLAGS=DIRECT）。
   Result<void> write_autoproxy(const AutoProxyState& a) override {
-    HKEY key = nullptr;
-    LONG rc = open_inet_settings_write(&key);
-    if (rc != ERROR_SUCCESS) {
-      return Result<void>::err({kErrIo, "open Internet Settings failed"});
-    }
-    if (a.enable && !a.url.empty()) {
-      RegSetValueExW(key, L"AutoConfigURL", 0, REG_SZ,
-                     reinterpret_cast<const BYTE*>(a.url.c_str()),
-                     static_cast<DWORD>((a.url.size() + 1) * sizeof(wchar_t)));
-    } else {
-      RegDeleteValueW(key, L"AutoConfigURL");  // ← 清 PAC（键删除）
-    }
-    RegCloseKey(key);
+    Result<void> r =
+        (a.enable && !a.url.empty()) ? set_auto_proxy(a.url) : unset_proxy();
+    if (r.is_err()) return r;
     broadcast_proxy_change();
     return Result<void>::ok();
   }
