@@ -34,6 +34,9 @@ class IconW : public Widget {
 
   void set_icon(const std::string& mui_name);  // 按 MUI 名设置
   void set_glyph(wchar_t g);                   // 直接设码点
+  // 在既有绘制目标上按绝对矩形画一颗图标（无独立控件树时用：通知条/动态列表）
+  static void paint_at(IRenderTarget& rt, const std::string& mui_name,
+                       const RectF& box, const Color4f& color);
   // 当前归一化图标名（F-D11：延迟徽章按档位切换前比对用）
   const std::string& name() const { return name_; }
 

@@ -30,6 +30,7 @@
 #include "ui/scenes/first_run_guide_dialog.h"
 #include "ui/scenes/unlock_dialog.h"
 #include "ui/scenes/utility_modals.h"
+#include "ui/snackbar_w.h"
 #include "ui/text_viewer.h"
 #include "ui/theme/theme.h"
 #include "util/dirs.h"
@@ -567,4 +568,75 @@ UT_TEST(t21_d2d_local_coordinates_no_double_offset) {
 
   // 双偏移的判定由上面的「描边出现在正确全局坐标」承担：
   // 若坐标被二次偏移，采样行将落在卡渐变内，gold_border_pixels 归零。
+}
+
+// ← src/components/layout/notice-manager.tsx:157-216（通知条容器与条目几何）
+UT_TEST(t21_snackbar_alert_layout_and_close) {
+  using clashwin::events::NoticeItem;
+  using clashwin::events::NoticeService;
+
+  SnackbarW bar;
+  bar.set_position("top-right");  // verge 缺省（verge.rs:353）
+  bar.set_bounds({0, 0, 271, 600});  // 271 逻辑宽（Mini 缺省窗口）
+
+  // 无通知 → 无条目
+  bar.set_items({});
+  bar.layout_items();
+  UT_CHECK_EQ(bar.visible_count(), 0u);
+  UT_CHECK_EQ(bar.item_rects().size(), 0u);
+
+  // 两条通知：竖向 gap 10、右对齐 20、宽 = min(360, 271-40)
+  std::vector<NoticeItem> items;
+  items.push_back({1, "success", 3000, "copied"});
+  items.push_back({2, "error", 8000, "import failed"});
+  bar.set_items(items);
+  bar.layout_items();
+  UT_CHECK_EQ(bar.item_rects().size(), 2u);
+  const RectF r0 = bar.item_rects()[0];
+  const RectF r1 = bar.item_rects()[1];
+  UT_CHECK_EQ(r0.w, 231.0f);              // 271 - 2*20（< maxWidth 360）
+  UT_CHECK_EQ(r0.h, 48.0f);               // MUI Alert filled 单行
+  UT_CHECK_EQ(r0.x, 271.0f - 20.0f - 231.0f);
+  UT_CHECK_EQ(r0.y, 20.0f);
+  UT_CHECK_EQ(r1.y, 20.0f + 48.0f + 10.0f);  // gap 10
+
+  // 宽窗时封顶 360
+  bar.set_bounds({0, 0, 600, 900});
+  bar.layout_items();
+  UT_CHECK_EQ(bar.item_rects()[0].w, 360.0f);
+
+  // bottom-left 锚点：贴左下，向上堆叠
+  bar.set_position("bottom-left");
+  bar.set_bounds({0, 0, 600, 900});
+  bar.layout_items();
+  const RectF b0 = bar.item_rects()[0];
+  const RectF b1 = bar.item_rects()[1];
+  UT_CHECK_EQ(b0.x, 20.0f);
+  UT_CHECK_EQ(b1.y, 900.0f - 20.0f - 48.0f);  // 最新一条贴底
+  UT_CHECK_EQ(b0.y, b1.y - 48.0f - 10.0f);
+
+  // 非法位置回落 top-right（← resolvePosition）
+  bar.set_position("middle");
+  UT_CHECK(bar.position() == "top-right");
+
+  // 关闭按钮：点右上角命中区 → 从 NoticeService 移除（:205 handleClose）
+  // 先清空同进程其它用例可能残留的通知，保证计数口径确定
+  for (const auto& stale : NoticeService::instance().snapshot())
+    NoticeService::instance().hide(stale.id);
+  NoticeService::instance().push("success", "k1", 3000);
+  NoticeService::instance().push("error", "k2", 8000);
+  bar.set_position("top-right");
+  bar.set_bounds({0, 0, 600, 900});
+  bar.attach(NoticeService::instance());
+  bar.layout_items();
+  UT_CHECK_EQ(bar.visible_count(), 2u);
+  const RectF first = bar.item_rects()[0];
+  const uint64_t first_id = bar.items()[0].id;
+  MouseEvent up;
+  up.type = MouseEventType::Up;
+  up.pos = {first.x + first.w - 8.0f - 15.0f, first.y + 10.0f + 15.0f};
+  UT_CHECK(bar.on_mouse(up));
+  UT_CHECK_EQ(NoticeService::instance().snapshot().size(), size_t(1));
+  UT_CHECK(NoticeService::instance().snapshot()[0].id != first_id);
+  bar.set_items({});
 }

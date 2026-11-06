@@ -327,6 +327,14 @@ void MainWindow::build_widget_tree() {
   tooltip_host_ = tip.get();
   root_.add_child(std::move(tip));
 
+  // 通知条（← components/layout/notice-manager.tsx:157-216，zIndex 1500）。
+  // 【缺口修复】此前 SnackbarW 存在但从未挂载 → NoticeService.push 的所有提示
+  //   （检查更新/内核更新/导入结果/错误）全部静默，用户侧表现为「没有任何反馈」。
+  auto snack = std::make_unique<SnackbarW>();
+  snackbar_ = snack.get();
+  root_.add_child(std::move(snack));
+  snackbar_->attach(events::NoticeService::instance());
+
   auto tb = std::make_unique<TitleBar>(this);
   title_bar_ = tb.get();
   title_bar_->set_version(utf::utf8_to_utf16(config::consts::kAppVersion));  // 单一事实源
@@ -915,6 +923,9 @@ void MainWindow::build_scene() {
                                    v.enable_silent_start.value_or(false),
                                    false, false,
                                    static_cast<int>(v.verge_mixed_port.value_or(0)));
+      // 通知位置：verge.notice_position（缺省 top-right，verge.rs:353）
+      if (snackbar_)
+        snackbar_->set_position(v.notice_position.value_or("top-right"));
     } catch (...) {
     }
   }

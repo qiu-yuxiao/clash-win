@@ -27,6 +27,7 @@
 #include "widget.h"
 #include "container.h"
 #include "tooltip_w.h"
+#include "snackbar_w.h"
 #include "main_scene.h"
 #include "scenes/connection_data.h"
 #include "scenes/node_data.h"
@@ -235,6 +236,7 @@ class MainWindow : public app::ILifecycleWindow {
 
   Stack root_;            // Widget 树根（客户区；overlay 宿主）
   TooltipHost* tooltip_host_ = nullptr;  // 悬停提示层（z 1200）
+  SnackbarW* snackbar_ = nullptr;        // 通知条（z 1500，← notice-manager.tsx）
   Column* flow_ = nullptr;  // root_ 内流式层：Column{titlebar(30), scene(flex)}
   ContentStack* content_ = nullptr;  // flow_ 第二层：Stack{scene, drawer}
   TitleBar* title_bar_ = nullptr;

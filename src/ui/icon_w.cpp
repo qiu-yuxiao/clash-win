@@ -454,6 +454,24 @@ const std::unordered_map<std::string, std::vector<MuiDef>>& mui_table() {
          "1.6 17.73h1.84l.92-2.45h5.11l.92 2.45h1.84L7.74 "
          "6.27zm-1.13 7.37 1.94-5.18 1.94 5.18zm10.76 2.5h6.12v1.59h-8.53v-1."
          "29l5.92-8.56h-5.88v-1.6h8.3v1.26z"}}},
+      // 通知条 Alert 图标（MUI internal/svg-icons SuccessOutlined / ErrorOutline /
+      // InfoOutlined，d 属性逐字取自 node_modules）
+      {"successoutline",
+       {{1.0f,
+         "M20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4C12.76,4 13.5,"
+         "4.11 14.2,4.31L15.77,2.74C14.61,2.26 13.34,2 12,2A10,10 0 0,0 2,12A10,"
+         "10 0 0,0 12,22A10,10 0 0,0 22,12M7.91,10.08L6.5,11.5L11,16L21,6L19.59,"
+         "4.58L11,13.17L7.91,10.08Z"}}},
+      {"erroroutline",
+       {{1.0f,
+         "M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 "
+         "10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s"
+         "3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"}}},
+      {"infooutline",
+       {{1.0f,
+         "M11,9H13V7H11M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 "
+         "20,7.59 20,12C20,16.41 16.41,20 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,"
+         "0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,17H13V11H11V17Z"}}},
       {"inbox",
        {{1.0f,
          "M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 "
@@ -558,6 +576,22 @@ void IconW::set_icon(const std::string& mui_name) {
 void IconW::set_glyph(wchar_t g) {
   glyph_ = g;
   invalidate();
+}
+
+// 绝对矩形绘制：借用临时 IconW 走同一绘制路径（矢量表/手绘/字形三级兜底一致），
+// 通过平移绘制原点把 {0,0,w,h} 约定映射到目标矩形。
+void IconW::paint_at(IRenderTarget& rt, const std::string& mui_name,
+                     const RectF& box, const Color4f& color) {
+  if (box.w <= 0 || box.h <= 0) return;
+  IconW tmp;
+  tmp.set_icon(mui_name);
+  tmp.size_ = box.w < box.h ? box.w : box.h;
+  tmp.color_ = color;
+  tmp.set_bounds({0, 0, box.w, box.h});
+  const PointF prev = rt.origin();
+  rt.set_origin({prev.x + box.x, prev.y + box.y});
+  tmp.on_paint(rt);
+  rt.set_origin(prev);
 }
 
 SizeF IconW::on_measure(float max_w, float max_h) {
