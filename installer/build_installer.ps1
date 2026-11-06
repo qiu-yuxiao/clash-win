@@ -18,7 +18,6 @@ $StageDir  = Join-Path $PSScriptRoot 'stage'
 $DistDir   = Join-Path $RepoRoot 'dist'
 $ScriptNsi = Join-Path $PSScriptRoot 'clashwin.nsi'
 $IconFile  = Join-Path $RepoRoot 'resources\icons\icon.ico'
-$License   = Join-Path $RepoRoot 'LICENSE'
 $OutFile   = Join-Path $DistDir "ClashWin_${Version}_x64-setup.exe"
 
 # ---------- 0. 管理员自提升 ----------
@@ -112,7 +111,7 @@ if (-not (Test-Path -LiteralPath $localesDir)) {
     $missing += "$localesDir (empty)"
 }
 
-foreach ($p in @($IconFile, $License, $ScriptNsi)) {
+foreach ($p in @($IconFile, $ScriptNsi)) {
     if (-not (Test-Path -LiteralPath $p)) { $missing += $p }
 }
 
@@ -177,9 +176,9 @@ $defines = @(
     "/DVERSION=$Version",
     "/DSTAGEDIR=$StageDir",
     "/DOUTFILE=$OutFile",
-    "/DICONFILE=$IconFile",
-    "/DLICENSEFILE=$License"
+    "/DICONFILE=$IconFile"
 )
+# License 页已随 1:1 对齐移除（Mini bundle.license 未配置 → installer.nsi:161 不渲染）
 # 卸载器签名：clashwin.nsi 的 !uninstfinalize 在编译期对 %TEMP%\nst*.tmp 就地签名，
 # 该 blob 随后被 NSIS 嵌入安装包 → 安装后的 uninstall.exe 也带有效签名。
 $UninstSignScript = Join-Path $RepoRoot 'scripts\sign_nsis_uninstaller.ps1'
