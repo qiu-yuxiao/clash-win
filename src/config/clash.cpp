@@ -207,28 +207,14 @@ void IClashTemp::apply_guard() {
   mapping_["external-controller"] = guard_external_controller(mapping_);
   mapping_["external-controller-pipe"] = guard_external_controller_ipc();
 
-  // 【P0-6】内核出网钉物理网卡。事故：同机 Clash Mini 的 TUN 抢走 0.0.0.0/0
-  // 并劫持 any:53，本内核解析节点域名拿到 198.18.x.x 假 IP，连接被送进 Mini 的
-  // TUN 后超时 → mixed-port 全部 502。显式配置 interface-name 时尊重用户值。
-  const YAML::Node in = mapping_["interface-name"];
-  if (!in || !in.IsScalar() || in.IsNull() || in.Scalar().empty()) {
-    std::string nic = system::detect_outbound_interface();
-    if (!nic.empty()) {
-      mapping_["interface-name"] = nic;
-      CWLOG_INFO("[P0-6] interface-name=" + nic);
-    }
-  }
-
-  // 【P0-6】DNS 服务端口与同机其它内核隔离（Mini 默认占 :53）。不隔离时
-  // 本内核启动报 "Start DNS server(UDP) error: listen udp :53 ... permitted"。
-  YAML::Node dns = mapping_["dns"];
-  if (dns && dns.IsMap()) {
-    const YAML::Node ln = dns["listen"];
-    const std::string s = (ln && ln.IsScalar()) ? ln.Scalar() : std::string();
-    if (s.empty() || s == ":53" || s == "0.0.0.0:53" || s == "127.0.0.1:53") {
-      dns["listen"] = "127.0.0.1:1053";
-    }
-  }
+  // ← B-D07 / B-D08（对齐 Mini，移除 Clash Win 共存期自加字段）：
+  // Mini 的 guard()（M:config/clash.rs:181-195）与 enhance（M:enhance/mod.rs:429-524）
+  // 全链路**不写** interface-name 与 dns.listen，故此处不再注入。
+  // 说明：本两项原为避免「同机 Clash Mini 的 TUN 劫持 any:53」的共存规避；
+  // 共存资源标识（端口/secret/pipe/APP_ID/配置目录/服务名）已在 constants.h
+  // 与 dirs.cpp 按 Mini 原值错开，足以隔离，无需再钉网卡 / 改 DNS 监听端口。
+  // 若用户显式在配置里写了 interface-name / dns.listen，下方模板合并与
+  // load 的「仅补缺失键」逻辑仍会原样保留其用户值。
 }
 
 IClashTemp::ClashInfo IClashTemp::get_client_info() const {

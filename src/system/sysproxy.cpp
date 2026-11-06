@@ -194,13 +194,11 @@ Result<void> Sysopt::update_sysproxy(const VergeView& v) {
     return Result<void>::ok();
   }
 
-  // 进入系统代理（master 开）前先备份 OS 原值；master 关且有备份 → 逐值还原
-  // （Mini sysopt.rs 只清 enable，此处按验收要求恢复 ProxyServer 等原值）
-  if (v.enable_system_proxy) {
-    ensure_backup_locked();
-  } else if (have_backup_) {
-    return restore_backup_locked();
-  }
+  // ← B-D40：对齐 Mini（M:core/sysopt.rs:199-235）语义——系统代理 master 开关
+  // 只改 enable 双关，不做「进入前全量快照 + 退出时逐值还原 OS 原值」。
+  // 本实现仅设置 Clash Win 自身的 ProxyServer（host/port/bypass），关闭时
+  // enable=false 而保留自身服务串（与 Mini「保留 inner_proxy 的 host/port」一致）。
+  // 旧的 sysproxy_backup.json 全量备份/还原逻辑已移除。
 
   // ← sysopt.rs:147-179 master switch 分派
   SysProxyState sys;
@@ -281,10 +279,9 @@ Result<void> Sysopt::reset_sysproxy() {
   }
   // ← sysopt.rs:217 close proxy guard（必须在锁内，Guard 停止后不再补写）
   SysproxyGuard::instance().set_guard_type(GuardType::None);
-  // 有进入前备份 → 逐值还原原值（含 ProxyServer/ProxyOverride）
-  if (have_backup_) return restore_backup_locked();
-  // ← sysopt.rs:219-232：无备份时直接双关；server/bypass 保留当前值
-  //   （Mini 是保留 inner_proxy 的 host/port；此处从 OS 读回，避免写空串）
+  // ← B-D40：对齐 Mini（M:core/sysopt.rs:217-235）reset 仅双关 enable，
+  //   保留自身 ProxyServer/ProxyOverride（不读 OS 原值、不还原备份）。
+  //   旧的 sysproxy_backup.json 全量还原已随 update 一同移除。
   SysProxyState sys;
   sys.enable = false;
   auto cur = access_->read_sysproxy();
