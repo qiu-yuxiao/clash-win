@@ -51,3 +51,8 @@ dist/
 installer/stage/
 tmp_test/
 viz/
+
+# Intermediate build / test residue (2026-11-06, never committed)
+build_verify/
+tmp_test_baseline/
+ui_diag/
