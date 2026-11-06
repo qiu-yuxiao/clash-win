@@ -41,15 +41,22 @@ if ($procs) {
 }
 
 # 本产品目录下的内核进程（只认安装目录/构建目录，避免误杀 Clash Mini 的内核）
-$instDirs = @('C:\Program Files\ClashWin', (Join-Path $PSScriptRoot '..\build\bin\Release'))
+$instDirs = @('C:\Program Files\ClashWin',
+              (Join-Path $PSScriptRoot '..\build\bin\Release'))
+$resolved = @()
+foreach ($d in $instDirs) {
+  try { $resolved += (Resolve-Path $d -ErrorAction Stop).Path } catch {}
+}
 foreach ($name in @('mini-mihomo')) {
   Get-Process $name -ErrorAction SilentlyContinue | ForEach-Object {
     $path = $null
     try { $path = $_.Path } catch {}
-    foreach ($d in $instDirs) {
-      if ($path -and $path.StartsWith((Resolve-Path (Join-Path $d 'x') -ErrorAction SilentlyContinue ?? $d) -replace '\\x$','')) {
+    if (-not $path) { return }
+    foreach ($d in $resolved) {
+      if ($path.StartsWith($d, [StringComparison]::OrdinalIgnoreCase)) {
         Write-Host "停止 $name pid=$($_.Id) path=$path"
         Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+        break
       }
     }
   }
@@ -78,6 +85,54 @@ if (Test-Path $configDir) {
   Write-Host "配置目录已备份移走：$backupDir" -ForegroundColor Yellow
 } else {
   Write-Host '配置目录不存在（已是干净状态）'
+}
+
+# ---------- 3b) 便携模式（.config\PORTABLE 标记）同样要清 ----------
+# 【踩坑】开发期跑 build\bin\Release\clashwin.exe 时配置落在
+#   <exe目录>\.config\io.github.clash-win.clash-win，里面残留过真实订阅
+#   → 首装引导不弹、节点列表非空、「什么都没做就有节点代理」。
+#   只清 %APPDATA% 不看便携目录 = 假干净。
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$portableRoots = @(
+  (Join-Path $repoRoot 'build\bin\Release'),
+  (Join-Path $repoRoot 'dist\ClashWin'),
+  (Join-Path $repoRoot 'ClashWin-Portable'),
+  (Join-Path $repoRoot 'installer\stage')
+)
+foreach ($root in $portableRoots) {
+  if (-not (Test-Path $root)) { continue }
+  $marker = Join-Path $root '.config\PORTABLE'
+  $pdir = Join-Path $root '.config\io.github.clash-win.clash-win'
+  if ((Test-Path $pdir) -and (Test-Path $marker)) {
+    $pbackup = "$pdir.bak-$stamp"
+    try {
+      Move-Item -Path $pdir -Destination $pbackup -Force -ErrorAction Stop
+      Write-Host "便携配置已备份移走：$pbackup" -ForegroundColor Yellow
+    } catch {
+      # 目录被内核占用（TUN 模式下服务以 SYSTEM 起的 mini-mihomo 锁着 cache.db，
+      # 普通权限杀不掉）→ 退化为「只搬状态文件、留下资产/被占用文件」，
+      # 效果等价干净首装：profiles/verge/window_state/skin 全清。
+      Write-Host "整目录被占用，改为逐项搬移状态文件 → $pbackup" -ForegroundColor Yellow
+      New-Item -ItemType Directory -Path $pbackup -Force | Out-Null
+      $stateNames = @(
+        'profiles', 'profiles.yaml', 'verge.yaml', 'clash.yaml', 'clash-win.yaml',
+        'clash-win-check.yaml', 'config.yaml', 'window_state.json',
+        'clashwin-skin.json', 'last_non_large_size.json', 'logs', 'diagnostics',
+        'proxy_head_state.json', 'unlock_cache.json', 'runtime.yaml'
+      )
+      foreach ($n in $stateNames) {
+        $src = Join-Path $pdir $n
+        if (Test-Path $src) {
+          try {
+            Move-Item -Path $src -Destination (Join-Path $pbackup $n) -Force -ErrorAction Stop
+            Write-Host "  搬移 $n"
+          } catch {
+            Write-Host "  跳过（占用）$n" -ForegroundColor DarkYellow
+          }
+        }
+      }
+    }
+  }
 }
 
 # ---------- 4) 校验 ----------
