@@ -18,6 +18,7 @@
 #include "cmd/command_service.h"
 #include "events/event_bus.h"
 #include "events/event_names.h"
+#include "events/notice.h"
 #include "theme/theme.h"
 #include "ui/ui_postbox.h"
 #include "mihomo/ws_manager.h"
@@ -720,11 +721,16 @@ void MainWindow::build_scene() {
         auto r = cmd::CommandService::instance().invoke(
             "check_app_update", nlohmann::json::object());
         if (!r.is_ok()) {
+          // ← use-client-update.ts:46-50 clientCheckFailed
+          events::NoticeService::instance().push(
+              "error", "检查更新失败: " + r.error().message);
           UiPostbox::instance().post([this] { settings_drawer_->set_app_update_checking(false); });
           return;
         }
         const auto& v = r.value();
         if (!v.value("has_update", false)) {
+          // ← use-client-update.ts:43-45 clientUpToDate
+          events::NoticeService::instance().push("info", "当前已是最新版本");
           UiPostbox::instance().post([this] { settings_drawer_->set_app_update_checking(false); });
           return;
         }
@@ -757,6 +763,9 @@ void MainWindow::build_scene() {
         auto r = cmd::CommandService::instance().invoke(
             "check_core_update", nlohmann::json::object());
         if (!r.is_ok()) {
+          // ← use-core-update.ts:78-82 coreCheckFailed
+          events::NoticeService::instance().push(
+              "error", "检查内核更新失败: " + r.error().message);
           UiPostbox::instance().post([this] { settings_drawer_->set_core_update_checking(false); });
           return;
         }
@@ -766,6 +775,8 @@ void MainWindow::build_scene() {
           return s;
         };
         if (latest.empty() || strip(cur) == strip(latest)) {
+          // ← use-core-update.ts:69-71 coreUpToDate
+          events::NoticeService::instance().push("info", "当前内核已是最新版本");
           UiPostbox::instance().post([this] { settings_drawer_->set_core_update_checking(false); });
           return;
         }
@@ -792,9 +803,15 @@ void MainWindow::build_scene() {
               nlohmann::json::object({{"url", url}, {"sha256", sha}, {"signature", sig}}));
           if (!r.is_ok()) {
             const std::string msg = "更新失败: " + r.error().message;
+            // ← use-client-update.ts:114-123 clientUpdateFailed（进度行 + 通知双显）
+            events::NoticeService::instance().push("error", msg);
             UiPostbox::instance().post([this, msg] {
               if (client_update_) client_update_->handle_progress_event("error", 0, msg);
             });
+          } else {
+            // ← use-client-update.ts:113 clientInstallCompleted
+            events::NoticeService::instance().push(
+                "success", "更新安装完毕，请重启应用以应用更改");
           }
         }).detach();
       };
@@ -814,6 +831,10 @@ void MainWindow::build_scene() {
           auto r = cmd::CommandService::instance().invoke("start_core_upgrade", args);
           if (!r.is_ok()) {
             const std::string msg = "启动失败: " + r.error().message;
+            // ← use-core-update.ts:107-118 coreStartFailed（进度行）+
+            //   coreUpgradeStartFailed（通知）
+            events::NoticeService::instance().push(
+                "error", "启动内核升级失败: " + r.error().message);
             UiPostbox::instance().post([this, msg] {
               if (core_update_) core_update_->handle_progress_event("error", 0, msg);
             });

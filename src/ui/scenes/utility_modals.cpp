@@ -9,6 +9,7 @@
 #include "util/str_utils.h"
 #include "util/utf.h"
 #include "ui/i18n_text.h"  // F-D01
+#include "events/notice.h"
 
 namespace clashwin::ui::scene {
 
@@ -628,8 +629,12 @@ void CoreUpdateModal::handle_progress_event(const std::string& status, int progr
   if (status_ == "done") {
     is_upgrading_ = false;
     current_version_ = latest_version_;
+    // ← use-core-update.ts:44-46 coreUpdateSuccess 通知
+    events::NoticeService::instance().push("success", "Mihomo 内核更新成功");
   } else if (status_ == "error") {
     is_upgrading_ = false;
+    // ← use-core-update.ts:47-51 coreUpdateFailed 通知
+    events::NoticeService::instance().push("error", "内核更新失败: " + msg);
   }
   invalidate();
 }
