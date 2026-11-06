@@ -335,6 +335,7 @@ void QuickBar::set_pinned(bool p) {
 //   名称按文字宽（超宽时收缩省略），Chip 固定宽不收缩。
 void QuickBar::on_arrange(const RectF& area) {
   set_bounds(area);
+  chip_rect_ = {};  // 每次重排先清，避免 has_badge_ 变 false 后残留旧命中区
   const float pad_top = padding().t;
   const float content_h = area.h - padding().v();
   const float btn_w = 28.0f, btn_h = 28.0f;  // src: _layout.tsx:1345-1346 28×28
@@ -419,6 +420,9 @@ void QuickBar::on_arrange(const RectF& area) {
   if (has_badge_ && wifi_ && delay_label_) {
     x += gap;
     SizeF ds = delay_label_->measure(1e6f, content_h);
+    // Chip 命中区：MUI Chip(size=small) 高 20（src: :315 sx height '20px'）
+    const float chip_h = 20.0f;
+    chip_rect_ = {x, pad_top + (content_h - chip_h) / 2, chip_w, chip_h};
     if (delay_ == -2) {
       // 测试中：icon 位 10×10（src: :315-320 CircularProgress size 10）
       delay_label_->layout_tree({x + 4.0f + 10.0f + 4.0f,
@@ -442,6 +446,21 @@ void QuickBar::on_arrange(const RectF& area) {
 
 bool QuickBar::on_mouse(const MouseEvent& e) {
   if (!node_label_ || node_label_->text.empty()) return false;
+  // 延迟 Chip 先判：点一下测单节点延迟（src: :311-344 onClick={handleTestDelay}）
+  if (has_badge_ && chip_rect_.contains(e.pos.x, e.pos.y)) {
+    if (e.type == MouseEventType::Down) {
+      chip_pressed_ = true;
+      return true;
+    }
+    if (e.type == MouseEventType::Up) {
+      const bool fired = chip_pressed_;
+      chip_pressed_ = false;
+      if (fired && on_test_delay) on_test_delay();
+      return fired;
+    }
+    return true;  // Move：吃掉，避免与节点名 hover 互相打断
+  }
+  if (e.type == MouseEventType::Up) chip_pressed_ = false;
   const RectF nb = node_label_->bounds();
   const bool inside = e.pos.x >= nb.x && e.pos.x < nb.right() &&
                       e.pos.y >= nb.y && e.pos.y < nb.bottom();

@@ -35,6 +35,8 @@ class QuickBar : public Row {
   // 徽章延迟数：has_node=false 隐藏；-1 = 未测（Mini 仍显示 Chip「-」）
   // src: active-node-card.tsx:311-344（activeNodeName && Chip；delay===-1 → formatDelay '-'）
   void set_badge(int delay, bool has_node = true);
+  // 延迟 Chip 命中区（on_arrange 计算；测试/宿主查点击位置用）
+  const RectF& chip_rect() const { return chip_rect_; }
   void set_pinned(bool p);    // 图钉激活态（深棕色）
   SizeF on_measure(float max_w, float max_h) override;  // 固定高 30
   // 卡片内容：标签/协议/名称/延迟/地址，窄窗按 580/480/400 断点隐藏
@@ -52,6 +54,8 @@ class QuickBar : public Row {
   std::function<void()> on_toggle_pin;    // 图钉（T19 置顶窗口）
   std::function<void()> on_open_settings; // 齿轮（T17 设置抽屉占位）
   std::function<void()> on_cycle_node;    // 点击节点名 → 轮换下一个
+  // 点击延迟 Chip → 单点测速（src: active-node-card.tsx:311-344 onClick={handleTestDelay}）
+  std::function<void()> on_test_delay;
 
  private:
   Label* node_label_ = nullptr;
@@ -65,6 +69,8 @@ class QuickBar : public Row {
   bool has_badge_ = false;
   bool node_hover_ = false;    // 节点名 hover（src: :296-298）
   bool node_pressed_ = false;  // 节点名按下（src: :299-301）
+  bool chip_pressed_ = false;  // 延迟 Chip 按下（可点测速）
+  RectF chip_rect_{};          // 延迟 Chip 命中区（on_arrange 记录）
   int delay_ = -1;  // 当前延迟（Chip 五档色/文本）
   bool pinned_ = false;
   bool has_proto_ = false;  // 有协议类型 → 胶囊可见

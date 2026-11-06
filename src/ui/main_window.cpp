@@ -6,6 +6,7 @@
 #include <shellapi.h>  // ShellExecuteW（T17 打开日志目录/帮助）
 
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <deque>
 #include <filesystem>
@@ -523,6 +524,75 @@ void MainWindow::build_scene() {
     quick_bar_->set_node_text(utf::utf8_to_utf16(node_data_->now()));
     quick_bar_->set_badge(node_data_->row_delay(node_data_->now()),
                           !node_data_->now().empty());
+  };
+
+  // 点击延迟 Chip → 单点测速（← active-node-card.tsx:108-136 handleTestDelay）
+  // 语义：先置 -2（测试中，Chip 显 spinner）→ trigger_auto_select(node_names=[node],
+  // select=false) → 结果写回；控制面失败不伪造成 Timeout，恢复原值并给可读提示。
+  quick_bar_->on_test_delay = [this] {
+    if (!node_data_) return;
+    const std::string node = node_data_->now();
+    if (node.empty()) return;
+    auto latest = config::Config::instance().profiles().latest_arc();
+    const std::string uid = latest->current.value_or("");
+    if (uid.empty()) return;
+    const int prev = node_data_->row_delay(node);
+    const auto started = std::chrono::steady_clock::now();
+    node_data_->set_delay(node, -2);           // ← setDelay(name, group, -2)
+    quick_bar_->set_badge(-2, true);
+    std::thread([this, node, uid, prev, started] {
+      nlohmann::json args = nlohmann::json::object();
+      args["profile_uid"] = uid;
+      args["node_names"] = nlohmann::json::array({node});
+      args["sort_type"] = 0;
+      args["select"] = false;
+      auto r = cmd::CommandService::instance().invoke("trigger_auto_select", args);
+      // ← delay.ts:340-348：至少显示 500ms 的加载动画
+      const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now() - started)
+                               .count();
+      if (elapsed < 500) std::this_thread::sleep_for(std::chrono::milliseconds(500 - elapsed));
+
+      int delay = 0;
+      std::string err;
+      if (!r.is_ok()) {
+        err = r.error().message;
+      } else if (!r.value().is_array() || r.value().empty()) {
+        err = "AUTO_SELECT_NO_RESULT";  // ← 空数组 = 本次压根没执行（非节点超时）
+      } else {
+        bool matched = false;
+        for (const auto& item : r.value()) {
+          if (item.is_array() && item.size() == 2 && item[0].is_string() &&
+              item[0].get<std::string>() == node) {
+            delay = item[1].get<int>();
+            matched = true;
+            break;
+          }
+        }
+        if (!matched) delay = 0;  // 执行了但该节点未返回 → Timeout 语义
+      }
+      UiPostbox::instance().post([this, node, prev, delay, err] {
+        if (!node_data_) return;
+        if (!err.empty()) {
+          node_data_->set_delay(node, prev);          // 恢复原值，不伪造 Timeout
+          quick_bar_->set_badge(prev, true);
+          // ← active-node-card.tsx:120-132 三种可读提示，绝不静默
+          if (err.find("AUTO_SELECT_BUSY") != std::string::npos) {
+            events::NoticeService::instance().push(
+                "info", tr8("settings.mini.testingInProgress"));
+          } else if (err.find("AUTO_SELECT_NO_RESULT") != std::string::npos) {
+            events::NoticeService::instance().push(
+                "error", tr8("settings.mini.testNotExecuted"));
+          } else {
+            events::NoticeService::instance().push(
+                "error", tr8("settings.mini.testFailed", {{"message", err}}));
+          }
+          return;
+        }
+        node_data_->set_delay(node, delay);
+        quick_bar_->set_badge(delay, true);
+      });
+    }).detach();
   };
   scene_->attach_node_list(std::move(nl));
 

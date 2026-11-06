@@ -408,3 +408,48 @@ UT_TEST(t13_scroll_top_button) {
   UT_CHECK(top->alpha() <= 0.05f);
   UT_CHECK(!top->interactive());  // visibility:hidden → 不参与命中
 }
+
+// ← active-node-card.tsx:311-344：延迟 Chip 可点 → 单点测速
+UT_TEST(t13_quick_bar_delay_chip_click) {
+  QuickBar bar;
+  bar.set_node_text(L"node-a");
+  bar.set_badge(120, true);
+  bar.layout_tree({0, 0, 271, 30});
+
+  const RectF chip = bar.chip_rect();
+  UT_CHECK(chip.w > 0.0f);
+  UT_CHECK(chip.h == 20.0f);  // MUI Chip size=small 高 20
+
+  int tests = 0;
+  bar.on_test_delay = [&] { ++tests; };
+
+  const PointF inside{chip.x + chip.w / 2, chip.y + chip.h / 2};
+  MouseEvent down{MouseEventType::Down, inside};
+  MouseEvent up{MouseEventType::Up, inside};
+  UT_CHECK(bar.on_mouse(down));
+  UT_CHECK(bar.on_mouse(up));
+  UT_CHECK_EQ(tests, 1);
+
+  // 点空处不触发
+  MouseEvent down2{MouseEventType::Down, {chip.x + chip.w + 40, chip.y + 10}};
+  MouseEvent up2{MouseEventType::Up, {chip.x + chip.w + 40, chip.y + 10}};
+  bar.on_mouse(down2);
+  bar.on_mouse(up2);
+  UT_CHECK_EQ(tests, 1);
+
+  // 测试中（-2）时 Chip 仍在位，可再次点击（Mini 未禁用 onClick）
+  bar.set_badge(-2, true);
+  bar.layout_tree({0, 0, 271, 30});
+  const RectF chip2 = bar.chip_rect();
+  UT_CHECK(chip2.w > 0.0f);
+  MouseEvent d3{MouseEventType::Down, {chip2.x + chip2.w / 2, chip2.y + chip2.h / 2}};
+  MouseEvent u3{MouseEventType::Up, {chip2.x + chip2.w / 2, chip2.y + chip2.h / 2}};
+  bar.on_mouse(d3);
+  bar.on_mouse(u3);
+  UT_CHECK_EQ(tests, 2);
+
+  // 无节点（has_node=false）→ 无 Chip、无命中
+  bar.set_badge(-1, false);
+  bar.layout_tree({0, 0, 271, 30});
+  UT_CHECK_EQ(bar.chip_rect().w, 0.0f);
+}
