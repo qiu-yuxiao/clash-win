@@ -32,7 +32,14 @@ if (-not $IsAdmin) {
            '-Configuration', $Configuration, '-Version', $Version)
     if ($Makensis) { $q += @('-Makensis', ('"' + $Makensis + '"')) }
     if ($SkipStage) { $q += '-SkipStage' }
-    $p = Start-Process powershell -ArgumentList $q -Verb RunAs -Wait -PassThru
+    try {
+        $p = Start-Process powershell -ArgumentList $q -Verb RunAs -Wait -PassThru -ErrorAction Stop
+    } catch {
+        Write-Host ("UAC 提升被拒绝或不可用：{0}" -f $_.Exception.Message) -ForegroundColor Red
+        Write-Host '未生成安装包；请在管理员 PowerShell 窗口中重新执行。' -ForegroundColor Yellow
+        exit 2
+    }
+    if ($null -eq $p) { Write-Host 'UAC 提升已取消；未生成安装包。' -ForegroundColor Red; exit 2 }
     exit $p.ExitCode
 }
 

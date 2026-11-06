@@ -96,7 +96,17 @@ if ($DryRun) {
         if ($SkipDestructive) { $q += '-SkipDestructive' }
         if ($SkipRebuild) { $q += '-SkipRebuild' }
         if ($ReportPath) { $q += @('-ReportPath', ('"' + $ReportPath + '"')) }
-        $p = Start-Process powershell -ArgumentList $q -Verb RunAs -Wait -PassThru
+        try {
+            $p = Start-Process powershell -ArgumentList $q -Verb RunAs -Wait -PassThru -ErrorAction Stop
+        } catch {
+            Write-Host ("UAC 提升被拒绝或不可用：{0}" -f $_.Exception.Message) -ForegroundColor Red
+            Write-Host '前置条件不满足：未执行任何验收项。请在「以管理员身份运行」的 PowerShell 窗口中重新执行，或双击 scripts\run_uac_acceptance.cmd。' -ForegroundColor Yellow
+            exit 2
+        }
+        if ($null -eq $p) {
+            Write-Host 'UAC 提升未返回进程对象（已取消）；未执行任何验收项。' -ForegroundColor Red
+            exit 2
+        }
         exit $p.ExitCode
     }
     Write-Host '管理员上下文：已具备（后续脚本继承，不再逐项弹 UAC）'

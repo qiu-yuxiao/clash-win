@@ -39,7 +39,14 @@ if (-not $IsAdmin) {
     if ($NoTimestamp) { $q += '-NoTimestamp' }
     if ($ResultFile) { $q += @('-ResultFile', ('"' + $ResultFile + '"')) }
     Remove-Item -LiteralPath $ResultFile -Force -ErrorAction SilentlyContinue
-    $p = Start-Process powershell -ArgumentList $q -Verb RunAs -PassThru -Wait
+    try {
+        $p = Start-Process powershell -ArgumentList $q -Verb RunAs -PassThru -Wait -ErrorAction Stop
+    } catch {
+        Write-Host ("UAC 提升被拒绝或不可用：{0}" -f $_.Exception.Message) -ForegroundColor Red
+        Write-Host '未签名任何产物；请在管理员 PowerShell 窗口中重新执行。' -ForegroundColor Yellow
+        exit 2
+    }
+    if ($null -eq $p) { Write-Host 'UAC 提升已取消；未签名任何产物。' -ForegroundColor Red; exit 2 }
     if (Test-Path -LiteralPath $ResultFile) { Get-Content -LiteralPath $ResultFile -Raw | Out-Host }
     exit $p.ExitCode
 }

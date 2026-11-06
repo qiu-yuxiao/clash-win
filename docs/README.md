@@ -126,11 +126,12 @@ Mini 侧没有任何自定义 NSIS 配置 —— `src-tauri/tauri.conf.json` 的
   **2026-11-06 校正**：原文转引的 `ACCEPTANCE-20261105.md` 10.5 六步操作从未入库、内容不可还原；
   此处只保留上述两步要点，完整步骤须重新整理，见 [06-验收状态台账.md](06-验收状态台账.md) §3。
 
-**待明日 UAC**
-- 21 条僵尸 PID（`clashwin`×6、`clashwin_test`×15，threads=0）→ 重启清理
-- 签名、完整打包、`/KEEP`×2、卸载、UAC 发布者目视 → 均需一次 UAC（见下表）
+**2026-11-06 13:44 更新：UAC 清单 #1～#4 已完整实测通过**
+- `scripts\acceptance_uac.ps1` 一次管理员授权跑完 #2 打包 → #1 验签 → #3 `/KEEP` ×2 → #4 卸载，`RESULT=PASS`（EXIT=0），报告见 `evidence/acceptance-uac-20261106-134426.md`，三份 `hash_*.txt` 已入库。
+- 仍需人工：**21 条僵尸 PID → 重启清理**（#0）、**UAC 发布者目视**（#5）、干净机 P0、4 页并排图、启动自检复跑。
+- 工具环境无交互桌面时无法弹出 UAC，可双击 `scripts\run_uac_acceptance.cmd` 一键完成（点一次「是」）。
 
-## 明日一次点击清单（需要 UAC）
+## UAC 验收清单（#1～#4 已于 2026-11-06 实测通过）
 
 | # | 动作 | 命令 | 预期 |
 | --- | --- | --- | --- |
@@ -140,6 +141,8 @@ Mini 侧没有任何自定义 NSIS 配置 —— `src-tauri/tauri.conf.json` 的
 | 3 | `/KEEP` 重装实测 | `dist\ClashWin_0.1.0_x64-setup.exe /S /KEEP` ×2 + 哈希比对 | 一次 UAC；两次后配置目录 SHA256 不变 |
 | 4 | 卸载实测 | `"C:\Program Files\ClashWin\uninstall.exe" /S` | 一次 UAC；程序文件移除、配置目录保留 |
 | 5 | UAC 发布者目视确认 | 双击安装包，看提示框顶部 | 显示「ClashWin」 |
+
+**2026-11-06 实测结果（#1～#4）**：#2 产出 `dist\ClashWin_0.1.0_x64-setup.exe` 18,354,760 B / SHA256 `3B536480…`；#1 `Valid / CN=ClashWin` + RFC3161 时间戳；#3 两次 `/S /KEEP` 后配置目录三份快照各 18 行、两两 `diff` 为空；#4 `uninstall.exe /S` 退出 0，`C:\Program Files\ClashWin` 已移除、配置目录保留。原始报告见 `evidence/acceptance-uac-20261106-134426.md`。#0 / #5 仍需人工。
 
 **待办**
 - 逐页并排图覆盖：已产出 主页/抽屉首屏/抽屉下半/连接面板/日志/编辑订阅(remote)/帮助菜单
@@ -151,9 +154,8 @@ Mini 侧没有任何自定义 NSIS 配置 —— `src-tauri/tauri.conf.json` 的
   结果摘要见 `evidence/2026-11-06-regression.md` §3。11-05 历史值为 531。
 - 启动自检：`scripts\run_app_test.ps1 -AppDir build\bin\Release -Runs 3` → **PASS ×3**，
   Post **clean**、**NET-RESTORED**；21 条 `threads=0` 僵尸 PID 不计存活。
-- 未签名包：`dist\ClashWin_0.1.0_x64-setup.exe`（**18,215,213 B**，
-  SHA256 `75F66429DDC637D66FCB7B56C4BADD4D8CD56F9DC1CF6C625A054FEB37482447`，`NotSigned`）；
-  签名版保留为 `dist\ClashWin_0.1.0_x64-setup-signed.exe`（18,270,488 B，`Valid`）。
+- 安装包（**以下为 11-05 历史值**）：未签名包 18,215,213 B / `75F66429…` / `NotSigned`、签名版 `dist\ClashWin_0.1.0_x64-setup-signed.exe` 18,270,488 B / `Valid`，原件备份于 `%TEMP%\clashwin_dist_backup_20261106\`。
+  **2026-11-06 13:43 重打包后**，`dist\ClashWin_0.1.0_x64-setup.exe` 为 **18,354,760 B** / SHA256 `3B536480F2301A9B05347EAA66FBFAECBC51594C94C3FBD3E52198086F8263FB` / `Valid / CN=ClashWin` + 时间戳；已通过 `/KEEP` ×2 与卸载实测。
 - **不对外发布**：不建 Release、不推 tag、不上传资产；包只留本地 `dist\`。
 - 窄窗抽屉高度差已归零：订阅卡 117 → 180 为主因（+94.5 px），主题卡标题行盒 18 → 20.4（半行距 1.2），
   三行 OCR **745/785/820** 与 Mini 零差（`settings_drawer.cpp:556-564`）。
@@ -170,9 +172,9 @@ Mini 侧没有任何自定义 NSIS 配置 —— `src-tauri/tauri.conf.json` 的
 
 - **状态矩阵**：[06-验收状态台账.md](06-验收状态台账.md) —— 逐项标注【本轮实测】/【文档记载】/【待验】/【已知缺口】。
 - **本轮实测证据**：`evidence/2026-11-06-regression.md` —— sidecar 5/5、UI 门禁 PASS、全量 547/0/0、安装包字节/哈希/签名。
-- **原始验收报告**：`ACCEPTANCE-20261105.md` **从未入库**，其「第九～十一节」「10.5 六步操作」无法还原；上文所有指向它的引用一律以状态矩阵为准。`hash_*.txt`、`pair_*.png`、`cmp_*.png`、`out/*.png`、`tests_full.log` 同样从未入库，不伪造补图。
+- **原始验收报告**：`ACCEPTANCE-20261105.md` **从未入库**，其「第九～十一节」「10.5 六步操作」无法还原；上文所有指向它的引用一律以状态矩阵为准。`pair_*.png`、`cmp_*.png`、`out/*.png`、`tests_full.log` 同样从未入库，不伪造补图；**`hash_*.txt` 已于 2026-11-06 实测生成并入库** `evidence/`。
 - **外部参照**：`clash_mini_agreements.md` §1.8 位于 `ClashVerge` 参考仓库，不在本仓库内；该目录按铁律只读参考，不得改动、移动或覆写。
-- **一键验收入口**：`scripts\acceptance_uac.ps1`（把「明日一次点击清单」#1～#4 编排为一次授权、自动留证；#0 重启与 #5 目视标 MANUAL）、`scripts\acceptance_clean_machine.ps1`（干净机 P0 链路留证，默认只读、绝不自动开 TUN/系统代理）。两者 `-DryRun` 只预演、不改动系统、不写报告。
-- **交付链现状**：`build\bin\Release\clashwin.exe`（2026-11-06 10:50）与 `installer\stage\`、`dist\` 子目录内同名 exe 的 **SHA256 互不相同**；`.delivery\stamp.json` 交付基线仍是 11-05 的值，未覆盖、未重新登记。当前最新构建**未重新打包、未签名**，详见台账 §4。
+- **一键验收入口**：`scripts\acceptance_uac.ps1`（把 UAC 清单 #1～#4 编排为一次授权、自动留证；#0 重启与 #5 目视标 MANUAL；提权失败固定 `exit 2`，不写假报告）、`scripts\run_uac_acceptance.cmd`（双击 → 一次 UAC → 自动跑完并显示退出码）、`scripts\acceptance_clean_machine.ps1`（干净机 P0 链路留证，默认只读、绝不自动开 TUN/系统代理）。`-DryRun` 只预演、不改动系统、不写报告。
+- **交付链现状（2026-11-06 13:44 已收敛）**：`build\bin\Release\clashwin.exe` 与 `installer\stage\clashwin.exe` 均为 `60ECEDAF…`（4,598,240 B，已签名）；`dist` 下两个 10-30 / 11-02 历史解压目录仍是旧值，属归档不覆盖。`scripts\delivery_check.ps1 -Record` 实跑 PASS（7 个接线标记全 PASS），`.delivery\stamp.json` 已由 `CA35E302…` 重登记为 `60ECEDAF…`。详见台账 §4 第 1/2 条。
 - **回归链**：`ui_src_gate.ps1` → `cmake --build build --config Release` → `run_tests_v4.ps1` → `run_app_test.ps1 -AppDir build\bin\Release -Runs 3` → Post `clean` + `NET-RESTORED`（`02-方法与流程.md:43`）。`run_app_test.ps1` 默认 `AppDir` 原指向已清理的 `build_verify\`，2026-11-06 已改为 `build\bin\Release`。
 - **方针不变**：不对外发布（不建 Release / 不推 tag / 不上传资产）。
