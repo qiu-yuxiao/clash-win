@@ -117,22 +117,25 @@ TitleBar::TitleBar(MainWindow* owner) {
   auto ctrls = std::make_unique<Row>();
   ctrls->spacing = 2;
   ctrls->flex_weight = 0;
-  auto mkbtn = [&](wchar_t g, bool close_red) {
+  // F-D11：绘制按 MUI 真实 SVG path（window-controller.tsx 的 Minimize/
+  //   CropSquare/FilterNone/Close）；glyph 仅为兜底兼容保留。
+  auto mkbtn = [&](wchar_t g, const char* name, bool close_red) {
     auto b = std::make_unique<TitleBarButton>(g);
+    b->icon_name_ = name;
     b->close_red_ = close_red;
     return b;
   };
   // Mini 标题栏只有三键：齿轮在 quickbar 内（_layout.tsx:1339-1349），
   // 这里不再重复挂 Setting，避免与 quickbar 齿轮双入口（P1）。
-  auto bmin = mkbtn(L'\uE921', false);   // ChromeMinimize
+  auto bmin = mkbtn(L'\uE921', "minimize", false);  // Minimize
   bmin->on_click = [owner] { if (owner) owner->minimize(); };
   btn_min_ = bmin.get();
   ctrls->add_child(std::move(bmin));
-  auto blg = mkbtn(L'\uE922', false);    // ChromeMaximize（large 态换 E923）
+  auto blg = mkbtn(L'\uE922', "cropsquare", false);  // CropSquare（large 态换 FilterNone）
   blg->on_click = [owner] { if (owner) owner->toggle_large(); };
   btn_large_ = blg.get();
   ctrls->add_child(std::move(blg));
-  auto bcl = mkbtn(L'\uE711', true);     // Cancel；hover 红
+  auto bcl = mkbtn(L'\uE711', "winclose", true);  // Close；hover 红
   bcl->on_click = [owner] { if (owner) owner->close_to_lightweight(); };
   btn_close_ = bcl.get();
   ctrls->add_child(std::move(bcl));
@@ -142,7 +145,9 @@ TitleBar::TitleBar(MainWindow* owner) {
 TitleBar::~TitleBar() = default;
 
 void TitleBar::set_large_mode(bool large) {
-  btn_large_->glyph_ = large ? L'\uE923' : L'\uE922';  // FilterNone / CropSquare
+  // src: window-controller.tsx:34-39 isLargeMode ? FilterNone : CropSquare
+  btn_large_->icon_name_ = large ? "filternone" : "cropsquare";
+  btn_large_->glyph_ = large ? L'\uE923' : L'\uE922';  // 兜底字形同步
   btn_large_->invalidate();
 }
 

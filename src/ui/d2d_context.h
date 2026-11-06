@@ -96,6 +96,8 @@ class D2dRenderTarget : public IRenderTarget, public ITextEngine {
                               float cx_ratio, float cy_ratio,
                               float rx, float ry) override;
   void draw_line(const PointF& a, const PointF& b, const Pen& p) override;
+  void fill_path(const std::vector<std::vector<PointF>>& loops,
+                 const Brush& b) override;
   void draw_text(const std::wstring& text, const RectF& r,
                  const TextStyle& ts) override;
   void draw_bitmap(uint64_t id, const RectF& r, float opacity) override;

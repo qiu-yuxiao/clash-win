@@ -289,6 +289,19 @@ void QuickBar::set_badge(int delay, bool has_node) {
   has_badge_ = show;
   delay_ = delay;
   wifi_->set_visible(show && !testing);
+  // F-D11：图标形状随延迟档位切换（src: style-helpers.tsx:25-87 getSignalIcon
+  //   —— >1e5/0/timeout→WifiOff、≥800→SignalWifi1Bar、≥400→2Bar、≥250→3Bar、
+  //   其余→4Bar；未测(-1)→0Bar。testing(-2) 不渲染 wifi（CircularProgress）。
+  if (show && !testing) {
+    const char* sig = "signalwifi4bar";
+    if (delay < 0) sig = "signalwifi0bar";           // 未测试
+    else if (delay > 100000 || delay == 0 ||
+             delay >= kNodeDelayMaxMs) sig = "wifioff";  // 错误/超时
+    else if (delay >= 800) sig = "signalwifi1bar";
+    else if (delay >= 400) sig = "signalwifi2bar";
+    else if (delay >= 250) sig = "signalwifi3bar";
+    if (wifi_->name() != sig) wifi_->set_icon(sig);
+  }
   delay_label_->set_visible(show);
   if (testing)
     delay_label_->set_text(tr("tests.unlock.page.actions.testing"));  // src: locales/zh/settings.json:549 statusTesting

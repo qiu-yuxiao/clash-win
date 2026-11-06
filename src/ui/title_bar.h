@@ -28,7 +28,8 @@ class TitleBarButton : public Widget {
   bool close_red_ = false;   // 关闭键 hover 红
   bool pressed_ = false;
   bool hover_ = false;
-  wchar_t glyph_;
+  wchar_t glyph_;             // 兼容保留（F-D11 后绘制走 icon_name_）
+  std::string icon_name_;     // F-D11：MUI path 名（minimize/maximize/restore/winclose）
 
   SizeF on_measure(float max_w, float max_h) override {
     (void)max_w; (void)max_h;
@@ -68,16 +69,42 @@ class TitleBarButton : public Widget {
       rt.round_rect(r, 4, {}, &bg);
     }
     // 图标 16px 居中（src: window-controller.tsx:32「width: 16, height: 16」）；
-    //   hover 且关闭键 → 白色
+    //   hover 且关闭键 → 白色。F-D11：按 Mini 的 MUI SVG path 填充绘制
+    //   （Minimize/CropSquare/FilterNone/Close 真实 path，24×24→16px 整盒映射）。
+    // ← MUI IconButton 默认 color=default ⇒ palette.action.active
+    //   （light rgba(0,0,0,.54) / dark rgba(255,255,255,.54)）
+    Color4f ink = close_red_ && hover_
+                      ? Color4f::hex(0xFFFFFF)
+                      : (svc.is_light() ? Color4f(0, 0, 0, 0.54f)
+                                        : Color4f(1, 1, 1, 0.54f));
+    std::vector<MuiLoopSet> mui;
+    if (!icon_name_.empty() && IconW::mui_paths_for(icon_name_, mui)) {
+      const float s = 16.0f;  // src: window-controller.tsx:32 width 16
+      const float scale = s / 24.0f;
+      const float ox = (bounds().w - s) * 0.5f, oy = (bounds().h - s) * 0.5f;
+      for (const auto& ls : mui) {
+        Color4f c = ink;
+        c.a *= ls.opacity;
+        // 同一 <path> 元素的全部子路径必须一次性 fill_path（偶奇填充靠
+        //   多环同场运算产生镂空，如 CropSquare 外框减内框）
+        std::vector<std::vector<PointF>> loops;
+        loops.reserve(ls.loops.size());
+        for (const auto& poly : ls.loops) {
+          std::vector<PointF> pts;
+          pts.reserve(poly.size());
+          for (const auto& p : poly)
+            pts.push_back({ox + p.x * scale, oy + p.y * scale});
+          loops.push_back(std::move(pts));
+        }
+        rt.fill_path(loops, Brush{c});
+      }
+      return;
+    }
+    // 兜底：字体字形（icon_name_ 未设时保持旧行为）
     TextStyle ts;
     ts.font_family = L"Segoe Fluent Icons";
     ts.size = 16;  // src: window-controller.tsx:32 width 16
-    // ← MUI IconButton 默认 color=default ⇒ palette.action.active
-    //   （light rgba(0,0,0,.54) / dark rgba(255,255,255,.54)）
-    ts.color = close_red_ && hover_
-                   ? Color4f::hex(0xFFFFFF)
-                   : (svc.is_light() ? Color4f(0, 0, 0, 0.54f)
-                                     : Color4f(1, 1, 1, 0.54f));
+    ts.color = ink;
     ts.align_h = AlignH::Center;
     ts.align_v = AlignV::Center;
     rt.draw_text(std::wstring(1, glyph_), r, ts);

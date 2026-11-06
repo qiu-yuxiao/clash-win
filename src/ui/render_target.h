@@ -139,6 +139,15 @@ class IRenderTarget {
     if (!pts || count < 2) return;
     for (int i = 1; i < count; ++i) draw_line(pts[i - 1], pts[i], p);
   }
+  // 多环填充（F-D11：MUI SVG path 扁平化后的闭合环集合；偶奇填充，
+  //   语义 = SVG fill-rule 摘要下的镂空 donut——外环减内环）。
+  // 默认退化为逐环描边（无填充能力的测试/兼容渲染器仍可见轮廓）。
+  virtual void fill_path(const std::vector<std::vector<PointF>>& loops,
+                         const Brush& b) {
+    Pen p{b.color, 1.0f};
+    for (const auto& loop : loops)
+      draw_polyline(loop.data(), static_cast<int>(loop.size()), p);
+  }
   virtual void draw_text(const std::wstring& text, const RectF& r,
                          const TextStyle& ts) = 0;
   // 位图：id 由 T12 icon_store 登记（register_bitmap）；未登记则不绘制

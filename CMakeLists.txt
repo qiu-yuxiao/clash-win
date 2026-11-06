@@ -315,6 +315,7 @@ add_executable(clashwin_test
   tests/test_cmd_smoke.cpp
   tests/test_ui_layout.cpp
   tests/test_ui_widgets.cpp
+  tests/test_fd11_mui_icons.cpp
   tests/test_ui_hit.cpp
   tests/test_ui_dirty.cpp
   tests/test_ui_scroll.cpp

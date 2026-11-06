@@ -1,8 +1,9 @@
 #pragma once
-// IconW（T10）：图标字形渲染。
-// 原版用 @mui/icons-material（Rounded 系）；C++ 侧以系统字体 Segoe Fluent
-// Icons（Win11）/ Segoe MDL2 Assets 等价字形映射表渲染（glyph_for）。
-// 映射表覆盖原版实际引用清单 + T13+ 常用项；无精确对应者取近似字形。
+// IconW（T10）：图标渲染。
+// F-D11（2026-11-06）：优先级 1 = 内嵌 @mui/icons-material 真实 SVG path
+//   （mui_paths 表，d 属性逐字取自 ClashVerge node_modules；24×24 viewBox
+//   扁平化为闭合环后 fill_path 偶奇填充）；优先级 2 = 手绘折线表；优先级 3 =
+//   Segoe Fluent/MDL2 字形映射（glyph_for，保留作未覆盖图标的兜底）。
 #include <string>
 #include <unordered_map>
 
@@ -10,17 +11,31 @@
 
 namespace clashwin::ui {
 
+class IRenderTarget;
+
+// 一条 MUI <path> 子元素：fill-opacity + 扁平化闭合环（24×24 坐标）。
+struct MuiLoopSet {
+  std::vector<std::vector<PointF>> loops;
+  float opacity = 1.0f;
+};
+
 class IconW : public Widget {
  public:
   explicit IconW(Widget* parent = nullptr);
 
   // @mui 图标名 → 字形码点（大小写/下划线不敏感；未知返回 0）
   static wchar_t glyph_for(const std::string& mui_name);
-  // 是否有内置 SVG path（折线）版本；有则优先矢量绘制，不依赖系统图标字体
+  // 是否有内置矢量版本（MUI path 表或手绘折线表）；有则不落字体字形
   static bool has_vector_path(const std::string& mui_name);
+  // F-D11：MUI SVG path 表展开（不缩放，24×24 坐标）；命中返回 true。
+  // 供 IconW 与 TitleBarButton（标题栏三键）共用。
+  static bool mui_paths_for(const std::string& mui_name,
+                            std::vector<MuiLoopSet>& out);
 
   void set_icon(const std::string& mui_name);  // 按 MUI 名设置
   void set_glyph(wchar_t g);                   // 直接设码点
+  // 当前归一化图标名（F-D11：延迟徽章按档位切换前比对用）
+  const std::string& name() const { return name_; }
 
   float size_ = 16;                            // 字号=图标边长（逻辑 px）
   float box_w = 0, box_h = 0;  // 固定命中盒（0=size_；字形仍按 size_ 居中绘制）

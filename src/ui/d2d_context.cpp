@@ -491,6 +491,34 @@ void D2dRenderTarget::draw_line(const PointF& a, const PointF& b, const Pen& p) 
                          p.width);
 }
 
+// F-D11：MUI SVG path 扁平化后的多环填充（偶奇）。每环一个 FILLED+CLOSED
+// figure；SetFillMode(ALTERNATE) 对整条几何生效（MUI donut 型图标的镂空语义）。
+void D2dRenderTarget::fill_path(const std::vector<std::vector<PointF>>& loops,
+                                const Brush& b) {
+  if (!active_rt_ || loops.empty()) return;
+  ID2D1PathGeometry* path = nullptr;
+  if (FAILED(ctx_.d2d()->CreatePathGeometry(&path)) || !path) return;
+  ID2D1GeometrySink* sink = nullptr;
+  if (FAILED(path->Open(&sink)) || !sink) {
+    path->Release();
+    return;
+  }
+  sink->SetFillMode(D2D1_FILL_MODE_ALTERNATE);
+  for (const auto& loop : loops) {
+    if (loop.size() < 2) continue;
+    sink->BeginFigure(D2D1::Point2F(loop[0].x, loop[0].y),
+                      D2D1_FIGURE_BEGIN_FILLED);
+    for (size_t i = 1; i < loop.size(); ++i)
+      sink->AddLine(D2D1::Point2F(loop[i].x, loop[i].y));
+    sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+  }
+  sink->Close();
+  sink->Release();
+  ID2D1SolidColorBrush* br = brush(b.color);
+  if (br) active_rt_->FillGeometry(path, br);
+  path->Release();
+}
+
 void D2dRenderTarget::draw_text(const std::wstring& text, const RectF& r,
                                 const TextStyle& ts) {
   if (!active_rt_ || text.empty()) return;
