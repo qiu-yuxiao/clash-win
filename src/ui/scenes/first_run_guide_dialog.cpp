@@ -530,6 +530,51 @@ void FirstRunGuideDialog::finish() {
   close();
 }
 
+// 三大特性胶囊排版：flex 1 1 auto + flexWrap:wrap + gap 6（src: :607-644）
+// 返回总高（多行时 > kPillH）；同时填充 pill_rects_ 供绘制使用。
+float FirstRunGuideDialog::layout_pills(float pills_y, float inner_x, float inner_w) {
+  const std::wstring texts[3] = {
+      tr("layout.components.firstRun.featureAutoSelect"),
+      tr("layout.components.firstRun.featureDnsGuard"),
+      tr("layout.components.firstRun.featureStealth")};
+  // 内容宽 = 文字 + px 8×2 + border 1×2（src: :623-625 px:1 / border 1px）
+  float cw3[3];
+  for (int i = 0; i < 3; ++i) {
+    float tw = 0;
+    if (ITextEngine* te = text_engine()) {
+      TextStyle ts;
+      ts.size = kPillFont;
+      tw = te->measure_text(texts[i], ts, 0).w;
+    } else {
+      tw = static_cast<float>(texts[i].size()) * kPillFont;
+    }
+    cw3[i] = tw + 16.0f + 2.0f;
+  }
+  pill_rects_.clear();
+  float py = pills_y;
+  for (int i = 0; i < 3;) {
+    int j = i;
+    float sum = 0;
+    while (j < 3) {
+      const float add = cw3[j] + (j > i ? kPillGap : 0.0f);
+      if (sum + add > inner_w && j > i) break;
+      sum += add;
+      ++j;
+    }
+    const int cnt = j - i;
+    const float extra = std::max(0.0f, inner_w - sum) / static_cast<float>(cnt);
+    float px = inner_x;
+    for (int k = i; k < j; ++k) {
+      const float w = cw3[k] + extra;
+      pill_rects_.push_back({px, py, w, kPillH});
+      px += w + kPillGap;
+    }
+    py += kPillH + kPillGap;
+    i = j;
+  }
+  return pill_rects_.empty() ? kPillH : (py - kPillGap - pills_y);
+}
+
 void FirstRunGuideDialog::on_arrange(const RectF& area) {
   set_bounds(area);
   // src: :545-557 paper width 100% / maxWidth 520（窗口侧留 32px 呼吸）
@@ -537,9 +582,30 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
   const bool has_banner =
       step_ == FirstRunStep::Input && detected_clipboard_url_.empty() == false &&
       url_.empty();
+  // 引导文案实测高度（src: :593-603 是流式 Typography，行数随语言变化）：
+  //   固定 2 行高度会让后续胶囊/输入框压在文字上（日/德文案实测 4~5 行）
+  {
+    const float inner_w = cw - kTitlePadX * 2.0f;
+    float h = kIntroH;
+    if (ITextEngine* te = text_engine()) {
+      TextStyle ts;
+      ts.size = kIntroSize;
+      ts.wrap = true;
+      const SizeF s = te->measure_text(tr("layout.components.firstRun.intro"), ts, inner_w);
+      if (s.h > 0) h = std::max(kIntroH, s.h);
+    }
+    intro_h_ = h;
+  }
   // src: :560-1120 内容随流式增减：输入步 + 横幅高度；就绪步两卡 + 动作
+  //   胶囊折行（pills_h_ - kPillH）同样撑高卡片：Mini 是流式 Box，高度自然增长
+  float pills_extra = 0.0f;
+  if (step_ == FirstRunStep::Input) {
+    pills_h_ = layout_pills(0.0f, 0.0f, cw - kTitlePadX * 2.0f);
+    pills_extra = std::max(0.0f, pills_h_ - kPillH);
+  }
   float ch = step_ == FirstRunStep::Input
-                 ? kInputStepH + (has_banner ? kBannerH + kBannerMb : 0.0f)
+                 ? kInputStepH + (intro_h_ - kIntroH) + pills_extra +
+                       (has_banner ? kBannerH + kBannerMb : 0.0f)
                  : kReadyStepH;
   ch = std::min(ch, area.h - 16.0f);
   const float cx = std::max(0.0f, (area.w - cw) / 2.0f);
@@ -551,10 +617,15 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
   const float content_y = cy + kTitleBlockH + kContentPad;
 
   if (step_ == FirstRunStep::Input) {
-    const float pills_y = content_y + kIntroH + kIntroMb;
-    const float field_y = pills_y + kPillH + kPillMb +
+    // ---- 三大特性胶囊：flex 1 1 auto + flexWrap:wrap + gap 6 ----
+    // （src: :607-644）窄窗 + 长译文放不下一行时必须折行，
+    //   行内按 flex-grow 均摊剩余宽度；早期实现平均三等分 → 文字互相压盖
+    const float pills_y = content_y + intro_h_ + kIntroMb;
+    pills_h_ = layout_pills(pills_y, inner_x, inner_w);
+
+    const float field_y = pills_y + pills_h_ + kPillMb +
                           (has_banner ? kBannerH + kBannerMb : 0.0f);
-    banner_clip_rect_ = {inner_x, pills_y + kPillH + kPillMb, inner_w, kBannerH};
+    banner_clip_rect_ = {inner_x, pills_y + pills_h_ + kPillMb, inner_w, kBannerH};
     input_rect_ = {inner_x, field_y, inner_w, kFieldH};
     // src: :715-729 endAdornment KeyboardReturn 16px（点击即导入）
     btn_enter_rect_ = {input_rect_.right() - 26.0f, field_y + 12.0f, 16.0f, 16.0f};
@@ -642,13 +713,14 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
     // ---- 引导文案（src: :593-603）----
     draw_text(rt,
               tr("layout.components.firstRun.intro"),
-              {inner_x, content_y, inner_w, kIntroH}, kIntroSize,
+              {inner_x, content_y, inner_w, intro_h_}, kIntroSize,
               static_cast<int>(Weight::Normal), secondary_text(), AlignH::Left,
               AlignV::Top, true);
 
     // ---- 三大特性胶囊（src: :606-647）----
-    const float pills_y = content_y + kIntroH + kIntroMb;
-    const float pill_w = (inner_w - kPillGap * 2.0f) / 3.0f;
+    //   排版在 on_arrange 里做过（flex 折行），这里只按 pill_rects_ 绘制
+    const float pills_y = content_y + intro_h_ + kIntroMb;
+    if (pill_rects_.size() != 3) layout_pills(pills_y, inner_x, inner_w);
     // src: :632-641 bgcolor / borderColor
     const Color4f pill_bg = is_retro() ? Color4f::hex(0x2C1F03, 0.10f)
                                       : (is_light() ? Color4f::hex(0x000000, 0.04f)
@@ -659,8 +731,8 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
         tr("layout.components.firstRun.featureAutoSelect"),
         tr("layout.components.firstRun.featureDnsGuard"),
         tr("layout.components.firstRun.featureStealth")};
-    for (int i = 0; i < 3; ++i) {
-      const RectF pr = {inner_x + i * (pill_w + kPillGap), pills_y, pill_w, kPillH};
+    for (int i = 0; i < 3 && i < static_cast<int>(pill_rects_.size()); ++i) {
+      const RectF pr = pill_rects_[static_cast<size_t>(i)];
       Brush pb{pill_bg};
       rt.round_rect(pr, 6.0f, Pen{pill_bd, 1.0f}, &pb);
       draw_text(rt, pills[i], pr, kPillFont, static_cast<int>(Weight::Bold), text_color,

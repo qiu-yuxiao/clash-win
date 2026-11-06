@@ -99,14 +99,12 @@
 
 ## 四、已查实、**尚未修**（需按轻重排期，个案讨论）
 
+> 2026-11-07 第二轮：A/C/D/F 已全部闭环（见第七节），B 已 key 级清零。
+> 仅剩 E（MUI 过渡动画）为长期全局性偏差，需单独定策略。
+
 | # | 缺口 | Mini 证据 | 影响 |
 |---|---|---|---|
-| A | **活跃节点卡的延迟 Chip 不可点**（点一下测单节点延迟） | `active-node-card.tsx:311-344` `onClick={handleTestDelay}`，测速中显示 spinner +「测试中...」 | Win 只能看不能测；配套 3 条通知（`testingInProgress` / `testNotExecuted` / `testFailed`）无从触发 |
-| B | 通知覆盖面剩余约 40 处（121 → 已覆盖 37 条状态 + 10 处直推） | `grep -rn showNotice src/` | 主要是边缘操作（解锁页检测超时、极简设置端口保存等） |
-| C | 通知右键复制文案 | `notice-manager.tsx:150-156,196-200` | 用户无法一键复制错误信息 |
-| D | 通知多行折行 | MUI Alert message 自动换行 | Win 当前单行省略号，长错误被截断 |
-| E | MUI 过渡动画（Dialog/Menu Fade 等） | `_theme.tsx` transitions | Win 全部瞬时出现（长期全局性偏差，需统一决策） |
-| F | 剪贴板「复制订阅链接」菜单项缺失 | `_layout.tsx:987-1020` | 无该入口（通知键 `layout.notices.profileLinkCopied` 已在位） |
+| E | MUI 过渡动画（Dialog/Menu Fade、Snackbar Grow 等） | `_theme.tsx` transitions | Win 全部瞬时出现（长期全局性偏差，需统一决策：Fade 只需 opacity 图层，Grow 需 scale 变换——`IRenderTarget` 目前只有平移 origin，无任意变换，须先补 `push_transform`） |
 
 ## 五、测试环境纪律（本轮踩坑）
 
@@ -131,3 +129,26 @@
 | 节点列表 | 空态（无 DIRECT、无任何行） |
 | UI 语言 | 日语 —— 本机 Culture=ja-JP，Mini `sys_locale::get_locale()` 出厂行为，非缺陷 |
 | 回归 | 566 用例 0 失败 |
+
+## 七、第二轮闭环（2026-11-07 续）
+
+| 项 | 修复内容 | 源码锚点 |
+|---|---|---|
+| A | 延迟 Chip 可点单点测速：`-2` 显 spinner → `trigger_auto_select(select=false)` → 写回；≥500ms 加载动画；控制面失败不伪造 Timeout，恢复原值 + 三种提示 | `active-node-card.tsx:108-136`、`delay.ts:340-348` |
+| B | 通知 key 级缺口清零（逐文件核对 Mini 100 处 `showNotice.*`）：<br>· 端口保存 3 条（portInUse / portSaved / 失败原文）<br>· 解锁检测 15s 超时 → detectionTimeout<br>· TUN 自动关闭 autoDisabled / autoDisableFailed（此前 Win 无该行为）<br>· 内核就绪超时 clashNotReady<br>· 复制订阅链接 profileLinkCopied / copyFailed<br>· `clientInstallCompleted` 核实**不可达**（`updater.rs:843-854` 先 `exit(0)`） | 见各条注释 |
+| C | 通知条右键 → 复制该条全文 + `copySuccess` 1000ms（关闭按钮上右键同样冒泡复制，不关闭） | `notice-manager.tsx:150-156,178-200` |
+| D | 通知长文案折行：条目高度按折行行数动态算（行高 20.02 = 14×1.43，单行仍 48）；图标/action 随高度居中；bottom 锚点按各自实际高度堆叠 | `notice-manager.tsx:178-212`（MUI Alert message `minWidth:0;overflow:auto`） |
+| F | 复制订阅链接补提示（菜单项本已存在，缺的是 toast） | `_layout.tsx:987-998,1833-1839` |
+
+## 八、第二轮顺带修掉的实现缺陷
+
+1. **Mixed Port 保存从不写内核**：原实现只 `patch_verge_config{verge_mixed_port}`，
+   内核 `mixed-port` 不变 —— 端口「改了不生效」。改为占用检查
+   （`is_port_in_use`）+ 双写（`patch_clash_config{mixed-port}` 与
+   `patch_verge_config{verge_mixed_port}`）+ 失败/占用回滚输入框，
+   ← `use-minimal-settings.ts:87-107`。
+2. **解锁检测在 worker 线程直接改控件状态**（`items_` / `is_checking_` +
+   `invalidate()`）→ 与绘制竞争。改为结果经 `UiPostbox` 投递回 UI 线程。
+3. **数据竞争之外的行为缺口**：`UnlockDialog::start_check` 无超时、无失败提示，
+   `check_all` 抛错即静默。补 15s（`UNLOCK_TIMEOUT_MS`）+ 异常捕获 +
+   `detectionTimeout` 提示。

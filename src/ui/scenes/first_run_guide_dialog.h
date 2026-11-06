@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <vector>
 
 #include "ui/widget.h"
 
@@ -102,6 +103,8 @@ class FirstRunGuideDialog : public Widget {
   RectF card_rect() const { return card_rect_; }
   RectF clip_banner_rect() const { return banner_clip_rect_; }
   RectF input_rect() const { return input_rect_; }
+  // 三大特性胶囊的实际矩形（折行后可多于一行；测试断言不重叠用）
+  const std::vector<RectF>& pill_rects() const { return pill_rects_; }
   RectF submit_btn_rect() const { return btn_submit_rect_; }
   RectF later_btn_rect() const { return btn_later_rect_; }
   RectF star_card_rect() const { return card_star_rect_; }
@@ -127,6 +130,16 @@ class FirstRunGuideDialog : public Widget {
 
   RectF card_rect_;
   RectF banner_clip_rect_;
+  // 引导文案实际折行高度：日/德等长文案在 271 宽下折成 4~5 行，
+  // 固定 kIntroH(41.6=2 行) 会让特性胶囊压在文字上。
+  // Mini 是 HTML 流式排版，高度自然增长 → 这里按实际测量值参与 y 链。
+  float intro_h_ = 41.6f;
+  // 三大特性胶囊：flex 1 1 auto + flexWrap:wrap + gap 6（src: :607-644），
+  // 窄窗（271）下日/德文案放不下一行 → 折成多行，行内均摊剩余宽度
+  std::vector<RectF> pill_rects_;
+  float pills_h_ = 22.2f;
+  // 胶囊折行排版（返回总高，并填充 pill_rects_）
+  float layout_pills(float pills_y, float inner_x, float inner_w);
   RectF input_rect_;
   RectF btn_enter_rect_;
   RectF btn_paste_rect_;

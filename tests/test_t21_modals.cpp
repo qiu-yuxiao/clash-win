@@ -875,3 +875,34 @@ UT_TEST(t21_snackbar_wrap_and_right_click_copy) {
   bar.set_items({});
   set_text_engine(nullptr);
 }
+
+// ← first-run-guide-dialog.tsx:607-644：三大特性胶囊 flex 1 1 auto + flexWrap:wrap
+// 窄窗 + 长译文（含 emoji）放不下一行时必须折行，且互不压盖；
+// 早期实现平均三等分 → 文字互相覆盖（271 宽 @ 日语文案实测）。
+UT_TEST(t21_first_run_guide_pills_wrap_no_overlap) {
+  FakeWrapEngine fake;
+  set_text_engine(&fake);
+
+  FirstRunGuideDialog dlg;
+  dlg.layout_tree({0, 0, 271, 680});  // Mini 缺省窗口
+
+  const auto& pr = dlg.pill_rects();
+  UT_CHECK_EQ(pr.size(), size_t(3));
+  // 同一行内不重叠；不同行则 y 递增且间距 = kPillGap(6)
+  for (size_t i = 1; i < pr.size(); ++i) {
+    const RectF& a = pr[i - 1];
+    const RectF& b = pr[i];
+    const bool same_row = std::abs(a.y - b.y) < 0.01f;
+    if (same_row) UT_CHECK(b.x >= a.right() + 5.5f);  // gap 6（浮点）
+    else UT_CHECK(b.y >= a.bottom());
+  }
+  // 每颗胶囊都在卡片内（右缘不越界）
+  for (const auto& r : pr) {
+    UT_CHECK(r.right() <= dlg.card_rect().right() + 0.5f);
+    UT_CHECK(r.h > 0.0f);
+  }
+  // 输入框不得与胶囊区重叠（曾出现过胶囊压文字/压输入框）
+  UT_CHECK(dlg.input_rect().y >= pr.back().bottom());
+
+  set_text_engine(nullptr);
+}
