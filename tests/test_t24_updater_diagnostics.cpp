@@ -266,11 +266,22 @@ UT_TEST(t24_core_updater_progress_event_stream) {
   UT_CHECK(std::find(statuses.begin(), statuses.end(), "extracting") != statuses.end());
   UT_CHECK(std::find(statuses.begin(), statuses.end(), "done") != statuses.end());
 
-  // Monotonic progress assertion
-  uint32_t prev_progress = 0;
-  for (const auto& ev : captured_events) {
-    UT_CHECK_MSG(ev.progress >= prev_progress, "progress must be monotonic");
-    prev_progress = ev.progress;
+  // 进度断言：Mini 真实事件流并非全局单调（core_updater.rs:269 下载末事件
+  // pct=10+floor(1.0*80)=90，随后 verifying 固定 85）→ 按「同状态内单调」
+  // 校验，并显式校验 checking→downloading→verifying→extracting→done 顺序。
+  {
+    uint32_t prev_in_status = 0;
+    std::string prev_status;
+    for (const auto& ev : captured_events) {
+      if (ev.status == prev_status) {
+        UT_CHECK_MSG(ev.progress >= prev_in_status, "progress must be monotonic within status");
+      }
+      prev_in_status = ev.progress;
+      prev_status = ev.status;
+    }
+    const std::vector<std::string> expect_order = {"checking", "downloading",
+                                                   "verifying", "extracting", "done"};
+    UT_CHECK(statuses == expect_order);
   }
 }
 

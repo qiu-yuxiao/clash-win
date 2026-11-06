@@ -30,6 +30,14 @@ std::string get_current_log_time() {
   return oss.str();
 }
 
+// ← style-helpers.tsx:221-225 formatCoreVersion：去前缀 v/V 后加 "Ver."
+std::string format_core_version(const std::string& version) {
+  if (version.empty()) return "";
+  size_t i = 0;
+  while (i < version.size() && (version[i] == 'v' || version[i] == 'V')) ++i;
+  return "Ver." + version.substr(i);
+}
+
 }  // namespace
 
 // ==========================================
@@ -375,18 +383,20 @@ void ClientUpdateModal::on_arrange(const RectF& area) {
   float cy = std::max(0.0f, (area.h - ch) / 2.0f);
   card_rect_ = {cx, cy, cw, ch};
 
-  btn_close_x_rect_ = {cx + cw - 32.0f, cy + 6.0f, 26.0f, 24.0f};
-  changelog_box_rect_ = {cx + 20.0f, cy + 82.0f, cw - 40.0f, 150.0f};
-  progress_bar_rect_ = {cx + 20.0f, cy + 244.0f, cw - 40.0f, 12.0f};
+  btn_close_x_rect_ = {cx + cw - 32.0f, cy + 6.0f, 26.0f, 24.0f};  // 保留成员（Mini 无 ✕，不绘制）
+  changelog_box_rect_ = {cx + 24.0f, cy + 124.0f, cw - 48.0f, 120.0f};
+  // ← layout-dialogs.tsx:343 bar 高 8px（radius 4）
+  progress_bar_rect_ = {cx + 24.0f, cy + 252.0f, cw - 48.0f, 8.0f};
 
   btn_close_rect_ = {cx + cw - 180.0f, cy + ch - 44.0f, 76.0f, 30.0f};
   btn_update_rect_ = {cx + cw - 96.0f, cy + ch - 44.0f, 82.0f, 30.0f};
 }
 
 void ClientUpdateModal::on_paint(IRenderTarget& rt) {
-  // 豁免: Mini 无对应物 — ClashWin 自加客户端更新弹窗，Mini 更新流程为
-  //   Notification/页面内提示，无独立模态（出处: layout-dialogs.tsx 无此组件）。
-  //   色值取 MUI 缺省(primary #2196F3/#1976D2、success #4CAF50、backdrop rgba(0,0,0,.5))。
+  // 1:1 对齐 layout-dialogs.tsx:247-410 Client Update Dialog：
+  //   MUI Dialog paper（theme-panel 类、radius 8）+ h6 标题 + body2 版本两行 +
+  //   changelog 框（13px pre-wrap）+ 进度条（8px，状态≠idle 时显示）+
+  //   关闭（outlined）/立即更新（contained primary）按钮（downloading 时禁用）。
   if (!open_) return;
 
   rt.fill_rect({0, 0, bounds().w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
@@ -395,117 +405,118 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
   rt.round_rect({card_rect_.x - 2, card_rect_.y - 1, card_rect_.w + 4, card_rect_.h + 5}, 9.0f,
                 {}, &shadow_b);
 
-  Brush card_bg{Color4f::hex(0xFFFFFF)};
-  rt.round_rect(card_rect_, 8.0f, {Color4f::hex(0xD0D0D0), 1.0f}, &card_bg);
+  // theme-panel 卡底（← _theme.tsx paper.background）
+  const auto& vars = ThemeService::instance().vars();
+  Brush card_bg{vars.theme_bg};
+  rt.round_rect(card_rect_, 8.0f, {Color4f(1, 1, 1, 0.12f), 1.0f}, &card_bg);
 
-  // 标题
+  // 标题（MUI DialogContentText h6 = 1.25rem = 20px bold）
   TextStyle title_ts;
-  title_ts.size = 13.5f;
+  title_ts.size = 20.0f;
   title_ts.weight = static_cast<int>(Weight::Bold);
-  title_ts.color = Color4f::hex(0x1A1A1A);
+  title_ts.color = ThemeService::instance().text_primary();
   title_ts.align_v = AlignV::Center;
   // src: locales/zh/layout.json:58 「"title": "软件本体更新"」（layout-dialogs.tsx:280 🚀）
-  rt.draw_text(L"🚀 " + tr("layout.components.dialogs.client.title"), {card_rect_.x + 18.0f, card_rect_.y + 8.0f, 200.0f, 24.0f},
+  rt.draw_text(L"🚀 " + tr("layout.components.dialogs.client.title"),
+               {card_rect_.x + 24.0f, card_rect_.y + 14.0f, card_rect_.w - 48.0f, 28.0f},
                title_ts);
 
-  // 关闭 ✕
-  Color4f x_bg = hover_close_x_ ? Color4f::hex(0xEEEEEE) : Color4f::hex(0xFAFAFA);
-  Brush xb{x_bg};
-  rt.round_rect(btn_close_x_rect_, 3.0f, {Color4f::hex(0xCCCCCC), 1.0f}, &xb);
-  TextStyle x_ts;
-  x_ts.size = 11.5f;
-  x_ts.color = Color4f::hex(0x424242);
-  x_ts.align_h = AlignH::Center;
-  x_ts.align_v = AlignV::Center;
-  rt.draw_text(L"✕", btn_close_x_rect_, x_ts);
-
-  rt.fill_rect({card_rect_.x, card_rect_.y + 36.0f, card_rect_.w, 1.0f},
-               Brush{Color4f::hex(0xEEEEEE)});
-
-  // 版本信息
+  // 版本信息两行（body2 = 14px；最新版本行 bold；v 前缀 ← layout-dialogs.tsx:288-306）
+  const std::wstring unknown = tr("layout.components.dialogs.update.unknown");
   TextStyle ver_ts;
-  ver_ts.size = 11.0f;
-  ver_ts.color = Color4f::hex(0x333333);
+  ver_ts.size = 14.0f;
+  ver_ts.color = ThemeService::instance().text_primary();
   ver_ts.align_v = AlignV::Center;
-  std::wstring ver_str =
-      tr("layout.components.dialogs.update.currentVersion",
-         {{"version", current_version_}}) +
-      L"   ➔   " + tr("layout.components.dialogs.update.latestVersion",
-                     {{"version", latest_version_}});
-  rt.draw_text(ver_str, {card_rect_.x + 20.0f, card_rect_.y + 44.0f, card_rect_.w - 40.0f, 22.0f},
+  rt.draw_text(tr("layout.components.dialogs.update.currentVersion",
+                  {{"version", current_version_.empty() ? utf::utf16_to_utf8(unknown)
+                                                       : current_version_}}),
+               {card_rect_.x + 24.0f, card_rect_.y + 48.0f, card_rect_.w - 48.0f, 20.0f},
                ver_ts);
+  TextStyle ver_bold = ver_ts;
+  ver_bold.weight = static_cast<int>(Weight::Bold);
+  rt.draw_text(tr("layout.components.dialogs.update.latestVersion",
+                  {{"version", latest_version_.empty() ? utf::utf16_to_utf8(unknown)
+                                                       : latest_version_}}),
+               {card_rect_.x + 24.0f, card_rect_.y + 72.0f, card_rect_.w - 48.0f, 20.0f},
+               ver_bold);
 
-  TextStyle chg_label;
-  chg_label.size = 10.5f;
-  chg_label.color = Color4f::hex(0x757575);
-  chg_label.align_v = AlignV::Center;
-  rt.draw_text(tr("layout.components.dialogs.client.changelog"), {card_rect_.x + 20.0f, card_rect_.y + 64.0f, 200.0f, 16.0f}, chg_label);
+  TextStyle chg_label = ver_bold;
+  // src: locales/zh/layout.json:59 「"更新日志:"」（layout-dialogs.tsx:318）
+  rt.draw_text(tr("layout.components.dialogs.client.changelog"),
+               {card_rect_.x + 24.0f, card_rect_.y + 100.0f, card_rect_.w - 48.0f, 20.0f},
+               chg_label);
 
-  // 更新日志框
-  Brush cl_bg{Color4f::hex(0xF8F9FA)};
-  rt.round_rect(changelog_box_rect_, 4.0f, {Color4f::hex(0xE0E0E0), 1.0f}, &cl_bg);
+  // 更新日志框（13px pre-wrap；← layout-dialogs.tsx:320-336）
+  const bool light = ThemeService::instance().is_light();
+  Brush cl_bg{light ? Color4f::hex(0x000000, 0.04f) : Color4f::hex(0xFFFFFF, 0.06f)};
+  rt.round_rect(changelog_box_rect_, 4.0f, {vars.theme_border, 1.0f}, &cl_bg);
 
   TextStyle cl_ts;
-  cl_ts.size = 10.5f;
-  cl_ts.font_family = L"Consolas";
-  cl_ts.color = Color4f::hex(0x424242);
+  cl_ts.size = 13.0f;
+  cl_ts.color = ThemeService::instance().text_primary();
   cl_ts.wrap = true;
   // src: locales/zh/layout.json:60 「"暂无详细更新日志"」（layout-dialogs.tsx:335）
   std::wstring chg_w = changelog_.empty() ? tr("layout.components.dialogs.client.changelogEmpty") : utf::utf8_to_utf16(changelog_);
   rt.push_clip(changelog_box_rect_);
-  rt.draw_text(chg_w, {changelog_box_rect_.x + 8.0f, changelog_box_rect_.y + 8.0f,
-                       changelog_box_rect_.w - 16.0f, changelog_box_rect_.h - 16.0f}, cl_ts);
+  rt.draw_text(chg_w, {changelog_box_rect_.x + 16.0f, changelog_box_rect_.y + 16.0f,
+                       changelog_box_rect_.w - 32.0f, changelog_box_rect_.h - 32.0f}, cl_ts);
   rt.pop_clip();
 
-  // 进度条与状态
-  // src: use-client-update.ts:73-105 started/progress/finished/error 均需可见状态行
-  if (is_downloading_ || progress_ > 0 || status_ == "error") {
-    Brush bar_bg{Color4f::hex(0xE0E0E0)};
-    rt.round_rect(progress_bar_rect_, 6.0f, {}, &bar_bg);
+  // 进度条与状态（仅 status ≠ idle 显示；← layout-dialogs.tsx:338-373）
+  if (status_ != "idle") {
+    // bar：8px 高、radius 4、底 10% 黑/白、填充 var(--primary-main)
+    Brush bar_bg{light ? Color4f::hex(0x000000, 0.1f) : Color4f::hex(0xFFFFFF, 0.1f)};
+    rt.round_rect(progress_bar_rect_, 4.0f, {}, &bar_bg);
     float fill_w = progress_bar_rect_.w * (static_cast<float>(progress_) / 100.0f);
-    Brush fill_b{Color4f::hex(0x2196F3)};
+    Brush fill_b{ThemeService::instance().primary()};
     rt.round_rect({progress_bar_rect_.x, progress_bar_rect_.y, fill_w, progress_bar_rect_.h},
-                  6.0f, {}, &fill_b);
+                  4.0f, {}, &fill_b);
 
     TextStyle stat_ts;
-    stat_ts.size = 10.0f;
-    stat_ts.color = Color4f::hex(0x1976D2);
+    stat_ts.size = 12.0f;
+    stat_ts.color = ThemeService::instance().text_primary();
+    stat_ts.color.a *= 0.8f;  // opacity 0.8
+    // 空消息兜底 = clientDownloading（点击后的初始文案）
     std::wstring stat_str = status_msg_.empty()
-                                ? (L"正在下载更新包... " + std::to_wstring(progress_) + L"%")
+                                ? tr("layout.components.dialogs.progress.clientDownloading")
                                 : utf::utf8_to_utf16(status_msg_);
     rt.draw_text(stat_str, {progress_bar_rect_.x, progress_bar_rect_.y + 16.0f,
                             progress_bar_rect_.w, 18.0f}, stat_ts);
   }
 
-  // 底部按钮
-  Color4f c_bg = hover_close_ ? Color4f::hex(0xEEEEEE) : Color4f::hex(0xF5F5F5);
-  Brush cb{c_bg};
-  rt.round_rect(btn_close_rect_, 4.0f, {Color4f::hex(0xCCCCCC), 1.0f}, &cb);
-  TextStyle c_ts;
-  c_ts.size = 11.0f;
-  c_ts.color = Color4f::hex(0x424242);
-  c_ts.align_h = AlignH::Center;
-  c_ts.align_v = AlignV::Center;
-  rt.draw_text(tr("shared.actions.close"), btn_close_rect_, c_ts);
+  // 底部按钮（关闭 outlined 禁用于 downloading；更新 contained primary）
+  const bool busy = is_downloading_;
+  auto paint_themed_btn = [&](IRenderTarget& rt2, const RectF& r, bool hovered,
+                              bool disabled, const char* color_type,
+                              const std::wstring& label) {
+    auto p = ThemeService::instance().button_paint(color_type);
+    Color4f fill = disabled ? p.fill_disabled
+                            : (hovered ? p.fill_hover : p.fill);
+    Brush b{fill};
+    rt2.round_rect(r, p.radius, {p.border, p.border_w}, &b);
+    TextStyle ts;
+    ts.size = 12.0f;  // MUI Button body2
+    ts.weight = p.weight;
+    ts.color = disabled ? p.text_disabled : p.text;
+    ts.align_h = AlignH::Center;
+    ts.align_v = AlignV::Center;
+    rt2.draw_text(label, r, ts);
+  };
+  paint_themed_btn(rt, btn_close_rect_, hover_close_, busy, "default",
+                   tr("shared.actions.close"));
 
-  Color4f u_bg = hover_update_ ? Color4f::hex(0x1976D2) : Color4f::hex(0x2196F3);
-  Brush ub{u_bg};
-  rt.round_rect(btn_update_rect_, 4.0f, {}, &ub);
-  TextStyle u_ts;
-  u_ts.size = 11.0f;
-  u_ts.weight = static_cast<int>(Weight::Bold);
-  u_ts.color = Color4f::hex(0xFFFFFF);
-  u_ts.align_h = AlignH::Center;
-  u_ts.align_v = AlignV::Center;
-  // src: layout.json:54/61 「已是最新 / 准备重启」（layout-dialogs.tsx:400-406）
-  std::wstring upd_label = tr("layout.components.dialogs.update.updateNow");
-  if (is_downloading_)
-    upd_label = tr("layout.components.dialogs.update.updating");
-  else if (progress_ >= 100)
+  // 标签逻辑（← layout-dialogs.tsx:400-407）：done→准备重启；downloading→更新中...；
+  // 同版本→已是最新；否则→立即更新
+  std::wstring upd_label;
+  if (status_ == "done")
     upd_label = tr("layout.components.dialogs.client.prepareRestart");
+  else if (busy)
+    upd_label = tr("layout.components.dialogs.update.updating");
   else if (!latest_version_.empty() && latest_version_ == current_version_)
     upd_label = tr("layout.components.dialogs.update.upToDate");
-  rt.draw_text(upd_label, btn_update_rect_, u_ts);
+  else
+    upd_label = tr("layout.components.dialogs.update.updateNow");
+  paint_themed_btn(rt, btn_update_rect_, hover_update_, busy, "primary", upd_label);
 }
 
 bool ClientUpdateModal::on_mouse(const MouseEvent& e) {
@@ -513,11 +524,9 @@ bool ClientUpdateModal::on_mouse(const MouseEvent& e) {
   PointF pt = e.pos;
 
   if (e.type == MouseEventType::Move) {
-    bool hx = btn_close_x_rect_.contains(pt.x, pt.y);
     bool hc = btn_close_rect_.contains(pt.x, pt.y);
     bool hu = btn_update_rect_.contains(pt.x, pt.y);
-    if (hx != hover_close_x_ || hc != hover_close_ || hu != hover_update_) {
-      hover_close_x_ = hx;
+    if (hc != hover_close_ || hu != hover_update_) {
       hover_close_ = hc;
       hover_update_ = hu;
       invalidate();
@@ -526,14 +535,18 @@ bool ClientUpdateModal::on_mouse(const MouseEvent& e) {
   }
 
   if (e.type == MouseEventType::Up) {
-    if (btn_close_x_rect_.contains(pt.x, pt.y) || btn_close_rect_.contains(pt.x, pt.y)) {
-      close();
+    if (btn_close_rect_.contains(pt.x, pt.y)) {
+      // src: layout-dialogs.tsx:250-254 仅非 downloading 时 onClose 生效
+      if (!is_downloading_) close();
       return true;
     }
     if (btn_update_rect_.contains(pt.x, pt.y)) {
       // src: use-client-update.ts:56-62 无更新对象/已是新版 → 不发起下载
       if (download_url_.empty() || is_downloading_ || progress_ >= 100) return true;
-      handle_progress_event("downloading", 0, "开始下载软件更新包...");
+      // ← use-client-update.ts:63-67 点击后先显示 clientDownloading
+      handle_progress_event("downloading", 0,
+                            utf::utf16_to_utf8(
+                                tr("layout.components.dialogs.progress.clientDownloading")));
       if (on_start_update) on_start_update();
       return true;
     }
@@ -629,124 +642,113 @@ void CoreUpdateModal::on_arrange(const RectF& area) {
   float cy = std::max(0.0f, (area.h - ch) / 2.0f);
   card_rect_ = {cx, cy, cw, ch};
 
-  btn_close_x_rect_ = {cx + cw - 32.0f, cy + 6.0f, 26.0f, 24.0f};
-  progress_bar_rect_ = {cx + 20.0f, cy + 140.0f, cw - 40.0f, 12.0f};
+  btn_close_x_rect_ = {cx + cw - 32.0f, cy + 6.0f, 26.0f, 24.0f};  // 保留成员（Mini 无 ✕，不绘制）
+  // ← layout-dialogs.tsx:484 bar 高 8px
+  progress_bar_rect_ = {cx + 24.0f, cy + 148.0f, cw - 48.0f, 8.0f};
 
   btn_close_rect_ = {cx + cw - 180.0f, cy + ch - 44.0f, 76.0f, 30.0f};
   btn_upgrade_rect_ = {cx + cw - 96.0f, cy + ch - 44.0f, 82.0f, 30.0f};
 }
 
 void CoreUpdateModal::on_paint(IRenderTarget& rt) {
-  // 豁免: Mini 无对应物 — ClashWin 自加内核更新弹窗，Mini 内核更新为通知 + 页面按钮，
-  //   无独立模态（出处: layout-dialogs.tsx 无此组件）。色值取 MUI 缺省与状态色。
+  // 1:1 对齐 layout-dialogs.tsx:412-553 Core Update Dialog（「Mini 无对应物」
+  // 的旧注释有误：Mini 具备本对话框）。MUI Dialog paper + h6 标题 + body2
+  // 版本两行 + 进度条（状态≠idle）+ 关闭/升级按钮（busy 时禁用）。
   if (!open_) return;
 
+  const auto& vars = ThemeService::instance().vars();
   rt.fill_rect({0, 0, bounds().w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
 
   Brush shadow_b{Color4f(0, 0, 0, 0.22f)};
   rt.round_rect({card_rect_.x - 2, card_rect_.y - 1, card_rect_.w + 4, card_rect_.h + 5}, 9.0f,
                 {}, &shadow_b);
 
-  Brush card_bg{Color4f::hex(0xFFFFFF)};
-  rt.round_rect(card_rect_, 8.0f, {Color4f::hex(0xD0D0D0), 1.0f}, &card_bg);
+  Brush card_bg{vars.theme_bg};
+  rt.round_rect(card_rect_, 8.0f, {Color4f(1, 1, 1, 0.12f), 1.0f}, &card_bg);
 
-  // 标题
+  // 标题（h6 = 20px bold）
   TextStyle title_ts;
-  title_ts.size = 13.5f;
+  title_ts.size = 20.0f;
   title_ts.weight = static_cast<int>(Weight::Bold);
-  title_ts.color = Color4f::hex(0x1A1A1A);
+  title_ts.color = ThemeService::instance().text_primary();
   title_ts.align_v = AlignV::Center;
   // src: locales/zh/layout.json:64 「"title": "Mihomo 内核更新"」（layout-dialogs.tsx:449 ⚙️）
-  rt.draw_text(L"⚙️ " + tr("layout.components.dialogs.core.title"), {card_rect_.x + 18.0f, card_rect_.y + 8.0f, 200.0f, 24.0f},
+  rt.draw_text(L"⚙️ " + tr("layout.components.dialogs.core.title"),
+               {card_rect_.x + 24.0f, card_rect_.y + 14.0f, card_rect_.w - 48.0f, 28.0f},
                title_ts);
 
-  // 关闭 ✕
-  Color4f x_bg = hover_close_x_ ? Color4f::hex(0xEEEEEE) : Color4f::hex(0xFAFAFA);
-  Brush xb{x_bg};
-  rt.round_rect(btn_close_x_rect_, 3.0f, {Color4f::hex(0xCCCCCC), 1.0f}, &xb);
-  TextStyle x_ts;
-  x_ts.size = 11.5f;
-  x_ts.color = Color4f::hex(0x424242);
-  x_ts.align_h = AlignH::Center;
-  x_ts.align_v = AlignV::Center;
-  rt.draw_text(L"✕", btn_close_x_rect_, x_ts);
-
-  rt.fill_rect({card_rect_.x, card_rect_.y + 36.0f, card_rect_.w, 1.0f},
-               Brush{Color4f::hex(0xEEEEEE)});
-
-  // 版本信息
+  // 版本信息两行（body2 = 14px；最新版本行 bold；formatCoreVersion ← style-helpers.tsx:221）
   TextStyle ver_ts;
-  ver_ts.size = 11.5f;
-  ver_ts.color = Color4f::hex(0x333333);
+  ver_ts.size = 14.0f;
+  ver_ts.color = ThemeService::instance().text_primary();
   ver_ts.align_v = AlignV::Center;
-  rt.draw_text(L"当前内核版本: " + utf::utf8_to_utf16(current_version_),
-               {card_rect_.x + 20.0f, card_rect_.y + 54.0f, card_rect_.w - 40.0f, 22.0f}, ver_ts);
-  // src: layout.json:51/65 「最新版本: {{version}} / 获取中...」（layout-dialogs.tsx:471-474）
-  const std::wstring latest_line = tr(
-      "layout.components.dialogs.update.latestVersion",
-      {{"version", latest_version_.empty()
-                       ? utf::utf16_to_utf8(
-                             tr("layout.components.dialogs.core.fetching"))
-                       : latest_version_}});
-  rt.draw_text(latest_line, {card_rect_.x + 20.0f, card_rect_.y + 80.0f, card_rect_.w - 40.0f, 22.0f},
+  rt.draw_text(tr("layout.components.dialogs.update.currentVersion",
+                  {{"version", format_core_version(current_version_)}}),
+               {card_rect_.x + 24.0f, card_rect_.y + 48.0f, card_rect_.w - 48.0f, 20.0f},
                ver_ts);
+  // src: layout.json:51/65 「最新版本: {{version}} / 获取中...」（layout-dialogs.tsx:471-474）
+  TextStyle ver_bold = ver_ts;
+  ver_bold.weight = static_cast<int>(Weight::Bold);
+  rt.draw_text(tr("layout.components.dialogs.update.latestVersion",
+                  {{"version", latest_version_.empty()
+                                   ? utf::utf16_to_utf8(
+                                         tr("layout.components.dialogs.core.fetching"))
+                                   : format_core_version(latest_version_)}}),
+               {card_rect_.x + 24.0f, card_rect_.y + 72.0f, card_rect_.w - 48.0f, 20.0f},
+               ver_bold);
 
-  // 升级进度条
-  Brush bar_bg{Color4f::hex(0xE0E0E0)};
-  rt.round_rect(progress_bar_rect_, 6.0f, {}, &bar_bg);
-  if (progress_ > 0) {
+  // 升级进度条（仅 status ≠ idle；8px/radius4/底 10% 黑白/填充 primary ← :479-514）
+  const bool light = ThemeService::instance().is_light();
+  if (status_ != "idle") {
+    Brush bar_bg{light ? Color4f::hex(0x000000, 0.1f) : Color4f::hex(0xFFFFFF, 0.1f)};
+    rt.round_rect(progress_bar_rect_, 4.0f, {}, &bar_bg);
     float fill_w = progress_bar_rect_.w * (static_cast<float>(progress_) / 100.0f);
-    Brush fill_b{status_ == "done" ? Color4f::hex(0x4CAF50) : Color4f::hex(0xE65100)};
+    Brush fill_b{ThemeService::instance().primary()};
     rt.round_rect({progress_bar_rect_.x, progress_bar_rect_.y, fill_w, progress_bar_rect_.h},
-                  6.0f, {}, &fill_b);
+                  4.0f, {}, &fill_b);
+
+    // 状态说明（12px ×0.8；消息直接来自后端 payload，无自造兜底）
+    TextStyle msg_ts;
+    msg_ts.size = 12.0f;
+    msg_ts.color = ThemeService::instance().text_primary();
+    msg_ts.color.a *= 0.8f;
+    std::wstring display_msg = utf::utf8_to_utf16(message_);
+    rt.draw_text(display_msg, {progress_bar_rect_.x, progress_bar_rect_.y + 16.0f,
+                               progress_bar_rect_.w, 20.0f}, msg_ts);
   }
 
-  // 状态说明文本
-  TextStyle msg_ts;
-  msg_ts.size = 10.5f;
-  msg_ts.color = status_ == "error" ? Color4f::hex(0xD32F2F) : Color4f::hex(0x555555);
-  std::wstring display_msg;
-  if (!message_.empty()) {
-    display_msg = utf::utf8_to_utf16(message_);
-  } else if (status_ == "checking") {
-    display_msg = L"正在检查新版本内核发布...";
-  } else if (status_ == "downloading") {
-    display_msg = L"正在下载内核组件... " + std::to_wstring(progress_) + L"%";
-  } else if (status_ == "verifying") {
-    display_msg = L"正在校验 SHA256 签名...";
-  } else if (status_ == "extracting") {
-    display_msg = L"正在热替换 mini-mihomo.exe 并平滑重启...";
-  } else if (status_ == "done") {
-    display_msg = L"✅ 内核升级完成并已就绪！";
-  } else {
-    display_msg = L"就绪，点击'立即更新'开始平滑热替换";
-  }
-  rt.draw_text(display_msg, {progress_bar_rect_.x, progress_bar_rect_.y + 18.0f,
-                             progress_bar_rect_.w, 20.0f}, msg_ts);
+  // 底部按钮（关闭 outlined 禁用于 busy；升级 contained primary）
+  const bool busy = is_upgrading_ || status_ == "checking" || status_ == "downloading" ||
+                    status_ == "extracting";
+  auto paint_themed_btn = [&](IRenderTarget& rt2, const RectF& r, bool hovered,
+                              bool disabled, const char* color_type,
+                              const std::wstring& label) {
+    auto p = ThemeService::instance().button_paint(color_type);
+    Color4f fill = disabled ? p.fill_disabled
+                            : (hovered ? p.fill_hover : p.fill);
+    Brush b{fill};
+    rt2.round_rect(r, p.radius, {p.border, p.border_w}, &b);
+    TextStyle ts;
+    ts.size = 12.0f;  // MUI Button body2
+    ts.weight = p.weight;
+    ts.color = disabled ? p.text_disabled : p.text;
+    ts.align_h = AlignH::Center;
+    ts.align_v = AlignV::Center;
+    rt2.draw_text(label, r, ts);
+  };
+  paint_themed_btn(rt, btn_close_rect_, hover_close_, busy, "default",
+                   tr("shared.actions.close"));
 
-  // 底部按钮
-  Color4f c_bg = hover_close_ ? Color4f::hex(0xEEEEEE) : Color4f::hex(0xF5F5F5);
-  Brush cb{c_bg};
-  rt.round_rect(btn_close_rect_, 4.0f, {Color4f::hex(0xCCCCCC), 1.0f}, &cb);
-  TextStyle c_ts;
-  c_ts.size = 11.0f;
-  c_ts.color = Color4f::hex(0x424242);
-  c_ts.align_h = AlignH::Center;
-  c_ts.align_v = AlignV::Center;
-  rt.draw_text(tr("shared.actions.close"), btn_close_rect_, c_ts);
-
-  Color4f u_bg = hover_upgrade_ ? Color4f::hex(0xEF6C00) : Color4f::hex(0xE65100);
-  Brush ub{u_bg};
-  rt.round_rect(btn_upgrade_rect_, 4.0f, {}, &ub);
-  TextStyle u_ts;
-  u_ts.size = 11.0f;
-  u_ts.weight = static_cast<int>(Weight::Bold);
-  u_ts.color = Color4f::hex(0xFFFFFF);
-  u_ts.align_h = AlignH::Center;
-  u_ts.align_v = AlignV::Center;
-  // src: locales/zh/layout.json:53/66 「更新中... / 更新完成」（layout-dialogs.tsx:545-547）
-  rt.draw_text(status_ == "done" ? tr("layout.components.dialogs.core.updateDone") : (is_upgrading_ ? tr("layout.components.dialogs.update.updating") : tr("layout.components.dialogs.update.updateNow")),
-               btn_upgrade_rect_, u_ts);
+  // 标签逻辑（← layout-dialogs.tsx:544-550）：done→更新完成；busy→更新中...；
+  // 否则→立即更新（isSameVersion 分支在 dialog 打开前提下不可达）
+  std::wstring upd_label;
+  if (status_ == "done")
+    upd_label = tr("layout.components.dialogs.core.updateDone");
+  else if (busy)
+    upd_label = tr("layout.components.dialogs.update.updating");
+  else
+    upd_label = tr("layout.components.dialogs.update.updateNow");
+  paint_themed_btn(rt, btn_upgrade_rect_, hover_upgrade_, busy, "primary", upd_label);
 }
 
 bool CoreUpdateModal::on_mouse(const MouseEvent& e) {
@@ -754,11 +756,9 @@ bool CoreUpdateModal::on_mouse(const MouseEvent& e) {
   PointF pt = e.pos;
 
   if (e.type == MouseEventType::Move) {
-    bool hx = btn_close_x_rect_.contains(pt.x, pt.y);
     bool hc = btn_close_rect_.contains(pt.x, pt.y);
     bool hu = btn_upgrade_rect_.contains(pt.x, pt.y);
-    if (hx != hover_close_x_ || hc != hover_close_ || hu != hover_upgrade_) {
-      hover_close_x_ = hx;
+    if (hc != hover_close_ || hu != hover_upgrade_) {
       hover_close_ = hc;
       hover_upgrade_ = hu;
       invalidate();
@@ -767,14 +767,21 @@ bool CoreUpdateModal::on_mouse(const MouseEvent& e) {
   }
 
   if (e.type == MouseEventType::Up) {
-    if (btn_close_x_rect_.contains(pt.x, pt.y) || btn_close_rect_.contains(pt.x, pt.y)) {
-      close();
+    if (btn_close_rect_.contains(pt.x, pt.y)) {
+      // src: layout-dialogs.tsx:415-421 busy 时禁用关闭
+      if (!(is_upgrading_ || status_ == "checking" || status_ == "downloading" ||
+            status_ == "extracting")) {
+        close();
+      }
       return true;
     }
     if (btn_upgrade_rect_.contains(pt.x, pt.y)) {
       if (status_ != "done") {
         is_upgrading_ = true;
-        handle_progress_event("checking", 5, "正在检查最新内核版本...");
+        // ← use-core-update.ts:98-100 点击后 coreStarting
+        handle_progress_event("checking", 5,
+                              utf::utf16_to_utf8(
+                                  tr("layout.components.dialogs.progress.coreStarting")));
         if (on_start_upgrade) on_start_upgrade();
       }
       return true;

@@ -540,9 +540,10 @@ Result<void> CoreUpdater::start_core_upgrade(const GithubRelease& release) {
   uint32_t last_pct = 10;
   auto on_progress = [this, &asset, &last_pct](uint64_t downloaded, uint64_t total) {
     if (total > 0) {
+      // src: core_updater.rs:269 ((d/t)*80.0) as u32 + 10（截断，不设上限，
+      // 满下载时 90；随后 verifying 固定 85 —— 与 Mini 行为一致）
       uint32_t pct = 10 + static_cast<uint32_t>((static_cast<double>(downloaded) /
-                                                 static_cast<double>(total)) * 74.0);
-      if (pct > 84) pct = 84;
+                                                 static_cast<double>(total)) * 80.0);
       if (pct != last_pct) {
         last_pct = pct;
         char msg_buf[256];
