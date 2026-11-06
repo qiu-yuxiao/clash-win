@@ -18,6 +18,17 @@ IVerge make_template();
 // 系统语言探测（供模板与 T10 i18n 复用）
 std::string system_language();
 
+// 安装器语言 → 应用语言（用户指令 2026-11-07）。
+// NSIS 安装器在开头弹语言选择（clashwin.nsi .onInit 的 MUI_LANGDLL_DISPLAY），
+// MUI 把所选语言 ID 写在 HKCU\Software\Clash Win\ClashWin 的
+// "Installer Language"（REG_SZ 数字串）。应用首次生成 verge.yaml 时优先采用它，
+// 取不到才回落系统语言 —— 用户口径：「在安装器里选了中文，接下来应用界面
+// 就该是中文」。None 返回空串，由调用方回落。
+std::string installer_language();
+// 纯映射（可单测）：2052 SimpChinese→zh / 1033 English→en / 1049 Russian→ru，
+// 其余（含 0）→ 空串。
+std::string language_from_installer_id(int id);
+
 // 序列化（serde_yaml_ng 逐字段形态；测试用于模板 diff 基准）
 std::string dump_verge(const IVerge& v);
 

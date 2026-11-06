@@ -69,7 +69,9 @@ UT_TEST(t03_first_launch_verge_yaml_diff_empty) {
     std::printf("  [diag] save_verge err code=%d msg=%s\n", r.error().code,
                 r.error().message.c_str());
   UT_CHECK(r.is_ok());
-  std::string lang = verge::system_language();
+  // 首启语言：安装器所选语言优先，取不到才回落系统语言（用户指令 2026-11-07）
+  std::string lang = verge::installer_language();
+  if (lang.empty()) lang = verge::system_language();
 
   // 期望文本：serde_yaml_ng 对 IVerge::template() 的序列化产物
   // （字段顺序 = verge.rs:23-192 声明序；None→null；skip 字段 None 省键；
@@ -286,4 +288,22 @@ UT_TEST(t03_config_init_generates_all_three) {
               std::string("127.0.0.1:9108"));
   UT_CHECK(cfg.profiles().latest_arc()->get_item("Merge") != nullptr);
   UT_CHECK(cfg.profiles().latest_arc()->get_item("Script") != nullptr);
+}
+
+// ← 安装器语言选择（clashwin.nsi .onInit MUI_LANGDLL_DISPLAY）落注册表
+//   HKCU\Software\Clash Win\ClashWin\"Installer Language" = 语言 ID。
+//   应用首次生成 verge.yaml 时采用它，避免「安装器选了中文、应用却是日文」。
+UT_TEST(t03_installer_language_mapping) {
+  using namespace clashwin::config::verge;
+  UT_CHECK(language_from_installer_id(2052) == "zh");  // LANG_SIMPCHINESE
+  UT_CHECK(language_from_installer_id(1033) == "en");  // LANG_ENGLISH
+  UT_CHECK(language_from_installer_id(1049) == "ru");  // LANG_RUSSIAN
+  // 其余语言安装器不提供：返回空串 → 调用方回落系统语言（不猜）
+  UT_CHECK(language_from_installer_id(0).empty());
+  UT_CHECK(language_from_installer_id(1041).empty());  // ja-JP，安装器无此选项
+  UT_CHECK(language_from_installer_id(2057).empty());
+
+  // 注册表读取：只做「不抛、返回合法值」的健全性断言（值随本机安装历史变化）
+  const std::string got = installer_language();
+  UT_CHECK(got.empty() || got == "zh" || got == "en" || got == "ru");
 }

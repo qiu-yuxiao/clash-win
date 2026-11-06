@@ -45,6 +45,38 @@ std::string system_language() {
   return "zh";  // DEFAULT_LANGUAGE
 }
 
+// ---------- 安装器语言（用户指令 2026-11-07） ----------
+std::string language_from_installer_id(int id) {
+  switch (id) {
+    case 2052: return "zh";   // LANG_SIMPCHINESE（clashwin.nsi:154）
+    case 1033: return "en";   // LANG_ENGLISH
+    case 1049: return "ru";   // LANG_RUSSIAN
+    default: return {};
+  }
+}
+
+std::string installer_language() {
+  // 键与值名必须与安装器一致：MUI_LANGDLL_REGISTRY_KEY="${MANUPRODUCTKEY}"
+  //（= Software\Clash Win\ClashWin）、VALUENAME="Installer Language"。
+  HKEY key = nullptr;
+  if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Clash Win\\ClashWin", 0,
+                    KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) {
+    return {};
+  }
+  wchar_t buf[64] = {};
+  DWORD bytes = sizeof(buf) - sizeof(wchar_t);
+  DWORD type = 0;
+  std::string out;
+  if (RegQueryValueExW(key, L"Installer Language", nullptr, &type,
+                       reinterpret_cast<LPBYTE>(buf), &bytes) == ERROR_SUCCESS &&
+      (type == REG_SZ || type == REG_EXPAND_SZ) && bytes > 0) {
+    buf[bytes / sizeof(wchar_t)] = L'\0';
+    out = language_from_installer_id(_wtoi(buf));
+  }
+  RegCloseKey(key);
+  return out;
+}
+
 IVerge make_template() { return IVerge::make_template(); }
 std::string dump_verge(const IVerge& v) { return serde::dump(v.to_yaml()); }
 // ---------- load / save ----------
@@ -111,7 +143,11 @@ IVerge IVerge::make_template() {
   v.app_log_max_size = consts::kAppLogMaxSize;
   v.app_log_max_count = consts::kAppLogMaxCount;
   v.clash_core = "mini-mihomo";
-  v.language = verge::system_language();
+  // 首启界面语言优先级（用户指令 2026-11-07）：
+  //   安装器里选的语言 → 系统语言。安装器在开头弹语言选择，用户选中文就该中文，
+  //   不该被 ja/其他系统区域盖过去。取不到安装器语言时与 Mini 出厂行为一致。
+  const std::string from_installer = verge::installer_language();
+  v.language = from_installer.empty() ? verge::system_language() : from_installer;
   v.theme_mode = "dark";
   v.env_type = "powershell";
   v.start_page = "/";
