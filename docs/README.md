@@ -46,11 +46,14 @@
   均为 Enter）。故本程序不为该键单独加逻辑。
 
 **2026-11-05 安装器与验收（本轮）**
-- 0.1.0 包已按本轮源码重打并签名：`dist\ClashWin_0.1.0_x64-setup.exe`
-  （18,270,488 字节，`Status=Valid / Subject=CN=ClashWin`）。
+- 0.1.0 包已按本轮源码重打：`dist\ClashWin_0.1.0_x64-setup.exe`
+  （18,215,213 字节，SHA256 `75F66429DDC637D66FCB7B56C4BADD4D8CD56F9DC1CF6C625A054FEB37482447`，`NotSigned`）；
+  签名版 `dist\ClashWin_0.1.0_x64-setup-signed.exe`（18,270,488 字节，`Valid / CN=ClashWin`，带 RFC3161 时间戳）。
+  **2026-11-06 按磁盘实测校正**：此处原把签名包的字节数与 `Valid` 写在了不带 `-signed` 的路径上，与本文件「待办」段及 `README.md` 矛盾，见 `evidence/2026-11-06-regression.md` §4。
 - `/KEEP` 连续两次静默安装实测：`exit=0`，安装后 `Program Files\ClashWin\clashwin.exe` 时间戳 = `installer\stage` 的 03:41:42；
   配置目录 `%APPDATA%\io.github.clash-win.clash-win` 的 10 个文件 SHA256 在两次安装前后**完全一致**
   （基线 `hash_before.txt` / 一次后 `hash_after.txt` / 二次后 `hash_after2.txt`，`Compare-Object` 输出为空）。
+  **这三份文件从未入库**；2026-11-06 起由 `scripts\acceptance_uac.ps1` 的 #3 在实测时自动生成到 `docs\evidence\`。
 - UAC 发布者：安装包 Authenticode `Subject=CN=ClashWin`，UAC 提示的发布者即取自该 Subject；
   secure desktop 无法程序化截屏，此项以签名链为准。
 
@@ -119,8 +122,9 @@ Mini 侧没有任何自定义 NSIS 配置 —— `src-tauri/tauri.conf.json` 的
 **刻意偏差（用户指令，保留）**
 - 安装默认「全新安装」会整目录 `Rename` 为 `%APPDATA%\io.github.clash-win.clash-win.bak-N`
   （非删除；Mini 安装从不移动配置）。生成规则：`clashwin.nsi:389-403` 从 `bak-1` 起取第一个空号。
-  恢复：退出程序 → `%APPDATA%` 下把 `.bak-N` 改名回去（保留当前目录留底），详见
-  `ACCEPTANCE-20261105.md` 10.5 的 6 步操作。
+  恢复：退出程序 → `%APPDATA%` 下把 `.bak-N` 改名回去（保留当前目录留底）。
+  **2026-11-06 校正**：原文转引的 `ACCEPTANCE-20261105.md` 10.5 六步操作从未入库、内容不可还原；
+  此处只保留上述两步要点，完整步骤须重新整理，见 [06-验收状态台账.md](06-验收状态台账.md) §3。
 
 **待明日 UAC**
 - 21 条僵尸 PID（`clashwin`×6、`clashwin_test`×15，threads=0）→ 重启清理
@@ -140,8 +144,11 @@ Mini 侧没有任何自定义 NSIS 配置 —— `src-tauri/tauri.conf.json` 的
 **待办**
 - 逐页并排图覆盖：已产出 主页/抽屉首屏/抽屉下半/连接面板/日志/编辑订阅(remote)/帮助菜单
   （`pair_07_help.png`，自绘 `ContextMenu` 已实拍，含动态版本后缀）；
-  首次引导、添加网址、编辑订阅(local)、解锁整页——逐项结论见 `ACCEPTANCE-20261105.md`。
-- 全量测试：隔离模式 **531 cases / 0 failed**（2026-11-05 夜间全量重建后复跑，`tests_full.log`）。
+  首次引导、添加网址、编辑订阅(local)、解锁整页——仍待实机产出。
+  **2026-11-06 校正**：`pair_07_help.png` 等 `pair_*` 与 `ACCEPTANCE-20261105.md` 均从未入库，仓库内无逐组结论文件；现状见 [06-验收状态台账.md](06-验收状态台账.md) B/C 节。
+- 全量测试：2026-11-06 以当前构建隔离模式复跑 **547 cases / 0 failed / 0 assertion failures**（EXIT=0）；
+  原始日志 `tests_full.log` 由 `run_tests_v4.ps1` 写到项目外 `C:\Users\sun_y\Documents\Trae-CN\temp_20261102_02\`（`*.log` 被忽略），
+  结果摘要见 `evidence/2026-11-06-regression.md` §3。11-05 历史值为 531。
 - 启动自检：`scripts\run_app_test.ps1 -AppDir build\bin\Release -Runs 3` → **PASS ×3**，
   Post **clean**、**NET-RESTORED**；21 条 `threads=0` 僵尸 PID 不计存活。
 - 未签名包：`dist\ClashWin_0.1.0_x64-setup.exe`（**18,215,213 B**，
@@ -156,3 +163,16 @@ Mini 侧没有任何自定义 NSIS 配置 —— `src-tauri/tauri.conf.json` 的
 - 常量单一事实源：`include/clashwin/config/constants.h`
 - UI 门禁：`scripts/ui_src_gate.ps1`；全量测试：`scripts/run_tests_v4.ps1`
 - Mini 参照源码：`C:\Users\sun_y\Documents\AntiGravity_Projects\ClashVerge`
+
+## 2026-11-06 校正与验收入口
+
+> 本节为地基整理后的权威索引。**上文 11-05 记录与本节冲突之处，以本节及 `06-验收状态台账.md` 为准**；11-05 原文保留作时间线，不作涂抹。
+
+- **状态矩阵**：[06-验收状态台账.md](06-验收状态台账.md) —— 逐项标注【本轮实测】/【文档记载】/【待验】/【已知缺口】。
+- **本轮实测证据**：`evidence/2026-11-06-regression.md` —— sidecar 5/5、UI 门禁 PASS、全量 547/0/0、安装包字节/哈希/签名。
+- **原始验收报告**：`ACCEPTANCE-20261105.md` **从未入库**，其「第九～十一节」「10.5 六步操作」无法还原；上文所有指向它的引用一律以状态矩阵为准。`hash_*.txt`、`pair_*.png`、`cmp_*.png`、`out/*.png`、`tests_full.log` 同样从未入库，不伪造补图。
+- **外部参照**：`clash_mini_agreements.md` §1.8 位于 `ClashVerge` 参考仓库，不在本仓库内；该目录按铁律只读参考，不得改动、移动或覆写。
+- **一键验收入口**：`scripts\acceptance_uac.ps1`（把「明日一次点击清单」#1～#4 编排为一次授权、自动留证；#0 重启与 #5 目视标 MANUAL）、`scripts\acceptance_clean_machine.ps1`（干净机 P0 链路留证，默认只读、绝不自动开 TUN/系统代理）。两者 `-DryRun` 只预演、不改动系统、不写报告。
+- **交付链现状**：`build\bin\Release\clashwin.exe`（2026-11-06 10:50）与 `installer\stage\`、`dist\` 子目录内同名 exe 的 **SHA256 互不相同**；`.delivery\stamp.json` 交付基线仍是 11-05 的值，未覆盖、未重新登记。当前最新构建**未重新打包、未签名**，详见台账 §4。
+- **回归链**：`ui_src_gate.ps1` → `cmake --build build --config Release` → `run_tests_v4.ps1` → `run_app_test.ps1 -AppDir build\bin\Release -Runs 3` → Post `clean` + `NET-RESTORED`（`02-方法与流程.md:43`）。`run_app_test.ps1` 默认 `AppDir` 原指向已清理的 `build_verify\`，2026-11-06 已改为 `build\bin\Release`。
+- **方针不变**：不对外发布（不建 Release / 不推 tag / 不上传资产）。

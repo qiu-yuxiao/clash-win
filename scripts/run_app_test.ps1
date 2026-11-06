@@ -33,8 +33,9 @@ Add-Type -AssemblyName System.Drawing
 
 $Repo = Split-Path -Parent $PSScriptRoot
 if (-not $AppDir) {
-  if ($FromRepo) { $AppDir = Join-Path $Repo 'build_verify\bin\Release' }
-  else { $AppDir = Join-Path $Repo 'build_verify\bin\Release' }
+  # 2026-11-06：build_verify\ 是已清理的中间产物目录，默认来源改为唯一交付事实源
+  # build\bin\Release（与 scripts\delivery_check.ps1 及 docs\README.md:145 一致）。
+  $AppDir = Join-Path $Repo 'build\bin\Release'
 }
 $RunDir = if ($FromRepo) { $AppDir } else { Join-Path $WorkDir 'app' }
 $ExeName = 'clashwin.exe'
