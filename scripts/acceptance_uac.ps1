@@ -3,16 +3,24 @@
   「一次管理员授权、逐项自动留证、产出结构化报告」。
 
   副作用警告：
-    #3 会以 /S /KEEP 静默重装 Clash Win 两次；#4 会静默卸载 Clash Win。
-    这两项会改变系统状态。请先用 -DryRun 预演，或用 -SkipDestructive 跳过。
+    - #2 完整打包会以 build\bin\Release 为源删除并重建 installer\stage\，
+      并覆盖 dist\ClashWin_<version>_x64-setup.exe；sign.ps1 还会重签 dist 下所有 *setup.exe。
+      → 执行即等于把交付基线定为当前 Release 构建。用 -SkipRebuild 可沿用现有包。
+    - #3 会以 /S /KEEP 静默重装 Clash Win 两次；#4 会静默卸载 Clash Win。
+      这两项会改变系统状态。请先用 -DryRun 预演，或用 -SkipDestructive 跳过。
 
   无法自动化的两项，脚本只列 MANUAL，不代做、不谎报：
     #0 重启清理 21 条僵尸 PID（需重启整机）
     #5 UAC 发布者目视（secure desktop 无法程序化截屏）
 
+  执行顺序：#2 打包 → #1 验签 → #3 /KEEP → #4 卸载。
+    build_installer.ps1 内部已完成「Release 产物签名 / 卸载器签名 / 安装包签名」，
+    且会删除重建 $OutFile；若先做 #1，签名结果与 PASS 结论会指向已被删除的文件。
+    因此 #1 改为「验证最终产物的签名，无效时才补签」，不重复劳动、不产生误导结论。
+
   纪律：
     - 不自动重启；不建 Release / 不推 tag / 不上传资产（docs/01-目的与方针.md:56）。
-    - -DryRun 只做前置检查并打印将执行的命令：不签名、不安装、不卸载、不写报告文件。
+    - -DryRun 只做前置检查并打印将执行的命令：不签名、不打包、不安装、不卸载、不写报告文件。
     - 生成的 hash_*.txt 与报告写入 docs/evidence/，补齐 docs/README.md:53 的断链。
     - 依赖 docs/06-验收状态台账.md C 节的状态口径。
 
@@ -20,6 +28,7 @@
     powershell -NoProfile -ExecutionPolicy Bypass -File scripts\acceptance_uac.ps1 -DryRun
     powershell -NoProfile -ExecutionPolicy Bypass -File scripts\acceptance_uac.ps1
     powershell -NoProfile -ExecutionPolicy Bypass -File scripts\acceptance_uac.ps1 -SkipDestructive
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\acceptance_uac.ps1 -SkipRebuild
 
   退出码：0 = 全部执行项 PASS（或 DryRun 预演完成）；1 = 存在 FAIL；2 = 前置条件不满足
 #>
@@ -27,6 +36,7 @@
 param(
     [switch]$DryRun,
     [switch]$SkipDestructive,
+    [switch]$SkipRebuild,
     [string]$Version = '0.1.0',
     [string]$ReportPath = ''
 )
@@ -69,14 +79,14 @@ function Write-Snapshot([string]$FileName, [object]$Rows) {
     return $p
 }
 
-Write-Host "Clash Win UAC 验收  |  DryRun=$DryRun  SkipDestructive=$SkipDestructive  Version=$Version"
+Write-Host "Clash Win UAC 验收  |  DryRun=$DryRun  SkipDestructive=$SkipDestructive  SkipRebuild=$SkipRebuild  Version=$Version"
 Write-Host ("Repo  = {0}" -f $Repo)
 Write-Host ("Setup = {0}" -f $Setup)
 Write-Host ''
 
 # ---------- 前置：一次管理员授权 ----------
 if ($DryRun) {
-    Write-Host '=== DRYRUN：不签名、不安装、不卸载、不写报告 ==='
+    Write-Host '=== DRYRUN：不打包、不签名、不安装、不卸载、不写报告 ==='
 } else {
     $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
         [Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -84,6 +94,7 @@ if ($DryRun) {
         Write-Host '需要管理员权限（读 LocalMachine\My 私钥 / 静默安装），正在请求一次 UAC 提升...' -ForegroundColor Yellow
         $q = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $PSCommandPath + '"'), '-Version', $Version)
         if ($SkipDestructive) { $q += '-SkipDestructive' }
+        if ($SkipRebuild) { $q += '-SkipRebuild' }
         if ($ReportPath) { $q += @('-ReportPath', ('"' + $ReportPath + '"')) }
         $p = Start-Process powershell -ArgumentList $q -Verb RunAs -Wait -PassThru
         exit $p.ExitCode
@@ -95,31 +106,12 @@ if ($DryRun) {
 Add-Result '0' '重启清理僵尸 PID' 'MANUAL' '需人工重启一次；重启后 Get-Process clashwin* 应无 threads=0 残留'
 Add-Result '5' 'UAC 发布者目视' 'SKIP-MANUAL' '双击安装包，目视提示框顶部是否显示「ClashWin」；secure desktop 无法程序化截屏'
 
-# ---------- #1 签名 ----------
-$signScript = Join-Path $PSScriptRoot 'sign.ps1'
-$signCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$signScript`" -Paths `"$Setup`""
-if ($DryRun) {
-    Add-Result '1' '签名' 'DRYRUN' $signCmd
-} else {
-    if (-not (Test-Path -LiteralPath $Setup)) {
-        Add-Result '1' '签名' 'FAIL' "安装包不存在: $Setup"
-    } else {
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $signScript -Paths $Setup | Out-Host
-        $rc = $LASTEXITCODE
-        $sig = Get-AuthenticodeSignature -LiteralPath $Setup
-        $subj = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { '(none)' }
-        if ($rc -eq 0 -and $sig.Status -eq 'Valid' -and $subj -match 'CN=ClashWin') {
-            Add-Result '1' '签名' 'PASS' ("Status={0} Subject={1} TimeStamper={2}" -f $sig.Status, $subj, ($null -ne $sig.TimeStamperCertificate))
-        } else {
-            Add-Result '1' '签名' 'FAIL' ("EXIT={0} Status={1} Subject={2}" -f $rc, $sig.Status, $subj)
-        }
-    }
-}
-
-# ---------- #2 完整打包（含卸载器签名钩子） ----------
+# ---------- #2 完整打包（先执行：内部含 Release 产物 / 卸载器 / 安装包三处签名） ----------
 $buildScript = Join-Path $Repo 'installer\build_installer.ps1'
 $buildCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$buildScript`" -Version $Version"
-if ($DryRun) {
+if ($SkipRebuild) {
+    Add-Result '2' '完整打包' 'SKIP' "已指定 -SkipRebuild；沿用现有 $Setup，不覆盖 dist / installer\stage"
+} elseif ($DryRun) {
     Add-Result '2' '完整打包' 'DRYRUN' $buildCmd
 } else {
     if (-not (Test-Path -LiteralPath $buildScript)) {
@@ -130,14 +122,41 @@ if ($DryRun) {
         if (Test-Path -LiteralPath $Setup) {
             $item = Get-Item -LiteralPath $Setup
             $sha = (Get-FileHash -LiteralPath $Setup -Algorithm SHA256).Hash
-            $sig = Get-AuthenticodeSignature -LiteralPath $Setup
-            if ($rc -eq 0 -and $item.Length -gt 0 -and $sig.Status -eq 'Valid') {
-                Add-Result '2' '完整打包' 'PASS' ("{0} B  SHA256={1}  {2}" -f $item.Length, $sha, $sig.Status)
+            if ($rc -eq 0 -and $item.Length -gt 0) {
+                Add-Result '2' '完整打包' 'PASS' ("{0} B  SHA256={1}" -f $item.Length, $sha)
             } else {
-                Add-Result '2' '完整打包' 'FAIL' ("EXIT={0} Bytes={1} Sig={2}" -f $rc, $item.Length, $sig.Status)
+                Add-Result '2' '完整打包' 'FAIL' ("EXIT={0} Bytes={1}" -f $rc, $item.Length)
             }
         } else {
             Add-Result '2' '完整打包' 'FAIL' "EXIT=$rc 且未产出 $Setup"
+        }
+    }
+}
+
+# ---------- #1 签名验证（#2 内部已签；只在无效时补签，避免重复签名与假 PASS） ----------
+$signScript = Join-Path $PSScriptRoot 'sign.ps1'
+$signCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$signScript`" -Paths `"$Setup`""
+if ($DryRun) {
+    Add-Result '1' '签名验证' 'DRYRUN' "验证 $Setup 的 Authenticode 状态；无效时才执行 $signCmd"
+} else {
+    if (-not (Test-Path -LiteralPath $Setup)) {
+        Add-Result '1' '签名验证' 'FAIL' "安装包不存在: $Setup"
+    } else {
+        $sig = Get-AuthenticodeSignature -LiteralPath $Setup
+        $subj = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { '(none)' }
+        $how = '来自 #2 打包链内部签名'
+        if ($sig.Status -ne 'Valid' -or $subj -notmatch 'CN=ClashWin') {
+            $how = "初始 Status=$($sig.Status)，调用 sign.ps1 补签"
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $signScript -Paths $Setup | Out-Host
+            $rc = $LASTEXITCODE
+            $sig = Get-AuthenticodeSignature -LiteralPath $Setup
+            $subj = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { '(none)' }
+            if ($rc -ne 0) { $how = "补签失败 EXIT=$rc" }
+        }
+        if ($sig.Status -eq 'Valid' -and $subj -match 'CN=ClashWin') {
+            Add-Result '1' '签名验证' 'PASS' ("Status={0} Subject={1} TimeStamper={2} 来源={3}" -f $sig.Status, $subj, ($null -ne $sig.TimeStamperCertificate), $how)
+        } else {
+            Add-Result '1' '签名验证' 'FAIL' ("Status={0} Subject={1} 来源={2}" -f $sig.Status, $subj, $how)
         }
     }
 }
@@ -206,7 +225,7 @@ if (-not $DryRun) {
     $lines = New-Object System.Collections.ArrayList
     [void]$lines.Add("# UAC 验收报告 · $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')")
     [void]$lines.Add('')
-    [void]$lines.Add("> 由 scripts\acceptance_uac.ps1 生成。SkipDestructive=$SkipDestructive。人工项 #0/#5 需另行确认。")
+    [void]$lines.Add("> 由 scripts\acceptance_uac.ps1 生成。SkipDestructive=$SkipDestructive SkipRebuild=$SkipRebuild。执行顺序 #2 -> #1 -> #3 -> #4；人工项 #0/#5 需另行确认。")
     [void]$lines.Add('')
     [void]$lines.Add('| # | 项目 | 状态 | 详情 |')
     [void]$lines.Add('| --- | --- | --- | --- |')
