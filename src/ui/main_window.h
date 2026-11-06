@@ -11,6 +11,7 @@
 
 #include <windows.h>
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -294,6 +295,13 @@ class MainWindow : public app::ILifecycleWindow {
   std::optional<std::pair<double, double>> last_non_large_restore_;  // 盘读
   std::optional<POINT> nc_down_;  // stealth 点击恢复判定
   system::Tray* tray_ = nullptr;
+  // —— TUN 自动关闭守卫（← use-system-state.ts:99-128）——
+  //   TUN 已开但当前不可用（非管理员且服务不可用）→ 自动关 TUN + 回退系统代理，
+  //   并给 info/error 提示。启动 10s 宽限 + 1s 冷却，避免与用户操作互相踩。
+  int64_t start_ms_ = 0;                  // create() 时刻
+  int64_t tun_guard_cool_until_ = 0;      // 1s 冷却（:123-127）
+  std::atomic<bool> tun_guard_busy_{false};
+  void tun_guard_tick();
 };
 
 }  // namespace clashwin::ui::win

@@ -30,6 +30,7 @@
 #include "util/utf.h"
 #include "system/tray.h"
 #include "system/signals.h"
+#include "system/service_runner.h"  // TUN 守卫：服务可用性探测
 #include "ui/help_menu.h"
 #include "ui/textfield.h"
 #include <cstring>
@@ -53,6 +54,9 @@ constexpr UINT_PTR kTimerNodeRetry = 3;  // 取数失败 2s 重试（内核配�
 constexpr UINT_PTR kTimerFirstRun = 4;   // 首次引导 500ms 延迟（_layout.tsx:351-353）
 // 首启就绪轮询驱动 250ms（1.5s 轮询闸门 + 20s 超时由 dialog tick 判定）
 constexpr UINT_PTR kTimerFirstReady = 5;  // src: first-run-guide-dialog.tsx:46-48
+// TUN 可用性轮询 5s（← use-system-state.ts:65-67：启动期 5s / 常态 30s，
+// 取更密的启动期值，成本仅为一次服务 IPC 探测）
+constexpr UINT_PTR kTimerTunGuard = 6;
 constexpr int kResizeBorder = 10;     // ← resize-handles.tsx HANDLE_SIZE
 constexpr int kCornerSize = 20;       // ← HANDLE_SIZE*2（角落热区）
 // 关闭键拖动判定（原版 mouseup 位移 <5 恢复标题栏）
@@ -223,6 +227,8 @@ bool MainWindow::create(bool show_immediately) {
 
   SetTimer(hwnd_, kTimerFrame, FrameClock::kFrameIntervalMs, nullptr);
   SetTimer(hwnd_, kTimerIdle, 1000, nullptr);
+  SetTimer(hwnd_, kTimerTunGuard, 5000, nullptr);
+  start_ms_ = now_ms();
   if (show_immediately) show_and_activate();
   CWLOG_INFO("MainWindow: 创建完成（无框 271x680 + 标题栏三键 + 钳制就绪）");
   return true;
@@ -470,10 +476,49 @@ void MainWindow::reload_nodes() {
   }
 }
 
+// TUN 自动关闭守卫 ← use-system-state.ts:99-128
+//   TUN 已开 且 当前不可用（非管理员 且 服务不可用）→
+//   patchVerge({enable_tun_mode:false, enable_system_proxy:true})，
+//   成功 info tunMode.autoDisabled / 失败 error tunMode.autoDisableFailed。
+//   Mini 的 isLoading / isStartingUp / isLongOperationRunning 三重闸门在此对应为：
+//   - isStartingUp → 启动 10s 宽限（STARTUP_GRACE_MS，services/delay.ts:39）
+//   - isLongOperationRunning → install_service 是阻塞命令，UI 线程期间定时器不触发
+//   - isLoading → 探测本身在 worker 线程串行（busy 标志），不重复判定
+void MainWindow::tun_guard_tick() {
+  if (start_ms_ != 0 && now_ms() - start_ms_ < 10000) return;  // 启动宽限
+  if (now_ms() < tun_guard_cool_until_) return;               // 1s 冷却（:123-127）
+  if (tun_guard_busy_.exchange(true)) return;                 // 上一轮探测未完
+  std::thread([this] {
+    const bool tun_on =
+        config::Config::instance().verge().latest_arc()->enable_tun_mode.value_or(false);
+    bool available = true;
+    if (tun_on) {
+      available = cmd::is_admin();
+      if (!available) {
+        auto runner = system::get_service_runner();
+        available = runner && runner->is_available();
+      }
+    }
+    if (tun_on && !available) {
+      auto r = cmd::CommandService::instance().invoke(
+          "patch_verge_config",
+          nlohmann::json::object(
+              {{"enable_tun_mode", false}, {"enable_system_proxy", true}}));
+      // ← :110-120 成功/失败两条提示，绝静默
+      events::NoticeService::instance().push(
+          r.is_ok() ? "info" : "error",
+          tr8(r.is_ok()
+                  ? "settings.sections.system.notifications.tunMode.autoDisabled"
+                  : "settings.sections.system.notifications.tunMode.autoDisableFailed"));
+      tun_guard_cool_until_ = now_ms() + 1000;
+    }
+    tun_guard_busy_.store(false);
+  }).detach();
+}
+
 // 首启就绪轮询：refreshProxy（getProxies 全量）+ activeDelay（src:
 // first-run-guide-dialog.tsx:143-170/:236-245）；row_delay(-1/-2) → null(-1)
-void MainWindow::sync_first_run_proxy() {
-  if (!node_data_) return;
+void MainWindow::sync_first_run_proxy() {  if (!node_data_) return;
   node_data_->load();
   const std::string now = node_data_->now();
   const int delay = now.empty() ? -1 : node_data_->row_delay(now);
@@ -1540,6 +1585,8 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       } else if (wp == kTimerNodeRetry) {
         KillTimer(hwnd_, kTimerNodeRetry);
         reload_nodes();
+      } else if (wp == kTimerTunGuard) {
+        tun_guard_tick();
       } else if (wp == kTimerFirstRun) {
         KillTimer(hwnd_, kTimerFirstRun);
         if (first_run_) {

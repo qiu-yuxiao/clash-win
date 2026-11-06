@@ -6,6 +6,8 @@
 #include <algorithm>
 
 #include "switching_lock.h"
+#include "events/notice.h"
+#include "ui/i18n_text.h"
 #include "util/log.h"
 
 namespace clashwin::core {
@@ -125,6 +127,10 @@ AutoSelect::Outcome AutoSelect::trigger(
   if (!skip_wait_ready && hooks_.wait_ready) {
     if (!hooks_.wait_ready()) {
       CWLOG_WARN("AutoSelect: 内核就绪等待超时，继续触发（尽力而为）");
+      // ← profile-coordination.ts:35-43：10s 内 PROXY 组仍无真实节点 →
+      //   showNotice.info(clashNotReady)，随后照旧继续自动选点
+      events::NoticeService::instance().push(
+          "info", ui::tr8("shared.feedback.notifications.clashNotReady"));
     }
   }
 
