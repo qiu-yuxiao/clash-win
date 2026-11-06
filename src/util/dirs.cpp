@@ -5,7 +5,9 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "util/log.h"
@@ -198,9 +200,25 @@ std::wstring service_log_dir() {
   return dir;
 }
 
+namespace {
+// B-D26：运行模式提供者，由 App::init 注入（见 dirs.h 说明）
+std::function<bool()> g_clash_log_service_provider;
+}  // namespace
+
+void set_clash_log_service_provider(std::function<bool()> provider) {
+  g_clash_log_service_provider = std::move(provider);
+}
+
 std::wstring clash_latest_log() {
-  // ← dirs.rs::clash_latest_log（RunningMode 判定在 T07 接入，此处按非 Service）
-  // 注意：调用方（core 层）已知运行模式；这里保持与 dirs.rs 相同的两分支形态。
+  // ← Mini: src-tauri/src/utils/dirs.rs:146-151 clash_latest_log()
+  //   match *CoreManager::global().get_running_mode():
+  //     Service                  -> <logs>/service/service_latest.log
+  //     Sidecar | NotRunning     -> <logs>/sidecar/sidecar_latest.log
+  //   旧实现恒返回 sidecar 分支（自注"T07 接入"但一直未接），Service 模式下
+  //   「打开内核日志」会指向错误文件。
+  const bool service = g_clash_log_service_provider &&
+                       g_clash_log_service_provider();
+  if (service) return join(service_log_dir(), L"service_latest.log");
   return join(sidecar_log_dir(), L"sidecar_latest.log");
 }
 

@@ -8,6 +8,7 @@
 #include "events/event_bus.h"
 #include "util/log.h"
 #include "util/utf.h"
+#include "ui/i18n_text.h"  // F-D01
 
 namespace clashwin::ui {
 
@@ -103,14 +104,20 @@ HMENU HelpMenu::create_menu_handle() {
   if (!menu) return nullptr;
 
   // src: help-menu-button.tsx:114-205 6 项 + 2 分隔线；文案 locales/zh/layout.json:32-39
-  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::StarGithub), L"⭐ 去 GitHub 点亮 ⭐ Star");
-  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::OpenWiki), L"💡 帮助指南 (Wiki)");
-  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::ReviewGuide), L"🧭 新手引导");
+  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::StarGithub),
+              (L"⭐ " + tr("layout.components.helpMenu.github")).c_str());
+  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::OpenWiki),
+              (L"💡 " + tr("layout.components.helpMenu.wiki")).c_str());
+  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::ReviewGuide),
+              (L"🧭 " + tr("layout.components.helpMenu.firstRunGuide")).c_str());
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::ExportDiagnostics), L"📦 导出诊断包");
+  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::ExportDiagnostics),
+              (L"📦 " + tr("layout.components.helpMenu.exportDiagnostics")).c_str());
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::CheckAppUpdate), L"🚀 检查软件更新");
-  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::CheckCoreUpdate), L"⚙️ 检查内核更新");
+  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::CheckAppUpdate),
+              (L"🚀 " + tr("layout.components.helpMenu.checkAppUpdate")).c_str());
+  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::CheckCoreUpdate),
+              (L"⚙️ " + tr("layout.components.helpMenu.checkCoreUpdate")).c_str());
 
   return menu;
 }

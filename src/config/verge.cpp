@@ -51,7 +51,13 @@ std::string dump_verge(const IVerge& v) { return serde::dump(v.to_yaml()); }
 Result<IVerge> load() {
   auto node = serde::read_mapping_file(verge_path());
   if (!node.is_ok()) {
-    return Result<IVerge>::err(node.error());
+    // ← Mini: src-tauri/src/config/verge.rs:327-330（Self::new 的 Err 分支）
+    //   读取/解析失败时记录 error 并回退 Self::template()，不把错误向上传播。
+    //   旧实现返回 err，依赖调用方各自兜底（config.cpp 构造/init 确有兜底，
+    //   但 prfitem.cpp:318 会静默丢端口），语义不等价。
+    CWLOG_ERROR("verge.yaml load failed, fallback to template: " +
+                node.error().message);
+    return Result<IVerge>::ok(IVerge::make_template());
   }
   IVerge cfg = IVerge::from_yaml(node.value());
 

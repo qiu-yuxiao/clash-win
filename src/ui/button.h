@@ -42,6 +42,8 @@ class Button : public Widget {
 
   State state() const { return enabled() ? state_ : State::Disabled; }
   void set_disabled(bool d);
+  // F-D01：绑定到 Mini locale key，语言切换时由 Widget::paint_all 自动刷新
+  void set_i18n_text(const char* key);
 
   SizeF on_measure(float max_w, float max_h) override;
   void on_paint(IRenderTarget& rt) override;

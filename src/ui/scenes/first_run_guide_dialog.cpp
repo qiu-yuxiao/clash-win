@@ -14,6 +14,7 @@
 #include "util/dirs.h"
 #include "util/str_utils.h"
 #include "util/utf.h"
+#include "ui/i18n_text.h"  // F-D01
 
 namespace clashwin::ui::scene {
 
@@ -601,7 +602,7 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
 
   // ---- 标题区（src: :562-590 / :832-860）----
   const std::wstring title =
-      step_ == FirstRunStep::Input ? L"🎉 欢迎使用 Clash Win" : L"🚀 订阅已就绪";
+      step_ == FirstRunStep::Input ? L"🎉 " + tr("layout.components.firstRun.title") : L"🚀 " + tr("layout.components.firstRun.readyTitle");
   draw_text(rt, title,
             {card_rect_.x, card_rect_.y + kTitlePadY, card_rect_.w, kTitleLineH},
             kTitleSize, static_cast<int>(Weight::Bold),
@@ -640,8 +641,7 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
   if (step_ == FirstRunStep::Input) {
     // ---- 引导文案（src: :593-603）----
     draw_text(rt,
-              L"首次使用只需一步：填入您的代理订阅链接，系统将自动完成节点解析、"
-              L"并发测速与最优路线接管。",
+              tr("layout.components.firstRun.intro"),
               {inner_x, content_y, inner_w, kIntroH}, kIntroSize,
               static_cast<int>(Weight::Normal), secondary_text(), AlignH::Left,
               AlignV::Top, true);
@@ -655,8 +655,10 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
                                                     : Color4f::hex(0xFFFFFF, 0.06f));
     const Color4f pill_bd = is_retro() ? Color4f::hex(0x2C1F03, 0.20f)
                                       : divider_color();
-    const wchar_t* pills[3] = {L"⚡ 自动测速择优", L"🛡️ 零配置防泄漏",
-                               L"🪶 极窄隐匿轻量"};
+    const std::wstring pills[3] = {
+        tr("layout.components.firstRun.featureAutoSelect"),
+        tr("layout.components.firstRun.featureDnsGuard"),
+        tr("layout.components.firstRun.featureStealth")};
     for (int i = 0; i < 3; ++i) {
       const RectF pr = {inner_x + i * (pill_w + kPillGap), pills_y, pill_w, kPillH};
       Brush pb{pill_bg};
@@ -679,7 +681,7 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
       Brush bbg{b_bg};
       rt.round_rect(br, 6.0f, {}, &bbg);
       dashed_rect(rt, br, b_bd);
-      draw_text(rt, L"✨ 检测到剪贴板中有订阅链接，点击填入或按 Enter 直接导入",
+      draw_text(rt, L"✨ " + tr("layout.components.firstRun.clipboardDetected"),
                 {br.x + kBannerPadX, br.y, br.w - kBannerPadX * 2.0f, br.h}, kBannerFont,
                 static_cast<int>(Weight::Bold), ready_color());
     }
@@ -715,7 +717,7 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
               AlignH::Center);
 
     // ---- 粘贴按钮（src: :750-779）----
-    draw_text(rt, L"📋 一键粘贴剪贴板链接", btn_paste_rect_, kPasteFont,
+    draw_text(rt, L"📋 " + tr("layout.components.firstRun.paste"), btn_paste_rect_, kPasteFont,
               static_cast<int>(Weight::Bold),
               hover_paste_ ? warning_color() : ThemeService::instance().primary(),
               AlignH::Center);
@@ -725,7 +727,7 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
     const bool has_error = !error_message_.empty();
     const std::wstring hint_line =
         has_error ? L"⚠️ " + utf::utf8_to_utf16(error_message_)
-                  : L"提示：按 Enter 键即可导入";
+                  : tr("layout.components.firstRun.enterHint");
     draw_text(rt, hint_line,
               {inner_x, btn_paste_rect_.bottom() + kHintGap, inner_w, kHintH},
               has_error ? kPasteFont : kHintFont,
@@ -740,9 +742,9 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
                  Brush{divider_color()});
     // src: :803-815 contained primary
     // src: locales/zh/layout.json:8 「"importAndStart": "立即导入并开启"」（Button loading 仅展示 spinner）
-    paint_button(rt, btn_submit_rect_, BtnStyle::Primary, L"立即导入并开启", 13.0f);
+    paint_button(rt, btn_submit_rect_, BtnStyle::Primary, tr("layout.components.firstRun.importAndStart"), 13.0f);
     // src: :816-827 outlined default
-    paint_button(rt, btn_later_rect_, BtnStyle::OutlinedDefault, L"稍后手动配置", 12.5f);
+    paint_button(rt, btn_later_rect_, BtnStyle::OutlinedDefault, tr("layout.components.firstRun.later"), 12.5f);
 
   } else {
     // ================= STEP 2：就绪仪表盘（src: :830-1119）=================
@@ -756,7 +758,7 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
 
     // src: :880-890 ✅ 导入成功
     const float imported_y = nc.y + kCardPad;
-    draw_text(rt, L"✅ 订阅配置已成功导入并激活",
+    draw_text(rt, L"✅ " + tr("layout.components.firstRun.imported"),
               {nc.x + kCardPad, imported_y, nc.w - kCardPad * 2.0f, kImportedH},
               kImportedFont, static_cast<int>(Weight::Bold), ready_color());
 
@@ -774,11 +776,10 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
     const Color4f status_color =
         ready ? ready_color() : (unconfirmed ? warning_color() : secondary_text());
     const std::wstring status_text =
-        ready ? L"代理已就绪，国际网络已连通"
+        ready ? tr("layout.components.firstRun.readyOk")
               : (unconfirmed
-                     ? L"当前节点响应超时，可点击下方按钮自动重新测速并切换至最快节点；"
-                       L"您也可以直接进入主界面手动选择其他节点"
-                     : L"正在并发测速并自动选优最快节点…");
+                     ? tr("layout.components.firstRun.readyUnconfirmed")
+                     : tr("layout.components.firstRun.checking"));
     draw_text(rt, status_text,
               {nc.x + kCardPad + (ready || unconfirmed ? 0.0f : 18.0f), status_y,
                nc.w - kCardPad * 2.0f - (ready || unconfirmed ? 0.0f : 18.0f), kStatusH},
@@ -792,7 +793,7 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
       dashed_line(rt, nc.x + kCardPad, node_top + kNodePt, nc.w - kCardPad * 2.0f,
                   Color4f::hex(0x808080, 0.25f));
       const float label_y = node_top + kNodePt + 1.0f;
-      draw_text(rt, L"🌐 当前最优节点",
+      draw_text(rt, L"🌐 " + tr("layout.components.firstRun.activeNodeLabel"),
                 {nc.x + kCardPad, label_y, 140.0f, kNodeLabelH},
                 kHintFont, static_cast<int>(Weight::Bold), secondary_text());
       if (ready) {
@@ -815,13 +816,13 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
     // src: :983-1000 重测并优选（仅在未就绪/重测中显示）
     if (!ready && (unconfirmed || retesting_)) {
       paint_button(rt, btn_retest_rect_, BtnStyle::OutlinedPrimary,
-                   L"🔄 重新测速并优选节点", 12.5f);
+                   L"🔄 " + tr("layout.components.firstRun.retestNodes"), 12.5f);
     }
 
     // src: :1002-1015 接管未开启提示
     if (!takeover_active_) {
       const float warn_y = btn_retest_rect_.bottom() + kWarnMt;
-      draw_text(rt, L"⚠️ 系统代理未开启，请在设置中开启后再试",
+      draw_text(rt, L"⚠️ " + tr("layout.components.firstRun.sysProxyOff"),
                 {nc.x + kCardPad, warn_y, nc.w - kCardPad * 2.0f, kWarnH}, 12.0f,
                 static_cast<int>(Weight::Bold), warning_color());
     }
@@ -838,19 +839,18 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
     rt.round_rect(sc, 8.0f, Pen{star_bd, 1.0f}, &sb);
 
     // src: :1035-1046 ⭐ 标题
-    draw_text(rt, L"⭐ 喜欢 Clash Win 吗？送我们一颗 ⭐ Star 吧！",
+    draw_text(rt, L"⭐ " + tr("layout.components.firstRun.starTitle"),
               {sc.x + kCardPad, sc.y + kCardPad, sc.w - kCardPad * 2.0f, kStarTitleH},
               kStarTitleFont, static_cast<int>(Weight::Bold), star_accent_color());
     // src: :1048-1057 正文
     draw_text(rt,
-              L"点击下方主按钮将打开 Clash Win 的 GitHub 仓库——既能实测外网秒开，"
-              L"也恳请在打开的页面右上角点亮一颗 ⭐ Star，您的支持是我们持续维护的最大动力！",
+              tr("layout.components.firstRun.wikiHint"),
               {sc.x + kCardPad, sc.y + kCardPad + kStarTitleH + kImportedMb,
                sc.w - kCardPad * 2.0f, kStarBodyH},
               kStarBodyFont, static_cast<int>(Weight::Normal), secondary_text(),
               AlignH::Left, AlignV::Top, true);
     // src: :1059-1082 Wiki 文本按钮
-    draw_text(rt, L"📖 查看 Wiki 进阶指南 ↗", btn_wiki_rect_, kHintFont,
+    draw_text(rt, L"📖 " + tr("layout.components.firstRun.openWiki") + L" ↗", btn_wiki_rect_, kHintFont,
               static_cast<int>(Weight::Bold),
               hover_wiki_ ? warning_color() : ThemeService::instance().primary(),
               AlignH::Right);
@@ -860,8 +860,8 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
                   card_rect_.w, 1.0f},
                  Brush{divider_color()});
     paint_button(rt, btn_finish_star_rect_, BtnStyle::Primary,
-                 L"⭐ 打开 GitHub 测速并点 ⭐ Star", 13.0f);
-    paint_button(rt, btn_finish_rect_, BtnStyle::OutlinedDefault, L"进入主界面", 12.5f);
+                 L"⭐ " + tr("layout.components.firstRun.openGithubStar"), 13.0f);
+    paint_button(rt, btn_finish_rect_, BtnStyle::OutlinedDefault, tr("layout.components.firstRun.finish"), 12.5f);
   }
 }
 

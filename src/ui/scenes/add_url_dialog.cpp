@@ -8,6 +8,7 @@
 #include "ui/theme/theme.h"
 #include "util/str_utils.h"
 #include "util/utf.h"
+#include "ui/i18n_text.h"  // F-D01
 
 namespace clashwin::ui::scene {
 
@@ -150,7 +151,7 @@ void AddUrlDialog::on_paint(IRenderTarget& rt) {
   title_ts.weight = static_cast<int>(Weight::Bold);
   title_ts.color = card_text();
   title_ts.align_v = AlignV::Center;
-  rt.draw_text(L"添加网址",
+  rt.draw_text(tr("settings.mini.addUrl"),
                {title_rect_.x + kTitlePx, title_rect_.y, title_rect_.w - kTitlePx * 2,
                 title_rect_.h},
                title_ts);
@@ -177,7 +178,7 @@ void AddUrlDialog::on_paint(IRenderTarget& rt) {
       // MUI 空值时即使聚焦也显示 placeholder，光标叠加在行首
       TextStyle ph = ts;
       ph.color.a *= 0.5f;
-      rt.draw_text(L"请填入需要代理的网址（每行一个）",
+      rt.draw_text(tr("settings.mini.addUrlPlaceholder"),
                    {input_rect_.x + 6, input_rect_.y + 4, input_rect_.w - 12,
                     input_rect_.h - 8},
                    ph);
@@ -207,7 +208,7 @@ void AddUrlDialog::on_paint(IRenderTarget& rt) {
     ts.color = card_text();
     ts.align_h = AlignH::Center;
     ts.align_v = AlignV::Center;
-    rt.draw_text(L"取消", btn_cancel_rect_, ts);
+    rt.draw_text(tr("shared.actions.cancel"), btn_cancel_rect_, ts);
   }
   {
     // contained primary src: button-styles.ts:38-39 retro-3d 135° 六停（与卡片同源）
@@ -230,7 +231,7 @@ void AddUrlDialog::on_paint(IRenderTarget& rt) {
     ts.color = Color4f::hex(0x2C1F03);  // src: button-styles.ts:1105-1121 retro-3d
     ts.align_h = AlignH::Center;
     ts.align_v = AlignV::Center;
-    rt.draw_text(L"添加", btn_add_rect_, ts);
+    rt.draw_text(tr("settings.mini.addUrlButton"), btn_add_rect_, ts);
   }
 
   // 6. 错误提示（showNotice.error → 对话框内红字，源码为 toast；此处保留内联提示）

@@ -11,6 +11,7 @@
 #include "node_list.h"  // delay_tier / delay_tier_color（与节点表格同源五档色）
 #include "util/log.h"
 #include "util/utf.h"
+#include "ui/i18n_text.h"  // F-D01
 
 namespace clashwin::ui::scene {
 
@@ -25,9 +26,10 @@ double steady_ms() {
 }
 
 // src: settings.json:541-543 settings.mini（手动模式/系统代理/TUN 模式）
-inline const wchar_t* takeover_label(int i) {
-  static const wchar_t* kLabels[] = {L"手动模式", L"系统代理", L"TUN 模式"};
-  return kLabels[i];
+inline std::wstring takeover_label(int i) {
+  static const char* kKeys[] = {"settings.mini.manual", "settings.mini.system",
+                               "settings.mini.tun"};
+  return tr(kKeys[i]);
 }
 inline const char* takeover_mode(int i) {
   static const char* kModes[] = {"MAN", "SYS", "TUN"};
@@ -159,7 +161,7 @@ QuickBar::QuickBar(Widget* parent) : Row(parent) {
   auto act = std::make_unique<Label>();
   active_label_ = act.get();
   active_label_->style.size = 11;  // src: :251
-  active_label_->set_text(L"活跃节点：");
+  active_label_->set_text(tr("settings.mini.activeNodeLabel"));
   add_child(std::move(act));
 
   // 协议胶囊文字（11px 粗体 + 1px 边框 + 圆角 4 + px6.4/py1.6；≤480 隐藏）
@@ -221,7 +223,7 @@ QuickBar::QuickBar(Widget* parent) : Row(parent) {
   pin->color_ = Color4f::hex(0x888888);
   pin->box_w = 28;
   pin->box_h = 28;
-  pin->set_tooltip_text(L"置顶窗口");  // src: locales/zh/layout.json:100 a11y.pinWindow
+  pin->set_tooltip_text(tr("layout.a11y.pinWindow"));  // src: locales/zh/layout.json:100 a11y.pinWindow
   pin->on_click = [this] {
     if (on_toggle_pin) on_toggle_pin();
   };
@@ -235,7 +237,7 @@ QuickBar::QuickBar(Widget* parent) : Row(parent) {
   gear->color_ = Color4f::hex(0x2C1F03);
   gear->box_w = 28;
   gear->box_h = 28;
-  gear->set_tooltip_text(L"打开设置");  // src: locales/zh/layout.json:101 a11y.openSettings
+  gear->set_tooltip_text(tr("layout.a11y.openSettings"));  // src: locales/zh/layout.json:101 a11y.openSettings
   gear->on_click = [this] {
     if (on_open_settings) on_open_settings();
   };
@@ -289,7 +291,7 @@ void QuickBar::set_badge(int delay, bool has_node) {
   wifi_->set_visible(show && !testing);
   delay_label_->set_visible(show);
   if (testing)
-    delay_label_->set_text(L"测试中...");  // src: locales/zh/settings.json:549 statusTesting
+    delay_label_->set_text(tr("tests.unlock.page.actions.testing"));  // src: locales/zh/settings.json:549 statusTesting
   else if (show)
     delay_label_->set_text(format_delay(delay));  // -1 → '-'；与节点表同源
   if (bounds().w > 0) on_arrange(bounds());  // 徽章显隐/位数变化 → 名称可用宽重算

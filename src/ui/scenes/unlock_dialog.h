@@ -10,6 +10,7 @@
 
 #include "config/unlock_cache.h"
 #include "ui/widget.h"
+#include "ui/i18n_text.h"  // F-D01
 
 namespace clashwin::ui::scene {
 
@@ -47,8 +48,8 @@ class UnlockDialog : public Widget {
 
   // src: locales/zh/tests.json:11 「"test": "测试"」；:4 testAll「测试全部」
   std::wstring tooltip_text() const override {
-    if (hover_card_ >= 0) return L"测试";
-    if (hover_retest_) return L"测试全部";
+    if (hover_card_ >= 0) return tr("tests.page.title");
+    if (hover_retest_) return tr("tests.page.actions.testAll");
     return {};
   }
 

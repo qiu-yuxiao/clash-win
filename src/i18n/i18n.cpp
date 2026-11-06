@@ -191,6 +191,7 @@ bool I18n::set_language(const std::string& raw) {
   language_ = target;
   if (changed) {
     CWLOG_INFO("I18n: 语言切换 → " + target);
+    ++revision_;  // ← _layout.tsx:478-483 语言变化引发 UI 重渲染的等价驱动
     for (auto& [id, cb] : listeners_) cb(target);
   }
   return true;

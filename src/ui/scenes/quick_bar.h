@@ -17,6 +17,7 @@
 #include "../icon_w.h"
 #include "../label.h"
 #include "../widget.h"
+#include "ui/i18n_text.h"  // F-D01
 
 namespace clashwin::ui::scene {
 
@@ -44,7 +45,7 @@ class QuickBar : public Row {
 
   // src: active-node-card.tsx:242 rotateNodeTooltip 「点击轮换下一个节点」
   std::wstring tooltip_text() const override {
-    return node_label_ && !node_label_->text.empty() ? std::wstring(L"点击轮换下一个节点")
+    return node_label_ && !node_label_->text.empty() ? std::wstring(tr("settings.mini.rotateNodeTooltip"))
                                                     : std::wstring();
   }
 
@@ -94,9 +95,9 @@ class TakeoverSegmented : public Widget {
 
   // src: locales/zh/settings.json:544-546 takeoverTooltipManual/System/Tun
   std::wstring tooltip_text() const override {
-    if (hover_ == 0) return L"完全手动配置代理";
-    if (hover_ == 1) return L"自动启用系统全局代理";
-    if (hover_ == 2) return L"开启虚拟网卡接管全机流量";
+    if (hover_ == 0) return tr("settings.mini.takeoverTooltipManual");
+    if (hover_ == 1) return tr("settings.mini.takeoverTooltipSystem");
+    if (hover_ == 2) return tr("settings.mini.takeoverTooltipTun");
     return {};
   }
 

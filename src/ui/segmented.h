@@ -16,11 +16,13 @@ class Segmented : public Widget {
   void set_options(std::vector<std::wstring> opts, int sel);
   // 逐段 Tooltip 文案（src: routing-preference-card.tsx:95/145/195）
   void set_tooltips(std::vector<std::wstring> tips) { tooltips_ = tips; }
-  std::wstring tooltip_text() const override {
-    return hover_ >= 0 && hover_ < static_cast<int>(tooltips_.size())
-               ? tooltips_[static_cast<size_t>(hover_)]
-               : std::wstring();
-  }
+
+  // F-D01：以 Mini locale key 设置分段文案 / tooltip。
+  // 语言切换时 options 在 on_paint 按 revision 重取，tooltip 在读取时实时取，
+  // 等价 MF:pages/_layout.tsx:478-483 的整树重渲染。
+  void set_options_i18n(std::vector<const char*> keys, int sel);
+  void set_tooltips_i18n(std::vector<const char*> keys);
+  std::wstring tooltip_text() const override;
   void set_selected(int i);  // 触发 on_change
   void select_silent(int i);  // 仅同步外观（外部配置回填用，不触发回调）
   int selected() const { return selected_; }
@@ -50,6 +52,9 @@ class Segmented : public Widget {
   int hit_segment(const PointF& local) const;
   std::vector<std::wstring> options_;
   std::vector<std::wstring> tooltips_;
+  std::vector<std::string> option_keys_;
+  std::vector<std::string> tooltip_keys_;
+  uint64_t options_revision_ = 0;
   int selected_ = 0;
   int pressed_ = -1;
   int hover_ = -1;

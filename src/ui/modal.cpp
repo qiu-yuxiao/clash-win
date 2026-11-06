@@ -4,6 +4,7 @@
 #include <algorithm>
 
 #include "button.h"
+#include "i18n_text.h"
 
 namespace clashwin::ui {
 
@@ -29,6 +30,7 @@ void Modal::build_tree() {
 
 void Modal::set_buttons(std::vector<std::wstring> labels) {
   buttons_ = std::move(labels);
+  button_keys_.clear();  // 自定义标签不再受 i18n 接管
   if (open_) layout_dialog();
 }
 
@@ -46,7 +48,11 @@ void Modal::open(std::unique_ptr<Widget> content, const SizeF& dialog_size,
     content_->flex_weight = 1;  // Column content 占据剩余
     dialog_->add_child(std::move(content));
   }
-  // 按钮排重建
+  // 按钮排重建（F-D01：按当前语言重取默认按钮文案）
+  if (button_keys_.size() == buttons_.size()) {
+    for (size_t i = 0; i < button_keys_.size(); ++i)
+      buttons_[i] = tr(button_keys_[i].c_str());
+  }
   while (buttons_row_->child_count() > 0)
     buttons_row_->remove_child(buttons_row_->child(0));
   for (size_t i = 0; i < buttons_.size(); ++i) {

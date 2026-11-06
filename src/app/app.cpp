@@ -9,6 +9,7 @@
 #include "cmd/cmd_support.h"
 #include "config/config.h"
 #include "config/prfitem.h"
+#include "config/verge.h"
 #include "core/auto_select.h"
 #include "core/autostart.h"
 #include "core/core_manager.h"
@@ -16,6 +17,7 @@
 #include "core/timer.h"
 #include "events/event_bus.h"
 #include "events/event_names.h"
+#include "i18n/i18n.h"
 #include "system/guard_monitor.h"
 #include "system/sysproxy.h"
 #include "system/tray.h"
@@ -178,6 +180,30 @@ bool App::init() {
   auto verge = config::Config::instance().verge().latest_arc();
   bool is_silent_start = verge ? verge->enable_silent_start.value_or(false) : false;
   bool should_silent = is_silent_start && has_silent_arg;
+
+  // F-D01 ← MF:services/preload.ts:62-97 preloadLanguage / MF:main.tsx:105-110
+  //   bootstrap：初始语言优先级「缓存 → verge.language → 浏览器语言 → zh」，
+  //   并在 createRoot/render 之前完成 initializeLanguage。
+  //   Win 无 localStorage；verge.language 的出厂模板值即 system_language()
+  //   （verge.cpp:31-48），等价覆盖后两级；下拉切换经 on_patch_verge 持久化。
+  //   必须在 MainWindow::create（build_widget_tree）之前，否则首屏取不到译文。
+  {
+    const std::string lang =
+        (verge && verge->language && !verge->language->empty())
+            ? *verge->language
+            : config::verge::system_language();
+    if (!i18n::I18n::instance().init(
+            util::dirs::exe_dir() + L"\\locales", lang)) {
+      CWLOG_WARN("App::init：locales 未完整加载，缺失 key 将显示 key 原文");
+    }
+  }
+
+  // B-D26 ← Mini: src-tauri/src/utils/dirs.rs:146-151 clash_latest_log()
+  //   Service 模式内核日志在 <logs>/service，其余在 <logs>/sidecar。
+  util::dirs::set_clash_log_service_provider([] {
+    return core::CoreManager::instance().running_mode() ==
+           core::RunningMode::Service;
+  });
 
   // T12：主题服务初始化（缺省 retro-3d/light；皮肤/亮暗切换 T17 接 verge）
   ui::theme::ThemeService::instance().init();

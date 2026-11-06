@@ -10,6 +10,7 @@
 #include "util/log.h"
 #include "util/parse_traffic.h"
 #include "util/utf.h"
+#include "ui/i18n_text.h"  // F-D01
 
 namespace clashwin::ui::scene {
 
@@ -220,7 +221,7 @@ ProfileImportCard::ProfileImportCard(Widget* parent) : Widget(parent) {
   title_ = title.get();
   title_->style.size = 13;
   title_->style.weight = 700;  // src: :116 fontWeight 'bold'
-  title_->set_text(L"订阅与机场配置");
+  title_->set_i18n_text("settings.mini.profilesTitle");
   title_->flex_weight = 0;
   add_child(std::move(title));
 
@@ -228,7 +229,7 @@ ProfileImportCard::ProfileImportCard(Widget* parent) : Widget(parent) {
   // 豁免: 引擎 TextField 为单行，按 1 行高 27 布局（源码 minRows=1）
   auto uf = std::make_unique<TextField>();
   url_field_ = uf.get();
-  url_field_->set_placeholder(L"填入订阅链接/节点配置...");
+  url_field_->set_placeholder(tr("settings.mini.importPlaceholder"));
   url_field_->style_.size = 13;
   url_field_->bg_ = ThemeService::instance().is_light()
                         ? Color4f::hex(0xFFFDE7, 0.8f)    // :742-744
@@ -251,7 +252,8 @@ ProfileImportCard::ProfileImportCard(Widget* parent) : Widget(parent) {
   add_child(std::move(uf));
 
   // 导入按钮：contained primary、fs12、h24、px2（:175-190）
-  auto btn = std::make_unique<Button>(L"导入节点信息");
+  auto btn = std::make_unique<Button>();
+  btn->set_i18n_text("settings.mini.importConfig");
   import_btn_ = btn.get();
   btn->themed_ = false;
   btn->text_style.size = 12;

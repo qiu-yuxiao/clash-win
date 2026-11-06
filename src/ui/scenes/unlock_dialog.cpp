@@ -8,6 +8,7 @@
 #include "system/unlock_checker.h"
 #include "ui/theme/theme.h"
 #include "util/utf.h"
+#include "ui/i18n_text.h"  // F-D01
 
 namespace clashwin::ui::scene {
 
@@ -48,16 +49,16 @@ Color4f status_color(const std::string& status, const theme::Palette& pal,
 std::wstring status_label(const std::string& status) {
   // src: pages/unlock.tsx:41-52 STATUS_LABEL_KEYS
   // src: locales/zh/tests.json:26-38 状态文案（unlock.tsx:41-52 STATUS_LABEL_KEYS）
-  if (status == "Pending") return L"待检测";
-  if (status == "Yes") return L"支持";
-  if (status == "No") return L"不支持";
-  if (status == "Failed") return L"测试失败";
-  if (status == "Completed") return L"检测完成";
-  if (status == "Disallowed ISP") return L"不允许的 ISP";
-  if (status == "Originals Only") return L"仅限原创";
-  if (status == "No (IP Banned By Disney+)") return L"不支持（IP 被 Disney+ 禁止）";
-  if (status == "Unsupported Country/Region") return L"不支持的国家/地区";
-  if (status == "Failed (Network Connection)") return L"测试失败（网络连接问题）";
+  if (status == "Pending") return tr("tests.statuses.test.pending");
+  if (status == "Yes") return tr("tests.statuses.test.yes");
+  if (status == "No") return tr("tests.statuses.test.no");
+  if (status == "Failed") return tr("tests.statuses.test.failed");
+  if (status == "Completed") return tr("tests.statuses.test.completed");
+  if (status == "Disallowed ISP") return tr("tests.statuses.test.disallowedIsp");
+  if (status == "Originals Only") return tr("tests.statuses.test.originalsOnly");
+  if (status == "No (IP Banned By Disney+)") return tr("tests.statuses.test.noDisney");
+  if (status == "Unsupported Country/Region") return tr("tests.statuses.test.unsupportedRegion");
+  if (status == "Failed (Network Connection)") return tr("tests.statuses.test.failedNetwork");
   return utf::utf8_to_utf16(status);
 }
 }  // namespace
@@ -177,7 +178,7 @@ void UnlockDialog::on_paint(IRenderTarget& rt) {
   title.color = pal.primary_text;
   title.align_v = AlignV::Center;
   // src: locales/zh/tests.json:50 「"解锁测试"」
-  rt.draw_text(L"解锁测试",
+  rt.draw_text(tr("tests.unlock.page.title"),
                {card_rect_.x + kPadX, card_rect_.y + 8.0f,
                 card_rect_.w - kPadX * 2.0f - kRetestW - kCloseSize - 18.0f, 22.0f},
                title);
@@ -192,7 +193,7 @@ void UnlockDialog::on_paint(IRenderTarget& rt) {
   rts.align_h = AlignH::Center;
   rts.align_v = AlignV::Center;
   // src: locales/zh/tests.json:43 「"测试中..."」
-  rt.draw_text(is_checking_ ? L"测试中..." : L"测试全部", btn_retest_rect_, rts);
+  rt.draw_text(is_checking_ ? tr("tests.unlock.page.actions.testing") : tr("tests.page.actions.testAll"), btn_retest_rect_, rts);
 
   // 关闭 ✕（豁免: ClashWin 模态壳，Mini 页面无关闭按钮）
   TextStyle xts;
@@ -219,7 +220,7 @@ void UnlockDialog::on_paint(IRenderTarget& rt) {
     ets.color = ec;
     ets.align_h = AlignH::Center;
     ets.align_v = AlignV::Center;
-    rt.draw_text(L"暂无解锁测试项目", view, ets);
+    rt.draw_text(tr("tests.unlock.page.empty"), view, ets);
   }
   for (size_t i = 0; i < items_.size() && i < ctrls_.size(); ++i) {
     const auto& it = items_[i];

@@ -9,6 +9,8 @@ param(
 $repo = 'C:\Users\sun_y\Documents\AntiGravity_Projects\ClashWin'
 $rel = Join-Path $repo 'build\bin\Release'
 $logRoot = 'C:\Users\sun_y\Documents\Trae-CN\temp_20261102_02'
+# 目录可能被外部清理；脚本必须自足，否则重定向失败会静默丢掉全部测试输出
+New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
 
 if ($InPlace) {
   Set-Location $rel

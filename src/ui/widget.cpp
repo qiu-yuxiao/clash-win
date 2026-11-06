@@ -6,6 +6,7 @@
 #include <format>
 #include <typeinfo>
 
+#include "i18n_text.h"
 #include "util/log.h"
 
 namespace clashwin::ui {
@@ -201,7 +202,32 @@ void Widget::paint(IRenderTarget& rt, const RectF& clip) {
   rt.pop_clip();
 }
 
+// ---------- i18n 文本绑定（F-D01） ----------
+void Widget::bind_i18n_text(std::wstring* slot, const char* key) {
+  if (!slot || !key || !*key) return;
+  i18n_slots_.push_back({slot, key});
+  *slot = tr(key);
+}
+
+void Widget::apply_i18n() {
+  for (auto& s : i18n_slots_) *s.slot = tr(s.key.c_str());
+}
+
+void Widget::refresh_i18n_tree() {
+  apply_i18n();
+  for (auto& c : children_) c->refresh_i18n_tree();
+}
+
 void Widget::paint_all(IRenderTarget& rt) {
+  // ← MF:pages/_layout.tsx:478-483（language 变化触发整树重新翻译）；
+  //   C++ 无虚拟 DOM，用 I18n 单调修订号在根节点一次性完成"重取译文 + 重排"。
+  //   只在根节点比较，避免每个子控件重复 relayout。
+  const uint64_t rev = clashwin::i18n::I18n::instance().revision();
+  if (rev != root_i18n_revision_) {
+    root_i18n_revision_ = rev;
+    refresh_i18n_tree();
+    relayout();
+  }
   paint(rt, {0, 0, rt.size().w, rt.size().h});
 }
 

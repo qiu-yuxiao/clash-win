@@ -18,6 +18,12 @@ void Button::set_disabled(bool d) {
   invalidate();
 }
 
+void Button::set_i18n_text(const char* key) {
+  // F-D01：文本槽随语言变化自动刷新（Widget::paint_all 的 revision 机制）
+  bind_i18n_text(&text, key);
+  invalidate();
+}
+
 SizeF Button::on_measure(float max_w, float max_h) {
   (void)max_w; (void)max_h;
   SizeF s{};

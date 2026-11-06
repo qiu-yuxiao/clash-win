@@ -3,6 +3,8 @@
 
 #include <algorithm>
 
+#include "i18n/i18n.h"
+#include "i18n_text.h"
 #include "theme/theme.h"
 
 namespace clashwin::ui {
@@ -11,6 +13,29 @@ void Segmented::set_options(std::vector<std::wstring> opts, int sel) {
   options_ = std::move(opts);
   selected_ = sel;
   invalidate();
+}
+
+void Segmented::set_options_i18n(std::vector<const char*> keys, int sel) {
+  option_keys_.assign(keys.begin(), keys.end());
+  std::vector<std::wstring> opts;
+  opts.reserve(keys.size());
+  for (const char* k : keys) opts.push_back(tr(k));
+  set_options(std::move(opts), sel);
+  options_revision_ = clashwin::i18n::I18n::instance().revision();
+}
+
+void Segmented::set_tooltips_i18n(std::vector<const char*> keys) {
+  tooltip_keys_.assign(keys.begin(), keys.end());
+  tooltips_.clear();
+  for (const char* k : keys) tooltips_.push_back(tr(k));
+}
+
+std::wstring Segmented::tooltip_text() const {
+  if (hover_ >= 0 && hover_ < static_cast<int>(tooltip_keys_.size()))
+    return tr(tooltip_keys_[static_cast<size_t>(hover_)].c_str());
+  return hover_ >= 0 && hover_ < static_cast<int>(tooltips_.size())
+             ? tooltips_[static_cast<size_t>(hover_)]
+             : std::wstring();
 }
 
 void Segmented::set_selected(int i) {
@@ -79,6 +104,15 @@ bool Segmented::on_mouse(const MouseEvent& e) {
 }
 
 void Segmented::on_paint(IRenderTarget& rt) {
+  // F-D01：语言切换 → 重取分段文案（← _layout.tsx:478-483 重渲染）
+  if (!option_keys_.empty()) {
+    const uint64_t rev = clashwin::i18n::I18n::instance().revision();
+    if (rev != options_revision_) {
+      options_revision_ = rev;
+      for (size_t i = 0; i < option_keys_.size() && i < options_.size(); ++i)
+        options_[i] = tr(option_keys_[i].c_str());
+    }
+  }
   RectF r{0, 0, bounds().w, bounds().h};
   Color4f bg_c = bg_, act_bg = selected_bg_, act_txt = selected_text_color_,
          txt_c = text_color_, act_border{};

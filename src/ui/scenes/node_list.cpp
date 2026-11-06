@@ -12,6 +12,7 @@
 #include "../theme/theme.h"
 #include "util/log.h"
 #include "util/utf.h"
+#include "ui/i18n_text.h"  // F-D01
 
 namespace clashwin::ui::scene {
 
@@ -275,7 +276,7 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   sort->size_ = 17;
   sort->box_w = sort->box_h = 26;
   sort->color_ = pal.primary_text;
-  sort->set_tooltip_text(L"按延迟排序");  // src: locales/zh/proxies.json:34-36
+  sort->set_tooltip_text(tr("proxies.page.tooltips.sortDelay"));  // src: locales/zh/proxies.json:34-36
   sort->on_click = [this] { toggle_sort(); };
   bar_p->add_child(std::move(sort));
 
@@ -295,7 +296,7 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   search_ = search.get();
   search_->flex_weight = 1;
   // placeholder src: base-search-box.tsx:117 shared.placeholders.filter
-  search_->set_placeholder(L"过滤条件");
+  search_->set_placeholder(tr("shared.placeholders.filter"));
   search_->bg_ = light ? Color4f::hex(0xFFFFFF) : Color4f::hex(0x1A160E, 0.4f);
   search_->border_ = Color4f::hex(0xD4AF37, light ? 0.35f : 0.25f);
   search_->border_focused_ = light ? Color4f::hex(0xB8860B) : Color4f::hex(0xFFA000);
@@ -310,7 +311,7 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   search_->height_ = 26;
   // 清空按钮（opt-in）：src: base-search-box.tsx:121-140
   //   ClearRounded 18 / pr 4 / 空值 opacity .5 + disabled / Tooltip resetInput
-  search_->set_clear_button(true, L"清空输入框");  // src: locales/zh/shared.json:63
+  search_->set_clear_button(true, tr("shared.placeholders.resetInput"));  // src: locales/zh/shared.json:63
   search_->on_text_changed = [this](const std::wstring& t) {
     set_filter(clashwin::utf::utf16_to_utf8(t));
   };
@@ -385,8 +386,10 @@ void NodeList::toggle_sort() {
     static const char* kIcons[3] = {"sort", "history", "sortbyalpha"};
     sort_btn_->set_icon(kIcons[sort_type_]);
     // src: locales/zh/proxies.json:34-36 三态 Tooltip
-    static const wchar_t* kTips[3] = {L"默认排序", L"按延迟排序", L"按名称排序"};
-    sort_btn_->set_tooltip_text(kTips[sort_type_]);
+    static const char* kTipKeys[3] = {"proxies.page.tooltips.sortDefault",
+                                      "proxies.page.tooltips.sortDelay",
+                                      "proxies.page.tooltips.sortName"};
+    sort_btn_->set_tooltip_text(tr(kTipKeys[sort_type_]));
   }
   rebuild_visible();
   sync_list();

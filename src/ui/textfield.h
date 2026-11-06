@@ -10,6 +10,7 @@
 #include <functional>
 
 #include "widget.h"
+#include "ui/i18n_text.h"  // F-D01
 
 namespace clashwin::ui {
 
@@ -46,7 +47,7 @@ class TextField : public Widget {
   //   - connections_panel.cpp 连接面板搜索（← connections-panel.tsx:182）
   //   - connections_view.cpp 连接页搜索（同一 connections-panel 搜索语义）
   //   - profile_import_card URL / 设置端口等普通 TextField 不传 onClear → 保持关
-  void set_clear_button(bool on, std::wstring tooltip = L"清空输入框");
+  void set_clear_button(bool on, std::wstring tooltip = tr("shared.placeholders.resetInput"));
   bool clear_button() const { return clear_button_; }
   RectF clear_button_rect() const;  // 局部坐标（点击/悬停判定）
   std::wstring tooltip_text() const override;
@@ -115,7 +116,7 @@ class TextField : public Widget {
   float scroll_x_ = 0;
   bool clear_button_ = false;
   bool clear_hover_ = false;
-  std::wstring clear_tooltip_ = L"清空输入框";
+  std::wstring clear_tooltip_ = tr("shared.placeholders.resetInput");
 };
 
 }  // namespace clashwin::ui

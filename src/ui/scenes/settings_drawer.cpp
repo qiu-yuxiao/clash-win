@@ -21,6 +21,7 @@
 #include "util/utf.h"
 #include "utility_modals.h"
 #include "../help_menu.h"
+#include "ui/i18n_text.h"  // F-D01
 
 namespace clashwin::ui::scene {
 
@@ -387,7 +388,7 @@ TakeoverCard::TakeoverCard() : Widget(nullptr) {
   title_->style.size = 13;  // src: takeover-mode-card.tsx:60 fontSize 13px
   title_->style.weight = static_cast<int>(Weight::Bold);
   title_->style.color = card_text();
-  title_->set_text(L"流量接管模式");
+  title_->set_i18n_text("settings.mini.takeoverMode");
   add_child(std::move(t));
   auto seg = std::make_unique<TakeoverSegmented>();
   seg_ = seg.get();
@@ -418,15 +419,16 @@ RoutingCard::RoutingCard() : Widget(nullptr) {
   title_->style.size = 13;
   title_->style.weight = static_cast<int>(Weight::Bold);
   title_->style.color = card_text();
-  title_->set_text(L"代理方式");
+  title_->set_i18n_text("settings.mini.proxyMethod");
   add_child(std::move(t));
   auto seg = std::make_unique<Segmented>();
   seg_ = seg.get();
-  seg_->set_options({L"全局代理", L"GFWList", L"添加网址"}, 1);
+  seg_->set_options_i18n({"settings.mini.globalProxy", "settings.mini.gfwlist",
+                          "settings.mini.addUrl"}, 1);
   // src: locales/zh/settings.json:567-569 globalProxyTooltip/gfwlistTooltip/addUrlTooltip
-  seg_->set_tooltips({L"所有流量都走代理（简单但费流量）",
-                      L"仅 GFWList 中的网站走代理，其余直连",
-                      L"在 GFWList 基础上，手动添加需要代理的网址"});
+  seg_->set_tooltips_i18n({"settings.mini.globalProxyTooltip",
+                           "settings.mini.gfwlistTooltip",
+                           "settings.mini.addUrlTooltip"});
   style_gold_segmented(seg_);
   add_child(std::move(seg));
   auto hint = std::make_unique<Label>();
@@ -456,14 +458,14 @@ BasicCard::BasicCard() : Widget(nullptr) {
   title_->style.size = 13;  // src: basic-settings-card.tsx:158 fontSize 13px
   title_->style.weight = static_cast<int>(Weight::Bold);
   title_->style.color = card_text();
-  title_->set_text(L"基础设置");
+  title_->set_i18n_text("settings.components.verge.basic.title");
   add_child(std::move(t));
   struct Def {
-    const wchar_t* text;
+    std::wstring text;
     SwitchW** slot;
-  } defs[4] = {{L"开机自启", &sw_auto_launch_},
+  } defs[4] = {{tr("settings.sections.system.fields.autoLaunch"), &sw_auto_launch_},
                {L"Allow LAN", &sw_allow_lan_},
-               {L"静默启动", &sw_silent_start_},
+               {tr("settings.sections.system.fields.silentStart"), &sw_silent_start_},
                {L"Allow IPv6", &sw_allow_ipv6_}};
   for (int i = 0; i < 4; ++i) {
     auto lb = std::make_unique<Label>();
@@ -489,7 +491,8 @@ BasicCard::BasicCard() : Widget(nullptr) {
   style_input(port_field_);
   port_field_->set_text(std::to_wstring(static_cast<uint32_t>(config::consts::kDefaultMixed)));
   add_child(std::move(pf));
-  auto btn = std::make_unique<Button>(L"保存");
+  auto btn = std::make_unique<Button>();
+  btn->set_i18n_text("shared.actions.save");
   save_btn_ = btn.get();
   btn->set_visible(false);
   add_child(std::move(btn));
@@ -534,7 +537,7 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   title_->style.size = 13;
   title_->style.weight = static_cast<int>(Weight::Bold);
   title_->style.color = card_text();
-  title_->set_text(L"主题设置");
+  title_->set_i18n_text("settings.components.verge.basic.fields.themeSetting");
   add_child(std::move(t));
   const wchar_t* skins[] = {L"3D", L"Org", L"Mod", L"Fro", L"Cyber", L"Mono"};
   for (int i = 0; i < 6; ++i) {
@@ -544,7 +547,8 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
     add_child(std::move(b));
   }
   // src: theme-settings-card.tsx:427-448 调试日志钮（contained primary 13px、高24）
-  auto lb = std::make_unique<Button>(L"系统调试运行日志");
+  auto lb = std::make_unique<Button>();
+  lb->set_i18n_text("settings.mini.debugLogs");
   logs_btn_ = lb.get();
   // src: button-styles.ts:73-81 get3DButtonStyle：radius 6 / 2px 边框 / bold 700
   lb->themed_ = false;
@@ -566,7 +570,9 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   add_child(std::move(lb));
   auto mode = std::make_unique<Segmented>();
   mode_seg_ = mode.get();
-  mode_seg_->set_options({L"系统", L"浅色", L"深色"}, 0);
+  mode_seg_->set_options_i18n({"settings.sections.appearance.system",
+                               "settings.sections.appearance.light",
+                               "settings.sections.appearance.dark"}, 0);
   style_gold_segmented_small(mode_seg_);
   add_child(std::move(mode));
   auto dl = std::make_unique<Label>();
@@ -635,7 +641,7 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
       // src: :471 text.secondary + 页脚整体 opacity .75（:459）→ 复合 alpha .45
       is_light() ? Color4f::hex(0x3C3C43, 0.45f) : Color4f::hex(0xEBEBF5, 0.45f);
   // src: locales/zh/settings.json:203 copyright（显示内容按中文包取字面量）
-  copyright_->set_text(L"© 2026 秋雨潇潇 (修改部分)");
+  copyright_->set_i18n_text("settings.components.verge.theme.copyright");
   add_child(std::move(cp));
   auto em = std::make_unique<Label>();
   email_ = em.get();
@@ -768,7 +774,7 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
   style_cell(bottom_help_, 16.0f);
   bottom_help_->text_style.weight = static_cast<int>(Weight::Bold);
   bottom_help_->on_click = [this]() { open_help_menu(); };
-  bottom_help_->set_tooltip_text(L"帮助与工具");  // src: locales/zh/layout.json:40 buttonAriaLabel
+  bottom_help_->set_tooltip_text(tr("layout.components.helpMenu.buttonAriaLabel"));  // src: locales/zh/layout.json:40 buttonAriaLabel
   panel_->add_child(std::move(bh));
 
   auto lb = std::make_unique<Button>(L"Language");
@@ -1169,14 +1175,14 @@ void SettingsDrawer::open_help_menu() {
           ? std::wstring{}
           : L" (" + utf::utf8_to_utf16(format_core_version(core_version)) + L")";
   std::vector<MenuItem> its;
-  its.push_back({L"⭐ 去 GitHub 点亮 ⭐ Star", false, false, L"", false});
-  its.push_back({L"💡 帮助指南 (Wiki)", false, false, L"", false});
-  its.push_back({L"🧭 新手引导", false, false, L"", false});
+  its.push_back({L"⭐ " + tr("layout.components.helpMenu.github"), false, false, L"", false});
+  its.push_back({L"💡 " + tr("layout.components.helpMenu.wiki"), false, false, L"", false});
+  its.push_back({L"🧭 " + tr("layout.components.helpMenu.firstRunGuide"), false, false, L"", false});
   its.push_back({L"", false, true, L"", false});
-  its.push_back({L"📦 导出诊断包", false, false, L"", false});
+  its.push_back({L"📦 " + tr("layout.components.helpMenu.exportDiagnostics"), false, false, L"", false});
   its.push_back({L"", false, true, L"", false});
-  its.push_back({L"🚀 检查软件更新" + app_suffix, false, false, L"", false});
-  its.push_back({L"⚙️ 检查内核更新" + core_suffix, false, false, L"", false});
+  its.push_back({L"🚀 " + tr("layout.components.helpMenu.checkAppUpdate") + app_suffix, false, false, L"", false});
+  its.push_back({L"⚙️ " + tr("layout.components.helpMenu.checkCoreUpdate") + core_suffix, false, false, L"", false});
   help_menu_->style_ = st;
   help_menu_->on_select = [this](int idx) {
     HelpAction a;
@@ -1249,13 +1255,13 @@ void SettingsDrawer::open_profile_menu(const std::string& uid, PointF anchor) {
 
   // 5 项 + 2 分隔线：src: _layout.tsx:1820-1856（图标/文案取自 zh 语言包）
   std::vector<MenuItem> its;
-  its.push_back({L"📝 编辑", false, false, L"", false});
-  its.push_back({L"📄 编辑文件", false, false, L"", false});
+  its.push_back({L"📝 " + tr("shared.actions.edit"), false, false, L"", false});
+  its.push_back({L"📄 " + tr("profiles.components.menu.editFile"), false, false, L"", false});
   its.push_back({L"", false, true, L"", false});
-  its.push_back({L"🔗 复制链接", local || url.empty(), false, L"", false});
-  its.push_back({L"🔄 更新", local, false, L"", false});
+  its.push_back({L"🔗 " + tr("profiles.components.menu.copyLink"), local || url.empty(), false, L"", false});
+  its.push_back({L"🔄 " + tr("profiles.components.menu.update"), local, false, L"", false});
   its.push_back({L"", false, true, L"", false});
-  its.push_back({L"❌ 删除", false, false, L"", true});
+  its.push_back({L"❌ " + tr("shared.actions.delete"), false, false, L"", true});
 
   profile_menu_->style_ = st;
   profile_menu_->on_select = [this, uid, url](int idx) {
@@ -1312,12 +1318,12 @@ void SettingsDrawer::open_url_menu(PointF anchor) {
 
   // 5 项 + 1 分隔线：src: _layout.tsx:1886-1931（文案 zh: shared.json:27-31）
   std::vector<MenuItem> its;
-  its.push_back({L"✂️ 剪切", !f->can_cut(), false, L"", false});
-  its.push_back({L"📋 复制", !f->can_copy(), false, L"", false});
-  its.push_back({L"📥 粘贴", !f->can_paste(), false, L"", false});
-  its.push_back({L"🔍 全选", !f->can_select_all(), false, L"", false});
+  its.push_back({L"✂️ " + tr("shared.actions.cut"), !f->can_cut(), false, L"", false});
+  its.push_back({L"📋 " + tr("shared.actions.copy"), !f->can_copy(), false, L"", false});
+  its.push_back({L"📥 " + tr("shared.actions.paste"), !f->can_paste(), false, L"", false});
+  its.push_back({L"🔍 " + tr("shared.actions.selectAll"), !f->can_select_all(), false, L"", false});
   its.push_back({L"", false, true, L"", false});
-  its.push_back({L"🧹 清空", !f->can_clear(), false, L"", true});
+  its.push_back({L"🧹 " + tr("shared.actions.clearInput"), !f->can_clear(), false, L"", true});
 
   url_menu_->style_ = st;
   url_menu_->on_select = [f](int idx) {

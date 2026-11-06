@@ -8,6 +8,7 @@
 #include "events/event_bus.h"
 #include "ui/theme/theme.h"
 #include "util/utf.h"
+#include "ui/i18n_text.h"  // F-D01
 
 namespace clashwin::ui::scene {
 
@@ -99,9 +100,9 @@ void ConnPanelRowWidget::on_paint(IRenderTarget& rt) {
   chains_ts.align_v = AlignV::Center;
   chains_ts.ellipsis = true;
   // src: locales/zh/connections.json:37-39 chainsDirect/Reject/Proxy = 直连/封锁/代理
-  std::wstring cat_text = L"代理";
-  if (cat == "Direct") cat_text = L"直连";
-  else if (cat == "Reject") cat_text = L"封锁";
+  std::wstring cat_text = tr("connections.components.miniTable.chainsProxy");
+  if (cat == "Direct") cat_text = tr("connections.components.miniTable.chainsDirect");
+  else if (cat == "Reject") cat_text = tr("connections.components.miniTable.chainsReject");
   rt.draw_text(cat_text, {chains_x, 0, chains_w, bounds().h}, chains_ts);
 
   // 6. 悬停关闭按钮 ✕ (活跃连接时在最右侧 18px 呈现)
@@ -172,17 +173,18 @@ ConnectionsPanel::ConnectionsPanel(Widget* parent) : Widget(parent) {
   auto search = std::make_unique<TextField>();
   search_ = search.get();
   // src: locales/zh/shared.json:64 「"filter": "过滤条件"」（base-search-box.tsx:117）
-  search_->set_placeholder(L"过滤条件");
+  search_->set_placeholder(tr("shared.placeholders.filter"));
   // 清空按钮（opt-in）：src: connections-panel.tsx:182 BaseSearchBox
   //   → base-search-box.tsx:121-140 endAdornment ClearRounded / resetInput tooltip
-  search_->set_clear_button(true, L"清空输入框");
+  search_->set_clear_button(true, tr("shared.placeholders.resetInput"));
   search_->on_text_changed = [this](const std::wstring& text) {
     set_filter(utf::utf16_to_utf8(text));
   };
   add_child(std::move(search));
 
   // 2. 断开全部按钮
-  auto btn_disc = std::make_unique<Button>(L"断开全部");
+  auto btn_disc = std::make_unique<Button>();
+  btn_disc->set_i18n_text("settings.mini.connectionsDisconnectAll");
   btn_disconnect_all_ = btn_disc.get();
   btn_disconnect_all_->themed_ = true;
   btn_disconnect_all_->on_click = [this] {
@@ -191,7 +193,8 @@ ConnectionsPanel::ConnectionsPanel(Widget* parent) : Widget(parent) {
   add_child(std::move(btn_disc));
 
   // 3. 清空历史按钮
-  auto btn_clr = std::make_unique<Button>(L"清空历史");
+  auto btn_clr = std::make_unique<Button>();
+  btn_clr->set_i18n_text("settings.mini.connectionsClearHistory");
   btn_clear_history_ = btn_clr.get();
   btn_clear_history_->themed_ = true;
   btn_clear_history_->on_click = [this] {
@@ -377,12 +380,12 @@ void ConnectionsPanel::refresh_visible() {
 void ConnectionsPanel::show_context_menu(const ConnItem& item, PointF anchor, RectF row_global) {
   std::vector<MenuItem> items;
   // src: locales/zh/connections.json:42-47 六项文案（connection-table.tsx:493-534，无快捷键列）
-  items.push_back({L"设为全局直连", false, false, L""});
-  items.push_back({L"设为代理分流", false, false, L""});
-  items.push_back({L"封锁它 (REJECT)", false, false, L""});
-  items.push_back({L"断开此连接", tab_ == Tab::Closed, false, L""});
-  items.push_back({L"复制连接地址", false, false, L""});
-  items.push_back({L"查看详细信息", false, false, L""});
+  items.push_back({tr("connections.components.contextMenu.setDirect"), false, false, L""});
+  items.push_back({tr("connections.components.contextMenu.setProxy"), false, false, L""});
+  items.push_back({tr("connections.components.contextMenu.setReject"), false, false, L""});
+  items.push_back({tr("connections.components.contextMenu.disconnect"), tab_ == Tab::Closed, false, L""});
+  items.push_back({tr("connections.components.contextMenu.copyAddress"), false, false, L""});
+  items.push_back({tr("connections.components.contextMenu.viewDetail"), false, false, L""});
 
   context_menu_->open(items, anchor);
   context_menu_->on_select = [this, item, row_global](int idx) {
@@ -450,7 +453,7 @@ void ConnTableOverlay::on_paint(IRenderTarget& rt) {
   ts.color = c;
   ts.align_h = AlignH::Center;
   ts.align_v = AlignV::Center;
-  rt.draw_text(L"空空如也", r, ts);
+  rt.draw_text(tr("shared.statuses.empty"), r, ts);
 }
 
 void ConnectionsPanel::on_arrange(const RectF& area) {
@@ -508,7 +511,7 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   title_ts.weight = static_cast<int>(Weight::Bold);
   title_ts.color = pal.primary_text;
   title_ts.align_v = AlignV::Center;
-  rt.draw_text(L"路径控制（右键点击链接）", {4.0f, 2.0f, bounds().w - 150.0f, 18.0f}, title_ts);
+  rt.draw_text(tr("settings.mini.pathControl"), {4.0f, 2.0f, bounds().w - 150.0f, 18.0f}, title_ts);
 
   // 3D Toggle 外框 (140×18px)
   float seg_x = tab_active_rect_.x;
@@ -525,8 +528,10 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   size_t act_num = data_ ? data_->active().size() : 0;
   size_t cls_num = data_ ? data_->closed().size() : 0;
 
-  std::wstring act_text = L"活跃 (" + std::to_wstring(act_num) + L")";
-  std::wstring cls_text = L"历史 (" + std::to_wstring(cls_num) + L")";
+  std::wstring act_text = tr("settings.mini.connectionsActive") + L" (" +
+                          std::to_wstring(act_num) + L")";
+  std::wstring cls_text = tr("settings.mini.connectionsHistory") + L" (" +
+                          std::to_wstring(cls_num) + L")";
 
   TextStyle tab_act_ts;
   tab_act_ts.size = 10.5f;
@@ -551,7 +556,7 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
 
   // Host 表头
   // src: locales/zh/connections.json:35 miniTable.hostColumn "链接目标"
-  std::wstring host_title = L"链接目标";
+  std::wstring host_title = tr("connections.components.miniTable.hostColumn");
   if (sort_col_ == SortCol::Host) {
     if (sort_dir_ == SortDir::Asc) host_title += L" ▲";
     if (sort_dir_ == SortDir::Desc) host_title += L" ▼";
@@ -567,7 +572,7 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   rt.fill_rect({bounds().w - 64.0f, 48.0f, 1.0f, 20.0f}, Brush{vars.divider_color});
 
   // Chains 表头 (固定 64px 居中)
-  std::wstring chains_title = L"路由";
+  std::wstring chains_title = tr("connections.components.miniTable.chainsColumn");
   if (sort_col_ == SortCol::Chains) {
     if (sort_dir_ == SortDir::Asc) chains_title += L" ▲";
     if (sort_dir_ == SortDir::Desc) chains_title += L" ▼";
@@ -588,7 +593,7 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
                              0.75f);  // src: base-empty.tsx:32 alpha(text.secondary, .75)
     empty_ts.align_h = AlignH::Center;
     empty_ts.align_v = AlignV::Center;
-    rt.draw_text(L"空空如也", list_->bounds(), empty_ts);
+    rt.draw_text(tr("shared.statuses.empty"), list_->bounds(), empty_ts);
   }
 }
 

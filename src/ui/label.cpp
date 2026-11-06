@@ -14,6 +14,12 @@ void Label::set_text(const std::wstring& t) {
   invalidate();
 }
 
+void Label::set_i18n_text(const char* key) {
+  // F-D01：文本槽随语言变化自动刷新（Widget::paint_all 的 revision 机制）
+  bind_i18n_text(&text, key);
+  invalidate();
+}
+
 SizeF Label::on_measure(float max_w, float max_h) {
   ITextEngine* e = text_engine();
   if (!e) return {};

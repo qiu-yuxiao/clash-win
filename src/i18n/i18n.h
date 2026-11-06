@@ -25,6 +25,11 @@ class I18n {
   bool inited() const { return inited_; }
   size_t loaded_language_count() const { return resources_.size(); }
 
+  // ← Mini: src/services/i18n.ts:161-171 changeLanguage + MF:pages/_layout.tsx:478-483
+  //   verge.language 变化触发整棵 UI 重新翻译。C++ 无 React 重渲染，用单调
+  //   修订号让每个 Widget 在自身下一次 paint 时自行重取译文（见 widget.cpp）。
+  uint64_t revision() const { return revision_; }
+
   // 归一（i18n.ts resolveLanguage 逐条对照；不依赖 init）
   static std::string resolve_language(const std::string& raw);
   static const std::vector<std::string>& supported_languages();
@@ -56,6 +61,7 @@ class I18n {
       resources_;
   std::string language_ = kFallback;
   bool inited_ = false;
+  uint64_t revision_ = 0;  // ← _layout.tsx:478-483 语言切换的整树重翻译驱动
   std::vector<std::pair<uint64_t, std::function<void(const std::string&)>>>
       listeners_;
   uint64_t next_id_ = 1;

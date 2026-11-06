@@ -7,6 +7,7 @@
 // 调试/测试覆盖（绝不动真实 %APPDATA%）：
 //   CLASHWIN_HOME_OVERRIDE      → 直接作为 app_home_dir 返回值
 //   CLASHWIN_PORTABLE_OVERRIDE  → "1" 强制便携分支 / "0" 强制非便携
+#include <functional>
 #include <string>
 
 namespace clashwin::util::dirs {
@@ -55,6 +56,10 @@ std::wstring sidecar_log_dir();        // <home>\logs\sidecar
 std::wstring service_log_dir();        // <home>\logs\service
 
 // ← dirs.rs::clash_latest_log：Service→service_latest.log，其余→sidecar_latest.log
+// 运行模式由 core 层在启动时注入（CMake 依赖是 core→config→util，
+// util 不得反向 include core，故用 provider 回调而非直接查 CoreManager）。
+// 未注入时按非 Service 处理（与 dirs.rs 的 NotRunning/Sidecar 分支一致）。
+void set_clash_log_service_provider(std::function<bool()> provider);
 std::wstring clash_latest_log();
 
 // ← dirs.rs::ipc_path

@@ -8,6 +8,7 @@
 #include "ui/theme/theme.h"
 #include "util/str_utils.h"
 #include "util/utf.h"
+#include "ui/i18n_text.h"  // F-D01
 
 namespace clashwin::ui::scene {
 
@@ -110,7 +111,7 @@ void EditProfileModal::on_paint(IRenderTarget& rt) {
   title_ts.weight = static_cast<int>(Weight::Bold);
   title_ts.color = pal.primary_text;
   title_ts.align_v = AlignV::Center;
-  rt.draw_text(L"⚙️ 编辑配置文件",
+  rt.draw_text(L"⚙️ " + tr("layout.components.dialogs.editProfile.title"),
                {card_rect_.x + 24.0f, card_rect_.y + 24.0f, card_rect_.w - 48.0f, 20.0f},
                title_ts);
 
@@ -120,13 +121,13 @@ void EditProfileModal::on_paint(IRenderTarget& rt) {
   label_ts.weight = static_cast<int>(Weight::Bold);
   label_ts.color = pal.primary_text;
   label_ts.align_v = AlignV::Center;
-  rt.draw_text(L"配置名称",
+  rt.draw_text(tr("layout.components.dialogs.editProfile.nameLabel"),
                {card_rect_.x + 24.0f, card_rect_.y + 60.0f, card_rect_.w - 48.0f, 20.0f},
                label_ts);
-  rt.draw_text(L"订阅地址",
+  rt.draw_text(tr("layout.components.dialogs.editProfile.urlLabel"),
                {card_rect_.x + 24.0f, card_rect_.y + 140.0f, card_rect_.w - 48.0f, 20.0f},
                label_ts);
-  rt.draw_text(L"更新周期 (单位: 小时, 设为 0 禁用)",
+  rt.draw_text(tr("layout.components.dialogs.editProfile.intervalLabel"),
                {card_rect_.x + 24.0f, card_rect_.y + 220.0f, card_rect_.w - 48.0f, 20.0f},
                label_ts);
 
@@ -181,14 +182,14 @@ void EditProfileModal::on_paint(IRenderTarget& rt) {
   Brush cb{c_bg};
   rt.round_rect(btn_cancel_rect_, 4.0f, {card_edge, 1.0f}, &cb);
   btn_ts.color = pal.primary_text;
-  rt.draw_text(L"取消", btn_cancel_rect_, btn_ts);
+  rt.draw_text(tr("shared.actions.cancel"), btn_cancel_rect_, btn_ts);
 
   Color4f s_bg = Color4f::hex(hover_save_ ? 0xE0BC55 : 0xD4AF37);
   Brush sb{s_bg};
   rt.round_rect(btn_save_rect_, 4.0f, {}, &sb);
   btn_ts.weight = static_cast<int>(Weight::Bold);
   btn_ts.color = Color4f::hex(0x2C1F03);
-  rt.draw_text(L"保存", btn_save_rect_, btn_ts);
+  rt.draw_text(tr("shared.actions.save"), btn_save_rect_, btn_ts);
 }
 
 bool EditProfileModal::on_mouse(const MouseEvent& e) {
@@ -404,7 +405,7 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
   title_ts.color = Color4f::hex(0x1A1A1A);
   title_ts.align_v = AlignV::Center;
   // src: locales/zh/layout.json:58 「"title": "软件本体更新"」（layout-dialogs.tsx:280 🚀）
-  rt.draw_text(L"🚀 软件本体更新", {card_rect_.x + 18.0f, card_rect_.y + 8.0f, 200.0f, 24.0f},
+  rt.draw_text(L"🚀 " + tr("layout.components.dialogs.client.title"), {card_rect_.x + 18.0f, card_rect_.y + 8.0f, 200.0f, 24.0f},
                title_ts);
 
   // 关闭 ✕
@@ -426,8 +427,11 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
   ver_ts.size = 11.0f;
   ver_ts.color = Color4f::hex(0x333333);
   ver_ts.align_v = AlignV::Center;
-  std::wstring ver_str = L"当前版本: " + utf::utf8_to_utf16(current_version_) + L"   ➔   最新版本: " +
-                         utf::utf8_to_utf16(latest_version_);
+  std::wstring ver_str =
+      tr("layout.components.dialogs.update.currentVersion",
+         {{"version", current_version_}}) +
+      L"   ➔   " + tr("layout.components.dialogs.update.latestVersion",
+                     {{"version", latest_version_}});
   rt.draw_text(ver_str, {card_rect_.x + 20.0f, card_rect_.y + 44.0f, card_rect_.w - 40.0f, 22.0f},
                ver_ts);
 
@@ -435,7 +439,7 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
   chg_label.size = 10.5f;
   chg_label.color = Color4f::hex(0x757575);
   chg_label.align_v = AlignV::Center;
-  rt.draw_text(L"更新日志:", {card_rect_.x + 20.0f, card_rect_.y + 64.0f, 200.0f, 16.0f}, chg_label);
+  rt.draw_text(tr("layout.components.dialogs.client.changelog"), {card_rect_.x + 20.0f, card_rect_.y + 64.0f, 200.0f, 16.0f}, chg_label);
 
   // 更新日志框
   Brush cl_bg{Color4f::hex(0xF8F9FA)};
@@ -447,7 +451,7 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
   cl_ts.color = Color4f::hex(0x424242);
   cl_ts.wrap = true;
   // src: locales/zh/layout.json:60 「"暂无详细更新日志"」（layout-dialogs.tsx:335）
-  std::wstring chg_w = changelog_.empty() ? L"暂无详细更新日志" : utf::utf8_to_utf16(changelog_);
+  std::wstring chg_w = changelog_.empty() ? tr("layout.components.dialogs.client.changelogEmpty") : utf::utf8_to_utf16(changelog_);
   rt.push_clip(changelog_box_rect_);
   rt.draw_text(chg_w, {changelog_box_rect_.x + 8.0f, changelog_box_rect_.y + 8.0f,
                        changelog_box_rect_.w - 16.0f, changelog_box_rect_.h - 16.0f}, cl_ts);
@@ -482,7 +486,7 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
   c_ts.color = Color4f::hex(0x424242);
   c_ts.align_h = AlignH::Center;
   c_ts.align_v = AlignV::Center;
-  rt.draw_text(L"关闭", btn_close_rect_, c_ts);
+  rt.draw_text(tr("shared.actions.close"), btn_close_rect_, c_ts);
 
   Color4f u_bg = hover_update_ ? Color4f::hex(0x1976D2) : Color4f::hex(0x2196F3);
   Brush ub{u_bg};
@@ -494,13 +498,13 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
   u_ts.align_h = AlignH::Center;
   u_ts.align_v = AlignV::Center;
   // src: layout.json:54/61 「已是最新 / 准备重启」（layout-dialogs.tsx:400-406）
-  std::wstring upd_label = L"立即更新";
+  std::wstring upd_label = tr("layout.components.dialogs.update.updateNow");
   if (is_downloading_)
-    upd_label = L"更新中...";
+    upd_label = tr("layout.components.dialogs.update.updating");
   else if (progress_ >= 100)
-    upd_label = L"准备重启";
+    upd_label = tr("layout.components.dialogs.client.prepareRestart");
   else if (!latest_version_.empty() && latest_version_ == current_version_)
-    upd_label = L"已是最新";
+    upd_label = tr("layout.components.dialogs.update.upToDate");
   rt.draw_text(upd_label, btn_update_rect_, u_ts);
 }
 
@@ -653,7 +657,7 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
   title_ts.color = Color4f::hex(0x1A1A1A);
   title_ts.align_v = AlignV::Center;
   // src: locales/zh/layout.json:64 「"title": "Mihomo 内核更新"」（layout-dialogs.tsx:449 ⚙️）
-  rt.draw_text(L"⚙️ Mihomo 内核更新", {card_rect_.x + 18.0f, card_rect_.y + 8.0f, 200.0f, 24.0f},
+  rt.draw_text(L"⚙️ " + tr("layout.components.dialogs.core.title"), {card_rect_.x + 18.0f, card_rect_.y + 8.0f, 200.0f, 24.0f},
                title_ts);
 
   // 关闭 ✕
@@ -678,9 +682,12 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
   rt.draw_text(L"当前内核版本: " + utf::utf8_to_utf16(current_version_),
                {card_rect_.x + 20.0f, card_rect_.y + 54.0f, card_rect_.w - 40.0f, 22.0f}, ver_ts);
   // src: layout.json:51/65 「最新版本: {{version}} / 获取中...」（layout-dialogs.tsx:471-474）
-  const std::wstring latest_line =
-      latest_version_.empty() ? std::wstring(L"最新版本: 获取中...")
-                              : L"最新版本: " + utf::utf8_to_utf16(latest_version_);
+  const std::wstring latest_line = tr(
+      "layout.components.dialogs.update.latestVersion",
+      {{"version", latest_version_.empty()
+                       ? utf::utf16_to_utf8(
+                             tr("layout.components.dialogs.core.fetching"))
+                       : latest_version_}});
   rt.draw_text(latest_line, {card_rect_.x + 20.0f, card_rect_.y + 80.0f, card_rect_.w - 40.0f, 22.0f},
                ver_ts);
 
@@ -726,7 +733,7 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
   c_ts.color = Color4f::hex(0x424242);
   c_ts.align_h = AlignH::Center;
   c_ts.align_v = AlignV::Center;
-  rt.draw_text(L"关闭", btn_close_rect_, c_ts);
+  rt.draw_text(tr("shared.actions.close"), btn_close_rect_, c_ts);
 
   Color4f u_bg = hover_upgrade_ ? Color4f::hex(0xEF6C00) : Color4f::hex(0xE65100);
   Brush ub{u_bg};
@@ -738,7 +745,7 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
   u_ts.align_h = AlignH::Center;
   u_ts.align_v = AlignV::Center;
   // src: locales/zh/layout.json:53/66 「更新中... / 更新完成」（layout-dialogs.tsx:545-547）
-  rt.draw_text(status_ == "done" ? L"更新完成" : (is_upgrading_ ? L"更新中..." : L"立即更新"),
+  rt.draw_text(status_ == "done" ? tr("layout.components.dialogs.core.updateDone") : (is_upgrading_ ? tr("layout.components.dialogs.update.updating") : tr("layout.components.dialogs.update.updateNow")),
                btn_upgrade_rect_, u_ts);
 }
 
@@ -962,7 +969,7 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
   title_ts.color = Color4f::hex(0x1A1A1A);
   title_ts.align_v = AlignV::Center;
   // src: locales/zh/logs.json:3 「"title": "日志"」（logs.tsx:106 BasePage title）
-  rt.draw_text(L"日志", {card_rect_.x + 18.0f, card_rect_.y + 8.0f, 200.0f, 24.0f},
+  rt.draw_text(tr("logs.page.title"), {card_rect_.x + 18.0f, card_rect_.y + 8.0f, 200.0f, 24.0f},
                title_ts);
 
   // 关闭 ✕
@@ -980,7 +987,9 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
                Brush{Color4f::hex(0xEEEEEE)});
 
   // 工具栏按钮
-  auto draw_tool_btn = [&](const RectF& r, const wchar_t* label, bool hover, bool active = false) {
+  // F-D01：label 允许 locale 译文（std::wstring）与图标字面量（const wchar_t*）
+  auto draw_tool_btn = [&](const RectF& r, const std::wstring& label, bool hover,
+                           bool active = false) {
     Color4f bg = active ? Color4f::hex(0xFFF3E0)
                         : (hover ? Color4f::hex(0xEEEEEE) : Color4f::hex(0xF5F5F5));
     Brush b{bg};
@@ -998,7 +1007,7 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
   draw_tool_btn(btn_pause_rect_, paused_ ? L"▶" : L"⏸", hover_pause_, paused_);
   draw_tool_btn(btn_order_rect_, desc_ ? L"▼" : L"▲", hover_order_, desc_);
   // src: locales/zh/shared.json:24 「"clear": "清除"」（logs.tsx:164）
-  draw_tool_btn(btn_clear_rect_, L"清除", hover_clear_);
+  draw_tool_btn(btn_clear_rect_, tr("shared.actions.clear"), hover_clear_);
 
   // 级别过滤显示
   TextStyle lvl_ts;
@@ -1022,7 +1031,7 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
   search_ts.color = search_query_.empty() ? Color4f::hex(0x9E9E9E) : Color4f::hex(0x333333);
   search_ts.align_v = AlignV::Center;
   // src: locales/zh/shared.json:65 「"filter": "过滤条件"」（base-search-box.tsx:117）
-  std::wstring s_text = search_query_.empty() ? L"过滤条件" : utf::utf8_to_utf16(search_query_);
+  std::wstring s_text = search_query_.empty() ? tr("shared.placeholders.filter") : utf::utf8_to_utf16(search_query_);
   rt.draw_text(s_text, {search_box_rect_.x + 6.0f, search_box_rect_.y, search_box_rect_.w - 12.0f,
                         search_box_rect_.h}, search_ts);
 

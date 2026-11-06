@@ -9,6 +9,7 @@
 
 #include "../theme/theme.h"
 #include "util/utf.h"
+#include "ui/i18n_text.h"  // F-D01
 
 namespace clashwin::ui::scene {
 
@@ -123,7 +124,7 @@ ConnectionsView::ConnectionsView(Widget* parent) : Widget(parent) {
   search_->flex_weight = 1;
   search_->set_placeholder(L"过滤连接...");
   // 清空按钮（opt-in）：src: connections-panel.tsx:182 BaseSearchBox
-  search_->set_clear_button(true, L"清空输入框");
+  search_->set_clear_button(true, tr("shared.placeholders.resetInput"));
   search_->on_text_changed = [this](const std::wstring& t) {
     set_filter(clashwin::utf::utf16_to_utf8(t));
   };

@@ -61,6 +61,10 @@ class Modal : public Widget {
   Label* title_label_ = nullptr;     // 子
   Row* buttons_row_ = nullptr;       // 子
   std::vector<std::wstring> buttons_ = {L"取消", L"确定"};
+  // F-D01：按钮文案的 Mini locale key（← shared.actions.cancel / confirm）。
+  //   open() 时按当前语言重取，set_buttons() 自定义标签后失效。
+  std::vector<std::string> button_keys_ = {"shared.actions.cancel",
+                                           "shared.actions.confirm"};
 };
 
 }  // namespace clashwin::ui

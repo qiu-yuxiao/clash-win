@@ -94,6 +94,13 @@ class Widget {
   void paint_all(IRenderTarget& rt);  // 根入口（clip = 全域）
   virtual void on_paint(IRenderTarget& rt) { (void)rt; }
 
+  // ---- i18n 文本绑定（F-D01）----
+  // ← MF:pages/_layout.tsx:478-483：verge.language 变化 → React 整树重渲染。
+  //   把控件自身的 wstring 文本槽绑到 Mini locale key；语言切换后由根节点
+  //   在 paint_all 时一次性重取译文 + relayout，等价 React 重渲染。
+  //   slot 必须指向本控件生命周期内的成员（通常为 Label::text / Button::text）。
+  void bind_i18n_text(std::wstring* slot, const char* key);
+
   // ---- 输入（返回 true = 已处理，停止冒泡） ----
   virtual bool on_mouse(const MouseEvent& e) { (void)e; return false; }
   virtual bool on_key(const KeyEvent& e) { (void)e; return false; }
@@ -158,6 +165,15 @@ class Widget {
   bool enabled_ = true;
   int z_order_ = 0;
   std::wstring tooltip_text_;
+
+  struct I18nSlot {
+    std::wstring* slot;
+    std::string key;
+  };
+  std::vector<I18nSlot> i18n_slots_;
+  uint64_t root_i18n_revision_ = 0;
+  void apply_i18n();
+  void refresh_i18n_tree();
 };
 
 // ---------- 全局输入路由（窗口层把 WM_MOUSE*/WM_KEY* 转成事件后调） ----------

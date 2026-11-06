@@ -6,6 +6,7 @@
 #include "ui/theme/theme.h"
 #include "util/parse_traffic.h"
 #include "util/utf.h"
+#include "ui/i18n_text.h"  // F-D01
 
 namespace clashwin::ui::scene {
 
@@ -38,57 +39,57 @@ std::vector<std::pair<std::wstring, std::wstring>> ConnectionDetailDialog::field
   //   标签源 locales/zh/connections.json:7-17（下载量/上传量见 shared.json:45-46）
 
   // 1. host → 主机
-  res.emplace_back(L"主机", utf::utf8_to_utf16(item_.host_formatted()));
+  res.emplace_back(tr("connections.components.fields.host"), utf::utf8_to_utf16(item_.host_formatted()));
 
   // 2. downloaded → 下载量（shared.json:45）
   auto [dv, du] = util::parse_traffic(item_.download);
-  res.emplace_back(L"下载量", utf::utf8_to_utf16(dv + " " + du));
+  res.emplace_back(tr("shared.labels.downloaded"), utf::utf8_to_utf16(dv + " " + du));
 
   // 3. uploaded → 上传量（shared.json:46）
   auto [uv, uu] = util::parse_traffic(item_.upload);
-  res.emplace_back(L"上传量", utf::utf8_to_utf16(uv + " " + uu));
+  res.emplace_back(tr("shared.labels.uploaded"), utf::utf8_to_utf16(uv + " " + uu));
 
   // 4. dlSpeed → 下载速度
   auto [dsv, dsu] = util::parse_traffic(item_.cur_download);
-  res.emplace_back(L"下载速度", utf::utf8_to_utf16(dsv + " " + dsu + "/s"));
+  res.emplace_back(tr("connections.components.fields.dlSpeed"), utf::utf8_to_utf16(dsv + " " + dsu + "/s"));
 
   // 5. ulSpeed → 上传速度
   auto [usv, usu] = util::parse_traffic(item_.cur_upload);
-  res.emplace_back(L"上传速度", utf::utf8_to_utf16(usv + " " + usu + "/s"));
+  res.emplace_back(tr("connections.components.fields.ulSpeed"), utf::utf8_to_utf16(usv + " " + usu + "/s"));
 
   // 6. chains → 链路
-  res.emplace_back(L"链路", utf::utf8_to_utf16(item_.chains_formatted()));
+  res.emplace_back(tr("connections.components.fields.chains"), utf::utf8_to_utf16(item_.chains_formatted()));
 
   // 7. rule → 规则
-  res.emplace_back(L"规则", utf::utf8_to_utf16(item_.rule_formatted()));
+  res.emplace_back(tr("connections.components.fields.rule"), utf::utf8_to_utf16(item_.rule_formatted()));
 
   // 8. process → 进程
-  res.emplace_back(L"进程", utf::utf8_to_utf16(item_.process_formatted()));
+  res.emplace_back(tr("connections.components.fields.process"), utf::utf8_to_utf16(item_.process_formatted()));
 
   // 9. time → 连接时间
-  res.emplace_back(L"连接时间", utf::utf8_to_utf16(item_.start));
+  res.emplace_back(tr("connections.components.fields.time"), utf::utf8_to_utf16(item_.start));
 
   // 10. source → 源地址
   std::string src = item_.metadata.source_ip;
   if (!item_.metadata.source_port.empty()) {
     src += ":" + item_.metadata.source_port;
   }
-  res.emplace_back(L"源地址", utf::utf8_to_utf16(src));
+  res.emplace_back(tr("connections.components.fields.source"), utf::utf8_to_utf16(src));
 
   // 11. destination → 目标地址
   std::string dst = item_.metadata.destination_ip.empty() ? item_.metadata.remote_destination
                                                           : item_.metadata.destination_ip;
-  res.emplace_back(L"目标地址", utf::utf8_to_utf16(dst));
+  res.emplace_back(tr("connections.components.fields.destination"), utf::utf8_to_utf16(dst));
 
   // 12. destinationPort → 目标端口
-  res.emplace_back(L"目标端口", utf::utf8_to_utf16(item_.metadata.destination_port));
+  res.emplace_back(tr("connections.components.fields.destinationPort"), utf::utf8_to_utf16(item_.metadata.destination_port));
 
   // 13. type → 类型
   std::string typ = item_.metadata.type;
   if (!item_.metadata.network.empty()) {
     typ += "(" + item_.metadata.network + ")";
   }
-  res.emplace_back(L"类型", utf::utf8_to_utf16(typ));
+  res.emplace_back(tr("connections.components.fields.type"), utf::utf8_to_utf16(typ));
 
   return res;
 }
@@ -213,7 +214,7 @@ void ConnectionDetailDialog::on_paint(IRenderTarget& rt) {
     btn_ts.align_h = AlignH::Center;
     btn_ts.align_v = AlignV::Center;
     // src: locales/zh/connections.json:28 「"closeConnection": "关闭连接"」（connection-detail.tsx:196）
-    rt.draw_text(L"关闭连接", btn_close_conn_rect_, btn_ts);
+    rt.draw_text(tr("connections.components.actions.closeConnection"), btn_close_conn_rect_, btn_ts);
   }
 
   // 关闭按钮
@@ -226,7 +227,7 @@ void ConnectionDetailDialog::on_paint(IRenderTarget& rt) {
   dis_ts.color = pal.primary_text;
   dis_ts.align_h = AlignH::Center;
   dis_ts.align_v = AlignV::Center;
-  rt.draw_text(L"关闭", btn_dismiss_rect_, dis_ts);
+  rt.draw_text(tr("shared.actions.close"), btn_dismiss_rect_, dis_ts);
 }
 
 bool ConnectionDetailDialog::on_mouse(const MouseEvent& e) {

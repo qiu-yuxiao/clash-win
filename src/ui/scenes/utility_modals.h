@@ -15,6 +15,7 @@
 #include "events/event_bus.h"
 #include "ui/context_menu.h"
 #include "ui/widget.h"
+#include "ui/i18n_text.h"  // F-D01
 
 namespace clashwin::ui::scene {
 
@@ -230,9 +231,9 @@ class LogViewerModal : public Widget {
 
   // src: logs.tsx:116-121 / :133-142（shared.actions.pause/resume；logs.actions.showDescending/Ascending）
   std::wstring tooltip_text() const override {
-    if (hover_pause_) return paused_ ? L"继续" : L"暂停";
-    if (hover_order_) return desc_ ? L"按时间正序" : L"按时间倒序";
-    if (hover_clear_) return L"清除";
+    if (hover_pause_) return paused_ ? tr("shared.actions.resume") : tr("shared.actions.pause");
+    if (hover_order_) return desc_ ? tr("logs.actions.showAscending") : tr("logs.actions.showDescending");
+    if (hover_clear_) return tr("shared.actions.clear");
     return {};
   }
 
