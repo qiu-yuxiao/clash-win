@@ -19,6 +19,7 @@
 #include "events/event_bus.h"
 #include "events/event_names.h"
 #include "events/notice.h"
+#include "update/client_updater.h"  // install_app_update（B-D44 更新流收口）
 #include "theme/theme.h"
 #include "ui/ui_postbox.h"
 #include "mihomo/ws_manager.h"
@@ -789,8 +790,11 @@ void MainWindow::build_scene() {
         });
       }).detach();
     };
-    // 客户端更新包下载（src: use-client-update.ts:56-125 downloadAndInstall 的下载段）。
-    //   安装器启动（NSIS + UAC）不在本轮接线，见 K 提权清单。
+    // 客户端更新包下载+安装（src: use-client-update.ts:56-125 downloadAndInstall）。
+    //   Mini 的 downloadAndInstall 在下载完成后于同一调用内启动安装器并
+    //   std::process::exit(0)（tauri-plugin-updater 2.10.1 updater.rs:843-854），
+    //   clientInstallCompleted 通知因进程先退出而不可达——这里保持同一行为：
+    //   成功启动安装器（/UPDATE /ARGS）后立即退出，不走通知分支。
     if (client_update_) {
       client_update_->on_start_update = [this] {
         if (!client_update_ || client_update_->download_url().empty()) return;
@@ -808,11 +812,20 @@ void MainWindow::build_scene() {
             UiPostbox::instance().post([this, msg] {
               if (client_update_) client_update_->handle_progress_event("error", 0, msg);
             });
-          } else {
-            // ← use-client-update.ts:113 clientInstallCompleted
-            events::NoticeService::instance().push(
-                "success", "更新安装完毕，请重启应用以应用更改");
+            return;
           }
+          // ← updater.rs:843-854：启动安装器（/UPDATE /ARGS）后 exit(0)；
+          //   Mini 的 clientInstallCompleted 通知因进程先退出而不可达。
+          const std::wstring installer =
+              utf::utf8_to_utf16(r.value().value("path", std::string()));
+          auto ir = update::ClientUpdater::instance().install_app_update(installer);
+          if (!ir.is_ok()) {
+            events::NoticeService::instance().push(
+                "error", "更新失败: " + ir.error().message);
+            return;
+          }
+          // Mini 同款：立即退出（updater.rs:853 std::process::exit(0)）
+          std::exit(0);
         }).detach();
       };
     }

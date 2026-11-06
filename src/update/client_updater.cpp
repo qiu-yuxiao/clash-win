@@ -469,18 +469,41 @@ Result<std::wstring> ClientUpdater::download_app_update(const std::string& downl
   return Result<std::wstring>::ok(dest_path);
 }
 
-Result<void> ClientUpdater::install_app_update(const std::wstring& installer_path, bool silent) {
+// ← tauri-plugin-updater 2.10.1 updater.rs:787-854 install_inner（NSIS 分支）：
+//   参数 = install_mode.nsis_args()（Mini installMode=basicUi → 空数组，
+//   plugins-workspace updater-v2.10.1 src/config.rs:36-45）+ "/UPDATE" + "/ARGS"
+//   + 当前进程参数[1..]；ShellExecuteW 启动后 std::process::exit(0) 立即退出应用
+//   ——因此 Mini 的 clientInstallCompleted 通知在真实更新流中不可达（进程先退出）。
+//   调用方（main_window）在成功启动后同步退出进程，保持同一用户可见行为。
+Result<void> ClientUpdater::install_app_update(const std::wstring& installer_path,
+                                               bool silent) {
+  (void)silent;  // Mini 无静默分支（basicUi 走完整向导 + /UPDATE 更新模式）
   std::error_code ec;
   if (!std::filesystem::exists(installer_path, ec)) {
     return Result<void>::err(make_err("installer file does not exist"));
   }
+
+  // 当前进程参数[1..]（← current_exe_args()[1..]，updater.rs:797-806）
+  std::wstring own_args;
+  int argc = 0;
+  LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+  if (argv) {
+    for (int i = 1; i < argc; ++i) {
+      if (!own_args.empty()) own_args += L" ";
+      own_args += argv[i];
+    }
+    LocalFree(argv);
+  }
+  const std::wstring params =
+      own_args.empty() ? std::wstring(L"/UPDATE /ARGS")
+                       : L"/UPDATE /ARGS " + own_args;
 
   SHELLEXECUTEINFOW sei{};
   sei.cbSize = sizeof(sei);
   sei.fMask = SEE_MASK_NOCLOSEPROCESS;
   sei.lpVerb = L"open";
   sei.lpFile = installer_path.c_str();
-  sei.lpParameters = silent ? L"/S" : L"";
+  sei.lpParameters = params.c_str();
   sei.nShow = SW_SHOWNORMAL;
 
   if (!ShellExecuteExW(&sei)) {
