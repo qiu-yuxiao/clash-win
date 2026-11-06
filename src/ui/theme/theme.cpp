@@ -124,30 +124,84 @@ ButtonPaint ThemeService::button_paint(const char* color_type) const {
 
   switch (skin_) {
     case SkinId::Retro3d: {
-      // 金色 3D（← :39-140）：default 渐变 #FFFDE7→…→#FFE082（light）
-      if (is_primary) {
-        p.fill = Color4f::hex(0xFFC107);   // 渐变 45% 站
-        p.fill_hover = Color4f::hex(0xFFD54F);  // hover 渐变 45% 站
-        p.text = Color4f::hex(0x2C1F03);
-        p.border = light ? Color4f::hex(0x8A6D00) : Color4f::hex(0x634E00);
-      } else if (is_error) {
-        p.fill = Color4f::hex(0xFF5252);   // 渐变 30% 站
-        p.fill_hover = Color4f::hex(0xFF8A80);
-        p.text = Color4f::hex(0xFFFFFF);
-        p.border = light ? Color4f::hex(0xB71C1C) : Color4f::hex(0x6B0505);
-      } else {
-        p.fill = light ? Color4f::hex(0xFFF59D) : Color4f::hex(0xFBC02D);
-        p.fill_hover = light ? Color4f::hex(0xFFF9C4) : Color4f::hex(0xFFF59D);
-        p.text = light ? Color4f::hex(0x3C2F0F) : Color4f::hex(0x2C1F03);
-        p.border = light ? Color4f::hex(0xD4AF37) : Color4f::hex(0x8A6D00);
-      }
-      p.fill_pressed = p.fill;  // active = inset bevel（无独立色）
-      // 禁用态：MUI Button.disabled 缺省（src: MUI palette action.disabledBackground / text.disabled）
-      p.fill_disabled = light ? Color4f::hex(0xe0e0e0) : Color4f::hex(0x32323a);
-      p.text_disabled = light ? Color4f::hex(0x9e9e9e) : Color4f::hex(0x6e6e75);
+      // 金色 3D（← :39-140）：135° 多停渐变 + 浮雕 + 外发光 + 文字阴影 + 位移
+      p.use_grad = true;
       p.border_w = 2;      // calc(2px * depth)
       p.radius = 6;
       p.weight = 700;      // bold
+      p.translate_hover = -2.0f;   // transform: translateY(-2px)
+      p.translate_active = 3.0f;   // transform: translateY(3px)
+      if (is_primary) {
+        p.text = Color4f::hex(0x2C1F03);
+        p.border = light ? Color4f::hex(0x8A6D00) : Color4f::hex(0x634E00);
+        p.bevel_dark = light ? Color4f::hex(0x8A6D00) : Color4f::hex(0x5D4037);
+        p.bevel_hi = light ? Color4f::hex(0xFFFFFF, 0.8f) : Color4f::hex(0xFFFFFF, 0.08f);
+        p.glow = Color4f::hex(0xFFC107, 0.2f);   // 0.2*vibrancy
+        p.text_shadow = Color4f::hex(0xFFFFFF, 0.45f); p.text_shadow_dy = 1.0f;
+        p.grad[0] = {0.0f, Color4f::hex(0xFFE082)};
+        p.grad[1] = {0.20f, Color4f::hex(0xFFD54F)};
+        p.grad[2] = {0.45f, Color4f::hex(0xFFC107)};
+        p.grad[3] = {0.70f, Color4f::hex(0xFFB300)};
+        p.grad[4] = {0.85f, Color4f::hex(0xD4AF37)};
+        p.grad[5] = {1.0f, Color4f::hex(0xB8860B)};
+        p.grad_count = 6;
+        p.grad_hover[0] = {0.0f, Color4f::hex(0xFFF59D)};
+        p.grad_hover[1] = {0.20f, Color4f::hex(0xFFE082)};
+        p.grad_hover[2] = {0.45f, Color4f::hex(0xFFD54F)};
+        p.grad_hover[3] = {0.70f, Color4f::hex(0xFFC107)};
+        p.grad_hover[4] = {0.85f, Color4f::hex(0xFFB300)};
+        p.grad_hover[5] = {1.0f, Color4f::hex(0xD4AF37)};
+      } else if (is_error) {
+        p.text = Color4f::hex(0xFFFFFF);
+        p.border = light ? Color4f::hex(0xB71C1C) : Color4f::hex(0x6B0505);
+        p.bevel_dark = light ? Color4f::hex(0x8B0000) : Color4f::hex(0x4A0404);
+        p.bevel_hi = light ? Color4f::hex(0xFFFFFF, 0.8f) : Color4f::hex(0xFFFFFF, 0.08f);
+        p.glow = Color4f::hex(0xD50000, 0.2f);
+        p.text_shadow = Color4f::hex(0x000000, 0.4f); p.text_shadow_dy = -1.0f;
+        p.grad[0] = {0.0f, Color4f::hex(0xFF8A80)};
+        p.grad[1] = {0.30f, Color4f::hex(0xFF5252)};
+        p.grad[2] = {0.75f, Color4f::hex(0xD50000)};
+        p.grad[3] = {1.0f, Color4f::hex(0x880E4F)};
+        p.grad_count = 4;
+        p.grad_hover[0] = {0.0f, Color4f::hex(0xFFAB91)};
+        p.grad_hover[1] = {0.30f, Color4f::hex(0xFF8A80)};
+        p.grad_hover[2] = {0.75f, Color4f::hex(0xFF5252)};
+        p.grad_hover[3] = {1.0f, Color4f::hex(0xC62828)};
+      } else {
+        p.text = light ? Color4f::hex(0x3C2F0F) : Color4f::hex(0x2C1F03);
+        p.border = light ? Color4f::hex(0xD4AF37) : Color4f::hex(0x8A6D00);
+        p.bevel_dark = light ? Color4f::hex(0xB8860B) : Color4f::hex(0x755500);
+        p.bevel_hi = light ? Color4f::hex(0xFFFFFF, 0.8f) : Color4f::hex(0xFFFFFF, 0.08f);
+        p.glow = Color4f::hex(0xFFC107, 0.2f);
+        p.text_shadow = Color4f::hex(0xFFFFFF, 0.45f); p.text_shadow_dy = 1.0f;
+        if (light) {
+          p.grad[0] = {0.0f, Color4f::hex(0xFFFDE7)};
+          p.grad[1] = {0.35f, Color4f::hex(0xFFF9C4)};
+          p.grad[2] = {0.70f, Color4f::hex(0xFFF59D)};
+          p.grad[3] = {1.0f, Color4f::hex(0xFFE082)};
+          p.grad_count = 4;
+          p.grad_hover[0] = {0.0f, Color4f::hex(0xFFFDE7)};
+          p.grad_hover[1] = {0.20f, Color4f::hex(0xFFF9C4)};
+          p.grad_hover[2] = {0.50f, Color4f::hex(0xFFF59D)};
+          p.grad_hover[3] = {1.0f, Color4f::hex(0xFFD54F)};
+        } else {
+          p.grad[0] = {0.0f, Color4f::hex(0xFFF59D)};
+          p.grad[1] = {0.35f, Color4f::hex(0xFBC02D)};
+          p.grad[2] = {0.70f, Color4f::hex(0xF57F17)};
+          p.grad[3] = {1.0f, Color4f::hex(0xE65100)};
+          p.grad_count = 4;
+          p.grad_hover[0] = {0.0f, Color4f::hex(0xFFF9C4)};
+          p.grad_hover[1] = {0.20f, Color4f::hex(0xFFF59D)};
+          p.grad_hover[2] = {0.50f, Color4f::hex(0xFBC02D)};
+          p.grad_hover[3] = {1.0f, Color4f::hex(0xF57F17)};
+        }
+      }
+      p.fill = p.grad[p.grad_count / 2].color;   // last_fill_ 兜底
+      p.fill_hover = p.grad_hover[p.grad_count / 2].color;
+      p.fill_pressed = p.fill;  // active = inset bevel（沿用 default 渐变）
+      // 禁用态：MUI Button.disabled 缺省（src: MUI palette action.disabledBackground / text.disabled）
+      p.fill_disabled = light ? Color4f::hex(0xe0e0e0) : Color4f::hex(0x32323a);
+      p.text_disabled = light ? Color4f::hex(0x9e9e9e) : Color4f::hex(0x6e6e75);
       break;
     }
     case SkinId::Original: {
@@ -164,6 +218,7 @@ ButtonPaint ThemeService::button_paint(const char* color_type) const {
                          : (is_error ? Color4f::hex(0xFF3B30) : vars_.theme_border);
       p.radius = 4;
       p.weight = 500;
+      p.translate_active = 1.0f;   // transform: translateY(1px)
       break;
     }
     case SkinId::ModernFlat: {
@@ -179,6 +234,7 @@ ButtonPaint ThemeService::button_paint(const char* color_type) const {
                                               : Color4f::hex(0x4b5563));
       p.radius = 6;
       p.weight = 700;
+      p.translate_active = 1.0f;   // transform: translateY(1px)
       break;
     }
     case SkinId::FrostedGlass: {
@@ -195,6 +251,8 @@ ButtonPaint ThemeService::button_paint(const char* color_type) const {
                        : Color4f::hex(0xFFFFFF, 0.12f);
       p.radius = 8;
       p.weight = 400;
+      p.translate_hover = -1.0f;   // translateY(-1px)
+      p.translate_active = 1.0f;   // translateY(1px)
       break;
     }
     case SkinId::Cyberpunk: {
@@ -213,6 +271,9 @@ ButtonPaint ThemeService::button_paint(const char* color_type) const {
       p.border = light ? Color4f::hex(0x4caf50) : neon;
       p.radius = 0;
       p.weight = 700;
+      p.translate_hover = -1.0f;    // translateY(-1px)
+      p.translate_active = 1.0f;    // translateY(1px)
+      p.glow = Color4f{p.border.r, p.border.g, p.border.b, 0.35f};  // 霓虹外发光
       break;
     }
     case SkinId::Monochrome: {
@@ -228,6 +289,7 @@ ButtonPaint ThemeService::button_paint(const char* color_type) const {
       p.border = light ? Color4f::hex(0x000000) : Color4f::hex(0xffffff);
       p.radius = 0;
       p.weight = 700;
+      p.translate_active = 1.0f;   // transform: translateY(1px)
       break;
     }
   }

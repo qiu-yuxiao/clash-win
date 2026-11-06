@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "palettes.h"
+#include "../render_target.h"  // GradientStop（F-D02 渐变站）
 
 namespace clashwin::ui::theme {
 
@@ -26,6 +27,21 @@ struct ButtonPaint {
   float border_w = 1;
   float radius = 4;
   int weight = 500;     // 字重（T12 字体近似：见 theme.cpp 注释）
+
+  // F-D02：3D 渐变 / 浮雕 / 文字阴影 / 位移（对齐 utils/button-styles.ts）
+  // retro-3d 用 135° 多停渐变；其余皮肤用单色 fill + 位移。
+  bool use_grad = false;                 // true → 用 grad / grad_hover（retro-3d）
+  GradientStop grad[6];                  // default 态渐变站
+  GradientStop grad_hover[6];            // hover 态渐变站（无单独站时回退 default）
+  int grad_count = 0;
+  float grad_angle = 135.0f;
+  Color4f bevel_dark{0, 0, 0, 0};       // 浮雕暗边（retro bevelShadowDark）
+  Color4f bevel_hi{0, 0, 0, 0};         // 浮雕顶高光（白，light .8 / dark .08）
+  Color4f glow{0, 0, 0, 0};             // 外发光（vibrancy 调制；retro 金/红，cyber 霓虹）
+  Color4f text_shadow{0, 0, 0, 0};      // 文字阴影色（a=0 表示无）
+  float text_shadow_dy = 1.0f;          // 文字阴影纵向偏移（px，负=上）
+  float translate_hover = 0;             // hover 位移 translateY（px，负=上移）
+  float translate_active = 0;            // active 位移 translateY（px）
 };
 
 struct SegmentedPaint {

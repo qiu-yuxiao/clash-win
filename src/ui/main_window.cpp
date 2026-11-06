@@ -1129,46 +1129,72 @@ void MainWindow::draw() {
   //   50%→100% 反向（alternate + 100% 关键帧 translate(10%,-10%) rotate(360) scale(1)
   //   与 0% 同态）→ 等效为 50s 往返。等价改写：smoothstep 逼近 ease 曲线，10fps 节流续帧。
   {
-    const float w = rt_.size().w, h = rt_.size().h;
-    const float vf = theme::ThemeService::instance().vibrancy_factor();
-    const RectF big{-w * 0.5f, -h * 0.5f, w * 2.0f, h * 2.0f};
-    // circle farthest-corner 半径 = 1.4 × 对角线
-    const float rad = 1.4f * std::sqrt(w * w + h * h);
-    const double u = std::fmod(static_cast<double>(now_ms()) / 25000.0, 2.0);
-    const double s = u < 1.0 ? u : 2.0 - u;
-    const float k = static_cast<float>(s * s * (3.0 - 2.0 * s));  // 逼近 ease 曲线
-    const float ca = std::cos(k * 3.14159265f), sa = std::sin(k * 3.14159265f);
-    const float scale = 1.0f + 0.1f * k;
-    const float shift = 0.1f * k;  // translate 相对 200% 盒
-    // 盒中心变换：scale 不改变比例（仅半径乘以 scale）→ rotate → translate
-    auto center = [&](float cx, float cy, float* ox, float* oy) {
-      const float dx = cx - 0.5f, dy = cy - 0.5f;
-      *ox = 0.5f + dx * ca - dy * sa - shift;
-      *oy = 0.5f + dx * sa + dy * ca + shift;
-    };
-    const float rr = rad * scale;
-    const Color4f primary = theme::ThemeService::instance().primary();
-    GradientStop g1[2] = {{0.0f, Color4f{primary.r, primary.g, primary.b, 0.18f * vf}},
-                          {0.40f, Color4f{primary.r, primary.g, primary.b, 0.0f}}};
-    float x1, y1;
-    center(0.30f, 0.30f, &x1, &y1);
-    rt_.fill_round_rect_radial(big, 0.0f, g1, 2, x1, y1, rr, rr);
-    GradientStop g2[2] = {{0.0f, Color4f::hex(0x0084FF, 0.15f * vf)},
-                          {0.40f, Color4f::hex(0x0084FF, 0.0f)}};
-    float x2, y2;
-    center(0.70f, 0.70f, &x2, &y2);
-    rt_.fill_round_rect_radial(big, 0.0f, g2, 2, x2, y2, rr, rr);
-    GradientStop g3[2] = {{0.0f, Color4f::hex(0xD4AF37, 0.12f * vf)},
-                          {0.35f, Color4f::hex(0xD4AF37, 0.0f)}};
-    float x3, y3;
-    center(0.80f, 0.20f, &x3, &y3);
-    rt_.fill_round_rect_radial(big, 0.0f, g3, 2, x3, y3, rr, rr);
-    // 动画续帧（极慢速位移，10fps 足以视觉平滑；隐藏时停帧）
-    if (hwnd_ && IsWindowVisible(hwnd_)) {
-      const int64_t nm = now_ms();
-      if (nm - aurora_tick_ms_ >= 100) {
-        aurora_tick_ms_ = nm;
-        root_.invalidate();
+    // F-D03：极光按皮肤分支（src: layout.scss .layout::before 与各皮肤覆盖块）
+    //   modern-flat / monochrome → opacity:0 关闭；cyberpunk → 霓虹三色（α×depth，
+    //   25s/(vibrancy) 单向）；retro-3d / original / frosted-glass → 默认三色极光
+    //   （frost 经半透明面板透出；α×vibrancy）。
+    const theme::SkinId skin = theme::ThemeService::instance().skin();
+    if (skin == theme::SkinId::ModernFlat || skin == theme::SkinId::Monochrome) {
+      // 无极光：不绘制、不触发动画续帧
+    } else {
+      const float w = rt_.size().w, h = rt_.size().h;
+      const float vf = theme::ThemeService::instance().vibrancy_factor();
+      const float df = theme::ThemeService::instance().depth_factor();
+      const RectF big{-w * 0.5f, -h * 0.5f, w * 2.0f, h * 2.0f};
+      // circle farthest-corner 半径 = 1.4 × 对角线
+      const float rad = 1.4f * std::sqrt(w * w + h * h);
+      const float period = (skin == theme::SkinId::Cyberpunk)
+                               ? 25000.0f / (vf + 0.001f)  // 25s/(vibrancy) 单向
+                               : 25000.0f;                   // 25s 单向（50s 往返）
+      const double u = std::fmod(static_cast<double>(now_ms()) / period, 2.0);
+      const double s = u < 1.0 ? u : 2.0 - u;
+      const float k = static_cast<float>(s * s * (3.0 - 2.0 * s));  // 逼近 ease 曲线
+      const float ca = std::cos(k * 3.14159265f), sa = std::sin(k * 3.14159265f);
+      const float scale = 1.0f + 0.1f * k;
+      const float shift = 0.1f * k;  // translate 相对 200% 盒
+      // 盒中心变换：scale 不改变比例（仅半径乘以 scale）→ rotate → translate
+      auto center = [&](float cx, float cy, float* ox, float* oy) {
+        const float dx = cx - 0.5f, dy = cy - 0.5f;
+        *ox = 0.5f + dx * ca - dy * sa - shift;
+        *oy = 0.5f + dx * sa + dy * ca + shift;
+      };
+      const float rr = rad * scale;
+      GradientStop g1[2], g2[2], g3[2];
+      float x1, y1, x2, y2, x3, y3;
+      if (skin == theme::SkinId::Cyberpunk) {
+        // 霓虹三色（src: layout.scss:375-377）
+        g1[0] = {0.0f, Color4f::hex(0x00F0FF, 0.15f * df)};
+        g1[1] = {0.40f, Color4f::hex(0x00F0FF, 0.0f)};
+        g2[0] = {0.0f, Color4f::hex(0xFF0055, 0.12f * df)};
+        g2[1] = {0.40f, Color4f::hex(0xFF0055, 0.0f)};
+        g3[0] = {0.0f, Color4f::hex(0x39FF14, 0.10f * df)};
+        g3[1] = {0.35f, Color4f::hex(0x39FF14, 0.0f)};
+        center(0.30f, 0.30f, &x1, &y1);
+        center(0.70f, 0.70f, &x2, &y2);
+        center(0.80f, 0.20f, &x3, &y3);
+      } else {
+        // 默认三色极光（src: layout.scss:20-22；α×vibrancy）
+        const Color4f primary = theme::ThemeService::instance().primary();
+        g1[0] = {0.0f, Color4f{primary.r, primary.g, primary.b, 0.18f * vf}};
+        g1[1] = {0.40f, Color4f{primary.r, primary.g, primary.b, 0.0f}};
+        g2[0] = {0.0f, Color4f::hex(0x0084FF, 0.15f * vf)};
+        g2[1] = {0.40f, Color4f::hex(0x0084FF, 0.0f)};
+        g3[0] = {0.0f, Color4f::hex(0xD4AF37, 0.12f * vf)};
+        g3[1] = {0.35f, Color4f::hex(0xD4AF37, 0.0f)};
+        center(0.30f, 0.30f, &x1, &y1);
+        center(0.70f, 0.70f, &x2, &y2);
+        center(0.80f, 0.20f, &x3, &y3);
+      }
+      rt_.fill_round_rect_radial(big, 0.0f, g1, 2, x1, y1, rr, rr);
+      rt_.fill_round_rect_radial(big, 0.0f, g2, 2, x2, y2, rr, rr);
+      rt_.fill_round_rect_radial(big, 0.0f, g3, 2, x3, y3, rr, rr);
+      // 动画续帧（极慢速位移，10fps 足以视觉平滑；隐藏时停帧）
+      if (hwnd_ && IsWindowVisible(hwnd_)) {
+        const int64_t nm = now_ms();
+        if (nm - aurora_tick_ms_ >= 100) {
+          aurora_tick_ms_ = nm;
+          root_.invalidate();
+        }
       }
     }
   }

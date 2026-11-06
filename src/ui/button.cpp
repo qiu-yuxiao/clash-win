@@ -35,18 +35,47 @@ SizeF Button::on_measure(float max_w, float max_h) {
 
 void Button::draw_button_bg(IRenderTarget& rt, const RectF& r) {
   if (themed_) {
-    // T12：ThemeService 查表（皮肤 × 亮暗）；hover/pressed 由状态选择
+    // T12/F-D02：ThemeService 查表（皮肤 × 亮暗 × 状态）；
+    // 渐变 + 浮雕 + 外发光 + translateY 位移。
     auto p = theme::ThemeService::instance().button_paint(theme_color_type_);
-    Color4f fill;
-    switch (state()) {
-      case State::Hover: fill = p.fill_hover; break;
-      case State::Pressed: fill = p.fill_pressed; break;
-      case State::Disabled: fill = p.fill_disabled; break;
-      default: fill = p.fill; break;
+    const bool disabled = (state() == State::Disabled);
+    const float vf = theme::ThemeService::instance().vibrancy_factor();
+    // 外发光（先于主体绘制形成光晕；vibrancy 调制）。D2D 无模糊滤镜，
+    // 用略大一圈的同色填充圆角矩形近似 halo（真实 glow=多层 boxShadow blur）。
+    if (p.glow.a > 0 && !disabled) {
+      float ga = std::min(1.0f, p.glow.a * (0.5f + 0.5f * vf));
+      if (ga > 0.01f) {
+        RectF gr{r.x - 3, r.y - 3, r.w + 6, r.h + 6};
+        Brush gb{Color4f{p.glow.r, p.glow.g, p.glow.b, ga}};
+        rt.round_rect(gr, p.radius + 3, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &gb);
+      }
     }
-    Brush b{fill};
-    rt.round_rect(r, p.radius, {p.border, p.border_w}, &b);
-    last_fill_ = fill;
+    // 主体：135° 多停渐变（retro）或单色填充（其余皮肤）
+    if (p.use_grad && !disabled) {
+      const GradientStop* gs = (state() == State::Hover) ? p.grad_hover : p.grad;
+      rt.fill_round_rect_gradient_angle(r, p.radius, gs, p.grad_count, p.grad_angle);
+      last_fill_ = gs[p.grad_count / 2].color;
+    } else {
+      Color4f fill;
+      switch (state()) {
+        case State::Hover: fill = p.fill_hover; break;
+        case State::Pressed: fill = p.fill_pressed; break;
+        case State::Disabled: fill = p.fill_disabled; break;
+        default: fill = p.fill; break;
+      }
+      Brush b{fill};
+      rt.round_rect(r, p.radius, {p.border, p.border_w}, &b);
+      last_fill_ = fill;
+    }
+    // 3D 浮雕（retro 渐变皮肤）：顶部高光 + 底部暗边
+    if (p.use_grad && !disabled && p.bevel_dark.a > 0) {
+      rt.draw_line(PointF{r.x + p.radius, r.y + 1.0f},
+                   PointF{r.right() - p.radius, r.y + 1.0f},
+                   Pen{p.bevel_hi, 1.0f});
+      rt.draw_line(PointF{r.x + p.radius, r.bottom() - 1.0f},
+                   PointF{r.right() - p.radius, r.bottom() - 1.0f},
+                   Pen{p.bevel_dark, 1.0f});
+    }
     return;
   }
   if (state() != State::Disabled && paint_params.grad_count > 0) {
@@ -74,9 +103,18 @@ void Button::draw_button_text(IRenderTarget& rt, const RectF& r) {
   TextStyle ts = text_style;
   if (themed_) {
     auto p = theme::ThemeService::instance().button_paint(theme_color_type_);
-    ts.color = state() == State::Disabled ? p.text_disabled : p.text;
+    const bool disabled = (state() == State::Disabled);
+    ts.color = disabled ? p.text_disabled : p.text;
+    ts.weight = p.weight;  // ← button-styles.ts fontWeight
     ts.align_h = AlignH::Center;
     ts.align_v = AlignV::Center;
+    // F-D02：文字阴影（先画偏移阴影层，再画主文字）
+    if (!disabled && p.text_shadow.a > 0) {
+      TextStyle ts2 = ts;
+      ts2.color = p.text_shadow;
+      RectF sr{r.x, r.y + p.text_shadow_dy, r.w, r.h};
+      rt.draw_text(text, sr, ts2);
+    }
     rt.draw_text(text, r, ts);
     return;
   }
@@ -89,6 +127,14 @@ void Button::draw_button_text(IRenderTarget& rt, const RectF& r) {
 
 void Button::on_paint(IRenderTarget& rt) {
   RectF r{0, 0, bounds().w, bounds().h};
+  // F-D02：translateY 位移（hover 上移 / active 下移；负=上）
+  float ty = 0;
+  if (themed_) {
+    auto p = theme::ThemeService::instance().button_paint(theme_color_type_);
+    if (state() == State::Hover) ty = p.translate_hover;
+    else if (state() == State::Pressed) ty = p.translate_active;
+  }
+  if (ty != 0) r = {0, r.y + ty, r.w, r.h};
   draw_button_bg(rt, r);
   if (!text.empty()) draw_button_text(rt, r);
 }
