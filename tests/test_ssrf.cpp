@@ -223,6 +223,9 @@ UT_TEST(t06_valid_node_server) {
 
 UT_TEST(t06_dummy_node_detection) {
   // ← node.rs test_dummy_node_detection
+  // ← MF:utils/node.ts:83「if (!name) return true」/ :86「name === 'DIRECT'」
+  UT_CHECK(is_dummy_node(""));
+  UT_CHECK(is_dummy_node("DIRECT"));
   UT_CHECK(is_dummy_node("剩余流量：100GB"));
   UT_CHECK(is_dummy_node("过期时间：2024-12-31"));
   UT_CHECK(is_dummy_node("官网 https://example.com"));

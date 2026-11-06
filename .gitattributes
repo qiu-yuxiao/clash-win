@@ -1,0 +1,17 @@
+# 统一行尾：源码入库 LF，避免 Windows 上 core.autocrlf=true 检出 CRLF
+* text=auto eol=lf
+
+# 测试夹具按字节逐行比较（golden diff），强制 LF 入库且 LF 检出：
+# 曾经的问题——夹具被检出为 CRLF，enhance 输出为 LF，t08_golden_fixture 全行误报 DIFF。
+tests/fixtures/** text eol=lf
+
+# 二进制产物
+*.exe binary
+*.dll binary
+*.lib binary
+*.ico binary
+*.png binary
+*.jpg binary
+*.mmdb binary
+*.dat binary
+*.zip binary

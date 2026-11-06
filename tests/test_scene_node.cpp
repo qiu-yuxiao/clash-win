@@ -126,6 +126,32 @@ UT_TEST(t13_node_data_load_merge) {
   st.group_fail = false;
 }
 
+UT_TEST(t13_node_data_filters_dummy) {
+  // ← MF:services/cmds.ts:344-349 calcuProxies：all.filter(name && !isDummyNode)
+  //   裸配置（无订阅）PROXY 组 all=[DIRECT] → 节点列表必须为空（空态 No Proxies），
+  //   而不是把 DIRECT 当节点展示（用户首装实测缺陷）
+  MockState st;
+  st.all = {"DIRECT"};
+  st.now = "DIRECT";
+  st.types = {{"DIRECT", "Direct"}};
+  NodeData bare = make_data(st);
+  UT_CHECK(bare.load());
+  UT_CHECK_EQ(bare.row_count(), 0u);
+  UT_CHECK(bare.now() == "DIRECT");  // 组头「当前节点」仍显示 DIRECT（Mini 同款）
+
+  // 广告/说明假节点一并剔除，真实节点保留原顺序
+  // 注：REJECT 不属 isDummyNode（MF:utils/node.ts:81-108 只判空串/DIRECT/URL/广告词），
+  //     故此处不放 REJECT，其非 dummy 语义由 t06_dummy_node_detection 覆盖。
+  MockState st2;
+  st2.all = {"剩余流量：100GB", "HK-01", "JP-02", "https://example.com"};
+  st2.now = "HK-01";
+  NodeData mixed = make_data(st2);
+  UT_CHECK(mixed.load());
+  UT_CHECK_EQ(mixed.row_count(), 2u);
+  UT_CHECK(mixed.rows()[0].name == "HK-01");
+  UT_CHECK(mixed.rows()[1].name == "JP-02");
+}
+
 UT_TEST(t13_node_data_select_and_bounce) {
   MockState st;
   NodeData data = make_data(st);

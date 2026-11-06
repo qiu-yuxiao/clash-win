@@ -11,8 +11,8 @@
 ; 版本号只有一个来源：下面的 VERSION（可由 build_installer.ps1 以 /DVERSION=... 覆盖）。
 ;
 ; 用法：
-;   构建： installer\build_installer.ps1 -Version 3.2.2
-;   交互安装： ClashWin_3.2.2_x64-setup.exe
+;   构建： installer\build_installer.ps1 -Version 0.1.0
+;   交互安装： ClashWin_0.1.0_x64-setup.exe
 ;   被动安装： ... /P            （仅进度页，自动关页；桌面快捷方式自动创建）
 ;   静默安装： ... /S [/NS] [/R [/ARGS <args>]]
 ;   更新模式（由应用内更新器启动，← updater.rs:808-812）：
@@ -53,7 +53,7 @@ ${UnStrStr}
 
 ; ---------- 可覆盖定义（构建脚本传入绝对路径） ----------
 !ifndef VERSION
-  !define VERSION "3.2.2"
+  !define VERSION "0.1.0"
 !endif
 !ifndef STAGEDIR
   !define STAGEDIR "stage"

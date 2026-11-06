@@ -233,7 +233,7 @@ std::string DiagnosticBundle::collect_system_info() {
 
   std::ostringstream ss;
   ss << "生成时间        : " << time_buf << "\n"
-     << "应用版本        : 3.2.2\n"
+     << "应用版本        : " << config::consts::kAppVersion << "\n"
      << "操作系统        : windows / x86_64\n"
      << "verge 配置版本  : " << (verge->config_version.has_value() ? std::to_string(*verge->config_version) : "null")
      << "（程序支持 " << config::consts::kCurrentVergeVersion << "）\n"

@@ -13,6 +13,7 @@
 #include "config/config.h"
 #include "events/event_bus.h"
 #include "util/log.h"
+#include "util/node.h"
 #include "util/utf.h"
 
 namespace clashwin::ui::scene {
@@ -29,11 +30,20 @@ std::wstring format_delay(int delay) {
 }
 
 bool NodeData::load() {
-  std::vector<std::string> all;
+  std::vector<std::string> raw;
   std::string now;
-  if (!hooks_.fetch_group || !hooks_.fetch_group(&all, &now)) {
+  if (!hooks_.fetch_group || !hooks_.fetch_group(&raw, &now)) {
     CWLOG_WARN("NodeData: fetch_group 失败（内核未就绪？）");
     return false;
+  }
+  // ← MF:services/cmds.ts:344-349 calcuProxies：
+  //   all.filter((item) => item?.name && !isDummyNode(item.name))
+  //   无订阅（裸配置 PROXY 组 all=[DIRECT]）时列表应为空态，不得展示 DIRECT。
+  std::vector<std::string> all;
+  all.reserve(raw.size());
+  for (const auto& name : raw) {
+    if (!name.empty() && !clashwin::util::is_dummy_node(name))
+      all.push_back(name);
   }
   std::map<std::string, mihomo::ProxyItem> items;
   if (hooks_.fetch_proxies && hooks_.fetch_proxies(&items)) {

@@ -57,6 +57,10 @@ std::string normalize_dummy_name(const std::string& name) {
 }  // namespace
 
 bool is_dummy_node(const std::string& name) {
+  // ← MF:utils/node.ts:83「if (!name) return true」
+  if (name.empty()) return true;
+  // ← MF:utils/node.ts:86「DIRECT 是策略而非真实节点：前端列表不应把它当成可选项展示」
+  if (name == "DIRECT") return true;
   const std::string lower = to_lower(name);
   // 高置信度：包含 URL scheme 或明确的英文广告词
   if (lower.find("http://") != std::string::npos ||

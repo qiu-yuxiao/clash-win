@@ -119,8 +119,8 @@ class ClientUpdateModal : public Widget {
 
   bool open_ = false;
   bool is_downloading_ = false;
-  std::string current_version_ = "v3.2.1";
-  std::string latest_version_ = "v3.2.2";
+  std::string current_version_;  // open() 必赋值（不设陈旧占位，避免误显示旧版本号）
+  std::string latest_version_;
   std::string changelog_;
   std::string download_url_;
   std::string status_ = "idle";
