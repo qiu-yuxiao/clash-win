@@ -704,6 +704,40 @@ void MainWindow::build_scene() {
       cmd::CommandService::instance().invoke(
           "patch_clash_mode", nlohmann::json::object({{"mode", mode}}));
     };
+    // Mixed Port 保存 ← use-minimal-settings.ts:87-107 handleSavePort：
+    //   ① 与 verge/clash 现值都相同 → 静默返回（:88-89）
+    //   ② isPortInUse → error portInUse{port} + 回滚输入框
+    //   ③ 同时写内核 mixed-port 与 verge verge_mixed_port（Promise.all）
+    //   ④ 成功 success settings.mini.portSaved；失败 error 原文 + 回滚
+    settings_drawer_->on_save_port = [](int port) -> bool {
+      auto& svc = cmd::CommandService::instance();
+      auto& cfg = config::Config::instance();
+      const int verge_port =
+          static_cast<int>(cfg.verge().latest_arc()->verge_mixed_port.value_or(0));
+      const int core_port =
+          static_cast<int>(cfg.clash().latest_arc()->get_mixed_port());
+      if (port == verge_port && port == core_port) return true;  // 无变更，静默
+      auto inuse =
+          svc.invoke("is_port_in_use", nlohmann::json::object({{"port", port}}));
+      if (inuse.is_ok() && inuse.value().is_boolean() && inuse.value().get<bool>()) {
+        events::NoticeService::instance().push(
+            "error", tr8("settings.modals.clashPort.messages.portInUse",
+                         {{"port", std::to_string(port)}}));
+        return false;  // 调用方回滚输入框
+      }
+      auto a = svc.invoke("patch_clash_config",
+                          nlohmann::json::object({{"mixed-port", port}}));
+      auto b = svc.invoke("patch_verge_config",
+                          nlohmann::json::object({{"verge_mixed_port", port}}));
+      if (a.is_ok() && b.is_ok()) {
+        events::NoticeService::instance().push("success",
+                                               tr8("settings.mini.portSaved"));
+        return true;
+      }
+      events::NoticeService::instance().push(
+          "error", a.is_ok() ? b.error().message : a.error().message);
+      return false;
+    };
     settings_drawer_->on_import_profile =
         [](const std::string& url, const std::string& name) {
           nlohmann::json args = nlohmann::json::object({{"url", url}});

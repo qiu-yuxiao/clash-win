@@ -2,11 +2,14 @@
 
 #include <windows.h>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <thread>
 
+#include "events/notice.h"
 #include "system/unlock_checker.h"
 #include "ui/theme/theme.h"
+#include "ui/ui_postbox.h"
 #include "util/utf.h"
 #include "ui/i18n_text.h"  // F-D01
 
@@ -98,11 +101,35 @@ void UnlockDialog::start_check() {
   is_checking_ = true;
   for (auto& it : items_) it.status = "Pending";
   invalidate();
-  std::thread([this]() {
-    auto results = system::UnlockChecker::instance().check_all();
-    this->items_ = results;
-    this->is_checking_ = false;
-    this->invalidate();
+  std::thread([this] {
+    // ← unlock.tsx:232-247 invokeWithTimeout + :249-267 checkAllMedia：
+    //   15s（UNLOCK_TIMEOUT_MS，services/delay.ts:36）未完成或抛错 →
+    //   setIsCheckingAll(false) + showNotice.error(detectionTimeout, err)
+    using namespace std::chrono;
+    auto fut = system::UnlockChecker::instance().check_all_async();
+    std::vector<config::unlock_cache::UnlockItem> results;
+    bool ok = true;
+    try {
+      if (fut.wait_for(milliseconds(15000)) != std::future_status::ready) {
+        ok = false;
+      } else {
+        results = fut.get();
+      }
+    } catch (...) {
+      ok = false;
+    }
+    // 结果只能回 UI 线程改控件树（后台线程直接改 items_ 会与绘制竞争）
+    UiPostbox::instance().post([this, ok, results] {
+      is_checking_ = false;
+      if (ok) {
+        items_ = results;
+      } else {
+        // ← :264 showNotice.error('tests.unlock.page.messages.detectionTimeout', err)
+        events::NoticeService::instance().push(
+            "error", tr8("tests.unlock.page.messages.detectionTimeout"));
+      }
+      invalidate();
+    });
   }).detach();
 }
 

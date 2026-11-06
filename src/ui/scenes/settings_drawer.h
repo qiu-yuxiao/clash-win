@@ -97,6 +97,9 @@ class BasicCard : public Widget {
   SwitchW* sw_allow_ipv6_ = nullptr;
   TextField* port_field_ = nullptr;
   Button* save_btn_ = nullptr;        // Mini 无（Enter 提交；隐藏）
+  // 当前生效端口（sync_basic 写入）：保存失败/占用时把输入框回滚到它
+  // ← use-minimal-settings.ts:96/:106 setMixedPortVal(currentPort())
+  int port_current_ = 0;
   Label* title_ = nullptr;
   Label* port_label_ = nullptr;
   Label* labels_[4] = {nullptr, nullptr, nullptr, nullptr};
@@ -145,6 +148,10 @@ class SettingsDrawer : public Stack {
   // 宿主回调（命令链）
   std::function<void(const std::string& patch_key, const nlohmann::json& v)>
       on_patch_verge;
+  // Mixed Port 保存（← use-minimal-settings.ts:87-107 handleSavePort）：
+  // 占用检查 → 同时写内核 mixed-port 与 verge verge_mixed_port →
+  // 返回 false 表示失败/被占用，调用方把输入框回滚到当前端口
+  std::function<bool(int port)> on_save_port;
   std::function<void(const std::string& mode)> on_patch_clash_mode;
   std::function<bool(const std::string& url, const std::string& name)>
       on_import_profile;

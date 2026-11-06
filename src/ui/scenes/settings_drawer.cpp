@@ -16,6 +16,7 @@
 #include "../theme/theme.h"
 #include "../../i18n/i18n.h"
 #include "clashwin/config/constants.h"
+#include "events/notice.h"
 #include "util/dirs.h"
 #include "util/log.h"
 #include "util/utf.h"
@@ -1010,8 +1011,10 @@ void SettingsDrawer::sync_basic(bool auto_launch, bool silent, bool allow_lan,
   basic_card_->sw_silent_start_->set_checked(silent, false);
   basic_card_->sw_allow_lan_->set_checked(allow_lan, false);
   basic_card_->sw_allow_ipv6_->set_checked(ipv6, false);
-  if (mixed_port > 0)
+  if (mixed_port > 0) {
+    basic_card_->port_current_ = mixed_port;
     basic_card_->port_field_->set_text(std::to_wstring(mixed_port));
+  }
   basic_card_->invalidate();
 }
 
@@ -1284,7 +1287,15 @@ void SettingsDrawer::open_profile_menu(const std::string& uid, PointF anchor) {
       const config::PrfItem* it = profile_card_->find_item(uid);
       if (it && it->file) open_profile_file(*it->file);
     } else if (idx == 3) {
-      copy_text_to_clipboard(url);
+      // ← _layout.tsx:987-998 handleCopyProfileLinkClick：
+      //   写剪贴板成功 → success profileLinkCopied；失败 → error copyFailed
+      if (copy_text_to_clipboard(url)) {
+        events::NoticeService::instance().push(
+            "success", tr8("layout.notices.profileLinkCopied"));
+      } else {
+        events::NoticeService::instance().push(
+            "error", tr8("layout.notices.copyFailed"));
+      }
     } else if (idx == 4) {
       if (on_update_profile) on_update_profile(uid);
     } else if (idx == 6) {
@@ -1440,9 +1451,16 @@ void SettingsDrawer::wire_callbacks() {
   auto commit_port = [this] {
     std::wstring t = basic_card_->port_field_->text();
     if (t.empty()) return;
-    int port = _wtoi(t.c_str());
-    // src: use-minimal-settings.ts:87-104 无取值范围校验（仅占用检查 + 变更判断）
-    if (on_patch_verge) on_patch_verge("verge_mixed_port", port);
+    const int port = _wtoi(t.c_str());
+    // src: use-minimal-settings.ts:87-107 handleSavePort：
+    //   等价判断 → 占用检查 → 双写（内核 mixed-port + verge verge_mixed_port）；
+    //   被占用/失败 → 输入框回滚到当前生效端口（setMixedPortVal(currentPort())）
+    bool ok = false;
+    if (on_save_port) ok = on_save_port(port);
+    if (!ok && basic_card_->port_current_ > 0) {
+      basic_card_->port_field_->set_text(
+          std::to_wstring(basic_card_->port_current_));
+    }
   };
   basic_card_->port_field_->on_submit = commit_port;
   basic_card_->port_field_->on_focus_lost = commit_port;
