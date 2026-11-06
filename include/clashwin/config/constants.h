@@ -14,8 +14,9 @@ inline constexpr const char* kWindowState = "window_state.json";
 inline constexpr const char* kProxyHeadState = "proxy_head_state.json";
 inline constexpr const char* kUnlockCache = "unlock_cache.json";
 
-// ---------- 应用（品牌独立首发版本；v3.0.10 为错误定义，已废弃） ----------
-inline constexpr const char* kAppVersion = "0.1.0";
+// ---------- 应用（F-D07 对齐 Mini：用户可见版本号与 Clash Mini 3.2.2 一致；
+//   唯一豁免仅限显示名 Clash Mini → Clash Win，版本号本身不属于品牌位，须 1:1 对齐） ----------
+inline constexpr const char* kAppVersion = "3.2.2";
 
 // ---------- 端口（共存错开：全部避开 Clash Mini 默认值与其控制器扫描带） ----------
 // Clash Mini：mixed 10801 / socks 10802 / http 10803 / guard 兜底 7899 /

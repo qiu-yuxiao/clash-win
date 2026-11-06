@@ -193,7 +193,14 @@ class SettingsDrawer : public Stack {
   Button* lang_btn_ = nullptr;
   ContextMenu* lang_menu_ = nullptr;  // 语言下拉（13 项）
   ContextMenu* help_menu_ = nullptr;  // 帮助菜单（自绘，替代原生 HMENU）
+  bool app_checking_ = false;   // F-D05：app 更新检查进行中
+  bool core_checking_ = false;  // F-D05：内核更新检查进行中
   ContextMenu* help_menu() const { return help_menu_; }
+
+  // F-D05：检查更新进行中禁用对应菜单项（对齐 Mini
+  //   help-menu-button.tsx:192,200 disabled={clientCheckLoading/coreCheckLoading}）
+  void set_app_update_checking(bool checking);
+  void set_core_update_checking(bool checking);
   std::vector<Button*> skin_row_;     // Trump-3D/Original/Modern/Frosted/Cyberpunk/Monochrome
   bool bottom_row_visible() const { return bottom_row_visible_; }
   // 启动期用 verge 实际值回填抽屉控件（不触发 patch，避免启动回写）

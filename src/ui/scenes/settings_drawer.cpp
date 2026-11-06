@@ -1181,8 +1181,10 @@ void SettingsDrawer::open_help_menu() {
   its.push_back({L"", false, true, L"", false});
   its.push_back({L"📦 " + tr("layout.components.helpMenu.exportDiagnostics"), false, false, L"", false});
   its.push_back({L"", false, true, L"", false});
-  its.push_back({L"🚀 " + tr("layout.components.helpMenu.checkAppUpdate") + app_suffix, false, false, L"", false});
-  its.push_back({L"⚙️ " + tr("layout.components.helpMenu.checkCoreUpdate") + core_suffix, false, false, L"", false});
+  its.push_back({L"🚀 " + tr("layout.components.helpMenu.checkAppUpdate") + app_suffix,
+                 app_checking_, false, L"", false});
+  its.push_back({L"⚙️ " + tr("layout.components.helpMenu.checkCoreUpdate") + core_suffix,
+                 core_checking_, false, L"", false});
   help_menu_->style_ = st;
   help_menu_->on_select = [this](int idx) {
     HelpAction a;
@@ -1212,6 +1214,17 @@ void SettingsDrawer::open_help_menu() {
   //   必须用 bounds()，用 global_bounds() 会多算标题栏偏移而压到底部行上。
   RectF rb = bottom_help_ ? bottom_help_->bounds() : RectF{0, 0, 80, 24};
   help_menu_->open(its, {rb.x, rb.y - 330.0f - 4.0f});
+}
+
+void SettingsDrawer::set_app_update_checking(bool checking) {
+  app_checking_ = checking;
+  // F-D05：检查进行中若菜单仍展开，刷新禁用态（Mini disabled={clientCheckLoading}）
+  if (help_menu_ && help_menu_->is_open()) open_help_menu();
+}
+
+void SettingsDrawer::set_core_update_checking(bool checking) {
+  core_checking_ = checking;
+  if (help_menu_ && help_menu_->is_open()) open_help_menu();
 }
 
 void SettingsDrawer::open_profile_menu(const std::string& uid, PointF anchor) {

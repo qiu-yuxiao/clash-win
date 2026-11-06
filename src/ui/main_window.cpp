@@ -251,8 +251,14 @@ bool MainWindow::create_hwnd() {
   int x = (GetSystemMetrics(SM_CXSCREEN) - w) / 2;
   int y = (GetSystemMetrics(SM_CYSCREEN) - h) / 2;
   // ← window.rs：加载完成才 show → 创建时不带 WS_VISIBLE，show_and_activate 再显
+  // F-D07：窗口标题对齐 Mini（window.rs:176 → "Clash Mini Ver.{appVersion}"）；
+  // 品牌名按豁免替换为 Clash Win，版本号取自单一事实源 kAppVersion
+  // （与标题栏 TitleBar::set_version 同一出处）。
+  std::wstring win_title =
+      L"Clash Win Ver." +
+      utf::utf8_to_utf16(clashwin::config::consts::kAppVersion);
   hwnd_ = CreateWindowExW(
-      0, kWndClass, L"Clash Win",
+      0, kWndClass, win_title.c_str(),
       WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_SYSMENU,
       x, y, w, h, nullptr, nullptr, GetModuleHandleW(nullptr), this);
   if (!hwnd_) {
@@ -705,15 +711,23 @@ void MainWindow::build_scene() {
       co->set_z_order(1001);
       root_.add_child(std::move(co));
     }
-    // 检查软件更新（src: use-client-update.ts:32-54）：有新版才开弹窗
+    // 检查软件更新（src: use-client-update.ts:32-54）：有新版才开弹窗。
+    // F-D05：检查期间禁用「检查更新」菜单项（对齐 Mini use-client-update.ts 的 checking 状态）。
     settings_drawer_->on_check_app_update = [this] {
       if (!client_update_) return;
+      settings_drawer_->set_app_update_checking(true);
       std::thread([this] {
         auto r = cmd::CommandService::instance().invoke(
             "check_app_update", nlohmann::json::object());
-        if (!r.is_ok()) return;
+        if (!r.is_ok()) {
+          UiPostbox::instance().post([this] { settings_drawer_->set_app_update_checking(false); });
+          return;
+        }
         const auto& v = r.value();
-        if (!v.value("has_update", false)) return;
+        if (!v.value("has_update", false)) {
+          UiPostbox::instance().post([this] { settings_drawer_->set_app_update_checking(false); });
+          return;
+        }
         const std::string dl_url = v.value("download_url", std::string());
         const std::string dl_sha = v.value("sha256", std::string());
         const std::string dl_sig = v.value("signature", std::string());
@@ -721,15 +735,18 @@ void MainWindow::build_scene() {
           if (!client_update_) return;
           pending_client_sha256_ = dl_sha;
           pending_client_signature_ = dl_sig;
+          settings_drawer_->set_app_update_checking(false);
           client_update_->open(v.value("current_version", std::string()),
                                v.value("latest_version", std::string()),
                                v.value("notes", std::string()), dl_url);
         });
       }).detach();
     };
-    // 检查内核更新（src: use-core-update.ts:64-86）：版本不同才开弹窗
+    // 检查内核更新（src: use-core-update.ts:64-86）：版本不同才开弹窗。
+    // F-D05：检查期间禁用「检查内核更新」菜单项（对齐 Mini use-core-update.ts 的 checking 状态）。
     settings_drawer_->on_check_core_update = [this] {
       if (!core_update_) return;
+      settings_drawer_->set_core_update_checking(true);
       std::thread([this] {
         std::string cur;
         auto m = cmd::mihomo();
@@ -739,17 +756,24 @@ void MainWindow::build_scene() {
         }
         auto r = cmd::CommandService::instance().invoke(
             "check_core_update", nlohmann::json::object());
-        if (!r.is_ok()) return;
+        if (!r.is_ok()) {
+          UiPostbox::instance().post([this] { settings_drawer_->set_core_update_checking(false); });
+          return;
+        }
         const std::string latest = r.value().value("tag_name", std::string());
         auto strip = [](std::string s) {
           if (!s.empty() && (s[0] == 'v' || s[0] == 'V')) s.erase(0, 1);
           return s;
         };
-        if (latest.empty() || strip(cur) == strip(latest)) return;
+        if (latest.empty() || strip(cur) == strip(latest)) {
+          UiPostbox::instance().post([this] { settings_drawer_->set_core_update_checking(false); });
+          return;
+        }
         const std::string rel_json = r.value().dump();
         UiPostbox::instance().post([this, cur, latest, rel_json] {
           if (!core_update_) return;
           pending_core_release_json_ = rel_json;
+          settings_drawer_->set_core_update_checking(false);
           core_update_->open(cur, latest);
         });
       }).detach();
