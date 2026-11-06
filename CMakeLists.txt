@@ -20,6 +20,7 @@ add_library(clashwin_util STATIC
   src/util/utf.cpp
   src/util/base64.cpp
   src/util/ed25519.cpp
+  src/util/blake2b.cpp
   src/util/str_utils.cpp
   src/util/uuid.cpp
   src/util/dirs.cpp
@@ -271,6 +272,8 @@ add_clashwin_copy_locales(clashwin)
 add_executable(clashwin_test
   tests/test_main.cpp
   tests/test_base64.cpp
+  tests/test_blake2b.cpp
+  tests/test_minisign_verify.cpp
   tests/test_str_utils.cpp
   tests/test_uuid.cpp
   tests/test_dirs.cpp

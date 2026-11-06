@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "clashwin/config/constants.h"
 #include "util/result.h"
@@ -72,7 +73,19 @@ class ClientUpdater {
   ~ClientUpdater() = default;
 
   std::shared_ptr<IAppUpdateDownloader> downloader_;
-  std::string current_version_ = config::consts::kAppVersion;  // 单一事实源（0.1.0）
+  std::string current_version_ = config::consts::kAppVersion;  // 单一事实源（← constants.h kAppVersion，与 Mini 同为 3.2.2）
 };
+
+// minisign 验签（B-D44 收敛，1:1 对齐 tauri-plugin-updater 2.10.1）：
+// 公钥取 config::kUpdatePubkeyFileB64（Mini tauri.conf.json:32）；
+// pubkey_file_b64_override 仅供测试注入（nullptr = 用 config 公钥）。
+// 语义见 src/update/client_updater.cpp verify_with_pubkey 注释。
+bool verify_installer_signature(const std::vector<uint8_t>& file_bytes,
+                                const std::string& signature_b64,
+                                std::string* err,
+                                const char* pubkey_file_b64_override = nullptr);
+
+// 测试注入：替换验签公钥（nullptr/空 = 恢复 config 公钥）
+void set_verify_pubkey_for_test(const char* pubkey_file_b64);
 
 }  // namespace clashwin::update

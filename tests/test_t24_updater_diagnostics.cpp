@@ -13,6 +13,7 @@
 #include "core/core_updater.h"
 #include "events/event_bus.h"
 #include "mihomo/mihomo_client.h"
+#include "minisign_vector.h"
 #include "util/ed25519.h"
 #include "system/diagnostic_bundle.h"
 #include "update/client_updater.h"
@@ -453,6 +454,9 @@ UT_TEST(t24_client_updater_download_progress_events) {
 
   auto dl = std::make_shared<MockAppDownloader>();
   ClientUpdater::instance().set_downloader(dl);
+  // B-D44 收敛后验签走 minisign（config 公钥 = Mini tauri.conf.json:32）；
+  // mock 载荷 SETUP_PAYLOAD 配测试密钥对签名（tests/minisign_vector.h）
+  clashwin::update::set_verify_pubkey_for_test(kTestPubkeyFileB64);
 
   std::vector<std::pair<std::string, int>> captured;
   std::string last_message;
@@ -465,7 +469,8 @@ UT_TEST(t24_client_updater_download_progress_events) {
   auto res = ClientUpdater::instance().download_app_update(
       "https://mock/setup.exe",
       "14f8d5227db0d72a23479944bd4263bfdcf77dceaa6b04ec77f7d0e5eb4bb457",
-      "liNKJZVe7syWqcblanQIkI6yeT3fpVVGzSyrovd3C0npD6B+xmMWjSHO0O/WM5saDUnB8MObtL5/oFy4Td5KBQ==");
+      kTestSetupPayloadSigB64);
+  clashwin::update::set_verify_pubkey_for_test(nullptr);
   events::EventBus::instance().unsubscribe(sub_id);
 
   UT_CHECK(res.is_ok());

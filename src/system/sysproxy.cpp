@@ -341,8 +341,9 @@ LONG open_inet_settings_write(HKEY* out) {
 
 // RAS 条目同步（← 任务卡完成标准①：LAN + 每个 RAS 条目 PER_CONN_OPTION）。
 // sysproxy-rs 经 wininet per-connection option 覆盖 RAS 拨号条目；此处遍历
-// RasEnumEntriesW 逐条写同值（差异声明：census 未确认 sysproxy crate 的
-// 具体键写法，按 WinINET 标准 per-conn 语义对齐）。
+// RasEnumEntriesW 逐条以条目名为 connection 构造 INTERNET_PER_CONN_OPTION_LISTW
+// 后 InternetSetOptionW 写入，与 LAN 注册表写入（write_sysproxy）保持同值。
+// 无 RAS 拨号条目时为 no-op（常见形态，不报错）。
 void sync_ras_entries(const SysProxyState& s) {
   DWORD entries = 0, bytes = 0;
   if (RasEnumEntriesW(nullptr, nullptr, nullptr, &bytes, &entries) !=
@@ -356,10 +357,25 @@ void sync_ras_entries(const SysProxyState& s) {
   if (RasEnumEntriesW(nullptr, nullptr, names, &bytes, &entries) != ERROR_SUCCESS) {
     return;
   }
-  (void)s;  // per-conn 写入走 InternetSetOption(INTERNET_OPTION_PER_CONNECTION_OPTION)
-  // 该路径在无 RAS 拨号环境不可验证（census 未确认项），保留遍历骨架：
-  // 每条目以名称为 connection 构造 INTERNET_PER_CONN_OPTION_LISTW 后
-  // InternetSetOptionW 写入；无条目时为 no-op。
+  const std::wstring server = s.host + (s.port ? L":" + std::to_wstring(s.port) : L"");
+  const std::wstring bypass = s.bypass.empty() ? kDefaultBypass : s.bypass;
+  INTERNET_PER_CONN_OPTIONW opt[3] = {};
+  opt[0].dwOption = INTERNET_PER_CONN_FLAGS;
+  opt[0].Value.dwValue = s.enable ? (PROXY_TYPE_PROXY | PROXY_TYPE_DIRECT)
+                                  : PROXY_TYPE_DIRECT;
+  opt[1].dwOption = INTERNET_PER_CONN_PROXY_SERVER;
+  opt[1].Value.pszValue = const_cast<LPWSTR>(server.c_str());
+  opt[2].dwOption = INTERNET_PER_CONN_PROXY_BYPASS;
+  opt[2].Value.pszValue = const_cast<LPWSTR>(bypass.c_str());
+  INTERNET_PER_CONN_OPTION_LISTW list = {};
+  list.dwSize = sizeof(list);
+  list.dwOptionCount = 3;
+  list.pOptions = opt;
+  for (DWORD i = 0; i < entries; ++i) {
+    list.pszConnection = const_cast<LPWSTR>(names[i].szEntryName);
+    InternetSetOptionW(nullptr, INTERNET_OPTION_PER_CONNECTION_OPTION, &list,
+                       sizeof(list));
+  }
 }
 
 class WininetSysProxyAccess : public ISysProxyAccess {

@@ -7,6 +7,7 @@
 #pragma comment(lib, "bcrypt.lib")
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -16,6 +17,7 @@
 #include "events/event_bus.h"
 #include "system/net_http.h"
 #include "util/base64.h"
+#include "util/blake2b.h"
 #include "util/dirs.h"
 #include "util/ed25519.h"
 #include "util/log.h"
@@ -53,47 +55,87 @@ std::string format_mb(double bytes) {
   return oss.str();
 }
 
-std::optional<std::vector<uint8_t>> hex_to_bytes(const std::string& hex) {
-  if (hex.size() % 2 != 0) return std::nullopt;
-  std::vector<uint8_t> out;
-  out.reserve(hex.size() / 2);
-  for (size_t i = 0; i < hex.size(); i += 2) {
-    auto nib = [](char c) -> int {
-      if (c >= '0' && c <= '9') return c - '0';
-      if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-      if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-      return -1;
-    };
-    const int hi = nib(hex[i]), lo = nib(hex[i + 1]);
-    if (hi < 0 || lo < 0) return std::nullopt;
-    out.push_back(static_cast<uint8_t>((hi << 4) | lo));
-  }
-  return out;
-}
+// ---------- minisign 验签（B-D44 收敛） ----------
+// 1:1 对齐 tauri-plugin-updater 2.10.1 verify_signature（updater.rs:1452-1463，
+// allow_legacy=true）+ jedisct1/rust-minisign-verify 语义：
+//   公钥 = Base64(pubkey_file_b64) → 两行文本 → 第 2 行 Base64 → 42 字节
+//     （"Ed"(2) + keynum(8) + Ed25519 公钥(32)）；
+//   签名 = Base64(manifest signature) → 四行文本 → bin1(74: 算法(2)+keynum(8)+
+//     sig(64)) + "trusted comment: " 行 + global_sig(64)；
+//   校验顺序：keynum 匹配 → 主签名（"ED"=Ed25519(BLAKE2b-512(file))；
+//     "Ed"=Ed25519(file)）→ 全局签名 Ed25519(sig(64) ++ trusted_comment[17..])。
+bool verify_with_pubkey(const std::vector<uint8_t>& file_bytes,
+                        const std::string& signature_b64,
+                        const char* pubkey_file_b64, std::string* err) {
+  auto fail = [&](const char* msg) {
+    if (err) *err = msg;
+    return false;
+  };
 
-// 验签口径：signature = Base64(Ed25519(私钥, SHA-256(installer)))。
-// ← 行为对齐 plugin-updater：先验签后安装；失败可见报错，绝不静默放行。
-bool verify_installer_signature(const std::string& actual_sha256_hex,
-                                const std::string& signature_b64, std::string* err) {
-  const auto pk = util::decode_base64_robust(config::kUpdatePubkeyB64);
-  if (!pk || pk->size() != 32) {
-    *err = "更新公钥未配置或格式错误，已中止安装";
-    return false;
+  // ---- 公钥解析 ----
+  const auto pk_file = util::decode_base64_robust(pubkey_file_b64);
+  if (!pk_file) return fail("更新公钥未配置或格式错误，已中止安装");
+  const std::string pk_text(pk_file->begin(), pk_file->end());
+  const size_t nl1 = pk_text.find('\n');
+  if (nl1 == std::string::npos) return fail("更新公钥格式错误，已中止安装");
+  size_t nl2 = pk_text.find('\n', nl1 + 1);
+  std::string pk_b64 = pk_text.substr(
+      nl1 + 1, nl2 == std::string::npos ? std::string::npos : nl2 - nl1 - 1);
+  if (!pk_b64.empty() && pk_b64.back() == '\r') pk_b64.pop_back();
+  const auto pk_bin = util::decode_base64_robust(pk_b64);
+  if (!pk_bin || pk_bin->size() != 42) return fail("更新公钥格式错误，已中止安装");
+  const uint8_t algo_pk[2] = {(*pk_bin)[0], (*pk_bin)[1]};
+  if (!((algo_pk[0] == 0x45 && algo_pk[1] == 0x64) ||
+        (algo_pk[0] == 0x45 && algo_pk[1] == 0x44)))
+    return fail("更新公钥算法不受支持，已中止安装");
+  const uint8_t* key_id = pk_bin->data() + 2;
+  const uint8_t* pk32 = pk_bin->data() + 10;
+
+  // ---- 签名解析 ----
+  const auto sig_text_bytes = util::decode_base64_robust(signature_b64);
+  if (!sig_text_bytes) return fail("发布清单缺少有效签名，已中止安装");
+  const std::string sig_text(sig_text_bytes->begin(), sig_text_bytes->end());
+  std::vector<std::string> lines;
+  {
+    std::istringstream iss(sig_text);
+    std::string ln;
+    while (std::getline(iss, ln)) {
+      if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+      lines.push_back(ln);
+    }
   }
-  const auto sig = util::decode_base64_robust(signature_b64);
-  if (!sig || sig->size() != 64) {
-    *err = "发布清单缺少有效签名，已中止安装";
-    return false;
+  // minisign .sig：注释 / bin1 / trusted comment / global sig（各行非空）
+  if (lines.size() < 4) return fail("签名格式错误，已中止安装");
+  const auto bin1 = util::decode_base64_robust(lines[1]);
+  if (!bin1 || bin1->size() != 74) return fail("签名格式错误，已中止安装");
+  const bool prehashed = (*bin1)[0] == 0x45 && (*bin1)[1] == 0x44;  // "ED"
+  const bool legacy_raw = (*bin1)[0] == 0x45 && (*bin1)[1] == 0x64;  // "Ed"
+  if (!prehashed && !legacy_raw) return fail("签名算法不受支持，已中止安装");
+  if (std::memcmp(bin1->data() + 2, key_id, 8) != 0)
+    return fail("签名与更新公钥不匹配，已中止安装");
+  const uint8_t* sig64 = bin1->data() + 10;
+  if (lines[2].rfind("trusted comment: ", 0) != 0)
+    return fail("签名格式错误，已中止安装");
+  const std::string trusted_comment = lines[2].substr(17);  // [17..]
+  const auto global_sig = util::decode_base64_robust(lines[3]);
+  if (!global_sig || global_sig->size() != 64)
+    return fail("签名格式错误，已中止安装");
+
+  // ---- 数据：预哈希变体先 BLAKE2b-512 ----
+  std::vector<uint8_t> data;
+  if (prehashed) {
+    data = util::Blake2b::digest(file_bytes.data(), file_bytes.size(), 64);
+  } else {
+    data = file_bytes;
   }
-  const auto digest = hex_to_bytes(actual_sha256_hex);
-  if (!digest || digest->size() != 32) {
-    *err = "安装包摘要无效";
-    return false;
-  }
-  if (!util::ed25519_verify(digest->data(), digest->size(), sig->data(), pk->data())) {
-    *err = "安装包签名校验失败";
-    return false;
-  }
+
+  // ---- 主签名 + 全局签名（minisign-verify verify_ed25519 顺序）----
+  if (!util::ed25519_verify(data.data(), data.size(), sig64, pk32))
+    return fail("安装包签名校验失败");
+  std::vector<uint8_t> gmsg(sig64, sig64 + 64);
+  gmsg.insert(gmsg.end(), trusted_comment.begin(), trusted_comment.end());
+  if (!util::ed25519_verify(gmsg.data(), gmsg.size(), global_sig->data(), pk32))
+    return fail("安装包签名校验失败");
   return true;
 }
 
@@ -169,6 +211,26 @@ std::vector<int> parse_version_numbers(const std::string& ver_str) {
 }
 
 }  // namespace
+
+// 测试注入钩子：nullptr = 恢复 config 公钥（Mini tauri.conf.json:32）
+namespace {
+const char* g_pubkey_override = nullptr;
+}  // namespace
+
+void set_verify_pubkey_for_test(const char* pubkey_file_b64) {
+  g_pubkey_override = pubkey_file_b64;
+}
+
+bool verify_installer_signature(const std::vector<uint8_t>& file_bytes,
+                                const std::string& signature_b64,
+                                std::string* err,
+                                const char* pubkey_file_b64_override) {
+  const char* pk = pubkey_file_b64_override
+                       ? pubkey_file_b64_override
+                       : (g_pubkey_override ? g_pubkey_override
+                                            : config::kUpdatePubkeyFileB64);
+  return verify_with_pubkey(file_bytes, signature_b64, pk, err);
+}
 
 ClientUpdater::ClientUpdater()
     : downloader_(std::make_shared<DefaultAppUpdateDownloader>()) {}
@@ -325,7 +387,7 @@ Result<AppUpdateInfo> ClientUpdater::check_app_update() {
     return Result<AppUpdateInfo>::err(make_err("downloader not configured"));
   }
   const std::string manifest_url =
-      "https://raw.githubusercontent.com/qiu-yuxiao/clash-win/dev/updater/app-update.json";
+      "https://raw.githubusercontent.com/qiu-yuxiao/clash-mini/dev/updater/app-update.json";  // ← MC:tauri.conf.json:31-35 端点（原 clash-win 自研，按 1:1 对齐 Mini 源）
   auto res = downloader_->fetch_manifest(manifest_url);
   if (!res.is_ok()) {
     return Result<AppUpdateInfo>::err(res.error());
@@ -360,8 +422,9 @@ Result<std::wstring> ClientUpdater::download_app_update(const std::string& downl
           }
           return;
         }
-        int pct = static_cast<int>((static_cast<double>(downloaded) /
-                                    static_cast<double>(total)) * 100.0);
+        // src: use-client-update.ts:82 Math.round（四舍五入，非截断）
+        int pct = static_cast<int>(std::lround(
+            (static_cast<double>(downloaded) / static_cast<double>(total)) * 100.0));
         if (pct > 100) pct = 100;
         if (pct != last_pct) {
           last_pct = pct;
@@ -379,11 +442,19 @@ Result<std::wstring> ClientUpdater::download_app_update(const std::string& downl
   }
 
   // 完整性 + 验签（← plugin-updater：先验签后安装；失败可见报错，不静默放行）
+  // 验签输入为安装包原始字节（minisign 预哈希变体内部做 BLAKE2b-512）
+  std::vector<uint8_t> file_bytes;
+  {
+    std::ifstream f(dest_path, std::ios::binary);
+    if (f)
+      file_bytes.assign(std::istreambuf_iterator<char>(f),
+                        std::istreambuf_iterator<char>());
+  }
   const std::string actual_sha = compute_sha256_hex(dest_path);
   const bool hash_ok =
       expected_sha256.empty() || actual_sha == to_lower(expected_sha256);
   std::string sig_err;
-  const bool sig_ok = verify_installer_signature(actual_sha, signature_b64, &sig_err);
+  const bool sig_ok = verify_installer_signature(file_bytes, signature_b64, &sig_err);
   if (!hash_ok || !sig_ok) {
     std::error_code ec;
     std::filesystem::remove(dest_path, ec);
