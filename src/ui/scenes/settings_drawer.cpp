@@ -1486,8 +1486,12 @@ void SettingsDrawer::wire_callbacks() {
     };
     edit_profile_modal_->on_dismiss = [this] { invalidate(); };
   }
-  // 接管三段 → patch_verge_config(enable_system_proxy/enable_tun_mode)
+  // 接管三段 → 宿主 handleTakeoverModeChange（← _layout.tsx:1042-1114）
+  //   宿主负责 isTunModeAvailable(is_admin||service_ok) 判定、service 缺失时试装、
+  //   patchVerge(enable_system_proxy/enable_tun_mode)、以及 info/success/error 通知；
+  //   返回 false → 分段回弹（quick_bar.cpp:635-642）。未接线时回落旧 patch 语义。
   takeover_card_->seg_->apply = [this](const std::string& mode) {
+    if (on_takeover_change) return on_takeover_change(mode);
     bool sys = mode == "SYS", tun = mode == "TUN";
     CWLOG_INFO("[TAKEOVER] apply mode=" + mode + " sys=" + (sys ? "1" : "0") +
                " tun=" + (tun ? "1" : "0") +

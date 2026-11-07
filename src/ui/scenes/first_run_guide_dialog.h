@@ -97,6 +97,7 @@ class FirstRunGuideDialog : public Widget {
   void on_arrange(const RectF& area) override;
   void on_paint(IRenderTarget& rt) override;
   bool on_mouse(const MouseEvent& e) override;
+  bool on_key(const KeyEvent& e) override;
 
   bool is_ready_step() const { return step_ == FirstRunStep::Ready; }
 
@@ -176,9 +177,9 @@ class FirstRunGuideDialog : public Widget {
 
   // 订阅链接：复用 Win 端 TextField（← Mini :698-732 真实 MUI TextField
   //   autoFocus/fullWidth/value+onChange/onContextMenu/endAdornment 回车图标）
-  std::unique_ptr<TextField> url_field_;
+  TextField* url_field_ = nullptr;
   // 订阅链接右键编辑菜单（剪切/复制/粘贴/全选/清空，← Mini :1859-1932）
-  std::unique_ptr<ContextMenu> url_menu_;
+  ContextMenu* url_menu_ = nullptr;
 };
 
 }  // namespace clashwin::ui::scene

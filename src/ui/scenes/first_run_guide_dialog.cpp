@@ -358,6 +358,9 @@ void FirstRunGuideDialog::close() {
 
 void FirstRunGuideDialog::set_step(FirstRunStep s) {
   step_ = s;
+  if (bounds().w > 0.0f && bounds().h > 0.0f) {
+    on_arrange(bounds());
+  }
   invalidate();
 }
 
@@ -382,6 +385,9 @@ void FirstRunGuideDialog::check_clipboard() {
 void FirstRunGuideDialog::set_active_delay_ms(int ms) {
   // -1 = null（未测出）；0 = 测速失败；>0 有效延迟（src: :143-166）
   active_delay_ms_ = ms;
+  if (bounds().w > 0.0f && bounds().h > 0.0f) {
+    on_arrange(bounds());
+  }
   invalidate();
 }
 
@@ -396,6 +402,9 @@ void FirstRunGuideDialog::tick(int64_t now_ms) {
   if (ready_started_ms_ == 0) ready_started_ms_ = now_ms;
   if (now_ms - ready_started_ms_ >= kReadyTimeoutMs) {
     gave_up_ = true;
+    if (bounds().w > 0.0f && bounds().h > 0.0f) {
+      on_arrange(bounds());
+    }
     invalidate();
     return;
   }
@@ -411,6 +420,9 @@ void FirstRunGuideDialog::on_retest_finished() {
   // src: :228-245 重测结束后重新计时/恢复轮询
   ready_started_ms_ = 0;
   last_poll_ms_ = 0;
+  if (bounds().w > 0.0f && bounds().h > 0.0f) {
+    on_arrange(bounds());
+  }
   invalidate();
 }
 
@@ -422,9 +434,6 @@ bool FirstRunGuideDialog::unconfirmed() const {
 
 void FirstRunGuideDialog::submit_import() {
   if (is_importing_) return;
-
-  // src: :703 disabled={submitting} —— 导入期间禁用订阅框
-  if (url_field_) url_field_->set_enabled(false);
 
   std::string target_url = util::trim(url_);
   if (target_url.empty()) {
@@ -452,6 +461,9 @@ void FirstRunGuideDialog::submit_import() {
     invalidate();
     return;
   }
+
+  // src: :703 disabled={submitting} —— 校验通过后导入期间禁用订阅框
+  if (url_field_) url_field_->set_enabled(false);
 
   is_importing_ = true;
   error_message_.clear();
@@ -1020,6 +1032,9 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
           gave_up_ = false;
           ready_started_ms_ = 0;
           last_poll_ms_ = 0;
+          if (bounds().w > 0.0f && bounds().h > 0.0f) {
+            on_arrange(bounds());
+          }
           invalidate();
           if (on_retest_nodes) on_retest_nodes();
         }
@@ -1096,7 +1111,7 @@ bool FirstRunGuideDialog::on_key(const KeyEvent& e) {
 
 void FirstRunGuideDialog::open_url_menu(PointF anchor) {
   if (!url_menu_ || !url_field_) return;
-  TextField* f = url_field_.get();
+  TextField* f = url_field_;
 
   // 外观：src: _layout.tsx:1872-1884（minWidth 160 / radius 6 / border 1px
   //   rgba(255,255,255,.12) / List padding 4px 0）+ style-helpers.tsx:126-145

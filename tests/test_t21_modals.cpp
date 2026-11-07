@@ -768,7 +768,41 @@ UT_TEST(t21_notice_status_mapping) {
   UT_CHECK(!dispatch_notice("nope::status", "x"));
   UT_CHECK_EQ(NoticeService::instance().snapshot().size(), size_t(0));
 
-  // 7) EventBus 端到端：notice_message → 订阅 → toast
+  // 7) 服务管控通知：service_unavailable / service_missing / service_install_error / service_start_error
+  UT_CHECK(dispatch_notice("service_unavailable", "服务不可用"));
+  {
+    auto s = NoticeService::instance().snapshot();
+    UT_CHECK_EQ(s.size(), size_t(1));
+    UT_CHECK_EQ(s[0].type, std::string("error"));
+    UT_CHECK_EQ(s[0].message, std::string("服务不可用"));
+  }
+  clear();
+  UT_CHECK(dispatch_notice("service_missing", "服务未安装"));
+  {
+    auto s = NoticeService::instance().snapshot();
+    UT_CHECK_EQ(s.size(), size_t(1));
+    UT_CHECK_EQ(s[0].type, std::string("info"));
+    UT_CHECK_EQ(s[0].message, std::string("服务未安装"));
+  }
+  clear();
+  UT_CHECK(dispatch_notice("service_install_error", "服务安装失败"));
+  {
+    auto s = NoticeService::instance().snapshot();
+    UT_CHECK_EQ(s.size(), size_t(1));
+    UT_CHECK_EQ(s[0].type, std::string("error"));
+    UT_CHECK_EQ(s[0].message, std::string("服务安装失败"));
+  }
+  clear();
+  UT_CHECK(dispatch_notice("service_start_error", "服务启动超时"));
+  {
+    auto s = NoticeService::instance().snapshot();
+    UT_CHECK_EQ(s.size(), size_t(1));
+    UT_CHECK_EQ(s[0].type, std::string("error"));
+    UT_CHECK_EQ(s[0].message, std::string("服务启动超时"));
+  }
+  clear();
+
+  // 8) EventBus 端到端：notice_message → 订阅 → toast
   install_notice_handler();
   clashwin::events::EventBus::notice_message("install_service::ok", "");
   {

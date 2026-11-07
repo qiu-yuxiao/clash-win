@@ -163,6 +163,11 @@ class SettingsDrawer : public Stack {
   // 宿主回调（命令链）
   std::function<void(const std::string& patch_key, const nlohmann::json& v)>
       on_patch_verge;
+  // 流量接管模式切换（← _layout.tsx:1042-1114 handleTakeoverModeChange）：
+  //   宿主负责 isTunModeAvailable 判定 / 试装 service / patchVerge / Notice；
+  //   返回 false → 分段不回弹不改态（quick_bar.cpp:635-642 门）+ 宿主已 push 错误。
+  //   未接线时回落到 on_patch_verge 旧语义（单测）。
+  std::function<bool(const std::string& mode)> on_takeover_change;
   // Mixed Port 保存（← use-minimal-settings.ts:87-107 handleSavePort）：
   // 占用检查 → 同时写内核 mixed-port 与 verge verge_mixed_port →
   // 返回 false 表示失败/被占用，调用方把输入框回滚到当前端口

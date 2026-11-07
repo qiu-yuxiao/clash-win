@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cwctype>
 #include <memory>
+#include <thread>
 
 #include "../theme/theme.h"
 #include "../overlay_fade.h"   // OverlayFade::now_ms()（cyberpunk 呼吸相位的时间基准）
@@ -143,8 +144,9 @@ void NodeRowWidget::on_paint(IRenderTarget& rt) {
                divider);
   x = type_r.right();
 
-  // 名称区（12px text.primary；selected bold）
-  RectF name_r{x, r.y, r.w - kNodeTypeColW - kNodeDelayColW, r.h};
+  // 名称区（12px text.primary；selected bold；减 16.0f 边距居中延迟列）
+  // src: proxy-item.tsx:142
+  RectF name_r{x, r.y, r.w - 16.0f - kNodeTypeColW - kNodeDelayColW, r.h};
   TextStyle ns;
   ns.size = 12;
   ns.weight = selected_ ? static_cast<int>(Weight::Bold)
@@ -373,7 +375,16 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
       if (i < 0 || static_cast<size_t>(i) >= rows.size()) continue;
       names.push_back(rows[static_cast<size_t>(i)].name);
     }
-    data_->test_and_select(names);
+    // src: proxy-groups.tsx:256-258 视觉占位：UI 线程立即置 -2 触发 BaseLoading 脉冲
+    for (const auto& n : names) {
+      data_->set_delay(n, -2);
+    }
+    invalidate();
+    // src: proxy-groups.tsx:263 异步后台线程执行测速，保障 UI 线程 60fps 脉冲动画
+    auto* data_ptr = data_;
+    std::thread([data_ptr, names] {
+      data_ptr->test_and_select(names);
+    }).detach();
   };
   bar_p->add_child(std::move(bolt));
 

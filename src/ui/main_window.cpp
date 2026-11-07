@@ -3,6 +3,8 @@
 #include "main_window.h"
 
 #include <windowsx.h>
+#include <dwmapi.h>
+#pragma comment(lib, "dwmapi.lib")
 #include <shellapi.h>  // ShellExecuteW（T17 打开日志目录/帮助）
 
 #include <atomic>
@@ -296,6 +298,9 @@ bool MainWindow::create_hwnd() {
   // 【RULERFIX】创建期 WS_THICKFRAME 的非客户框在首次显影前仍占 10px（实测 +0.9s
   //   客户区只有 386×1000，+2.5s 才变 406×1020）。这里强制重算外框，使显影前
   //   client 就与窗口矩形一致，避免截图/布局踩到瞬态小窗。
+  // D11: 消除非客户区厚白边框（DWM 延伸客户区到边缘）
+  MARGINS m{1, 1, 1, 1};
+  DwmExtendFrameIntoClientArea(hwnd_, &m);
   SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE |
                    SWP_FRAMECHANGED);
@@ -743,9 +748,95 @@ void MainWindow::build_scene() {
             }
             return;
           }
+          // 代理方式三段 ← _layout.tsx:398-424 handleRuleFallbackChange：
+          //   常驻 info「正在调整代理模式」→ patchVerge(rule_fallback)（无 success 通知）
+          //   → finally hideNotice；失败 showNotice.error(原文)。
+          if (k == "rule_fallback") {
+            const uint64_t wait_id = events::NoticeService::instance().push(
+                "info", tr8("layout.notices.adjustingProxyMode"), 0);
+            auto r =
+                svc.invoke("patch_verge_config", nlohmann::json::object({{k, v}}));
+            events::NoticeService::instance().hide(wait_id);
+            if (!r.is_ok()) {
+              events::NoticeService::instance().push("error", r.error().message);
+            }
+            return;
+          }
+          // 其余 verge 键（enable_auto_launch/enable_silent_start）：Mini 为裸
+          //   patchVerge 无通知（basic-settings-card.tsx:136,185）→ 保持静默。
           auto r = svc.invoke("patch_verge_config", nlohmann::json::object({{k, v}}));
-          CWLOG_INFO(std::string("[TAKEOVER] patch_verge ") + k + "=" + v.dump() +
+          CWLOG_INFO(std::string("[PATCH_VERGE] ") + k + "=" + v.dump() +
                      (r.is_ok() ? " ok" : " FAIL " + r.error().message));
+        };
+    // 流量接管模式切换 ← _layout.tsx:1042-1114 handleTakeoverModeChange
+    //   manual/system：patchVerge(enable_system_proxy/enable_tun_mode) + success/error；
+    //   tun：isTunModeAvailable=isAdminMode||isServiceOk，不可用先 installServiceAndRestartCore，
+    //        失败 push tunServiceConfigFailed 且 return（不 patch，分段回弹）。
+    settings_drawer_->on_takeover_change =
+        [](const std::string& mode) -> bool {
+          auto& svc = cmd::CommandService::instance();
+          auto& notices = events::NoticeService::instance();
+          // 常驻 info「正在调整，请稍候…」（:1047 showNotice.info(...,0)）
+          const uint64_t wait_id =
+              notices.push("info", tr8("layout.notices.adjusting"), 0);
+          if (mode == "MAN") {
+            // :1054-1071 手动：清系统代理 + 清 TUN
+            auto r = svc.invoke(
+                "patch_verge_config",
+                nlohmann::json::object({{"enable_system_proxy", false},
+                                        {"enable_tun_mode", false}}));
+            notices.hide(wait_id);
+            if (r.is_ok()) {
+              notices.push("success",
+                           tr8("layout.notices.switchedToManualMode"));
+              return true;
+            }
+            notices.push("error", r.error().message);
+            return false;
+          }
+          if (mode == "SYS") {
+            // :1072-1084 系统代理：开系统代理 + 清 TUN
+            auto r = svc.invoke(
+                "patch_verge_config",
+                nlohmann::json::object({{"enable_system_proxy", true},
+                                        {"enable_tun_mode", false}}));
+            notices.hide(wait_id);
+            if (r.is_ok()) {
+              notices.push("success", tr8("layout.notices.systemProxyEnabled"));
+              return true;
+            }
+            notices.push("error", r.error().message);
+            return false;
+          }
+          // :1085-1109 TUN
+          bool is_admin = false;
+          {
+            auto ar = svc.invoke("app_is_admin");
+            if (ar.is_ok() && ar.value().is_boolean())
+              is_admin = ar.value().get<bool>();
+          }
+          const bool service_ok = svc.invoke("is_service_available").is_ok();
+          if (!(is_admin || service_ok)) {
+            // 不可用 → installServiceAndRestartCore()；失败 → error + return（不 patch）
+            auto inst = svc.invoke("install_service");
+            if (!inst.is_ok()) {
+              notices.hide(wait_id);
+              notices.push("error",
+                           tr8("layout.notices.tunServiceConfigFailed"));
+              return false;
+            }
+          }
+          auto r = svc.invoke(
+              "patch_verge_config",
+              nlohmann::json::object({{"enable_system_proxy", false},
+                                      {"enable_tun_mode", true}}));
+          notices.hide(wait_id);
+          if (r.is_ok()) {
+            notices.push("success", tr8("layout.notices.tunModeEnabled"));
+            return true;
+          }
+          notices.push("error", r.error().message);
+          return false;
         };
     settings_drawer_->on_patch_clash_mode = [](const std::string& mode) {
       cmd::CommandService::instance().invoke(
@@ -1274,6 +1365,7 @@ void MainWindow::toggle_large() {
                  static_cast<int>(h * s + 0.5), SWP_NOMOVE | SWP_NOZORDER);
     bp_.set_large(false);
   }
+  update_conn_ws_state();
   stealth_.feed_activity(now_ms());
 }
 
@@ -1299,6 +1391,7 @@ void MainWindow::on_client_resized(int cw, int ch) {
   // 布局区 = 物理像素，组件被当作更宽的逻辑画布 → 堆叠/溢出）
   root_.layout_tree({0, 0, static_cast<float>(lw), static_cast<float>(lh)});
   clock_.invalidate({0, 0, static_cast<float>(lw), static_cast<float>(lh)});
+  update_conn_ws_state();
   persist_geometry();
 }
 
@@ -1522,8 +1615,15 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
   switch (msg) {
     case WM_NCCALCSIZE:
       // 去非客户区：客户区 = 窗口矩形（无框；保留 THICKFRAME 的系统 resize）
-      if (wp) return 0;
-      break;
+      return 0;
+
+    case WM_NCPAINT:
+      // D11: 阻止 DefWindowProcW 绘制 GDI 非客户边框
+      return 0;
+
+    case WM_NCACTIVATE:
+      // D11: 阻止激活/非激活状态切换时 DefWindowProcW 绘制白色边框
+      return TRUE;
 
     case WM_NCHITTEST:
       return hit_test_nc({GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});

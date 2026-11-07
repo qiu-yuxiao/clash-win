@@ -535,11 +535,10 @@ Result<void> CoreManager::start_auto(const std::wstring& config_file,
     if (needs_tun && !is_admin_user) {
       auto r = start_service_locked(config_file);
       if (r.is_ok()) return r;
-      CWLOG_WARN("TUN requested but service unavailable: " + r.error().message +
-                 " → fallback Sidecar (TUN will fail)");
+      CWLOG_WARN("TUN requested but service unavailable: " + r.error().message);
       notify("service_unavailable",
-             "clash_verge_service 不可用，TUN 无法启用（已回退 Sidecar）: " +
-                 r.error().message);
+             "clash_verge_service 不可用，TUN 无法启用: " + r.error().message);
+      return Result<void>::err({2302, "TUN 模式需要特权服务 clash_verge_service，服务启动失败: " + r.error().message});
     }
     return start_sidecar_locked(config_file, ipc_pipe);
   }

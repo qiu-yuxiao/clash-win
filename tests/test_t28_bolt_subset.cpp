@@ -85,6 +85,9 @@ UT_TEST(t28_bolt_passes_visible_subset) {
   if (!bolt) return;
   UT_CHECK(bolt->on_click != nullptr);
   bolt->on_click();
+  for (int i = 0; i < 100 && st.test_and_select_calls == 0; ++i) {
+    ::Sleep(10);
+  }
 
   UT_CHECK_EQ(st.test_and_select_calls, 1);
   UT_CHECK_EQ(st.last_subset.size(), 3u);
@@ -109,6 +112,9 @@ UT_TEST(t28_bolt_subset_respects_filter) {
   UT_CHECK(bolt != nullptr);
   if (!bolt) return;
   bolt->on_click();
+  for (int i = 0; i < 100 && st.test_and_select_calls == 0; ++i) {
+    ::Sleep(10);
+  }
 
   UT_CHECK_EQ(st.test_and_select_calls, 1);
   UT_CHECK_EQ(st.last_subset.size(), 1u);

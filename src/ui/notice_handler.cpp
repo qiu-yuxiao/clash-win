@@ -115,6 +115,11 @@ constexpr NoticeRule kRules[] = {
     {"copied", "success", "connections.notices.copied", "address", 2000},
     // ← services/cmds.ts:84-110 withIpcTimeout：原文 `[label] IPC call timed out after Nms`
     {"ipc_timeout", "error", nullptr, nullptr, 0},
+    // 服务管控通知（← CoreManager start_service_locked / notify）
+    {"service_unavailable", "error", nullptr, nullptr, 0},
+    {"service_missing", "info", nullptr, nullptr, 0},
+    {"service_install_error", "error", nullptr, nullptr, 0},
+    {"service_start_error", "error", nullptr, nullptr, 0},
 };
 
 const NoticeRule* find_rule(const char* status) {
