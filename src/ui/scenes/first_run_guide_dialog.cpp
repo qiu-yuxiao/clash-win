@@ -660,6 +660,7 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     // src: :984-999 重测按钮 fullWidth，仅 !ready && (unconfirmed||retesting) 出现
     const bool show_node = !active_node_name_.empty() && (proxy_ready() || unconfirmed());
     const bool show_retest = !proxy_ready() && (unconfirmed() || retesting_);
+    const bool show_warn = !takeover_active_;  // 与 node_h 计算块同源，避免「检测中」态错位
     float ny = content_y + kCardPad + kImportedH + kImportedMb + kStatusMt + kStatusH;
     if (show_node) ny += kNodeMt + kNodePt + 1.0f + kNodeLabelH + kNodeGap + kNodeNameH;
     if (show_retest) {
@@ -966,7 +967,8 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
         invalidate();
       }
     } else {
-      const bool hr = btn_retest_rect_.contains(pt.x, pt.y);
+      const bool hr = btn_retest_rect_.contains(pt.x, pt.y) &&
+                      !proxy_ready() && (unconfirmed() || retesting_);
       const bool hw = btn_wiki_rect_.contains(pt.x, pt.y);
       const bool hfs = btn_finish_star_rect_.contains(pt.x, pt.y);
       const bool hf = btn_finish_rect_.contains(pt.x, pt.y);
@@ -1010,7 +1012,8 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
         return true;
       }
     } else {
-      if (btn_retest_rect_.contains(pt.x, pt.y)) {
+      if (btn_retest_rect_.contains(pt.x, pt.y) &&
+          !proxy_ready() && (unconfirmed() || retesting_)) {
         // src: :189-205 重测并优选：retesting=true、gaveUp=false
         if (!retesting_) {
           retesting_ = true;
