@@ -57,8 +57,8 @@ constexpr float kBannerH = 31.4f;        // src: :661/:688 6×2 + 12×1.45 + 1px
 constexpr float kBannerMb = 10.0f;       // src: :659 mb: 1.25
 constexpr float kFieldH = 40.0f;         // 豁免: MUI TextField size=small 默认输入框高 40
 constexpr float kFieldMb = 8.0f;         // src: :697 mb: 1
-constexpr float kFieldRadius = 4.0f;     // 豁免: MUI OutlinedInput 默认 shape 圆角 4
-constexpr float kFieldBorderW = 2.0f;    // src: get3DInputStyle :752 2px × depth
+// 输入框圆角/描边宽逐皮肤（get3DInputStyle）→ 运行时取 input_paint().radius /
+//   .border_w，不再用固定常量。
 constexpr float kPasteFont = 12.0f;      // src: :767 fontSize '12px'
 constexpr float kPasteH = 18.4f;         // src: :771/:772 py: 0.25×2 + 12 行高
 constexpr float kPasteW = 150.0f;        // 豁免: Mini 无对应物 — 按钮宽按文字 + px 8×2 自适应，无 width 字面量（出处: first-run-guide-dialog.tsx:750-760）
@@ -707,21 +707,17 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
                 static_cast<int>(Weight::Bold), ready_color());
     }
 
-    // ---- 凹陷订阅输入框（src: :697-733 + get3DInputStyle :739-777）----
+    // ---- 凹陷订阅输入框（src: :697-733 + get3DInputStyle :734-927）----
+    // ★ 输入框逐皮肤查表（get3DInputStyle 6 套皮肤各自一套），不是「retro 金 +
+    //   其余一律金色描边」。
     const float field_y = input_rect_.y;
-    // src: :742-744 背景 light rgba(255,253,231,.8) / dark rgba(26,22,14,.4)
-    const Color4f field_bg = is_retro()
-                                 ? (is_light() ? Color4f::hex(0xFFFDE7, 0.8f)
-                                               : Color4f::hex(0x1A160E, 0.4f))
-                                 : ThemeService::instance().vars().theme_input_bg;
-    // src: :753-755 描边 rgba(212,175,55,.35/.25)；:772 focus #B8860B/#FFA000
-    const Color4f field_bd =
-        input_focused_
-            ? (is_light() ? Color4f::hex(0xB8860B) : Color4f::hex(0xFFA000))
-            : (is_light() ? Color4f::hex(0xD4AF37, 0.35f)
-                          : Color4f::hex(0xD4AF37, 0.25f));
+    const auto ip = ThemeService::instance().input_paint();
+    const Color4f field_bg = ip.bg;
+    const Color4f field_bd = input_focused_ ? ip.border_focused : ip.border;
+    // 描边宽逐皮肤（retro 2px×depth / original·modern 1px / frosted 1px / cyber 1px）
+    const float field_bw = input_focused_ ? ip.border_w_focused : ip.border_w;
     Brush fbg{field_bg};
-    rt.round_rect(input_rect_, kFieldRadius, Pen{field_bd, kFieldBorderW}, &fbg);
+    rt.round_rect(input_rect_, ip.radius, Pen{field_bd, field_bw}, &fbg);
     const std::wstring display_url =
         url_.empty() ? L"https://example.com/api/v1/client/subscribe?token=..."
                      : utf::utf8_to_utf16(url_);

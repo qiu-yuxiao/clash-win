@@ -8,6 +8,7 @@
 #include <map>
 
 #include "../theme/theme.h"
+#include "../card_draw.h"
 #include "../soft_shadow.h"  // 卡面阴影/发光近似（随 depth/vibrancy）
 #include "node_list.h"  // delay_tier / delay_tier_color（与节点表格同源五档色）
 #include "util/log.h"
@@ -65,22 +66,7 @@ inline bool is_retro3d_dark() {
 // 出处：utils/button-styles.ts:492-731 get3DCardStyle('default')。
 // 旧实现只画 retro-3d 的浅黄渐变，其它皮肤下这张卡仍是金色 —— 已修正。
 void paint_card_gradient(IRenderTarget& rt, const RectF& r) {
-  const theme::CardPaint cp =
-      ThemeService::instance().card_paint("default");
-  if (cp.has_shadow)
-    draw_soft_shadow(rt, r, cp.radius, cp.shadow_color, cp.shadow_dy,
-                     cp.shadow_blur);
-  if (cp.has_glow) draw_glow(rt, r, cp.radius, cp.glow_color, cp.glow_blur);
-  if (cp.grad_bg) {
-    rt.fill_round_rect_gradient_angle(r, cp.radius, cp.grad, cp.grad_count,
-                                      cp.grad_angle);
-  } else if (cp.bg.a > 0.001f) {
-    Brush bg{cp.bg};
-    rt.round_rect(r, cp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &bg);
-  }
-  if (cp.border_w > 0.0f) {
-    rt.round_rect(r, cp.radius, Pen{cp.border, cp.border_w}, nullptr);
-  }
+  draw_card(rt, r, theme::ThemeService::instance().card_paint("default"));
 }
 
 // 选中卡正文色：随皮肤取自 card_paint().text_color
@@ -88,10 +74,10 @@ void paint_card_gradient(IRenderTarget& rt, const RectF& r) {
 inline Color4f card_ink() {
   return ThemeService::instance().card_paint("default").text_color;
 }
-// 选中卡 bevel 暗边：src: button-styles.ts:540（light #B8860B / dark #755500）
-inline Color4f card_bevel_dark() {
-  return Color4f::hex(ThemeService::instance().is_light() ? 0xB8860B : 0x755500);
-}
+// 选中卡底缘 bevel 暗边已并入 ThemeService::card_paint("default")
+// 的 has_bottom_bevel / bottom_bevel_color（← button-styles.ts:540，
+// retro-3d 专属：boxShadow 首层 '0 1px 0 0 ${bevelShadowDark}'；其余 5 套皮肤
+// 的 boxShadow 无此层 → 不画这条线）。绘制统一走 card_draw::draw_card。
 
 // quickbar 右侧 pin/gear 的 3D 按钮底：Mini 用 IconButton + get3DButtonStyle
 // src: _layout.tsx:1338-1348（pin，contained/default 或 pinned→primary）、
@@ -509,9 +495,6 @@ void QuickBar::on_paint(IRenderTarget& rt) {
     RectF card{8, 0, pin_->bounds().x - 8, 28};  // 高 = 30-2 = 28，m:0 顶对齐
     if (card.w > 0) {
       paint_card_gradient(rt, card);
-      // 底部 bevel 暗边：src: button-styles.ts:540 bevelShadowDark
-      rt.fill_rect({card.x, card.bottom() - 1, card.w, 1},
-                   Brush{card_bevel_dark()});
     }
     // pin/gear 的 3D 按钮底（图标在子层绘制，先铺底）
     // src: _layout.tsx:1330-1387 IconButton + get3DButtonStyle('contained', ...)
@@ -663,41 +646,75 @@ bool TakeoverSegmented::on_mouse(const MouseEvent& e) {
 
 void TakeoverSegmented::on_paint(IRenderTarget& rt) {
   // src: takeover-mode-card.tsx:64-77 容器（radius 4 / p 1px / h 22）
-  //   + button-styles.ts:939-945 retro-3d 容器：1px rgba(212,175,55,.35/.22)、
-  //   bg rgba(212,175,55,.06/.08)
+  //   + button-styles.ts:917-990 get3DSegmentedContainerStyle（逐皮肤）
+  //   + :992-1103 get3DSegmentedActiveStyle（逐皮肤）
+  //   + :1105-1123 get3DSegmentedActiveTextColor（逐皮肤）
   // on_paint 局部坐标约定 {0,0,w,h}（origin 已是本件全局原点，
   // 用 bounds() 会二次偏移）
   RectF r{0, 0, bounds().w, bounds().h};
   const bool light = ThemeService::instance().is_light();
-  Brush cont_bg{Color4f::hex(0xD4AF37, light ? 0.06f : 0.08f)};
-  rt.round_rect(r, 4.0f,
-                Pen{Color4f::hex(0xD4AF37, light ? 0.35f : 0.22f), 1.0f}, &cont_bg);
+  const bool retro = ThemeService::instance().skin() == theme::SkinId::Retro3d;
+  const auto sp = ThemeService::instance().segmented_paint();
+  // 容器：src: button-styles.ts:932-990（retro-3d 半透明金 + inset 暗影；
+  //   original/modern/frosted/cyber/monochrome 各自底色与边框）
+  const float cont_radius = sp.container_radius > 0.01f ? sp.container_radius : 4.0f;
+  if (sp.container_inset)
+    draw_top_inset_shadow(rt, r, cont_radius, sp.container_inset_color,
+                          sp.container_inset_dy, sp.container_inset_blur);
+  Brush cont_bg{sp.container_bg};
+  rt.round_rect(r, cont_radius, Pen{sp.container_border, 1.0f}, &cont_bg);
+  if (sp.container_top_hi.a > 0.004f)
+    rt.draw_line({r.x + cont_radius, r.y + 0.5f},
+                 {r.right() - cont_radius, r.y + 0.5f},
+                 Pen{sp.container_top_hi, 1.0f});
   float seg_w = r.w / 3.0f;
   for (int i = 0; i < 3; ++i) {
     RectF seg{r.x + seg_w * i, r.y, seg_w, r.h};
     bool sel = mode_ == takeover_mode(i);
     if (sel) {
-      // src: button-styles.ts:999-1007 选中块 absolute inset 1px / radius 3 /
-      //   135° 六停金渐变；未选中段无底色（takeover-mode-card.tsx:102-138）
+      // src: button-styles.ts:1000-1001 选中块 absolute inset 1px /
+      //   radius 3（retro-3d 135° 六停金渐变 :1006-1007）
       RectF pill{seg.x + 1, seg.y + 1, seg.w - 2, seg.h - 2};
-      GradientStop st[6];
-      st[0] = {0.00f, Color4f::hex(0xFFE082)};
-      st[1] = {0.20f, Color4f::hex(0xFFD54F)};
-      st[2] = {0.45f, Color4f::hex(0xFFC107)};
-      st[3] = {0.70f, Color4f::hex(0xFFB300)};
-      st[4] = {0.85f, Color4f::hex(0xD4AF37)};
-      st[5] = {1.00f, Color4f::hex(0xB8860B)};
-      rt.fill_round_rect_gradient_angle(pill, 3.0f, st, 6, 135.0f);
+      const bool has_border = sp.active_border.a > 0.001f;
+      if (sp.active_grad_count > 0) {
+        rt.fill_round_rect_gradient_angle(pill, sp.active_radius,
+                                          sp.active_grad, sp.active_grad_count,
+                                          sp.active_grad_angle);
+        // src: button-styles.ts:1021-1022 retro-3d 边框 1px
+        if (has_border)
+          rt.round_rect(pill, sp.active_radius, Pen{sp.active_border, 1.0f},
+                        nullptr);
+      } else {
+        Brush sel_bg{sp.active_bg};
+        rt.round_rect(pill, sp.active_radius,
+                      Pen{sp.active_border, has_border ? 1.0f : 0.0f}, &sel_bg);
+      }
+      // 选中块浮雕/辉光（← :1009-1020 retro-3d；:1081-1082 cyberpunk 霓虹）
+      if (sp.active_has_bevel && sp.active_bevel_dark.a > 0.004f) {
+        const float by = sp.active_bevel_dy;
+        rt.draw_line({pill.x + sp.active_radius, pill.bottom() + 0.5f},
+                     {pill.right() - sp.active_radius, pill.bottom() + 0.5f},
+                     Pen{sp.active_bevel_dark, 1.0f});
+        if (by > 0.5f)
+          rt.draw_line({pill.x + sp.active_radius, pill.bottom() + by + 0.5f},
+                       {pill.right() - sp.active_radius, pill.bottom() + by + 0.5f},
+                       Pen{sp.active_bevel_dark, 1.0f});
+      }
+      if (sp.active_has_glow)
+        draw_glow(rt, pill, sp.active_radius, sp.active_glow_color,
+                  sp.active_glow_blur);
     }
     TextStyle ts;
     ts.size = 13;  // src: takeover-mode-card.tsx:116-117 zh 13px（非 zh 11px）
-    // src: button-styles.ts:1110 选中文字 '#2C1F03'；
-    //   未选中 takeover-mode-card.tsx:110-115 rgba(44,31,3,.75) / text.secondary
+    // src: button-styles.ts:1105-1123 选中文字 get3DSegmentedActiveTextColor；
+    //   未选中 takeover-mode-card.tsx:110-115
+    //     isRetro3DDark ? 'rgba(44,31,3,.75)' : 'text.secondary'
     //   hover :122-129 dark '#2C1F03'；active :130-137 dark rgba(44,31,3,.5)
-    Color4f color = sel ? Color4f::hex(0x2C1F03)
-                        : (light ? Color4f::hex(0x3C3C43, 0.6f)
-                                 : Color4f::hex(0x2C1F03, 0.75f));
-    if (!sel && !light) {
+    const bool rd = retro && !light;
+    Color4f color = sel ? sp.active_text
+                        : (rd ? Color4f::hex(0x2C1F03, 0.75f)
+                              : ThemeService::instance().palette().secondary_text);
+    if (!sel && rd) {
       if (pressed_ == i) color = Color4f::hex(0x2C1F03, 0.5f);
       else if (hover_ == i) color = Color4f::hex(0x2C1F03);
     }

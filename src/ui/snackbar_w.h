@@ -58,6 +58,19 @@ class SnackbarW : public Widget {
   void on_paint(IRenderTarget& rt) override;
   bool on_mouse(const MouseEvent& e) override;
 
+  // 【命中】通知容器不拦截点击。
+  //   ← notice-manager.tsx:157-176：容器 position:fixed；MUI Snackbar 容器默认
+  //     pointer-events:none（只有 Snackbar 本体可交互）→ 容器本体不吃鼠标。
+  //   本实现的通知条目是自绘的（无子 widget），所以只有「点落在某条通知条目上」
+  //   才算命中（条目支持右键复制全文）；其余区域一律放行给下层控件。
+  //   ★ 不加这条守卫时，本容器铺满全窗且 visible=true，会在 hit_test 里截断
+  //     整棵命中链 → 全应用鼠标点击失效（齿轮/开关/滑块全部点不动）。
+  bool hit_self(PointF local) const override {
+    for (size_t i = 0; i < item_rects_.size() && i < items_.size(); ++i)
+      if (item_rects_[i].contains(local.x, local.y)) return true;
+    return false;
+  }
+
   // 测试断言：第 i 条在自身坐标系的矩形
   const std::vector<RectF>& item_rects() const { return item_rects_; }
   void layout_items();  // 依 bounds + position_ 计算 item_rects_

@@ -201,6 +201,9 @@ UT_TEST(t15_import_card_ui) {
 UT_TEST(t15_import_card_pixel) {
   make_offscreen(240, 110, 96);
   auto& svc = theme::ThemeService::instance();
+  // ★ 逐皮肤（src: button-styles.ts:492-731 get3DCardStyle）：
+  //   original 卡面纯白（:585 '#ffffff'），**不是** retro-3d 的浅金渐变。
+  //   旧实现在所有皮肤下都画金渐变 → 此处按 1:1 语义分皮肤断言。
   svc.init(theme::SkinId::Original, theme::ThemeMode::Light);
   scene::ProfileImportCard card;
   card.layout_tree({0, 0, 240, 110});
@@ -208,18 +211,24 @@ UT_TEST(t15_import_card_pixel) {
   rt().clear({1, 1, 1, 1});
   card.paint_all(rt());
   rt().end_frame();
-  // 卡片底 = get3DCardStyle('default') 135° 4 停靠渐变
-  // （src: button-styles.ts:538 light #FFFDE7→#FFF9C4→#FFF59D→#FFE082）
   // 取标题行与 URL 输入框之间的卡面（y=21），避开输入框深色底与文字
   Px p = pixel(120, 21);
-  UT_CHECK(p.r > 240 && p.g > 200 && p.b < 245);  // 浅金渐变卡
+  UT_CHECK(p.r > 245 && p.g > 245 && p.b > 245);  // original 纯白卡面
   // 标题 "导入订阅" 深色文本存在
   int dark = 0;
   for (int y = 2; y < 20; ++y)
     for (int x = 4; x < 120; ++x)
       if (pixel(x, y).r < 120) ++dark;
   UT_CHECK(dark > 3);
+  // 切到 retro-3d：卡面必须是浅金渐变（:538 #FFFDE7→#FFF9C4→#FFF59D→#FFE082）
   svc.init(theme::SkinId::Retro3d, theme::ThemeMode::Light);
+  card.invalidate();
+  rt().begin_frame();
+  rt().clear({1, 1, 1, 1});
+  card.paint_all(rt());
+  rt().end_frame();
+  Px q = pixel(120, 21);
+  UT_CHECK(q.r > 240 && q.g > 200 && q.b < 245);  // retro-3d 浅金渐变卡
 }
 
 // ---------- G3 式对照：实机 profiles.yaml remote 条目（含 extra）落盘格式 ----------

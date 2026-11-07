@@ -10,6 +10,15 @@
 
 namespace clashwin::ui {
 
+namespace {
+// 未接主题时（themed_=false 且 gold_3d_=true）的 retro-3d 选中块渐变兜底。
+// src: button-styles.ts:1006-1007
+const GradientStop kRetroActiveGrad[6] = {
+    {0.00f, Color4f::hex(0xFFE082)}, {0.20f, Color4f::hex(0xFFD54F)},
+    {0.45f, Color4f::hex(0xFFC107)}, {0.70f, Color4f::hex(0xFFB300)},
+    {0.85f, Color4f::hex(0xD4AF37)}, {1.00f, Color4f::hex(0xB8860B)}};
+}  // namespace
+
 void Segmented::set_options(std::vector<std::wstring> opts, int sel) {
   options_ = std::move(opts);
   selected_ = sel;
@@ -127,6 +136,9 @@ void Segmented::on_paint(IRenderTarget& rt) {
   bool act_has_bevel = false, act_has_glow = false;
   Color4f act_bevel_dark{}, act_glow_color{};
   float act_bevel_dy = 0, act_glow_blur = 0;
+  const GradientStop* act_grad = nullptr;
+  int act_grad_count = 0;
+  float act_grad_angle = 135.0f;
   if (themed_) {
     // T12：ThemeService 查表（← get3DSegmented* 三函数）
     auto p = theme::ThemeService::instance().segmented_paint();
@@ -149,6 +161,10 @@ void Segmented::on_paint(IRenderTarget& rt) {
     act_has_glow = p.active_has_glow;
     act_glow_color = p.active_glow_color;
     act_glow_blur = p.active_glow_blur;
+    // ← :1006-1007 retro-3d 135° 六停金渐变（其余皮肤纯色）
+    act_grad = p.active_grad;
+    act_grad_count = p.active_grad_count;
+    act_grad_angle = p.active_grad_angle;
     if (p.container_radius > 0.01f) cont_radius = p.container_radius;
   }
   Brush bg{bg_c};
@@ -178,20 +194,21 @@ void Segmented::on_paint(IRenderTarget& rt) {
       const float inset = gold_3d_ ? 1.0f : 2.0f;
       RectF sr{seg.x + inset, seg.y + inset, seg.w - 2 * inset, seg.h - 2 * inset};
       if (gold_3d_) {
+        // src: button-styles.ts:1006-1007 135° 六停金渐变（retro-3d）
+        //   themed_ 时取查表（单一真源），未接主题时用本地兜底。
         act_radius = 3.0f;
-        // src: button-styles.ts:1006-1007 135° 六停金渐变
-        GradientStop g[6] = {{0.00f, Color4f::hex(0xFFE082)},
-                             {0.20f, Color4f::hex(0xFFD54F)},
-                             {0.45f, Color4f::hex(0xFFC107)},
-                             {0.70f, Color4f::hex(0xFFB300)},
-                             {0.85f, Color4f::hex(0xD4AF37)},
-                             {1.00f, Color4f::hex(0xB8860B)}};
-        rt.fill_round_rect_gradient_angle(sr, act_radius, g, 6, 135.0f);
+        const GradientStop* g =
+            act_grad_count > 0 ? act_grad : kRetroActiveGrad;
+        const int gc = act_grad_count > 0 ? act_grad_count : 6;
+        const float ga = act_grad_count > 0 ? act_grad_angle : 135.0f;
+        rt.fill_round_rect_gradient_angle(sr, act_radius, g, gc, ga);
         // src: button-styles.ts:1021-1022 边框 light '#8A6D00' / dark '#634E00'
         rt.round_rect(sr, act_radius,
-                      Pen{theme::ThemeService::instance().is_light()
-                              ? Color4f::hex(0x8A6D00)
-                              : Color4f::hex(0x634E00),
+                      Pen{act_border.a > 0 ? act_border
+                                            : (theme::ThemeService::instance()
+                                                   .is_light()
+                                                   ? Color4f::hex(0x8A6D00)
+                                                   : Color4f::hex(0x634E00)),
                           1.0f},
                       nullptr);
         // ★ 选中块硬浮雕 + 金辉光（← :1009-1020，×depth / ×vibrancy）

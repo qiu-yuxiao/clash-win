@@ -1645,7 +1645,24 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       // 捕获：Down 后移出窗口仍能收到 Move/Up（开关拖动 thumb 跟随）
       if (down) SetCapture(hwnd_);
       else if (up && GetCapture() == hwnd_) ReleaseCapture();
-      route_mouse_event(&root_, e);
+      Widget* hit_w = route_mouse_event(&root_, e);
+      // 【DIAG】鼠标命中诊断（Down/Up）：打印事件坐标与命中控件的全局矩形。
+      //   用途：脚本化截图/自动化点击若「点了没反应」，靠这条日志判断是
+      //   消息没送达、坐标换算错、还是命中被上层控件拦截。
+      if (e.type == MouseEventType::Down || e.type == MouseEventType::Up) {
+        std::string d = std::string("[MOUSEDBG] ") +
+                        (e.type == MouseEventType::Down ? "down" : "up") +
+                        " pos=(" + std::to_string(e.pos.x) + "," +
+                        std::to_string(e.pos.y) + ")";
+        if (hit_w) {
+          const RectF gb = hit_w->global_bounds();
+          d += " hit=(" + std::to_string(gb.x) + "," + std::to_string(gb.y) +
+               "," + std::to_string(gb.w) + "," + std::to_string(gb.h) + ")";
+        } else {
+          d += " hit=NONE";
+        }
+        CWLOG_DEBUG(d);
+      }
       // 悬停提示：命中控件（或父链）→ 500ms 后显示（src: tooltip_w.h:20-23）
       if (tooltip_host_ && e.type == MouseEventType::Move) {
         tooltip_host_->tick_now(now_ms());

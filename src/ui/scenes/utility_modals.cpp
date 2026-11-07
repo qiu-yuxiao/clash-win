@@ -1035,45 +1035,73 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
   rt.round_rect({card_rect_.x - 2, card_rect_.y - 1, card_rect_.w + 4, card_rect_.h + 5}, 9.0f,
                 {}, &shadow_b);
 
-  Brush card_bg{Color4f::hex(0xFFFFFF)};
-  rt.round_rect(card_rect_, 8.0f, {Color4f::hex(0xD0D0D0), 1.0f}, &card_bg);
+  // ★ 卡片底座走主题（theme-panel 查表，与 EditProfileModal 同构）：
+  //   src: layout-dialogs.tsx:556-594 Dialog paper className='theme-panel'
+  //   + index.scss:108-115（theme-panel 被强制为纯色面板基色）
+  //   此前写死 #FFFFFF 白底 + #1A1A1A 深字 → 暗色模式下是刺眼的白卡。
+  {
+    const auto& svc = ThemeService::instance();
+    const auto& pal = svc.palette();
+    const auto& vars = svc.vars();
+    const auto pp = svc.panel_paint();
+    if (pp.has_shadow)
+      draw_soft_shadow(rt, card_rect_, pp.radius, pp.shadow_color, pp.shadow_dy,
+                       pp.shadow_blur);
+    if (pp.has_glow)
+      draw_glow(rt, card_rect_, pp.radius, pp.glow_color, pp.glow_blur);
+    if (pp.grad_bg) {
+      rt.fill_round_rect_gradient_angle(card_rect_, pp.radius, pp.grad,
+                                        pp.grad_count, pp.grad_angle);
+    } else if (pp.bg.a > 0.001f) {
+      Brush b{pp.bg};
+      rt.round_rect(card_rect_, pp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &b);
+    }
+    if (pp.border != theme::PanelPaint::BorderKind::None) {
+      Pen border{pp.border_color, 1.34f};
+      rt.round_rect(card_rect_, pp.radius, border, nullptr);
+    }
 
   // 标题
   TextStyle title_ts;
   title_ts.size = 13.5f;
   title_ts.weight = static_cast<int>(Weight::Bold);
-  title_ts.color = Color4f::hex(0x1A1A1A);
+  title_ts.color = pal.primary_text;
   title_ts.align_v = AlignV::Center;
   // src: locales/zh/logs.json:3 「"title": "日志"」（logs.tsx:106 BasePage title）
   rt.draw_text(tr("logs.page.title"), {card_rect_.x + 18.0f, card_rect_.y + 8.0f, 200.0f, 24.0f},
                title_ts);
 
-  // 关闭 ✕
-  Color4f x_bg = hover_close_x_ ? Color4f::hex(0xEEEEEE) : Color4f::hex(0xFAFAFA);
+  // 关闭 ✕（MUI IconButton：hover = action.hover）
+  const Color4f action_hover =
+      svc.is_light() ? Color4f::hex(0x000000, 0.04f)
+                      : Color4f::hex(0xFFFFFF, 0.08f);
+  Color4f x_bg = hover_close_x_ ? action_hover : Color4f(0, 0, 0, 0);
   Brush xb{x_bg};
-  rt.round_rect(btn_close_x_rect_, 3.0f, {Color4f::hex(0xCCCCCC), 1.0f}, &xb);
+  rt.round_rect(btn_close_x_rect_, 3.0f, Pen{Color4f(0, 0, 0, 0), 0.0f}, &xb);
   TextStyle x_ts;
   x_ts.size = 11.5f;
-  x_ts.color = Color4f::hex(0x424242);
+  x_ts.color = pal.primary_text;
   x_ts.align_h = AlignH::Center;
   x_ts.align_v = AlignV::Center;
   rt.draw_text(L"✕", btn_close_x_rect_, x_ts);
 
   rt.fill_rect({card_rect_.x, card_rect_.y + 36.0f, card_rect_.w, 1.0f},
-               Brush{Color4f::hex(0xEEEEEE)});
+               Brush{vars.theme_border});
 
-  // 工具栏按钮
+  // 工具栏按钮（active = warning 主色；hover = action.hover）
   // F-D01：label 允许 locale 译文（std::wstring）与图标字面量（const wchar_t*）
+  const Color4f warn_c = svc.is_light() ? Color4f::hex(0xE65100)   // warning.dark
+                                        : Color4f::hex(0xFFD54F);  // warning.main
   auto draw_tool_btn = [&](const RectF& r, const std::wstring& label, bool hover,
                            bool active = false) {
-    Color4f bg = active ? Color4f::hex(0xFFF3E0)
-                        : (hover ? Color4f::hex(0xEEEEEE) : Color4f::hex(0xF5F5F5));
+    Color4f bg = active ? Color4f(0, 0, 0, 0)
+                        : (hover ? action_hover : Color4f(0, 0, 0, 0));
     Brush b{bg};
-    Pen p{active ? Color4f::hex(0xE65100) : Color4f::hex(0xCCCCCC), 1.0f};
+    Pen p{active ? warn_c : Color4f(0, 0, 0, 0), active ? 1.0f : 0.0f};
     rt.round_rect(r, 4.0f, p, &b);
     TextStyle ts;
     ts.size = 10.5f;
-    ts.color = active ? Color4f::hex(0xE65100) : Color4f::hex(0x333333);
+    ts.color = active ? warn_c : pal.primary_text;
     ts.align_h = AlignH::Center;
     ts.align_v = AlignV::Center;
     rt.draw_text(label, r, ts);
@@ -1088,7 +1116,7 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
   // 级别过滤显示
   TextStyle lvl_ts;
   lvl_ts.size = 10.0f;
-  lvl_ts.color = Color4f::hex(0x555555);
+  lvl_ts.color = pal.secondary_text;
   lvl_ts.align_v = AlignV::Center;
   // src: locales/zh/shared.json:137-141 级别取值「ALL/DEBUG/INFO/WARN/ERROR」（logs.tsx:179-191）
   std::wstring lvl_str;
@@ -1099,17 +1127,19 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
   else lvl_str = L"ERROR";
   rt.draw_text(lvl_str, seg_level_rect_, lvl_ts);
 
-  // 搜索框
-  Brush sb{Color4f::hex(0xFAFAFA)};
-  rt.round_rect(search_box_rect_, 4.0f, {Color4f::hex(0xCCCCCC), 1.0f}, &sb);
+  // 搜索框（走主题输入框变量 → 随皮肤/亮暗）
+  Brush sb{vars.theme_input_bg};
+  rt.round_rect(search_box_rect_, 4.0f, {vars.theme_input_border, 1.0f}, &sb);
   TextStyle search_ts;
   search_ts.size = 10.0f;
-  search_ts.color = search_query_.empty() ? Color4f::hex(0x9E9E9E) : Color4f::hex(0x333333);
+  search_ts.color =
+      search_query_.empty() ? pal.secondary_text : pal.primary_text;
   search_ts.align_v = AlignV::Center;
   // src: locales/zh/shared.json:65 「"filter": "过滤条件"」（base-search-box.tsx:117）
   std::wstring s_text = search_query_.empty() ? tr("shared.placeholders.filter") : utf::utf8_to_utf16(search_query_);
   rt.draw_text(s_text, {search_box_rect_.x + 6.0f, search_box_rect_.y, search_box_rect_.w - 12.0f,
                         search_box_rect_.h}, search_ts);
+  }
 
   // src: components/log/log-item.tsx:8-14 日志项底色随页面（无终端暗底），
   //   分隔线 palette.divider；文字色为 text.primary/secondary + 级别色

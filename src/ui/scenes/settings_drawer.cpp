@@ -74,26 +74,32 @@ constexpr float kThemeH = 161.7f;
 bool is_light() { return ThemeService::instance().is_light(); }
 RectF inset_rect(const RectF& r, float d);
 
-// 关闭钮：金渐变 3D 底 + Fluent 图标。作为抽屉最后挂载的子件绘制，
+// 关闭钮：primary contained 按钮 + Fluent 图标。作为抽屉最后挂载的子件绘制，
 // 保证压在订阅卡/连接面板之上（此前底图由 SettingsDrawer::on_paint 画，
 // 被子卡覆盖，只剩卡片右侧约 10 DIP 可见可点）。
+// ★ 逐皮肤：Mini `_layout.tsx:1294` 用 get3DButtonStyle(theme,'contained','primary')
+//   （button-styles.ts:17-491，6 套皮肤各自一套），**不是**固定金色。
 class CloseButton : public IconW {
  public:
   CloseButton() = default;
   void on_paint(IRenderTarget& rt) override {
     RectF r{0, 0, bounds().w, bounds().h};
-    // src: _layout.tsx:1294 get3DButtonStyle(theme,'contained','primary') →
-    //   button-styles.ts:39 六停金渐变（与 pin 置顶态同源），非 upload 卡橙色分支
-    GradientStop cs[6] = {{0.00f, Color4f::hex(0xFFE082)},
-                          {0.20f, Color4f::hex(0xFFD54F)},
-                          {0.45f, Color4f::hex(0xFFC107)},
-                          {0.70f, Color4f::hex(0xFFB300)},
-                          {0.85f, Color4f::hex(0xD4AF37)},
-                          {1.00f, Color4f::hex(0xB8860B)}};
-    rt.fill_round_rect_gradient_angle(r, kCardR, cs, 6, 135.0f);
-    // src: button-styles.ts:52 primary contained 边框 #8A6D00(light)/#634E00(dark)，2px
-    Pen bevel{is_light() ? Color4f::hex(0x8A6D00) : Color4f::hex(0x634E00), 2.0f};
-    rt.round_rect(inset_rect(r, 1.0f), kCardR, bevel, nullptr);
+    // src: _layout.tsx:1294 get3DButtonStyle(theme,'contained','primary')
+    //   retro-3d :28-151 六停金渐变 135°（:39）+ 2px 边框（:84）
+    //   其余 5 套：单色主色 + 各自边框/圆角（:152/:220/:289/:350/:427）
+    const auto p = ThemeService::instance().button_paint("primary");
+    if (p.use_grad) {
+      rt.fill_round_rect_gradient_angle(r, p.radius, p.grad, p.grad_count,
+                                        p.grad_angle);
+    } else {
+      Brush b{p.fill};
+      rt.round_rect(r, p.radius, Pen{p.border, p.border_w}, &b);
+    }
+    if (p.border_w > 0.01f && p.border.a > 0.001f)
+      rt.round_rect(r, p.radius, Pen{p.border, p.border_w}, nullptr);
+    // src: button-styles.ts:35 primary contained textColor（retro #2C1F03，
+    //   其余皮肤见各段 color 字段）——图标色随按钮文字色。
+    color_ = p.text;
     IconW::on_paint(rt);
   }
 };
@@ -174,6 +180,18 @@ Color4f card_text() {
   return ThemeService::instance().card_paint("default").text_color;
 }
 
+// src: theme-settings-card.tsx:357 / :406
+//   color: isRetro3DDark ? '#2C1F03' : 'text.secondary'
+//   —— 只有 retro-3d **暗态**用不透明 #2C1F03（卡面深棕，次级文字需反色）；
+//      其余皮肤（含 retro-3d 亮态）一律用 palette.text.secondary，
+//      该值跨皮肤恒定：light '#3C3C4399' / dark '#EBEBF599'（pages/_theme.tsx:6/:22）。
+Color4f slider_value_color() {
+  if (ThemeService::instance().skin() == theme::SkinId::Retro3d && !is_light())
+    return Color4f::hex(0x2C1F03);
+  return is_light() ? Color4f::hex(0x3C3C43, 0.6f)
+                    : Color4f::hex(0xEBEBF5, 0.6f);
+}
+
 // src: use-custom-theme.ts:364-371 --divider-color .06 用于 CSS 变量；
 // 组件内用的是 MUI theme.palette.divider（light rgba(0,0,0,.12) /
 // dark rgba(255,255,255,.12)）——此处是组件边框，取后者。
@@ -194,26 +212,14 @@ bool system_is_dark() {
 }
 
 // ---------- get3DCardStyle('default') 渐变卡 ----------
-// src: button-styles.ts:534-565
+// src: button-styles.ts:492-731 get3DCardStyle(theme, cardType)
+//   ★ 逐皮肤分叉：retro-3d :508-567（135° 金渐变 default 分支 :534-541）、
+//     original :572-606（白/#1e1f29）、modern-flat :611-648（白/#1f2937）、
+//     frosted-glass :653-669（半透明白）、cyberpunk :674-711（#fff/#05070c）、
+//     monochrome :716-728（纯黑/纯白）。
+//   → 统一走 ThemeService::card_paint()，不再各写一份硬编码金色。
 void draw_card_bg(IRenderTarget& rt, const RectF& r) {
-  GradientStop stops[4];
-  if (is_light()) {
-    // src: button-styles.ts:538 light #FFFDE7@0 #FFF9C4@35 #FFF59D@70 #FFE082@100
-    stops[0] = {0.00f, Color4f::hex(0xFFFDE7)};
-    stops[1] = {0.35f, Color4f::hex(0xFFF9C4)};
-    stops[2] = {0.70f, Color4f::hex(0xFFF59D)};
-    stops[3] = {1.00f, Color4f::hex(0xFFE082)};
-  } else {
-    // src: button-styles.ts:539 dark #FFF59D@0 #FBC02D@35 #F57F17@70 #E65100@100
-    stops[0] = {0.00f, Color4f::hex(0xFFF59D)};
-    stops[1] = {0.35f, Color4f::hex(0xFBC02D)};
-    stops[2] = {0.70f, Color4f::hex(0xF57F17)};
-    stops[3] = {1.00f, Color4f::hex(0xE65100)};
-  }
-  rt.fill_round_rect_gradient_angle(r, kCardR, stops, 4, 135.0f);  // src: button-styles.ts:544
-  // 底缘 bevel 线 src: :540 bevelShadowDark light '#B8860B' / dark '#755500'
-  Brush bevel{is_light() ? Color4f::hex(0xB8860B) : Color4f::hex(0x755500)};
-  rt.fill_rect({r.x + kCardR, r.bottom() - 1, r.w - kCardR * 2, 1}, bevel);
+  draw_card(rt, r, card_default());
 }
 
 RectF inset_rect(const RectF& r, float d) {
@@ -589,22 +595,11 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   lb->set_i18n_text("settings.mini.debugLogs");
   logs_btn_ = lb.get();
   // src: button-styles.ts:73-81 get3DButtonStyle：radius 6 / 2px 边框 / bold 700
-  lb->themed_ = false;
-  lb->paint_params.radius = 6.0f;
-  lb->paint_params.border =
-      Pen{is_light() ? Color4f::hex(0x8A6D00) : Color4f::hex(0x634E00), 2.0f};
+  //   ★ 逐皮肤查表（6 套各自一套），不再硬编码 retro-3d 六停金渐变。
+  lb->themed_ = true;
+  lb->theme_color_type_ = "primary";
   lb->text_style.size = 13;  // src: :444 fontSize 13
   lb->text_style.weight = 700;  // src: button-styles.ts:78 'bold'
-  lb->paint_params.text_normal = Color4f::hex(0x2C1F03);  // src: :443
-  // src: button-styles.ts:39 135° 六停金渐变
-  lb->paint_params.grad[0] = {0.00f, Color4f::hex(0xFFE082)};
-  lb->paint_params.grad[1] = {0.20f, Color4f::hex(0xFFD54F)};
-  lb->paint_params.grad[2] = {0.45f, Color4f::hex(0xFFC107)};
-  lb->paint_params.grad[3] = {0.70f, Color4f::hex(0xFFB300)};
-  lb->paint_params.grad[4] = {0.85f, Color4f::hex(0xD4AF37)};
-  lb->paint_params.grad[5] = {1.00f, Color4f::hex(0xB8860B)};
-  lb->paint_params.grad_count = 6;
-  lb->paint_params.grad_angle = 135.0f;
   add_child(std::move(lb));
   auto mode = std::make_unique<Segmented>();
   mode_seg_ = mode.get();
@@ -647,8 +642,11 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   dv->style.font_family.clear();  // ★ §2.7 跟随皮肤（layout.scss:319）
   dv->style.align_v = AlignV::Center;
   dv->style.align_h = AlignH::Right;        // src: :335-338 space-between
-  // src: :357 'text.secondary'（retro 暗态 #2C1F03）
-  dv->style.color = is_light() ? Color4f::hex(0x3C3C43, 0.6f) : Color4f::hex(0x2C1F03);
+  // src: :357 isRetro3DDark ? '#2C1F03' : 'text.secondary'
+  //   ★ text.secondary 是 palette.text.secondary（跨皮肤恒定）：
+  //     light '#3C3C4399' / dark '#EBEBF599'（src: pages/_theme.tsx:6/:22）。
+  //     仅 retro-3d 暗态才用不透明 #2C1F03（卡面是深棕，secondary 会看不清）。
+  dv->style.color = slider_value_color();
   dv->set_text(SettingsDrawer::fmt_factor(0.0f));
   add_child(std::move(dv));
   auto vl = std::make_unique<Label>();
@@ -683,8 +681,8 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   vv->style.font_family.clear();  // ★ §2.7 跟随皮肤（layout.scss:319）
   vv->style.align_v = AlignV::Center;
   vv->style.align_h = AlignH::Right;        // src: :335-338 space-between
-  // src: :406 'text.secondary'（retro 暗态 #2C1F03）
-  vv->style.color = is_light() ? Color4f::hex(0x3C3C43, 0.6f) : Color4f::hex(0x2C1F03);
+  // src: :406 isRetro3DDark ? '#2C1F03' : 'text.secondary'（同上）
+  vv->style.color = slider_value_color();
   vv->set_text(SettingsDrawer::fmt_factor(0.0f));
   add_child(std::move(vv));
   // 页脚 src: theme-settings-card.tsx:468-494 11px text.secondary + 10px primary
@@ -810,17 +808,13 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
   // 底部行（_layout.tsx:1534-1720，@media max-height:830px 隐藏 ⇒ 显示条件 h≥831）
   //   左 0..80 = ? 帮助、80..177.5 = Language、177.5..640 = 6 个皮肤格（高 24）
   auto style_cell = [](Button* b, float font) {
-    b->themed_ = false;
+    b->themed_ = true;
+    b->theme_color_type_ = "primary";
     b->text_style.size = font;
     b->text_style.align_h = AlignH::Center;
     b->text_style.align_v = AlignV::Center;
-    // src: button-styles.ts primaryBtn3DStyle 金底 + 深金 1px 描边
-    b->paint_params.fill_normal = Color4f::hex(0xD4AF37);
-    b->paint_params.fill_hover = Color4f::hex(0xE5C158);
-    b->paint_params.fill_pressed = Color4f::hex(0xB8860B);
-    b->paint_params.text_normal = Color4f::hex(0x2C1F03);
-    b->paint_params.border = Pen{Color4f::hex(0x8C6D1F), 1};
-    b->paint_params.radius = 4;
+    // src: _layout.tsx:1596 primaryBtn3DStyle（= get3DButtonStyle contained
+    //   primary，button-styles.ts:17-491 逐皮肤分叉）→ 走 ThemeService 查表
     b->set_visible(false);
   };
 
@@ -837,18 +831,6 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
   style_cell(lang_btn_, 11.0f);  // src: _layout.tsx:1586 fontSize 11
   lang_btn_->text_style.weight = 700;  // src: :1587 fontWeight 'bold'
   lang_btn_->text_style.font_family.clear();  // src: :1588 var(--control-font-family)
-  lang_btn_->paint_params.radius = 6.0f;  // src: button-styles.ts:79
-  // src: button-styles.ts:36 borderColor #8A6D00/#634E00、:81 2px（!important 覆盖）
-  lang_btn_->paint_params.border =
-      Pen{is_light() ? Color4f::hex(0x8A6D00) : Color4f::hex(0x634E00), 2.0f};
-  // src: _layout.tsx:1596 primaryBtn3DStyle + button-styles.ts:39 六停金渐变
-  lang_btn_->paint_params.grad[0] = {0.00f, Color4f::hex(0xFFE082)};
-  lang_btn_->paint_params.grad[1] = {0.20f, Color4f::hex(0xFFD54F)};
-  lang_btn_->paint_params.grad[2] = {0.45f, Color4f::hex(0xFFC107)};
-  lang_btn_->paint_params.grad[3] = {0.70f, Color4f::hex(0xFFB300)};
-  lang_btn_->paint_params.grad[4] = {0.85f, Color4f::hex(0xD4AF37)};
-  lang_btn_->paint_params.grad[5] = {1.00f, Color4f::hex(0xB8860B)};
-  lang_btn_->paint_params.grad_count = 6;
   panel_->add_child(std::move(lb));
 
   auto lm = std::make_unique<ContextMenu>();
@@ -917,7 +899,8 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
   close_btn_ = close.get();
   close_btn_->set_icon("close");
   close_btn_->size_ = 20;
-  close_btn_->color_ = Color4f::hex(0x2C1F03);  // src: button-styles.ts:1105-1121 金底深棕图标
+  // 图标色由 CloseButton::on_paint 按 button_paint("primary").text 实时取
+  // （src: button-styles.ts:35 primary contained textColor，逐皮肤）
   close_btn_->on_click = [this]() { set_open(false); };
   close_btn_->set_z_order(9999);  // src: _layout.tsx:1286「zIndex: 9999」
   close_btn_->set_visible(false);
@@ -1089,16 +1072,16 @@ void SettingsDrawer::restyle_cards() {
     set(theme_card_->title_);
     set(theme_card_->depth_label_);
     set(theme_card_->vibrancy_label_);
-    // src: :357/:406 数值列 text.secondary（retro 暗态 #2C1F03）
-    const Color4f num = is_light() ? Color4f::hex(0x3C3C43, 0.6f)
-                                   : Color4f::hex(0x2C1F03);
+    // src: :357/:406 数值列 text.secondary（retro-3d 暗态 #2C1F03，其余恒定 secondary）
+    const Color4f num = slider_value_color();
     theme_card_->depth_value_->style.color = num;
     theme_card_->vibrancy_value_->style.color = num;
     if (theme_card_->copyright_)
-      // src: :471 text.secondary = #3C3C4399 / #EBEBF599
+      // src: :471 text.secondary = #3C3C4399 / #EBEBF599，
+      //   父级 opacity .75（:459）→ 复合 alpha .6×.75 = .45（与构造时一致）
       theme_card_->copyright_->style.color =
-          is_light() ? Color4f::hex(0x3C3C43, 0.6f)
-                     : Color4f::hex(0xEBEBF5, 0.6f);
+          is_light() ? Color4f::hex(0x3C3C43, 0.45f)
+                     : Color4f::hex(0xEBEBF5, 0.45f);
     restyle_seg(theme_card_->mode_seg_);
     // 滑块：重新查表（轨厚/滑块尺寸/渐变随皮肤变）
     if (theme_card_->depth_slider_) theme_card_->depth_slider_->apply_theme();

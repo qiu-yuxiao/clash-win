@@ -6,6 +6,7 @@
 #include <cmath>
 #include <ctime>
 
+#include "../card_draw.h"
 #include "../theme/theme.h"
 #include "util/log.h"
 #include "util/parse_traffic.h"
@@ -245,28 +246,15 @@ ProfileImportCard::ProfileImportCard(Widget* parent) : Widget(parent) {
   auto btn = std::make_unique<Button>();
   btn->set_i18n_text("settings.mini.importConfig");
   import_btn_ = btn.get();
-  btn->themed_ = false;
+  // src: button-styles.ts:17-491 get3DButtonStyle(theme,'contained','primary')
+  //   —— 6 套皮肤各自一套（retro-3d 六停金渐变 :39，其余单色主色），
+  //   改走 ThemeService 查表，切皮肤实时生效。
+  btn->themed_ = true;
+  btn->theme_color_type_ = "primary";
   btn->text_style.size = 12;
   btn->text_style.weight = 700;  // src: button-styles.ts:78 fontWeight 'bold'
   btn->text_style.align_h = AlignH::Center;
   btn->text_style.align_v = AlignV::Center;
-  // src: button-styles.ts:38-39 contained primary 135° 六停
-  //   #FFE082 0% / #FFD54F 20% / #FFC107 45% / #FFB300 70% / #D4AF37 85% / #B8860B 100%
-  btn->paint_params.grad[0] = {0.00f, Color4f::hex(0xFFE082)};
-  btn->paint_params.grad[1] = {0.20f, Color4f::hex(0xFFD54F)};
-  btn->paint_params.grad[2] = {0.45f, Color4f::hex(0xFFC107)};
-  btn->paint_params.grad[3] = {0.70f, Color4f::hex(0xFFB300)};
-  btn->paint_params.grad[4] = {0.85f, Color4f::hex(0xD4AF37)};
-  btn->paint_params.grad[5] = {1.00f, Color4f::hex(0xB8860B)};
-  btn->paint_params.grad_count = 6;
-  btn->paint_params.fill_disabled = Color4f::hex(0x000000, 0.12f);
-  btn->paint_params.text_normal = Color4f::hex(0x2C1F03);
-  // src: button-styles.ts:36 borderColor light #8A6D00 / dark #634E00；:81 2px
-  btn->paint_params.border =
-      Pen{ThemeService::instance().is_light() ? Color4f::hex(0x8A6D00)
-                                              : Color4f::hex(0x634E00),
-          2};
-  btn->paint_params.radius = 6.0f;                             // :549
   btn->on_click = [this] { do_import(); };
   add_child(std::move(btn));
 
@@ -392,34 +380,21 @@ void ProfileImportCard::on_arrange(const RectF& area) {
 }
 
 void ProfileImportCard::on_paint(IRenderTarget& rt) {
-  // 卡片底 = get3DCardStyle('default')（src: button-styles.ts:534-565）：
-  //   radius 6、135° 4 停靠渐变 light #FFFDE7@0/#FFF9C4@35/#FFF59D@70/#FFE082@100
-  //   （dark #FFF59D@0/#FBC02D@35/#F57F17@70/#E65100@100）、底缘 bevel 线
-  //   #B8860B(light)/#755500(dark)。
-  const bool light = ThemeService::instance().is_light();
-  GradientStop stops[4];
-  if (light) {
-    stops[0] = {0.00f, Color4f::hex(0xFFFDE7)};
-    stops[1] = {0.35f, Color4f::hex(0xFFF9C4)};
-    stops[2] = {0.70f, Color4f::hex(0xFFF59D)};
-    stops[3] = {1.00f, Color4f::hex(0xFFE082)};
-  } else {
-    stops[0] = {0.00f, Color4f::hex(0xFFF59D)};
-    stops[1] = {0.35f, Color4f::hex(0xFBC02D)};
-    stops[2] = {0.70f, Color4f::hex(0xF57F17)};
-    stops[3] = {1.00f, Color4f::hex(0xE65100)};
-  }
+  // 卡片底 = get3DCardStyle('default')（src: button-styles.ts:492-731）：
+  //   ★ 6 套皮肤逐皮肤分叉 —— retro-3d :534-541（135° 4 停金渐变）、
+  //     original :572-606（白/#1e1f29）、modern-flat :611-648（白/#1f2937）、
+  //     frosted-glass :653-669（半透明白）、cyberpunk :674-711（#fff/#05070c）、
+  //     monochrome :716-728（纯黑/纯白）。
+  //   统一走 ThemeService::card_paint()，不再各写一份硬编码金色。
   RectF r{0, 0, bounds().w, bounds().h};
-  // src: button-styles.ts:538-540 135°
-  rt.fill_round_rect_gradient_angle(r, 6.0f, stops, 4, 135.0f);
-  // src: button-styles.ts:540 bevelShadowDark
-  Brush bevel{light ? Color4f::hex(0xB8860B) : Color4f::hex(0x755500)};
-  rt.fill_rect({6.0f, r.h - 1.0f, r.w - 12.0f, 1.0f}, bevel);
-  // 标题色：retro-3d 暗色 #2C1F03，其余 inherit → text.primary（src: :121）
-  const bool retro_dark =
-      ThemeService::instance().skin() == theme::SkinId::Retro3d && !light;
-  title_->style.color = title_color_.value_or(
-      retro_dark ? Color4f::hex(0x2C1F03) : ThemeService::instance().text_primary());
+  draw_card(rt, r, card_default());
+  // 标题色：src: profile-import-card.tsx:121
+  //   color: isRetro3DDark ? '#2C1F03' : 'inherit'
+  //   'inherit' = 父级卡面的 color = get3DCardStyle(theme,'default').color
+  //   → 即 card_paint("default").text_color（cyberpunk 暗态 #00f0ff、
+  //     monochrome 纯黑/纯白，都不是 text.primary）。
+  title_->style.color =
+      title_color_.value_or(card_default().text_color);
 }
 
 }  // namespace clashwin::ui::scene

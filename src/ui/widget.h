@@ -113,6 +113,10 @@ class Widget {
   // 全局坐标 → 最深可见启用 widget（可为子）；未命中返回 nullptr
   virtual Widget* hit_test(PointF global);
   // 矩形命中默认实现（local 为相对自身原点的坐标）；圆角/异形可重载
+  // ★ 铺满型容器（整页浮层 / 通知层 / 菜单层）必须覆写本函数：
+  //   命中测试的兜底是「自身矩形命中即返回自身」，铺满容器会截断整条命中链，
+  //   使下层控件收不到鼠标事件。惯例：`return open_ && Widget::hit_self(local);`
+  //   （对照 src/ui/snackbar_w.h / context_menu.h / utility_modals.h 等）。
   virtual bool hit_self(PointF local) const {
     return local.x >= 0 && local.y >= 0 && local.x < bounds_.w &&
            local.y < bounds_.h;

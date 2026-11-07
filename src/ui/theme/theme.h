@@ -61,6 +61,12 @@ struct SegmentedPaint {
   // 容器圆角（← :954 original calc(4px * val1)）；0 = 用控件自身 radius_
   float container_radius = 0.0f;
 
+  // 选中块渐变（← :1005 retro-3d 'linear-gradient(135deg, #FFE082 0%, …)'）；
+  // grad_count=0 → 用纯色 active_bg（其余 5 套皮肤）
+  GradientStop active_grad[6];
+  int active_grad_count = 0;
+  float active_grad_angle = 135.0f;
+
   // 容器 inset 内凹阴影（← :934-938 retro-3d inset 0 2.5d 4.5d / 0 3d 5d）
   bool container_inset = false;
   Color4f container_inset_color;
@@ -175,6 +181,10 @@ struct CardPaint {
   Color4f glow_color;
   float glow_blur = 0.0f;
   Color4f text_color;  // 卡面文字色（各皮肤不同）
+  // 底缘 1px 实线（← retro-3d 专属：boxShadow 首层 '0 1px 0 0 ${bevelShadowDark}'
+  //   ，light #B8860B / dark #755500；其余 5 套皮肤的 boxShadow 无此层）
+  bool has_bottom_bevel = false;
+  Color4f bottom_bevel_color;
   bool pulse = false;
   Color4f pulse_from, pulse_to;
   float pulse_period_s = 2.5f;

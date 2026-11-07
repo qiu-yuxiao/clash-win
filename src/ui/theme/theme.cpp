@@ -499,6 +499,15 @@ SegmentedPaint ThemeService::segmented_paint() const {
       p.active_border = light ? Color4f::hex(0x8A6D00) : Color4f::hex(0x634E00);
       p.active_text = Color4f::hex(0x2C1F03);  // ← ActiveTextColor retro
       p.active_radius = 3;
+      // ← :1006-1007 选中块 135° 六停金渐变
+      p.active_grad[0] = {0.00f, Color4f::hex(0xFFE082)};
+      p.active_grad[1] = {0.20f, Color4f::hex(0xFFD54F)};
+      p.active_grad[2] = {0.45f, Color4f::hex(0xFFC107)};
+      p.active_grad[3] = {0.70f, Color4f::hex(0xFFB300)};
+      p.active_grad[4] = {0.85f, Color4f::hex(0xD4AF37)};
+      p.active_grad[5] = {1.00f, Color4f::hex(0xB8860B)};
+      p.active_grad_count = 6;
+      p.active_grad_angle = 135.0f;
       // ← :934-938 容器 boxShadow：inset 0 2.5d 4.5d α.2(亮) / 0 3d 5d α.7(暗)
       //   + 0 1px 0 rgba(255,255,255,.8|.08)
       p.container_inset = true;
@@ -1384,6 +1393,9 @@ CardPaint ThemeService::card_paint(const char* card_type) const {
       p.shadow_color = bevel;  // CSS 是 0 1/2/3px 硬边 bevel，此处近似为贴边实影
       p.shadow_dy = 3.0f * d;
       p.shadow_blur = 2.0f * d;
+      // ← :556/:561 boxShadow 首层 '0 1px 0 0 ${bevelShadowDark}' = 底缘 1px 实线
+      p.has_bottom_bevel = true;
+      p.bottom_bevel_color = bevel;
       if (is_primary || is_upload || is_download) {
         p.has_glow = true;    // 这三类额外带金色 glow（:543-546）
         p.glow_color = Color4f::hex(0xFFC107, 0.20f * v);
