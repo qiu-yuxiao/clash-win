@@ -64,8 +64,8 @@ UT_TEST(t17_left_column_layout_pixels) {
   drawer.set_open(true);
   // 卡宽 = 240 - pr 8 - borderRight 1 = 231（src: _layout.tsx:1428-1436）
   UT_CHECK(near_f(drawer.profile_card()->bounds().w, 231));
-  // 面板 4px double 边框占 4 DIP，padding 12 从边框内侧起算 → 12+4=16
-  UT_CHECK(near_f(drawer.profile_card()->bounds().x, 16));
+  // D12: 窄窗单列居中对齐：(271 - 231) / 2 = 20；y 仍为 12+4=16
+  UT_CHECK(near_f(drawer.profile_card()->bounds().x, 20));
   UT_CHECK(near_f(drawer.profile_card()->bounds().y, 16));
   rt().begin_frame();
   rt().clear({1, 1, 1, 1});

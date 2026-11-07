@@ -269,7 +269,7 @@ class MainWindow : public app::ILifecycleWindow {
   std::string pending_client_sha256_;
   std::string pending_client_signature_;
   std::unique_ptr<mihomo::WsManager> ws_;  // T14：traffic/connections WS
-  uint64_t ws_sub_traffic_ = 0, ws_sub_conn_ = 0;
+  uint64_t ws_sub_traffic_ = 0, ws_sub_conn_ = 0, ws_sub_logs_ = 0;
   uint64_t theme_sub_ = 0;  // ThemeService 热切换订阅（切皮肤/亮暗 → 全窗重绘）
   int64_t aurora_tick_ms_ = 0;  // 极光动画自续帧节流（10fps；src: layout.scss:23）
 

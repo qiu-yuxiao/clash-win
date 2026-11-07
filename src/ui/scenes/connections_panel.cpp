@@ -8,6 +8,7 @@
 #include "events/event_bus.h"
 #include "ui/icon_w.h"
 #include "ui/theme/theme.h"
+#include "ui/soft_shadow.h"
 #include "util/utf.h"
 #include "ui/i18n_text.h"  // F-D01
 
@@ -185,21 +186,23 @@ ConnectionsPanel::ConnectionsPanel(Widget* parent) : Widget(parent) {
   };
   add_child(std::move(search));
 
-  // 2. 断开全部按钮
+  // 2. 断开全部按钮（src: connections-panel.tsx:193 get3DButtonStyle contained primary）
   auto btn_disc = std::make_unique<Button>();
   btn_disc->set_i18n_text("settings.mini.connectionsDisconnectAll");
   btn_disconnect_all_ = btn_disc.get();
   btn_disconnect_all_->themed_ = true;
+  btn_disconnect_all_->theme_color_type_ = "primary";
   btn_disconnect_all_->on_click = [this] {
     if (on_close_all) on_close_all();
   };
   add_child(std::move(btn_disc));
 
-  // 3. 清空历史按钮
+  // 3. 清空历史按钮（src: connections-panel.tsx:210 get3DButtonStyle contained primary）
   auto btn_clr = std::make_unique<Button>();
   btn_clr->set_i18n_text("settings.mini.connectionsClearHistory");
   btn_clear_history_ = btn_clr.get();
   btn_clear_history_->themed_ = true;
+  btn_clear_history_->theme_color_type_ = "primary";
   btn_clear_history_->on_click = [this] {
     if (on_clear_history) on_clear_history();
     refresh_visible();
@@ -471,9 +474,17 @@ void ConnectionsPanel::on_arrange(const RectF& area) {
   set_bounds(area);
 
   // 1. 顶部 Header 行 (高 22px): Subtitle + 3D Toggle
+  // src: connections-panel.tsx:65-73 justifyContent: 'flex-start', gap: 1 (8px)
+  TextStyle title_ts;
+  title_ts.size = 11.0f;
+  title_ts.weight = static_cast<int>(Weight::Bold);
+  float title_w = 145.0f;
+  if (auto* te = text_engine()) {
+    title_w = te->measure_text(tr("settings.mini.pathControl"), title_ts, 0).w;
+  }
   float seg_w = 140.0f;
   float seg_h = 18.0f;
-  float seg_x = area.w - seg_w - 4.0f;
+  float seg_x = 4.0f + title_w + 8.0f;
   tab_active_rect_ = {seg_x, 2.0f, seg_w / 2.0f, seg_h};
   tab_closed_rect_ = {seg_x + seg_w / 2.0f, 2.0f, seg_w / 2.0f, seg_h};
 
@@ -522,23 +533,60 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   title_ts.weight = static_cast<int>(Weight::Bold);
   title_ts.color = pal.primary_text;
   title_ts.align_v = AlignV::Center;
-  rt.draw_text(tr("settings.mini.pathControl"), {4.0f, 2.0f, bounds().w - 150.0f, 18.0f}, title_ts);
+  float title_w = tab_active_rect_.x - 4.0f - 8.0f;
+  if (title_w <= 0.0f) title_w = 145.0f;
+  rt.draw_text(tr("settings.mini.pathControl"), {4.0f, 2.0f, title_w, 18.0f}, title_ts);
 
-  // 3D Toggle 外框 (140×18px)
+  // 3D Toggle (140×18px)
+  // src: connections-panel.tsx:75-100 get3DSegmentedContainerStyle(theme) + get3DSegmentedActiveStyle(theme)
   float seg_x = tab_active_rect_.x;
   float seg_w = 140.0f;
   float seg_h = 18.0f;
-  // src: connections-panel.tsx:89 bgcolor: 'action.hover'
-  //   → node_modules/@mui/material/styles/createPalette.js:46 light rgba(0,0,0,.04)
-  //     / :78 dark rgba(255,255,255,.08)
-  Brush seg_bg{theme.is_light() ? Color4f::hex(0x000000, 0.04f)
-                                : Color4f::hex(0xFFFFFF, 0.08f)};
-  rt.round_rect({seg_x, 2.0f, seg_w, seg_h}, 4.0f, {}, &seg_bg);
+  const auto sp = theme.segmented_paint();
+  const float cont_radius = sp.container_radius > 0.01f ? sp.container_radius : 4.0f;
+  RectF cont_r{seg_x, 2.0f, seg_w, seg_h};
+  if (sp.container_inset) {
+    draw_top_inset_shadow(rt, cont_r, cont_radius, sp.container_inset_color,
+                          sp.container_inset_dy, sp.container_inset_blur);
+  }
+  Brush cont_bg{sp.container_bg};
+  rt.round_rect(cont_r, cont_radius, Pen{sp.container_border, 1.0f}, &cont_bg);
+  if (sp.container_top_hi.a > 0.004f) {
+    rt.draw_line({cont_r.x + cont_radius, cont_r.y + 0.5f},
+                 {cont_r.right() - cont_radius, cont_r.y + 0.5f},
+                 Pen{sp.container_top_hi, 1.0f});
+  }
 
   // 滑块指示背景
-  RectF active_slide = (tab_ == Tab::Active) ? tab_active_rect_ : tab_closed_rect_;
-  Brush slide_bg{vars.theme_panel_bg};
-  rt.round_rect(active_slide, 3.5f, {}, &slide_bg);
+  RectF active_seg = (tab_ == Tab::Active) ? tab_active_rect_ : tab_closed_rect_;
+  RectF pill{active_seg.x + 1.0f, active_seg.y + 1.0f, active_seg.w - 2.0f, active_seg.h - 2.0f};
+  const bool has_border = sp.active_border.a > 0.001f;
+  if (sp.active_grad_count > 0) {
+    rt.fill_round_rect_gradient_angle(pill, sp.active_radius,
+                                      sp.active_grad, sp.active_grad_count,
+                                      sp.active_grad_angle);
+    if (has_border) {
+      rt.round_rect(pill, sp.active_radius, Pen{sp.active_border, 1.0f}, nullptr);
+    }
+  } else {
+    Brush sel_bg{sp.active_bg};
+    rt.round_rect(pill, sp.active_radius,
+                  Pen{sp.active_border, has_border ? 1.0f : 0.0f}, &sel_bg);
+  }
+  if (sp.active_has_bevel && sp.active_bevel_dark.a > 0.004f) {
+    const float by = sp.active_bevel_dy;
+    rt.draw_line({pill.x + sp.active_radius, pill.bottom() + 0.5f},
+                 {pill.right() - sp.active_radius, pill.bottom() + 0.5f},
+                 Pen{sp.active_bevel_dark, 1.0f});
+    if (by > 0.5f) {
+      rt.draw_line({pill.x + sp.active_radius, pill.bottom() + by + 0.5f},
+                   {pill.right() - sp.active_radius, pill.bottom() + by + 0.5f},
+                   Pen{sp.active_bevel_dark, 1.0f});
+    }
+  }
+  if (sp.active_has_glow && sp.active_glow_color.a > 0.004f) {
+    draw_glow(rt, pill, sp.active_radius, sp.active_glow_color, sp.active_glow_blur);
+  }
 
   size_t act_num = data_ ? data_->active().size() : 0;
   size_t cls_num = data_ ? data_->closed().size() : 0;
@@ -551,7 +599,7 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   TextStyle tab_act_ts;
   tab_act_ts.size = 10.5f;
   tab_act_ts.weight = static_cast<int>(Weight::Bold);
-  tab_act_ts.color = (tab_ == Tab::Active) ? pal.primary_text : pal.secondary_text;
+  tab_act_ts.color = (tab_ == Tab::Active) ? sp.active_text : pal.secondary_text;
   tab_act_ts.align_h = AlignH::Center;
   tab_act_ts.align_v = AlignV::Center;
   rt.draw_text(act_text, tab_active_rect_, tab_act_ts);
@@ -559,7 +607,7 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   TextStyle tab_cls_ts;
   tab_cls_ts.size = 10.5f;
   tab_cls_ts.weight = static_cast<int>(Weight::Bold);
-  tab_cls_ts.color = (tab_ == Tab::Closed) ? pal.primary_text : pal.secondary_text;
+  tab_cls_ts.color = (tab_ == Tab::Closed) ? sp.active_text : pal.secondary_text;
   tab_cls_ts.align_h = AlignH::Center;
   tab_cls_ts.align_v = AlignV::Center;
   rt.draw_text(cls_text, tab_closed_rect_, tab_cls_ts);

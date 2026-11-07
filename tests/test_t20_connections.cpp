@@ -487,11 +487,11 @@ UT_TEST(t20_settings_drawer_two_column_responsive_split) {
   SettingsDrawer drawer;
   drawer.set_open(true);
 
-  // 1. 窄窗形态 (<= 285px): 单列呈现，ConnectionsPanel 隐藏
+  // 1. 窄窗形态 (<= 285px): 单列呈现，ConnectionsPanel 隐藏；D12 居中 (271-231)/2 = 20
   drawer.layout_tree({0, 0, 271, 680});
   UT_CHECK_EQ(drawer.panel()->bounds().w, 271.0f);  // 全窗覆盖层
   UT_CHECK_EQ(drawer.panel()->bounds().h, 680.0f);
-  UT_CHECK_EQ(drawer.profile_card()->bounds().x, 16.0f);  // 边框 4 + padding 12
+  UT_CHECK_EQ(drawer.profile_card()->bounds().x, 20.0f);  // D12: (271 - 231) / 2 = 20
   UT_CHECK_EQ(drawer.profile_card()->bounds().w, 231.0f);  // 240 - pr 8 - border 1
   UT_CHECK(drawer.conn_panel() != nullptr);
   UT_CHECK(!drawer.conn_panel()->visible());
@@ -499,6 +499,7 @@ UT_TEST(t20_settings_drawer_two_column_responsive_split) {
   // 2. 宽窗形态 (> 285px): 两列并排，左列固定 240px，右列自适应
   drawer.layout_tree({0, 0, 640, 680});
   UT_CHECK_EQ(drawer.panel()->bounds().w, 640.0f);
+  UT_CHECK_EQ(drawer.profile_card()->bounds().x, 16.0f);  // 宽窗并排靠左: 边框 4 + padding 12 = 16
   UT_CHECK_EQ(drawer.profile_card()->bounds().w, 231.0f);
   UT_CHECK(drawer.conn_panel()->visible());
   RectF cp_bounds = drawer.conn_panel()->bounds();

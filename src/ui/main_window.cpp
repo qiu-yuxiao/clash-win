@@ -881,7 +881,13 @@ void MainWindow::build_scene() {
           nlohmann::json args = nlohmann::json::object({{"url", url}});
           if (!name.empty()) args["name"] = name;
           auto r = cmd::CommandService::instance().invoke("import_profile", args);
-          return r.is_ok();
+          if (r.is_ok()) {
+            events::NoticeService::instance().push(
+                "success", tr8("shared.feedback.notifications.importSuccess"));
+            return true;
+          }
+          events::NoticeService::instance().push("error", r.error().message);
+          return false;
         };
     settings_drawer_->on_select_profile = [](const std::string& uid) {
       auto r = cmd::CommandService::instance().invoke(
@@ -933,18 +939,25 @@ void MainWindow::build_scene() {
       }
       opt["update_interval"] = interval;
       nlohmann::json patch = {{"name", name}, {"url", url}, {"option", opt}};
-      cmd::CommandService::instance().invoke(
+      auto r = cmd::CommandService::instance().invoke(
           "patch_profile",
           nlohmann::json::object({{"index", uid}, {"profile", patch}}));
-      return true;
+      if (r.is_ok()) {
+        events::NoticeService::instance().push(
+            "success", tr8("layout.notices.profileSaved"));
+        return true;
+      }
+      events::NoticeService::instance().push("error", r.error().message);
+      return false;
     };
     settings_drawer_->on_open_logs = [this] {
       // ← Mini 调试日志：应用内 LogViewerModal（pages/logs.tsx），
-      //   不再 ShellExecute 打开目录。首开时回填 logs/clashwin.log 末尾。
+      //   首开时回填 logs/clashwin.log 末尾并抓取 Mihomo 内核日志与实时 WS 流
       if (!log_viewer_) return;
       if (log_viewer_->log_count() == 0 && log_viewer_->incoming_count() == 0) {
-        std::wstring path =
-            clashwin::util::dirs::app_home_dir() + L"\\logs\\clashwin.log";
+        std::wstring p1 = clashwin::util::dirs::exe_dir() + L"\\logs\\clashwin.log";
+        std::wstring p2 = clashwin::util::dirs::app_logs_dir() + L"\\clashwin.log";
+        std::wstring path = fs::exists(p1) ? p1 : p2;
         std::ifstream in(utf::utf16_to_utf8(path));
         if (in) {
           std::deque<std::string> tail;
@@ -955,7 +968,34 @@ void MainWindow::build_scene() {
           }
           for (const auto& l : tail) log_viewer_->push_log_line(l);
         }
+        // 拉取 Mihomo 内核运行日志（src: cmd_clash.cpp:285 get_clash_logs）
+        auto kr = cmd::CommandService::instance().invoke("get_clash_logs", {});
+        if (kr.is_ok() && kr.value().is_array()) {
+          for (const auto& item : kr.value()) {
+            if (item.is_string()) {
+              log_viewer_->push_log_line(item.get<std::string>());
+            }
+          }
+        }
       }
+      // 订阅实时内核日志流（src: use-log-data.ts:25-45 / ws_manager.h:44）
+      if (ws_sub_logs_ == 0 && ws_) {
+        ws_sub_logs_ = ws_->subscribe_logs(
+            mihomo::LogLevel::Info, [this](const std::string& payload) {
+              UiPostbox::instance().post([this, payload] {
+                if (!log_viewer_) return;
+                try {
+                  auto j = nlohmann::json::parse(payload);
+                  std::string type = j.value("type", "info");
+                  std::string msg = j.value("payload", payload);
+                  log_viewer_->push_log(type, msg);
+                } catch (...) {
+                  log_viewer_->push_log_line(payload);
+                }
+              });
+            });
+      }
+      log_viewer_->flush_incoming();
       log_viewer_->open();
     };
     // 日志弹窗装载（覆盖抽屉，与 Mini 的独立 logs modal 一致）
@@ -963,6 +1003,13 @@ void MainWindow::build_scene() {
       auto lv = std::make_unique<scene::LogViewerModal>();
       log_viewer_ = lv.get();
       lv->set_z_order(1001);
+      lv->on_dismiss = [this] {
+        if (ws_sub_logs_ != 0 && ws_) {
+          ws_->unsubscribe(ws_sub_logs_);
+          ws_sub_logs_ = 0;
+        }
+        root_.invalidate();
+      };
       root_.add_child(std::move(lv));
     }
     // 添加网址弹窗（Mini：AddUrlDialog 挂在抽屉右列，_layout.tsx:1485-1488）

@@ -12,7 +12,7 @@
 #include <fstream>
 #include <sstream>
 
-#include "../../cmd/cmd_support.h"
+#include "cmd/command_service.h"
 #include "../card_draw.h"
 #include "../soft_shadow.h"
 #include "../theme/theme.h"
@@ -738,8 +738,8 @@ void ThemeCard::on_arrange(const RectF& area) {
   const float logs_w = lb_sz.w + 8.0f;
   logs_btn_->layout_tree({(area.w - logs_w) / 2.0f, row1_y + row_h * 2 + 8,
                           logs_w, 24.0f});
-  // 页脚：pt 1=8 + caption 11px×1.66=18.3 + 10px×1.66=16.6（src: :459-494）
-  const float foot_y = area.h - pad - 18.3f - 16.6f;
+  // 页脚：src: theme-settings-card.tsx:452-466 mt:auto pt:1=8 紧随调试日志按钮下方 8 DIP，消除窗口高度依赖
+  const float foot_y = logs_btn_->bounds().bottom() + 8.0f;
   copyright_->layout_tree({pad, foot_y, area.w - pad * 2, 18.3f});
   email_->layout_tree({pad, foot_y + 18.3f, area.w - pad * 2, 16.6f});
 }
@@ -1141,16 +1141,16 @@ void SettingsDrawer::on_arrange(const RectF& area) {
   const float bottom_inset = area.w <= 285.0f ? 100.0f : 135.0f;
   const bool tall = (area.h + 30.0f + bottom_inset) > 830.0f;
   bottom_row_visible_ = tall && open_;
-  // 【DRAWERFIX】面板 4px double 边框占 4 DIP，内边距 12 从边框内侧起算
-  //   （_layout.tsx:1420 padding + get3DCardStyle border:4px double）。旧代码
-  //   从面板外沿直接加 12，导致整列比 Mini 高 6px、左 6px（27.33 DIP 偏移）。
-  const float col_x = kPad + kPanelBorder, col_y = kPad + kPanelBorder;
+  const bool side = area.w > 285.0f;
+  // 豁免: Mini 无对应物 — 用户明确预先裁决单列模式水平居中设置卡片（出处: 无）
+  const float col_x = side ? (kPad + kPanelBorder) : std::max(kPad, (area.w - kCardW) / 2.0f);
+  const float col_y = kPad + kPanelBorder;
   const float col_h = area.h - kPanelBorder * 2 - kPad * 2 - (tall ? 30.0f : 0.0f);
   left_rect_ = {col_x, col_y, kLeftW, col_h};
   float y = col_y;
   // 订阅卡为固定内容高（源码 flexShrink:0 + 列表 maxHeight 110，
   //   profile-import-card.tsx:98,196），不吸收剩余高度
-  float profile_h = profile_card_ ? profile_card_->preferred_height() : 105.0f;
+  float profile_h = profile_card_ ? profile_card_->preferred_height() : 124.4f;
   // 【DRAWERFIX】源码左列 flexShrink:0（profile-import-card.tsx:98 /
   //   theme-settings-card.tsx:139），订阅卡**不压缩**：超出列底时按 Mini 的
   //   overflow:hidden 语义裁掉末尾的卡，而不是把订阅卡压扁。
@@ -1210,7 +1210,6 @@ void SettingsDrawer::on_arrange(const RectF& area) {
       basic_rect_.y, theme_rect_.y));
 
   if (conn_panel_) {
-    bool side = area.w > 285.0f;
     conn_panel_->set_visible(open_ && side);
     // src: _layout.tsx:1519-1533 右列 flex:1，占 padding 12 + gap 12 之后
     if (side)
@@ -1493,6 +1492,23 @@ void SettingsDrawer::wire_callbacks() {
   takeover_card_->seg_->apply = [this](const std::string& mode) {
     if (on_takeover_change) return on_takeover_change(mode);
     bool sys = mode == "SYS", tun = mode == "TUN";
+    if (tun) {
+      // src: _layout.tsx:1085-1095 isTunModeAvailable = isAdmin || isServiceOk
+      auto& svc = cmd::CommandService::instance();
+      bool is_admin = false;
+      auto ar = svc.invoke("app_is_admin");
+      if (ar.is_ok() && ar.value().is_boolean())
+        is_admin = ar.value().get<bool>();
+      bool service_ok = svc.invoke("is_service_available").is_ok();
+      if (!(is_admin || service_ok)) {
+        auto inst = svc.invoke("install_service");
+        if (!inst.is_ok()) {
+          events::NoticeService::instance().push(
+              "error", tr8("layout.notices.tunServiceConfigFailed"));
+          return false;
+        }
+      }
+    }
     CWLOG_INFO("[TAKEOVER] apply mode=" + mode + " sys=" + (sys ? "1" : "0") +
                " tun=" + (tun ? "1" : "0") +
                " patch_verge=" + (on_patch_verge ? "set" : "NULL"));

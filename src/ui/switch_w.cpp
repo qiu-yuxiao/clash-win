@@ -33,8 +33,13 @@ SizeF SwitchW::on_measure(float max_w, float max_h) {
 void SwitchW::update_drag(float local_x) {
   // 旋钮可移动区间 = 轨道宽 - 旋钮直径 - 左右 margin（← base-switch.tsx thumb margin）
   const auto sp = theme::ThemeService::instance().switch_paint();
-  const float half = sp.thumb_d / 2.0f + sp.thumb_margin;
-  const float range = width_ - sp.thumb_d - sp.thumb_margin * 2.0f;
+  const float h = bounds().h > 0 ? bounds().h : sp.track_h;
+  const float w = bounds().w > 0 ? bounds().w : width_;
+  const float scale = h / 14.0f;
+  const float thumb_d = 14.0f * scale;
+  const float thumb_margin = sp.thumb_margin * scale;
+  const float half = thumb_d / 2.0f + thumb_margin;
+  const float range = w - thumb_d - thumb_margin * 2.0f;
   float t = range > 0 ? (local_x - half) / range : 0.0f;
   anim_ = t < 0 ? 0 : (t > 1 ? 1 : t);
   dragging_ = true;
@@ -98,6 +103,13 @@ void SwitchW::on_paint(IRenderTarget& rt) {
   const float w = bounds().w > 0 ? bounds().w : sp.track_w;
   const float h = bounds().h > 0 ? bounds().h : sp.track_h;
   const RectF track{0, 0, w, h};
+  // 依据 track 高度等比缩放旋钮直径、圆角和 bevel 阴影（基础 14 DIP，Mini basic settings scale 0.85 → 11.9 DIP）
+  // src: basic-settings-card.tsx:148 transform: 'scale(0.85)'
+  const float scale = h / 14.0f;
+  const float track_radius = h / 2.0f;
+  const float thumb_d = 14.0f * scale;
+  const float thumb_radius = thumb_d / 2.0f;
+  const float thumb_margin = sp.thumb_margin * scale;
   // MUI disabled：轨道/旋钮按 0.38 叠乘（MUI Switch `.Mui-disabled` 轨道
   //   opacity .38，thumb 同档）——src: MUI Switch disabled 语义。
   const float dis = enabled() ? 1.0f : 0.38f;
@@ -109,21 +121,21 @@ void SwitchW::on_paint(IRenderTarget& rt) {
   Brush off_b{off_bg};
   Color4f off_edge = sp.off_border;
   off_edge.a *= dis;
-  rt.round_rect(track, sp.track_radius, Pen{off_edge, sp.off_bw}, &off_b);
+  rt.round_rect(track, track_radius, Pen{off_edge, sp.off_bw}, &off_b);
   // 上缘内阴影（inset 0 dy blur）——"槽"的凹陷感
   if (sp.off_inset && a < 0.999f) {
     Color4f ic = sp.off_inset_color;
     ic.a *= (1.0f - a) * dis;
-    draw_top_inset_shadow(rt, track, sp.track_radius, ic, sp.off_inset_dy,
-                          sp.off_inset_blur);
+    draw_top_inset_shadow(rt, track, track_radius, ic, sp.off_inset_dy * scale,
+                          sp.off_inset_blur * scale);
   }
   // 底部 1px 高光线（0 1px 0 color）
   if (sp.off_bottom_hi && a < 0.999f) {
     Color4f hc = sp.off_bottom_hi_color;
     hc.a *= (1.0f - a) * dis;
-    const float half = std::min(sp.track_radius, w * 0.5f);
+    const float half = std::min(track_radius, w * 0.5f);
     rt.draw_line({half, h - 0.5f}, {w - half, h - 0.5f},
-                 Pen{hc, sp.off_bottom_hi_w});
+                 Pen{hc, sp.off_bottom_hi_w * scale});
   }
 
   // ---- 轨道：on 态 ----
@@ -135,38 +147,38 @@ void SwitchW::on_paint(IRenderTarget& rt) {
         st[i].color.a *= a * dis;
       }
       // 角度 180 = CSS to bottom；src: base-switch.tsx:99
-      rt.fill_round_rect_gradient_angle(track, sp.track_radius, st,
+      rt.fill_round_rect_gradient_angle(track, track_radius, st,
                                         sp.on_grad_n, 180.0f);
     } else {
       Color4f on = sp.on_bg;
       on.a *= a * dis;
       Brush on_b{on};
-      rt.round_rect(track, sp.track_radius, Pen{Color4f{0, 0, 0, 0}, 0.0f},
+      rt.round_rect(track, track_radius, Pen{Color4f{0, 0, 0, 0}, 0.0f},
                     &on_b);
     }
     if (sp.on_bw > 0.01f) {
       Color4f oe = sp.on_border;
       oe.a *= a * dis;
-      rt.round_rect(track, sp.track_radius, Pen{oe, sp.on_bw}, nullptr);
+      rt.round_rect(track, track_radius, Pen{oe, sp.on_bw}, nullptr);
     }
     // on 态槽的内阴影 + 底部高光（src: base-switch.tsx:60-79）
     if (sp.on_inset) {
       Color4f ic = sp.on_inset_color;
       ic.a *= a * dis;
-      draw_top_inset_shadow(rt, track, sp.track_radius, ic, sp.on_inset_dy,
-                            sp.on_inset_blur);
+      draw_top_inset_shadow(rt, track, track_radius, ic, sp.on_inset_dy * scale,
+                            sp.on_inset_blur * scale);
     }
     if (sp.on_bottom_hi) {
       Color4f hc = sp.on_bottom_hi_color;
       hc.a *= a * dis;
-      const float half = std::min(sp.track_radius, w * 0.5f);
+      const float half = std::min(track_radius, w * 0.5f);
       rt.draw_line({half, h - 0.5f}, {w - half, h - 0.5f},
-                   Pen{hc, sp.on_bottom_hi_w});
+                   Pen{hc, sp.on_bottom_hi_w * scale});
     }
     if (sp.on_glow) {
       Color4f g = sp.on_glow_color;
       g.a *= a * dis;
-      draw_glow(rt, track, sp.track_radius, g, sp.on_glow_blur);
+      draw_glow(rt, track, track_radius, g, sp.on_glow_blur * scale);
     }
   }
 
@@ -174,12 +186,12 @@ void SwitchW::on_paint(IRenderTarget& rt) {
   // ★ 悬停态（← Mini `&:hover .MuiSwitch-thumb`）：悬停整个开关即生效。
   const bool hover = thumb_hovered_ && sp.thumb_hover;
   const float tscale = hover ? sp.thumb_hover_scale : 1.0f;
-  const float td = sp.thumb_d * tscale;
-  const float t_radius = sp.thumb_radius * tscale;
-  const float tx = sp.thumb_margin + a * (w - sp.thumb_d - sp.thumb_margin * 2.0f);
+  const float td = thumb_d * tscale;
+  const float t_radius = thumb_radius * tscale;
+  const float tx = thumb_margin + a * (w - thumb_d - thumb_margin * 2.0f);
   // 缩放围绕旋钮中心
-  const float tcx = tx + sp.thumb_d / 2.0f;
-  const float tcy = (h - sp.thumb_d) / 2.0f + sp.thumb_d / 2.0f;
+  const float tcx = tx + thumb_d / 2.0f;
+  const float tcy = (h - thumb_d) / 2.0f + thumb_d / 2.0f;
   const float ty = tcy - td / 2.0f;
   const float tx0 = tcx - td / 2.0f;
   const RectF tr{tx0, ty, td, td};
@@ -190,9 +202,9 @@ void SwitchW::on_paint(IRenderTarget& rt) {
     Color4f sc = use_hs ? sp.thumb_hover_shadow_color : sp.thumb_shadow_color;
     sc.a *= dis;
     draw_soft_shadow(rt, tr, t_radius, sc,
-                     use_hs ? sp.thumb_hover_shadow_dy : sp.thumb_shadow_dy,
-                     use_hs ? sp.thumb_hover_shadow_blur
-                            : sp.thumb_shadow_blur);
+                     (use_hs ? sp.thumb_hover_shadow_dy : sp.thumb_shadow_dy) * scale,
+                     (use_hs ? sp.thumb_hover_shadow_blur
+                             : sp.thumb_shadow_blur) * scale);
   }
   const bool on_side = a > 0.5f;
   const GradientStop* gs = on_side ? sp.on_thumb_stops : sp.off_thumb_stops;
@@ -243,9 +255,9 @@ void SwitchW::on_paint(IRenderTarget& rt) {
                     : (on_side ? sp.on_thumb_inset_hi_color
                                : sp.off_thumb_inset_hi_color);
     c.a *= dis;
-    const float dy = use_hih ? sp.thumb_hover_inset_hi_dy
-                             : (on_side ? sp.on_thumb_inset_hi_dy
-                                        : sp.off_thumb_inset_hi_dy);
+    const float dy = (use_hih ? sp.thumb_hover_inset_hi_dy
+                              : (on_side ? sp.on_thumb_inset_hi_dy
+                                         : sp.off_thumb_inset_hi_dy)) * scale;
     const float half = std::min(t_radius, td * 0.5f);
     rt.draw_line({tr.x + half, tr.y + dy}, {tr.right() - half, tr.y + dy},
                  Pen{c, 1.0f});
@@ -257,9 +269,9 @@ void SwitchW::on_paint(IRenderTarget& rt) {
                     : (on_side ? sp.on_thumb_inset_dark_color
                                : sp.off_thumb_inset_dark_color);
     c.a *= dis;
-    const float dy = use_hdk ? sp.thumb_hover_inset_dark_dy
-                             : (on_side ? sp.on_thumb_inset_dark_dy
-                                        : sp.off_thumb_inset_dark_dy);
+    const float dy = (use_hdk ? sp.thumb_hover_inset_dark_dy
+                              : (on_side ? sp.on_thumb_inset_dark_dy
+                                         : sp.off_thumb_inset_dark_dy)) * scale;
     const float half = std::min(t_radius, td * 0.5f);
     rt.draw_line({tr.x + half, tr.bottom() - 1.0f + dy},
                  {tr.right() - half, tr.bottom() - 1.0f + dy}, Pen{c, 1.0f});

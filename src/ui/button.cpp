@@ -41,7 +41,6 @@ void Button::draw_button_bg(IRenderTarget& rt, const RectF& r) {
     auto p = theme::ThemeService::instance().button_paint(theme_color_type_);
     const bool disabled = (state() == State::Disabled);
     const float d = theme::ThemeService::instance().depth_factor();
-    const float vf = theme::ThemeService::instance().vibrancy_factor();
     // 外阴影（← 各皮肤 boxShadow 常规层）：D2D 无 box-shadow，多层外扩近似
     if (p.has_shadow && !disabled)
       draw_soft_shadow(rt, r, p.radius, p.shadow_color, p.shadow_dy,
@@ -52,26 +51,28 @@ void Button::draw_button_bg(IRenderTarget& rt, const RectF& r) {
       draw_glow(rt, r, p.radius, p.glow, p.glow_blur);
     // 主体：135° 多停渐变（retro）或单色填充（其余皮肤）
     if (p.use_grad && !disabled) {
+      // ← button-styles.ts:89-96 多层硬 bevel boxShadow（×depth）：
+      //   0 1px 0 bevelDark / 0 d 0 bevelDark / 0 2d 0 bevelDark / 0 3d 2d 黑影
+      //   圆角矩形底沿与内嵌平滑过渡，避免底部断裂直硬线
+      if (p.bevel_dark.a > 0) {
+        Color4f ds = Color4f::hex(0x000000, theme::ThemeService::instance().is_light() ? 0.35f : 0.60f);
+        draw_soft_shadow(rt, r, p.radius, ds, 3.0f * d, 2.0f * d);
+        for (int i = 2; i >= 1; --i) {
+          RectF br{r.x, r.y + i * d, r.w, r.h};
+          Brush bb{p.bevel_dark};
+          rt.round_rect(br, p.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &bb);
+        }
+      }
       const GradientStop* gs = (state() == State::Hover) ? p.grad_hover : p.grad;
       rt.fill_round_rect_gradient_angle(r, p.radius, gs, p.grad_count, p.grad_angle);
       last_fill_ = gs[p.grad_count / 2].color;
-      // ← :84 border: calc(2px * depth) solid borderColor（渐变填充后单独描边）
+      // ← button-styles.ts:84 border: calc(2px * depth) solid borderColor（渐变填充后单独描边）
       if (p.border_w > 0.01f && p.border.a > 0.001f)
         rt.round_rect(r, p.radius, Pen{p.border, p.border_w}, nullptr);
-      // ← :89-96 多层硬 bevel boxShadow（×depth）：
-      //   0 1px 0 bevelDark / 0 d 0 bevelDark / 0 2d 0 bevelDark / 0 3d 2d 黑影
       if (p.bevel_dark.a > 0) {
         rt.draw_line(PointF{r.x + p.radius, r.y + 1.0f},
                      PointF{r.right() - p.radius, r.y + 1.0f},
                      Pen{p.bevel_hi, 1.0f});
-        for (int i = 1; i <= 2; ++i) {
-          rt.draw_line(
-              PointF{r.x + p.radius, r.bottom() - 1.0f + i * d},
-              PointF{r.right() - p.radius, r.bottom() - 1.0f + i * d},
-              Pen{p.bevel_dark, 1.0f});
-        }
-        Color4f ds = Color4f::hex(0x000000, 0.35f);
-        draw_soft_shadow(rt, r, p.radius, ds, 3.0f * d, 2.0f * d);
       }
       return;
     }

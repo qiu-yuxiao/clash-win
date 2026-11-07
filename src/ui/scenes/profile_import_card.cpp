@@ -226,14 +226,13 @@ ProfileImportCard::ProfileImportCard(Widget* parent) : Widget(parent) {
   title_->flex_weight = 0;
   add_child(std::move(title));
 
-  // URL TextField：multiline 1–4 行、fs13、py4、get3DInputStyle（:138-167）
-  // 豁免: 引擎 TextField 为单行，按 1 行高 27 布局（源码 minRows=1）
+  // URL TextField：multiline 1–4 行、fs13、py4、get3DInputStyle（src: profile-import-card.tsx:138-167）
   auto uf = std::make_unique<TextField>();
   url_field_ = uf.get();
   url_field_->set_placeholder(tr("settings.mini.importPlaceholder"));
   url_field_->apply_theme();  // ← get3DInputStyle 6 套皮肤查表（:734-927）
   url_field_->style_.size = 13;
-  url_field_->height_ = 27;  // src: :158-163 py4 + 13px*1.4375 + py4 ≈ 27
+  url_field_->height_ = 46.0f;  // src: profile-import-card.tsx:145-165 py4 + 2×13px*1.4375 + py4 ≈ 46
   // 【保留】MUI OutlinedInput 缺省 radius 4：original/modern 由 apply_theme 给出
   //   8*d/6*d 更接近源码，此处不再覆盖。
   // 右键：5 项编辑命令菜单（_layout.tsx:1859-1932）
@@ -368,13 +367,14 @@ void ProfileImportCard::on_arrange(const RectF& area) {
   set_bounds(area);
   const float w = area.w;
   const float x = 8.0f;   // p1
-  // src: :113-114 subtitle2 line-height 1.57 × 13px ≈ 20.4，mb 0.75=6（:110）
+  // src: profile-import-card.tsx:113-114 subtitle2 line-height 1.57 × 13px ≈ 20.4，mb 0.75=6（:110）
   title_->layout_tree({x, 8.0f, w - x * 2, 20.4f});
-  // src: :153-166 minRows=1 multiline → py4 + 18.6 + py4 ≈ 27
-  url_field_->layout_tree({x, 34.4f, w - x * 2, 27.0f});
-  const float list_y = 97.4f;  // 34.4+27+gap4+btn24+mb8（src: :130-136/:135/:192）
+  // src: profile-import-card.tsx:145-165 multiline 2 行高（py4 + 2×13px*1.4375 + py4 ≈ 46）
+  url_field_->layout_tree({x, 34.4f, w - x * 2, 46.0f});
+  // 34.4+46+gap4+btn24+mb8（src: profile-import-card.tsx:130-136/:135/:192）
+  const float list_y = 116.4f;
   // 按钮 px2=16 两侧 + 12px 文本约 72 → 宽 104（源码无固定宽，按内容居中）
-  import_btn_->layout_tree({(w - 104.0f) / 2, 65.4f, 104.0f, 24.0f});
+  import_btn_->layout_tree({(w - 104.0f) / 2, 84.4f, 104.0f, 24.0f});
   float list_h = std::max(0.0f, area.h - list_y - 8.0f);
   list_->layout_tree({x, list_y, w - x * 2, list_h});
 }
