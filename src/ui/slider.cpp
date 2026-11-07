@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "soft_shadow.h"
 #include "theme/theme.h"
 
 namespace clashwin::ui {
@@ -64,71 +65,96 @@ bool Slider::on_mouse(const MouseEvent& e) {
   }
 }
 
+void Slider::apply_theme() {
+  const auto p = ThemeService::instance().slider_paint();
+  themed_ = true;
+  thickness_ = p.thickness;
+  thumb_d_ = std::max(p.thumb_w, p.thumb_h);
+  track_ = p.rail;
+  fill_ = p.track;
+  thumb_ = p.thumb;
+  gold_3d_ = ThemeService::instance().skin() == theme::SkinId::Retro3d;
+  invalidate();
+}
+
 void Slider::on_paint(IRenderTarget& rt) {
-  float cy = bounds().h / 2;
-  float range = bounds().w - thumb_d_;
+  // T12：6 套皮肤统一走 ThemeService::slider_paint()（← get3DSliderStyle）。
+  //   此前只有 gold_3d_（retro）与 MUI 缺省（单色圆头）两枝，切换皮肤无差异。
+  const theme::SliderPaint sp = themed_ ? ThemeService::instance().slider_paint()
+                                        : theme::SliderPaint{};
+  const float track_h = themed_ ? sp.thickness : thickness_;
+  const float tw = themed_ ? sp.thumb_w : thumb_d_;
+  const float th = themed_ ? sp.thumb_h : thumb_d_;
+  const float cy = bounds().h / 2;
+  const float range = bounds().w - tw;
   auto cx_of = [&](float v) {
-    return thumb_d_ / 2 + (v - min_) / (max_ - min_) * range;
+    return tw / 2 + (v - min_) / (max_ - min_) * range;
   };
-  if (gold_3d_) {
-    // src: style-helpers.tsx:251-283 get3DSliderStyle retro-3d
-    //   rail：rgba(212,175,55,.25/.15) + 1px #B8860B(light)/#8A6D00(dark)（:255-263）
-    RectF rail{thumb_d_ / 2, cy - thickness_ / 2, range, thickness_};
-    Brush rail_b{track_};
-    rt.round_rect(rail, thickness_ / 2,
-                  Pen{theme::ThemeService::instance().is_light()
-                          ? Color4f::hex(0xB8860B)
-                          : Color4f::hex(0x8A6D00),
-                      1.0f},
-                  &rail_b);
-    // track（已填充段）：linear-gradient(to bottom,#FFE082,#FFC107,#B8860B)（:265-273）
-    float fw = cx_of(value_) - thumb_d_ / 2;
-    if (fw > 0) {
-      GradientStop track[3] = {{0.0f, Color4f::hex(0xFFE082)},
-                               {0.50f, Color4f::hex(0xFFC107)},
-                               {1.00f, Color4f::hex(0xB8860B)}};
-      RectF filled{thumb_d_ / 2, cy - thickness_ / 2, fw, thickness_};
-      rt.fill_round_rect_gradient_angle(filled, thickness_ / 2, track, 3, 180.0f);
+  auto thumb_rect = [&](float cx) {
+    return RectF{cx - tw / 2, cy - th / 2, tw, th};
+  };
+  const float thumb_r = themed_ ? sp.thumb_radius : thumb_d_ / 2;
+
+  // ---- 滑轨 ----
+  RectF rail{tw / 2, cy - track_h / 2, range, track_h};
+  const float rail_r = themed_ ? sp.rail_radius : track_h / 2;
+  Brush rail_b{themed_ ? sp.rail : track_};
+  const float rail_bw = themed_ ? sp.rail_bw : 0.0f;
+  if (themed_ && sp.rail_inset)
+    draw_inner_glow(rt, rail, rail_r, sp.rail_inset_color, sp.rail_inset_blur);
+  rt.round_rect(rail, rail_r,
+                {themed_ ? sp.rail_border : Color4f{0, 0, 0, 0}, rail_bw},
+                &rail_b);
+  if (themed_ && sp.rail_top_hi.a > 0.004f)
+    rt.draw_line({rail.x, rail.y + 0.5f}, {rail.right(), rail.y + 0.5f},
+                 Pen{sp.rail_top_hi, 1.0f});
+
+  // ---- 已填充段（track）----
+  const float fw = cx_of(value_) - tw / 2;
+  const float track_r = themed_ ? sp.track_radius : track_h / 2;
+  if (fw > 0) {
+    RectF filled{tw / 2, cy - track_h / 2, fw, track_h};
+    if (themed_ && sp.track_grad) {
+      // retro：linear-gradient(to bottom, #FFE082, #FFC107, #B8860B) = 180°
+      rt.fill_round_rect_gradient_angle(filled, track_r,
+                                        sp.track_grad_stops, sp.track_grad_n,
+                                        180.0f);
+    } else {
+      Brush fill_b{themed_ ? sp.track : fill_};
+      rt.round_rect(filled, track_r, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &fill_b);
     }
-    // thumb：radial-gradient(circle at 35% 35%)（:280-283）
-    float d = thumb_d_;
-    RectF ball_rect{cx_of(value_) - d / 2, cy - d / 2, d, d};
-    GradientStop ball[4] = {
-        {0.00f, Color4f::hex(theme::ThemeService::instance().is_light() ? 0xFFFDE7
-                                                                       : 0xFFF9C4)},
-        {0.45f, Color4f::hex(theme::ThemeService::instance().is_light() ? 0xFFD54F
-                                                                       : 0xFFC107)},
-        {0.80f, Color4f::hex(0xFFA000)},
-        {1.00f, Color4f::hex(theme::ThemeService::instance().is_light() ? 0xB8860B
-                                                                       : 0x8A6D00)}};
-    rt.fill_round_rect_radial(ball_rect, d / 2, ball, 4, 0.35f, 0.35f, d * 0.65f,
-                              d * 0.65f);
-    // src: :297 border 1px #8A6D00(light)/#634E00(dark)
-    rt.round_rect(ball_rect, d / 2,
-                  Pen{theme::ThemeService::instance().is_light()
-                          ? Color4f::hex(0x8A6D00)
-                          : Color4f::hex(0x634E00),
-                      1.0f},
-                  nullptr);
-    return;
   }
-  rt.fill_rect({thumb_d_ / 2, cy - thickness_ / 2, range, thickness_},
-               Brush{track_});
-  Brush fill_b{fill_};
-  rt.fill_rect({thumb_d_ / 2, cy - thickness_ / 2, cx_of(value_) - thumb_d_ / 2,
-                thickness_}, fill_b);
   if (value2_) {
-    rt.fill_rect({cx_of(value_), cy - thickness_ / 2,
-                  cx_of(value2_.value()) - cx_of(value_), thickness_},
-                 fill_b);
+    const float x0 = cx_of(value_), x1 = cx_of(value2_.value());
+    Brush fill_b{themed_ ? sp.track : fill_};
+    rt.round_rect({x0, cy - track_h / 2, x1 - x0, track_h}, track_r,
+                  Pen{Color4f{0, 0, 0, 0}, 0.0f}, &fill_b);
   }
-  Brush thumb_b{thumb_};
-  rt.round_rect({cx_of(value_) - thumb_d_ / 2, cy - thumb_d_ / 2, thumb_d_,
-                 thumb_d_}, thumb_d_ / 2, {}, &thumb_b);
-  if (value2_) {
-    rt.round_rect({cx_of(value2_.value()) - thumb_d_ / 2, cy - thumb_d_ / 2,
-                   thumb_d_, thumb_d_}, thumb_d_ / 2, {}, &thumb_b);
-  }
+
+  // ---- 滑块（thumb）----
+  auto paint_thumb = [&](float cx) {
+    RectF br = thumb_rect(cx);
+    if (themed_) {
+      if (sp.thumb_shadow)
+        draw_soft_shadow(rt, br, thumb_r, sp.thumb_shadow_color,
+                         sp.thumb_shadow_dy, sp.thumb_shadow_blur);
+      if (sp.thumb_glow)
+        draw_glow(rt, br, thumb_r, sp.thumb_glow_color, sp.thumb_glow_blur);
+    }
+    if (themed_ && sp.thumb_grad) {
+      // retro：radial-gradient(circle at 35% 35%, ...)
+      rt.fill_round_rect_radial(br, thumb_r, sp.thumb_stops, sp.thumb_grad_n,
+                                sp.thumb_grad_cx, sp.thumb_grad_cy,
+                                tw * 0.65f, th * 0.65f);
+    } else {
+      Brush tb{themed_ ? sp.thumb : thumb_};
+      rt.round_rect(br, thumb_r, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &tb);
+    }
+    if (themed_ && sp.thumb_bw > 0.01f)
+      rt.round_rect(br, thumb_r, Pen{sp.thumb_border, sp.thumb_bw}, nullptr);
+  };
+  paint_thumb(cx_of(value_));
+  if (value2_) paint_thumb(cx_of(value2_.value()));
 }
 
 }  // namespace clashwin::ui

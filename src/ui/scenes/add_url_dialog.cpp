@@ -5,6 +5,7 @@
 
 #include <algorithm>
 
+#include "ui/card_draw.h"
 #include "ui/theme/theme.h"
 #include "util/str_utils.h"
 #include "util/utf.h"
@@ -31,32 +32,9 @@ constexpr float kBtnH = 36.5f, kBtnW = 64.0f, kBtnFs = 13.0f;
 
 bool is_light() { return theme::ThemeService::instance().is_light(); }
 
+// 卡面文字色 ← get3DCardStyle(theme,'default').color（6 套皮肤不同）
 Color4f card_text() {
-  // src: button-styles.ts:535 get3DCardStyle('default').color
-  //   light '#3C2F0F' / dark '#2C1F03'
-  return is_light() ? Color4f::hex(0x3C2F0F) : Color4f::hex(0x2C1F03);
-}
-
-void draw_card(IRenderTarget& rt, const RectF& r) {
-  // src: button-styles.ts:534-565 get3DCardStyle('default')：radius 6 + 135° 4 停靠
-  GradientStop stops[4];
-  if (is_light()) {
-    // src: button-styles.ts:538 light #FFFDE7@0 #FFF9C4@35 #FFF59D@70 #FFE082@100
-    stops[0] = {0.00f, Color4f::hex(0xFFFDE7)};
-    stops[1] = {0.35f, Color4f::hex(0xFFF9C4)};
-    stops[2] = {0.70f, Color4f::hex(0xFFF59D)};
-    stops[3] = {1.00f, Color4f::hex(0xFFE082)};
-  } else {
-    // src: button-styles.ts:539 dark #FFF59D@0 #FBC02D@35 #F57F17@70 #E65100@100
-    stops[0] = {0.00f, Color4f::hex(0xFFF59D)};
-    stops[1] = {0.35f, Color4f::hex(0xFBC02D)};
-    stops[2] = {0.70f, Color4f::hex(0xF57F17)};
-    stops[3] = {1.00f, Color4f::hex(0xE65100)};
-  }
-  rt.fill_round_rect_gradient_angle(r, 6.0f, stops, 4, 135.0f);  // src: button-styles.ts:544
-  // src: :540 bevelShadowDark light '#B8860B' / dark '#755500'
-  Brush bevel{is_light() ? Color4f::hex(0xB8860B) : Color4f::hex(0x755500)};
-  rt.fill_rect({r.x + 6.0f, r.bottom() - 1.0f, r.w - 12.0f, 1.0f}, bevel);
+  return theme::ThemeService::instance().card_paint("default").text_color;
 }
 
 }  // namespace
@@ -148,7 +126,7 @@ void AddUrlDialog::on_paint(IRenderTarget& rt) {
   rt.fill_rect({0, 0, bounds().w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
 
   // 2. paper：3D 渐变卡（get3DCardStyle default）+ radius 6
-  draw_card(rt, card_rect_);
+  draw_card(rt, card_rect_, theme::ThemeService::instance().card_paint("default"));
 
   // 3. 标题 src: :206-216 15px bold、px 16、py 12
   TextStyle title_ts;
@@ -164,17 +142,16 @@ void AddUrlDialog::on_paint(IRenderTarget& rt) {
   // 4. TextField multiline（get3DInputStyle）
   // src: button-styles.ts:734-778 bg rgba(255,253,231,.8)/rgba(26,22,14,.4)、
   //   outline 2px rgba(212,175,55,.35/.25)、focus border '#B8860B'/'#FFA000'
-  Brush input_bg{is_light() ? Color4f::hex(0xFFFDE7, 0.8f)
-                            : Color4f::hex(0x1A160E, 0.4f)};
-  Pen input_pen{input_focused_
-                    ? (is_light() ? Color4f::hex(0xB8860B) : Color4f::hex(0xFFA000))
-                    : Color4f::hex(0xD4AF37, is_light() ? 0.35f : 0.25f),
-                1.0f};
-  rt.round_rect(input_rect_, 4.0f, input_pen, &input_bg);
+  // T12：6 套皮肤走 input_paint() 查表（← get3DInputStyle）
+  const theme::InputPaint ip = theme::ThemeService::instance().input_paint();
+  Brush input_bg{ip.bg};
+  Pen input_pen{input_focused_ ? ip.border_focused : ip.border,
+                input_focused_ ? ip.border_w_focused : ip.border_w};
+  rt.round_rect(input_rect_, ip.radius, input_pen, &input_bg);
   {
     TextStyle ts;
     ts.size = 13.0f;  // src: get3DInputStyle fontSize 13px
-    ts.color = is_light() ? Color4f::hex(0x2C1F03) : Color4f::hex(0xFFFDE7);
+    ts.color = ip.text;
     ts.wrap = true;
     ts.max_lines = static_cast<int>(kRows);
     std::wstring body = utf::utf8_to_utf16(payload_);
@@ -201,43 +178,44 @@ void AddUrlDialog::on_paint(IRenderTarget& rt) {
   }
 
   // 5. 动作按钮：取消 outlined default、添加 contained primary（src: :236-249）
-  {
-    // outlined default src: button-styles.ts get3DButtonStyle(outlined, default)
-    Brush c_bg{hover_cancel_ ? Color4f::hex(0xD4AF37, 0.14f)
-                             : Color4f::hex(0xD4AF37, 0.06f)};
-    Pen c_pen{Color4f::hex(0xD4AF37, is_light() ? 0.35f : 0.22f), 1.0f};
-    rt.round_rect(btn_cancel_rect_, 6.0f, c_pen, &c_bg);
+  // T12：6 套皮肤走 button_paint() 查表（← get3DButtonStyle）
+  auto paint_btn = [&](const RectF& r, const char* ctype, bool outlined,
+                       bool hover, const std::wstring& label) {
+    const auto bp =
+        theme::ThemeService::instance().button_paint(ctype, outlined);
+    if (bp.has_shadow)
+      draw_soft_shadow(rt, r, bp.radius, bp.shadow_color, bp.shadow_dy,
+                       bp.shadow_blur);
+    if (bp.glow.a > 0) draw_glow(rt, r, bp.radius, bp.glow, bp.glow_blur);
+    if (bp.use_grad) {
+      const GradientStop* gs = hover ? bp.grad_hover : bp.grad;
+      rt.fill_round_rect_gradient_angle(r, bp.radius, gs, bp.grad_count,
+                                        bp.grad_angle);
+    } else {
+      Brush fb{hover ? bp.fill_hover : bp.fill};
+      rt.round_rect(r, bp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &fb);
+    }
+    if (bp.border_w > 0.01f)
+      rt.round_rect(r, bp.radius, Pen{bp.border, bp.border_w}, nullptr);
+    if (bp.use_grad && bp.bevel_dark.a > 0) {
+      rt.draw_line({r.x + bp.radius, r.y + 1.0f},
+                   {r.right() - bp.radius, r.y + 1.0f}, Pen{bp.bevel_hi, 1.0f});
+      rt.draw_line({r.x + bp.radius, r.bottom() - 1.0f},
+                   {r.right() - bp.radius, r.bottom() - 1.0f},
+                   Pen{bp.bevel_dark, 1.0f});
+    }
     TextStyle ts;
     ts.size = kBtnFs;
-    ts.weight = static_cast<int>(Weight::Bold);
-    ts.color = card_text();
+    ts.weight = bp.weight;
+    ts.color = bp.text;
     ts.align_h = AlignH::Center;
     ts.align_v = AlignV::Center;
-    rt.draw_text(tr("shared.actions.cancel"), btn_cancel_rect_, ts);
-  }
-  {
-    // contained primary src: button-styles.ts:38-39 retro-3d 135° 六停（与卡片同源）
-    GradientStop st[6];
-    st[0] = {0.00f, Color4f::hex(0xFFE082)};
-    st[1] = {0.20f, Color4f::hex(0xFFD54F)};
-    st[2] = {0.45f, Color4f::hex(0xFFC107)};
-    st[3] = {0.70f, Color4f::hex(0xFFB300)};
-    st[4] = {0.85f, Color4f::hex(0xD4AF37)};
-    st[5] = {1.00f, Color4f::hex(0xB8860B)};
-    rt.fill_round_rect_gradient_angle(btn_add_rect_, 6.0f, st, 6, 135.0f);  // src: :544
-    // src: button-styles.ts:36-37 borderColor light '#8A6D00' / dark '#634E00'，2px
-    Pen bevel{is_light() ? Color4f::hex(0x8A6D00) : Color4f::hex(0x634E00), 2.0f};
-    rt.round_rect({btn_add_rect_.x + 1, btn_add_rect_.y + 1,
-                   btn_add_rect_.w - 2, btn_add_rect_.h - 2},
-                  5.0f, bevel, nullptr);
-    TextStyle ts;
-    ts.size = kBtnFs;
-    ts.weight = static_cast<int>(Weight::Bold);
-    ts.color = Color4f::hex(0x2C1F03);  // src: button-styles.ts:1105-1121 retro-3d
-    ts.align_h = AlignH::Center;
-    ts.align_v = AlignV::Center;
-    rt.draw_text(tr("settings.mini.addUrlButton"), btn_add_rect_, ts);
-  }
+    rt.draw_text(label, r, ts);
+  };
+  paint_btn(btn_cancel_rect_, "default", /*outlined=*/true, hover_cancel_,
+            tr("shared.actions.cancel"));
+  paint_btn(btn_add_rect_, "primary", /*outlined=*/false, hover_add_,
+            tr("settings.mini.addUrlButton"));
 
   // 6. 错误提示（showNotice.error → 对话框内红字，源码为 toast；此处保留内联提示）
   if (!error_message_.empty()) {

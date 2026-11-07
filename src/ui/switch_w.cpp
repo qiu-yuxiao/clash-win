@@ -5,6 +5,7 @@
 #include <cmath>
 #include <format>
 
+#include "soft_shadow.h"
 #include "theme/theme.h"
 #include "util/log.h"
 
@@ -21,12 +22,20 @@ bool SwitchW::set_checked(bool v, bool fire) {
 
 SizeF SwitchW::on_measure(float max_w, float max_h) {
   (void)max_w; (void)max_h;
+  // 尺寸随皮肤：retro/original/modern 28×14、frosted 28×14、cyberpunk 18×10、
+  //   monochrome 28×14（← base-switch.tsx sizeSmall 强制尺寸）
+  const auto sp = theme::ThemeService::instance().switch_paint();
+  width_ = sp.track_w;
+  height_ = sp.track_h;
   return {width_, height_};
 }
 
 void SwitchW::update_drag(float local_x) {
-  float range = width_ - height_;
-  float t = range > 0 ? (local_x - height_ / 2) / range : 0.0f;
+  // 旋钮可移动区间 = 轨道宽 - 旋钮直径 - 左右 margin（← base-switch.tsx thumb margin）
+  const auto sp = theme::ThemeService::instance().switch_paint();
+  const float half = sp.thumb_d / 2.0f + sp.thumb_margin;
+  const float range = width_ - sp.thumb_d - sp.thumb_margin * 2.0f;
+  float t = range > 0 ? (local_x - half) / range : 0.0f;
   anim_ = t < 0 ? 0 : (t > 1 ? 1 : t);
   dragging_ = true;
   drag_moved_ = true;
@@ -64,63 +73,150 @@ bool SwitchW::on_mouse(const MouseEvent& e) {
 }
 
 void SwitchW::on_paint(IRenderTarget& rt) {
-  // 【DPIARCH】← base-switch.tsx：padding 0，thumb=全高（14），track r=h/2（7），
-  // checked 位移 translateX(w-h)=14（:21-34/104 结构）。
+  // T12：6 套皮肤统一走 ThemeService::switch_paint()（← base-switch.tsx:15-556）。
+  //
+  // ★ 轨道（滑槽）可见性（用户反馈 2026-11-07）：retro-3d 槽底是
+  //   rgba(212,175,55,.15)*.85 的半透明金，叠在同色卡片底上几乎无对比。
+  //   Mini 里槽的立体感来自 boxShadow 的**上缘内阴影**（inset 0 3d 5d
+  //   rgba(0,0,0,.7)）与**底部 1px 高光线**（0 1px 0 rgba(255,255,255,.08)）。
+  //   之前 Win 侧两者都缺 → 只剩一个悬空的旋钮，"滑槽看不见"。
   auto& svc = theme::ThemeService::instance();
-  const bool light = svc.is_light();
-  float h = bounds().h, w = bounds().w;
-  float thumb_d = h;
+  const theme::SwitchPaint sp = svc.switch_paint();
+  const float w = bounds().w > 0 ? bounds().w : sp.track_w;
+  const float h = bounds().h > 0 ? bounds().h : sp.track_h;
+  const RectF track{0, 0, w, h};
   // MUI disabled：轨道/旋钮按 0.38 叠乘（MUI Switch `.Mui-disabled` 轨道
   //   opacity .38，thumb 同档）——src: MUI Switch disabled 语义。
   const float dis = enabled() ? 1.0f : 0.38f;
-  // 轨道底（未选中）src: base-switch.tsx:104-109 bgcolor rgba(212,175,55,.25/.15)
-  //   opacity .85；border 1px rgba(212,175,55,.3/.18)
-  Color4f off = light ? Color4f::hex(0xD4AF37, 0.25f) : Color4f::hex(0xD4AF37, 0.15f);
-  off.a *= (1.0f - anim_) * 0.85f * dis;
-  Color4f edge_c = light ? Color4f::hex(0xD4AF37, 0.3f) : Color4f::hex(0xD4AF37, 0.18f);
-  edge_c.a *= dis;
-  Pen edge{edge_c, 1.0f};
-  Brush off_b{off};
-  rt.round_rect({0, 0, w, h}, h / 2, edge, &off_b);
-  // 选中轨道 src: base-switch.tsx:99-103
-  //   linear-gradient(to bottom,#FFE082 0%,#FFC107 50%,#B8860B 100%) opacity .85
-  if (anim_ > 0.001f) {
-    // src: base-switch.tsx:99-103 135°/to bottom 3 停靠（#FFE082/#FFC107/#B8860B α.85）
-    GradientStop st[3] = {{0.0f, Color4f::hex(0xFFE082, 0.85f * anim_ * dis)},
-                          {0.5f, Color4f::hex(0xFFC107, 0.85f * anim_ * dis)},
-                          {1.0f, Color4f::hex(0xB8860B, 0.85f * anim_ * dis)}};
-    // 角度 180 = CSS to bottom；src: base-switch.tsx:99
-    rt.fill_round_rect_gradient_angle({0, 0, w, h}, h / 2, st, 3, 180.0f);
+  const float a = anim_;
+
+  // ---- 轨道：off 态 ----
+  Color4f off_bg = sp.off_bg;
+  off_bg.a *= (1.0f - a) * dis;
+  Brush off_b{off_bg};
+  Color4f off_edge = sp.off_border;
+  off_edge.a *= dis;
+  rt.round_rect(track, sp.track_radius, Pen{off_edge, sp.off_bw}, &off_b);
+  // 上缘内阴影（inset 0 dy blur）——"槽"的凹陷感
+  if (sp.off_inset && a < 0.999f) {
+    Color4f ic = sp.off_inset_color;
+    ic.a *= (1.0f - a) * dis;
+    draw_top_inset_shadow(rt, track, sp.track_radius, ic, sp.off_inset_dy,
+                          sp.off_inset_blur);
   }
-  float tx = anim_ * (w - h);
-  // 滑块 src: base-switch.tsx:76-80 checked 金 radial(circle at 35% 35%)；
-  //   未选中 :90-92。CSS circle 半径取 farthest-corner（≈0.65×边长×√2）
-  GradientStop th[4];
-  if (anim_ > 0.5f) {
-    th[0] = {0.00f, light ? Color4f::hex(0xFFFDE7) : Color4f::hex(0xFFF9C4)};
-    th[1] = {0.45f, light ? Color4f::hex(0xFFD54F) : Color4f::hex(0xFFC107)};
-    th[2] = {0.80f, Color4f::hex(0xFFA000)};
-    th[3] = {1.00f, light ? Color4f::hex(0xB8860B) : Color4f::hex(0x8A6D00)};
-    for (auto& s : th) s.color.a *= dis;
+  // 底部 1px 高光线（0 1px 0 color）
+  if (sp.off_bottom_hi && a < 0.999f) {
+    Color4f hc = sp.off_bottom_hi_color;
+    hc.a *= (1.0f - a) * dis;
+    const float half = std::min(sp.track_radius, w * 0.5f);
+    rt.draw_line({half, h - 0.5f}, {w - half, h - 0.5f},
+                 Pen{hc, sp.off_bottom_hi_w});
+  }
+
+  // ---- 轨道：on 态 ----
+  if (a > 0.001f) {
+    if (sp.on_grad) {
+      GradientStop st[3];
+      for (int i = 0; i < sp.on_grad_n; ++i) {
+        st[i] = sp.on_grad_stops[i];
+        st[i].color.a *= a * dis;
+      }
+      // 角度 180 = CSS to bottom；src: base-switch.tsx:99
+      rt.fill_round_rect_gradient_angle(track, sp.track_radius, st,
+                                        sp.on_grad_n, 180.0f);
+    } else {
+      Color4f on = sp.on_bg;
+      on.a *= a * dis;
+      Brush on_b{on};
+      rt.round_rect(track, sp.track_radius, Pen{Color4f{0, 0, 0, 0}, 0.0f},
+                    &on_b);
+    }
+    if (sp.on_bw > 0.01f) {
+      Color4f oe = sp.on_border;
+      oe.a *= a * dis;
+      rt.round_rect(track, sp.track_radius, Pen{oe, sp.on_bw}, nullptr);
+    }
+    // on 态槽的内阴影 + 底部高光（src: base-switch.tsx:60-79）
+    if (sp.on_inset) {
+      Color4f ic = sp.on_inset_color;
+      ic.a *= a * dis;
+      draw_top_inset_shadow(rt, track, sp.track_radius, ic, sp.on_inset_dy,
+                            sp.on_inset_blur);
+    }
+    if (sp.on_bottom_hi) {
+      Color4f hc = sp.on_bottom_hi_color;
+      hc.a *= a * dis;
+      const float half = std::min(sp.track_radius, w * 0.5f);
+      rt.draw_line({half, h - 0.5f}, {w - half, h - 0.5f},
+                   Pen{hc, sp.on_bottom_hi_w});
+    }
+    if (sp.on_glow) {
+      Color4f g = sp.on_glow_color;
+      g.a *= a * dis;
+      draw_glow(rt, track, sp.track_radius, g, sp.on_glow_blur);
+    }
+  }
+
+  // ---- 旋钮 ----
+  const float td = sp.thumb_d;
+  const float tx = sp.thumb_margin + a * (w - td - sp.thumb_margin * 2.0f);
+  const float ty = (h - td) / 2.0f;
+  const RectF tr{tx, ty, td, td};
+  if (sp.thumb_shadow) {
+    Color4f sc = sp.thumb_shadow_color;
+    sc.a *= dis;
+    draw_soft_shadow(rt, tr, sp.thumb_radius, sc, sp.thumb_shadow_dy,
+                     sp.thumb_shadow_blur);
+  }
+  const bool on_side = a > 0.5f;
+  const GradientStop* gs = on_side ? sp.on_thumb_stops : sp.off_thumb_stops;
+  const int gn = on_side ? sp.on_thumb_n : sp.off_thumb_n;
+  const bool use_grad = on_side ? sp.on_thumb_grad : sp.off_thumb_grad;
+  if (use_grad && gn > 0) {
+    GradientStop st[4];
+    for (int i = 0; i < gn; ++i) {
+      st[i] = gs[i];
+      st[i].color.a *= dis;
+    }
+    // CSS circle at 35% 35%：半径取 farthest-corner
+    const float corner_r = std::sqrt(2.0f) * (td * 0.65f);
+    rt.fill_round_rect_radial(tr, sp.thumb_radius, st, gn, 0.35f, 0.35f,
+                              corner_r, corner_r);
   } else {
-    th[0] = {0.00f, light ? Color4f::hex(0xFFFDE7) : Color4f::hex(0xFFF9C4)};
-    th[1] = {0.60f, light ? Color4f::hex(0xD4AF37, 0.3f)
-                          : Color4f::hex(0x8A6D00, 0.3f)};
-    th[2] = {1.00f, light ? Color4f::hex(0x8A6D00, 0.45f)
-                          : Color4f::hex(0x634E00, 0.55f)};
-    th[3] = {1.00f, th[2].color};
-    for (auto& s : th) s.color.a *= dis;
+    Color4f tc = on_side ? sp.on_thumb : sp.off_thumb;
+    tc.a *= dis;
+    Brush tb{tc};
+    rt.round_rect(tr, sp.thumb_radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &tb);
   }
-  const float corner_r = std::sqrt(2.0f) * (thumb_d * 0.65f);
-  rt.fill_round_rect_radial({tx, 0, thumb_d, thumb_d}, thumb_d / 2, th, 4,
-                            0.35f, 0.35f, corner_r, corner_r);
-  Pen tedge{anim_ > 0.5f
-                ? (light ? Color4f::hex(0x8A6D00) : Color4f::hex(0x634E00))
-                : (light ? Color4f::hex(0x8A6D00, 0.4f)
-                         : Color4f::hex(0x634E00, 0.45f)),
-            1.0f};
-  tedge.color.a *= dis;
-  rt.round_rect({tx, 0, thumb_d, thumb_d}, thumb_d / 2, tedge, nullptr);
+  const float bw = on_side ? sp.on_thumb_bw : sp.off_thumb_bw;
+  if (bw > 0.01f) {
+    Color4f bc = on_side ? sp.on_thumb_border : sp.off_thumb_border;
+    bc.a *= dis;
+    rt.round_rect(tr, sp.thumb_radius, Pen{bc, bw}, nullptr);
+  }
+  // 旋钮内浮雕（inset 0 dy 0 color）：顶部高光线 + 底部暗线
+  //   src: base-switch.tsx:88-98（retro-3d）
+  if (on_side ? sp.on_thumb_inset_hi : sp.off_thumb_inset_hi) {
+    Color4f c = on_side ? sp.on_thumb_inset_hi_color : sp.off_thumb_inset_hi_color;
+    c.a *= dis;
+    const float dy = on_side ? sp.on_thumb_inset_hi_dy : sp.off_thumb_inset_hi_dy;
+    const float half = std::min(sp.thumb_radius, td * 0.5f);
+    rt.draw_line({tr.x + half, tr.y + dy}, {tr.right() - half, tr.y + dy},
+                 Pen{c, 1.0f});
+  }
+  if (on_side ? sp.on_thumb_inset_dark : sp.off_thumb_inset_dark) {
+    Color4f c = on_side ? sp.on_thumb_inset_dark_color : sp.off_thumb_inset_dark_color;
+    c.a *= dis;
+    const float dy = on_side ? sp.on_thumb_inset_dark_dy : sp.off_thumb_inset_dark_dy;
+    const float half = std::min(sp.thumb_radius, td * 0.5f);
+    rt.draw_line({tr.x + half, tr.bottom() - 1.0f + dy},
+                 {tr.right() - half, tr.bottom() - 1.0f + dy}, Pen{c, 1.0f});
+  }
+  if (sp.thumb_glow) {
+    Color4f g = sp.thumb_glow_color;
+    g.a *= dis;
+    draw_glow(rt, tr, sp.thumb_radius, g, sp.thumb_glow_blur);
+  }
 }
 
 }  // namespace clashwin::ui

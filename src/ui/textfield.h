@@ -79,6 +79,10 @@ class TextField : public Widget {
 
   bool wants_key() const override { return true; }
 
+  // 按当前皮肤/滑块刷新输入框绘制参数（← get3DInputStyle 6 套皮肤查表）。
+  // 调用点：各处创建 TextField 后统一调用，替代手写 bg_/border_ 字面量。
+  void apply_theme();
+
   SizeF on_measure(float max_w, float max_h) override;
   bool on_mouse(const MouseEvent& e) override;
   bool on_key(const KeyEvent& e) override;
@@ -94,6 +98,17 @@ class TextField : public Widget {
   Color4f caret_color_ = Color4f::hex(0x007AFF);  // ← 光标主色缺省
   float radius_ = 4;  // ← MUI shape.borderRadius 4
   float border_w_ = 1;  // ← MUI OutlinedInput 缺省 1px；retro-3d outline 2px
+  float border_w_focused_ = 0;  // 0 = 沿用 border_w_（← get3DInputStyle focus 单独宽）
+  // inset 内凹阴影 / 聚焦外发光（← get3DInputStyle boxShadow；D2D 用 soft_shadow 近似）
+  bool has_inset_ = false;
+  Color4f inset_color_ = Color4f(0, 0, 0, 0);
+  float inset_dy_ = 0;
+  float inset_blur_ = 0;
+  Color4f inset_top_hi_ = Color4f(0, 0, 0, 0);
+  bool focus_glow_ = false;
+  Color4f focus_glow_color_ = Color4f(0, 0, 0, 0);
+  float focus_glow_blur_ = 0;
+  float focus_ring_ = 0;
   float height_ = 28;  // ← 行内输入框高 28（源码 size=small 布局）
   static constexpr int kCaretBlinkMs = 500;  // 豁免: Mini 无对应物 — 光标闪烁半周期（MUI InputBase 无闪烁字面量）
 

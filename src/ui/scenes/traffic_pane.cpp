@@ -6,6 +6,7 @@
 #include <cmath>
 #include <memory>
 
+#include "../card_draw.h"
 #include "../theme/theme.h"
 #include "util/log.h"
 #include "util/parse_traffic.h"
@@ -41,66 +42,48 @@ constexpr float kCardR = 6.0f;    // src: button-styles.ts:549 borderRadius 6px
 constexpr float kRunGap = 2.4f;   // src: mini-traffic-panel.tsx:98 gap 0.3=2.4px
 constexpr float kIconBox = 14.0f;  // src: mini-traffic-panel.tsx:114 fontSize 14
 
-// 卡渐变（src: button-styles.ts get3DCardStyle retro-3d，135°，4 停靠）
-void download_stops(GradientStop* s) {
-  if (light_mode()) {  // :531
-    s[0] = {0.0f, Color4f::hex(0xECEFF1)};
-    s[1] = {0.35f, Color4f::hex(0xCFD8DC)};
-    s[2] = {0.70f, Color4f::hex(0x90A4AE)};
-    s[3] = {1.0f, Color4f::hex(0x78909C)};
-  } else {  // :532
-    s[0] = {0.0f, Color4f::hex(0x263238)};
-    s[1] = {0.40f, Color4f::hex(0x37474F)};
-    s[2] = {0.75f, Color4f::hex(0x455A64)};
-    s[3] = {1.0f, Color4f::hex(0x1C252C)};
-  }
-}
-void upload_stops(GradientStop* s) {
-  if (light_mode()) {  // :524
-    s[0] = {0.0f, Color4f::hex(0xFFE0B2)};
-    s[1] = {0.35f, Color4f::hex(0xFFCC80)};
-    s[2] = {0.70f, Color4f::hex(0xFFA726)};
-    s[3] = {1.0f, Color4f::hex(0xFB8C00)};
-  } else {  // :525
-    s[0] = {0.0f, Color4f::hex(0xE65100)};
-    s[1] = {0.40f, Color4f::hex(0xD84315)};
-    s[2] = {0.75f, Color4f::hex(0xBF360C)};
-    s[3] = {1.0f, Color4f::hex(0x800000)};
-  }
-}
-// src: button-styles.ts:533/:526 bevelShadowDark（boxShadow 底缘 :556-565）
-inline Color4f download_bevel() {
-  return Color4f::hex(light_mode() ? 0x78909C : 0x263238);
-}
-inline Color4f upload_bevel() {
-  return Color4f::hex(light_mode() ? 0xB38F1E : 0x705407);
-}
+// 卡底/描边/阴影：全部由 ThemeService::card_paint("download"/"upload") 给出
+// （4 卡型 × 6 皮肤查表，见 theme.cpp）。此处不再有手写金色渐变。
 
 // 文字/图标色（src: mini-traffic-panel.tsx；--download-text/--upload-text 仅
-// original 皮肤定义 index.scss:298-312，retro-3d 走 CSS var fallback 值）
+// original 皮肤定义 index.scss:306-312，其余皮肤走 CSS var fallback 字面值）。
+// var(--download-text, fallback) 的取值规则：original 命中变量、其余命中 fallback。
+inline Color4f dl_var(bool dark, uint32_t fallback) {  // index.scss:306-307
+  if (ThemeService::instance().skin() != theme::SkinId::Original)
+    return Color4f::hex(fallback);
+  const float v = ThemeService::instance().vibrancy_factor();
+  return theme::hsl_to_rgb(200.0f * v, 1.0f, dark ? 0.75f : 0.25f);
+}
+inline Color4f ul_var(bool dark, uint32_t fallback) {  // index.scss:311-312
+  if (ThemeService::instance().skin() != theme::SkinId::Original)
+    return Color4f::hex(fallback);
+  const float v = ThemeService::instance().vibrancy_factor();
+  return theme::hsl_to_rgb(38.0f * v, 1.0f, dark ? 0.75f : 0.30f);
+}
+
 inline Color4f dl_icon_color() {   // :111-113
-  return Color4f::hex(light_mode() ? 0x0084FF : 0x80D8FF);
+  return dl_var(!light_mode(), light_mode() ? 0x0084FF : 0x80D8FF);
 }
 inline Color4f ul_icon_color() {   // :240-241
-  return Color4f::hex(light_mode() ? 0xE65100 : 0xFFD54F);
+  return ul_var(!light_mode(), light_mode() ? 0xE65100 : 0xFFD54F);
 }
 inline Color4f dl_text_color() {   // prefix/unit :121-123,150-152
-  return Color4f::hex(light_mode() ? 0x006064 : 0x80D8FF);
+  return dl_var(!light_mode(), light_mode() ? 0x006064 : 0x80D8FF);
 }
-inline Color4f dl_value_color() {  // :138-140
-  return Color4f::hex(light_mode() ? 0x00363A : 0xFFFFFF);
+inline Color4f dl_value_color() {  // :138-140（暗态写死 #FFFFFF，不走变量）
+  return light_mode() ? dl_var(false, 0x00363A) : Color4f::hex(0xFFFFFF);
 }
 inline Color4f dl_unit_color() {   // :150-152
-  return Color4f::hex(light_mode() ? 0x006064 : 0xE0F7FA);
+  return dl_var(!light_mode(), light_mode() ? 0x006064 : 0xE0F7FA);
 }
 inline Color4f ul_text_color() {   // prefix :250-251
-  return Color4f::hex(light_mode() ? 0x7B5200 : 0xFFD54F);
+  return ul_var(!light_mode(), light_mode() ? 0x7B5200 : 0xFFD54F);
 }
-inline Color4f ul_value_color() {  // :266
-  return Color4f::hex(light_mode() ? 0x3E2723 : 0xFFFFFF);
+inline Color4f ul_value_color() {  // :266（暗态写死 #FFFFFF）
+  return light_mode() ? ul_var(false, 0x3E2723) : Color4f::hex(0xFFFFFF);
 }
 inline Color4f ul_unit_color() {   // :277-278
-  return Color4f::hex(light_mode() ? 0x7B5200 : 0xFFECB3);
+  return ul_var(!light_mode(), light_mode() ? 0x7B5200 : 0xFFECB3);
 }
 
 // ArrowDownward/UpwardRounded 近似（src: :108/:236 fontSize 14）
@@ -369,48 +352,46 @@ void TrafficPane::on_paint(IRenderTarget& rt) {
   }
 
   // 成对卡（:102-104/:171-173 内角半径 0 → 左卡 TL|BL、右卡 TR|BR）
-  GradientStop dstops[4], ustops[4];
-  download_stops(dstops);
-  upload_stops(ustops);
-  rt.fill_round_rect_gradient_angle(dl_l_, kCardR, dstops, 4, 135.f, 0x9);
-  rt.fill_round_rect_gradient_angle(dl_r_, kCardR, dstops, 4, 135.f, 0x6);
-  rt.fill_round_rect_gradient_angle(ul_l_, kCardR, ustops, 4, 135.f, 0x9);
-  rt.fill_round_rect_gradient_angle(ul_r_, kCardR, ustops, 4, 135.f, 0x6);
-  // 底缘 bevel 线（src: button-styles.ts:556-565 boxShadow 底部 1-2px）
-  Pen dl_pen{download_bevel(), 1.0f}, ul_pen{upload_bevel(), 1.0f};
-  rt.draw_line({dl_l_.x + kCardR, dl_l_.bottom() - 0.5f},
-               {dl_r_.right() - kCardR, dl_l_.bottom() - 0.5f}, dl_pen);
-  rt.draw_line({ul_l_.x + kCardR, ul_l_.bottom() - 0.5f},
-               {ul_r_.right() - kCardR, ul_l_.bottom() - 0.5f}, ul_pen);
-  // src: button-styles.ts:556-565 多层盒阴影：顶部内高光、底缘双层 bevel、
-  //   gold glow、下沿 3px 深阴影（自上而下逐层降透明）
-  auto decorate = [&](const RectF& l, const RectF& r, Color4f bevel) {
-    const float top_y = l.y + 1.0f;
-    rt.draw_line({l.x + kCardR, top_y}, {r.right() - kCardR, top_y},
-                 Pen{light ? Color4f(1, 1, 1, 0.80f) : Color4f(1, 1, 1, 0.08f), 1.0f});
-    for (int i = 1; i <= 2; ++i) {
-      Color4f b = bevel;
-      b.a = 0.45f / static_cast<float>(i);
-      rt.draw_line({l.x + kCardR, l.bottom() - 0.5f + i},
-                   {r.right() - kCardR, l.bottom() - 0.5f + i},
-                   Pen{b, 1.0f});
-    }
-    for (int i = 1; i <= 2; ++i) {
-      Color4f b = bevel;
-      b.a = 0.35f / static_cast<float>(i);
-      rt.draw_line({l.x + kCardR, l.bottom() + 2.0f + i},
-                   {r.right() - kCardR, l.bottom() + 2.0f + i},
-                   Pen{b, 1.0f});
-    }
-    for (int i = 1; i <= 2; ++i) {
-      Color4f g = bevel;
-      g.a = 0.12f / static_cast<float>(i);
-      rt.round_rect({l.x - i, l.y - i, r.right() - l.x + 2 * i, l.h + 2 * i},
-                   kCardR + i, Pen{g, 1.0f}, nullptr);
-    }
-  };
-  decorate(dl_l_, dl_r_, download_bevel());
-  decorate(ul_l_, ul_r_, upload_bevel());
+  // 底色/渐变/描边/阴影/发光全部来自 card_paint（4 卡型 × 6 皮肤，theme.cpp）
+  const theme::CardPaint dcp = ThemeService::instance().card_paint("download");
+  const theme::CardPaint ucp = ThemeService::instance().card_paint("upload");
+  const float dl_r = dcp.radius, ul_r = ucp.radius;
+  draw_card(rt, dl_l_, dcp, 0x9);  // bit0 TL | bit3 BL
+  draw_card(rt, dl_r_, dcp, 0x6);  // bit1 TR | bit2 BR
+  draw_card(rt, ul_l_, ucp, 0x9);
+  draw_card(rt, ul_r_, ucp, 0x6);
+  // 底缘 bevel / 内高光：retro-3d 专属（src: button-styles.ts:556-565 boxShadow
+  //   顶部 1px 内高光 + 底缘 1-2px 硬 bevel）。其余皮肤该层 boxShadow 已由
+  //   card_paint 的 has_shadow/glow 表达，这里只在 retro 下补描边细节。
+  const bool retro = ThemeService::instance().skin() == theme::SkinId::Retro3d;
+  if (retro) {
+    Pen dl_pen{dcp.shadow_color, 1.0f}, ul_pen{ucp.shadow_color, 1.0f};
+    rt.draw_line({dl_l_.x + dl_r, dl_l_.bottom() - 0.5f},
+                 {dl_r_.right() - dl_r, dl_l_.bottom() - 0.5f}, dl_pen);
+    rt.draw_line({ul_l_.x + ul_r, ul_l_.bottom() - 0.5f},
+                 {ul_r_.right() - ul_r, ul_l_.bottom() - 0.5f}, ul_pen);
+    auto decorate = [&](const RectF& l, const RectF& r, float rad,
+                        Color4f bevel) {
+      const float top_y = l.y + 1.0f;
+      rt.draw_line(
+          {l.x + rad, top_y}, {r.right() - rad, top_y},
+          Pen{light ? Color4f(1, 1, 1, 0.80f) : Color4f(1, 1, 1, 0.08f), 1.0f});
+      for (int i = 1; i <= 2; ++i) {
+        Color4f b = bevel;
+        b.a = 0.45f / static_cast<float>(i);
+        rt.draw_line({l.x + rad, l.bottom() - 0.5f + i},
+                     {r.right() - rad, l.bottom() - 0.5f + i}, Pen{b, 1.0f});
+      }
+      for (int i = 1; i <= 2; ++i) {
+        Color4f b = bevel;
+        b.a = 0.35f / static_cast<float>(i);
+        rt.draw_line({l.x + rad, l.bottom() + 2.0f + i},
+                     {r.right() - rad, l.bottom() + 2.0f + i}, Pen{b, 1.0f});
+      }
+    };
+    decorate(dl_l_, dl_r_, dl_r, dcp.shadow_color);
+    decorate(ul_l_, ul_r_, ul_r, ucp.shadow_color);
+  }
 
   // 图标（src: :108-116 下载箭头 / :236-244 上传箭头；总量卡无图标）
   draw_arrow(rt, dl_icon_, true, dl_icon_color());

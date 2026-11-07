@@ -160,6 +160,8 @@ bool MainWindow::create(bool show_immediately) {
   //   getActiveSkin(theme) —— 所有控件按当前皮肤即时换表，无需重启。
   theme_sub_ = theme::ThemeService::instance().subscribe([this] {
     if (settings_drawer_) settings_drawer_->restyle_cards();
+    // 主页节点列表的输入框也走 get3DInputStyle 查表，缓存需重刷
+    if (node_list_) node_list_->restyle_theme();
     clock_.invalidate({0, 0, static_cast<float>(client_w_),
                        static_cast<float>(client_h_)});
   });

@@ -13,6 +13,8 @@
 #include <sstream>
 
 #include "../../cmd/cmd_support.h"
+#include "../card_draw.h"
+#include "../soft_shadow.h"
 #include "../theme/theme.h"
 #include "../../i18n/i18n.h"
 #include "clashwin/config/constants.h"
@@ -167,10 +169,9 @@ class SkinCell : public Button {
   }
 };
 
-// src: button-styles.ts:535 get3DCardStyle('default').color
-//   light '#3C2F0F' / dark '#2C1F03'
+// src: button-styles.ts get3DCardStyle(theme,'default').color（6 套皮肤不同）
 Color4f card_text() {
-  return is_light() ? Color4f::hex(0x3C2F0F) : Color4f::hex(0x2C1F03);
+  return ThemeService::instance().card_paint("default").text_color;
 }
 
 // src: use-custom-theme.ts:364-371 --divider-color .06 用于 CSS 变量；
@@ -219,47 +220,58 @@ RectF inset_rect(const RectF& r, float d) {
   return {r.x + d, r.y + d, r.w - d * 2, r.h - d * 2};
 }
 
-// ---------- theme-panel 底 ----------
-// src: index.scss:124-132（retro-3d dark）/ :146-152（light）
+// ---------- theme-panel 底（6 套皮肤走 panel_paint 查表） ----------
+// src: index.scss:74-84 基线 + :123-329 各皮肤 override；与节点区容器同源，
+//   此前只画 retro-3d 的金渐变 + 双金线，切皮肤后抽屉底板始终是金色。
 void draw_panel_bg(IRenderTarget& rt, const RectF& r) {
-  GradientStop stops[3];
-  if (is_light()) {
-    // src: index.scss:147 light linear-gradient(135deg,#FFFDE7,#FFF9C4 50%,#FFF59D)
-    stops[0] = {0.0f, Color4f::hex(0xFFFDE7)};
-    stops[1] = {0.5f, Color4f::hex(0xFFF9C4)};
-    stops[2] = {1.0f, Color4f::hex(0xFFF59D)};
-  } else {
-    // src: index.scss:126 dark linear-gradient(135deg,#1A160E,#2A2413 50%,#17140B)
-    stops[0] = {0.0f, Color4f::hex(0x1A160E)};
-    stops[1] = {0.5f, Color4f::hex(0x2A2413)};
-    stops[2] = {1.0f, Color4f::hex(0x17140B)};
+  auto& svc = ThemeService::instance();
+  const auto pp = svc.panel_paint();
+  if (pp.has_shadow)
+    draw_soft_shadow(rt, r, pp.radius, pp.shadow_color, pp.shadow_dy,
+                     pp.shadow_blur);
+  if (pp.has_glow)
+    draw_glow(rt, r, pp.radius, pp.glow_color, pp.glow_blur);
+  if (pp.grad_bg) {
+    rt.fill_round_rect_gradient_angle(r, pp.radius, pp.grad, pp.grad_count,
+                                      pp.grad_angle);
+  } else if (pp.bg.a > 0.001f) {
+    Brush bg{pp.bg};
+    rt.round_rect(r, pp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &bg);
   }
-  rt.fill_round_rect_gradient_angle(r, kPanelR, stops, 3, 135.0f);  // src: index.scss:126
-  // src: index.scss:125 border 4px double #B8860B → 两道 1px 金线（外 0.5、内 3.5）
-  Pen gold{Color4f::hex(0xB8860B), 1.0f};
-  rt.round_rect(inset_rect(r, 0.5f), kPanelR, gold, nullptr);
-  rt.round_rect(inset_rect(r, 3.5f), kPanelR - 2.0f, gold, nullptr);
+  if (pp.has_inner_bevel) {
+    const float ih = 3.0f;
+    rt.draw_line({r.x + pp.radius, r.y + ih}, {r.right() - pp.radius, r.y + ih},
+                 Pen{pp.inner_hi, 1.0f});
+    rt.draw_line({r.x + ih, r.y + pp.radius}, {r.x + ih, r.bottom() - pp.radius},
+                 Pen{pp.inner_hi, 1.0f});
+    rt.draw_line({r.x + pp.radius, r.bottom() - ih},
+                 {r.right() - pp.radius, r.bottom() - ih},
+                 Pen{pp.inner_dark, 1.0f});
+    rt.draw_line({r.right() - ih, r.y + pp.radius},
+                 {r.right() - ih, r.bottom() - pp.radius},
+                 Pen{pp.inner_dark, 1.0f});
+  }
+  if (pp.border == theme::PanelPaint::BorderKind::None) return;
+  Color4f bc = pp.border_color;
+  if (pp.pulse) {
+    const float now_s = static_cast<float>(GetTickCount64()) / 1000.0f;
+    bc = Color4f::lerp(pp.pulse_from, pp.pulse_to, svc.pulse_phase(now_s));
+  }
+  // 1.34 逻辑 px ≈ 2 物理 px（与节点区容器同一补偿）
+  Pen border{bc, 1.34f};
+  rt.round_rect(r, pp.radius, border, nullptr);
+  const float inner_r = pp.radius > 3.0f ? pp.radius - 3.0f : 0.0f;
+  rt.round_rect({r.x + 3, r.y + 3, r.w - 6, r.h - 6}, inner_r, border, nullptr);
 }
 
-// ---------- 金渐变分段控件 ----------
+// ---------- 分段控件（6 套皮肤走 segmented_paint 查表） ----------
 void style_gold_segmented(Segmented* s) {
-  s->themed_ = false;
-  // 容器 src: button-styles.ts:939-945 border 1px rgba(212,175,55,.35/.22)，
-  //   bg rgba(212,175,55,.06/.08)（get3DSegmentedContainerStyle）
-  s->bg_ = is_light() ? Color4f::hex(0xD4AF37, 0.06f)
-                      : Color4f::hex(0xD4AF37, 0.08f);
-  // 滑块 src: button-styles.ts:998-1023 135° 金渐变（gold_3d_ 内走真渐变+描边）
-  s->gold_3d_ = true;
-  s->selected_bg_ = Color4f::hex(0xFFC107);
-  // src: button-styles.ts:1105-1121 retro-3d 选中文字 '#2C1F03'
-  s->selected_text_color_ = Color4f::hex(0x2C1F03);
-  // src: takeover-mode-card.tsx:110-115 未选中：
-  //   isRetro3DDark ? 'rgba(44,31,3,0.75)' : 'text.secondary'
-  //   text.secondary = _theme.tsx:6 '#3C3C4399'（a=0x99/255≈0.6）
-  s->text_color_ = is_light() ? Color4f::hex(0x3C3C43, 0.6f)
-                              : Color4f::hex(0x2C1F03, 0.75f);
-  // src: button-styles.ts:1005 滑块 radius 3；theme-settings-card.tsx:174 容器 4
-  s->radius_ = 4.0f;  // 容器圆角；滑块在 segmented.cpp 内固定 3
+  // T12：改为 themed_ → ThemeService::segmented_paint()（← get3DSegmented*）。
+  // 仅 retro-3d 保留 135° 六停金渐变滑块（gold_3d_），其余皮肤用查表纯色滑块。
+  s->themed_ = true;
+  s->gold_3d_ = (ThemeService::instance().skin() == theme::SkinId::Retro3d);
+  // src: theme-settings-card.tsx:174 容器圆角 4；滑块 radius 3
+  s->radius_ = 4.0f;
   // src: takeover-mode-card.tsx:116 / theme-settings-card.tsx:211 fontSize 13/10
   s->style_.size = 13;
   s->style_.weight = static_cast<int>(Weight::Bold);
@@ -272,39 +284,28 @@ void style_gold_segmented_small(Segmented* s) {
 }
 
 void style_slider(Slider* s) {
-  // src: style-helpers.tsx:251-283 get3DSliderStyle retro-3d
-  s->thickness_ = 5.0f;   // rail/track height 5
-  s->thumb_d_ = 14.0f;    // thumb 14×14
-  // rail src: :254 opacity .85 × :255-261 bgcolor rgba(212,175,55,.25/.15)
-  s->track_ = is_light() ? Color4f::hex(0xD4AF37, 0.25f * 0.85f)
-                         : Color4f::hex(0xD4AF37, 0.15f * 0.85f);
-  // track src: :268-269 linear-gradient(to bottom,#FFE082,#FFC107,#B8860B)
-  // thumb src: :280-283 radial 金（gold_3d_ 内真实渐变）
-  s->gold_3d_ = true;
-  s->fill_ = Color4f::hex(0xFFC107);
-  s->thumb_ = is_light() ? Color4f::hex(0xFFD54F) : Color4f::hex(0xFFC107);
+  // src: pages/_layout/utils/style-helpers.tsx:241-467 get3DSliderStyle
+  // 6 套皮肤全部走单次查表（此前只有 retro 金渐变与 MUI 缺省两枝）
+  s->apply_theme();
 }
 
 void style_input(TextField* f) {
-  // src: button-styles.ts:734-778 get3DInputStyle
-  f->bg_ = is_light() ? Color4f::hex(0xFFFDE7, 0.8f)
-                      : Color4f::hex(0x1A160E, 0.4f);
-  // outline 2px rgba(212,175,55,.35/.25) src: button-styles.ts:734-778
-  f->border_ = Color4f::hex(0xD4AF37, is_light() ? 0.35f : 0.25f);
-  f->border_w_ = 2.0f;
-  // focus src: :770-775 border '#B8860B'(light)/'#FFA000'(dark)
-  f->border_focused_ = is_light() ? Color4f::hex(0xB8860B) : Color4f::hex(0xFFA000);
-  // 文字 src: _theme.tsx:5/:20 text.primary '#000000' / '#FFFFFF'
-  //   （basic-settings-card.tsx:238-251 只给 13px 居中，未覆写颜色）
-  f->style_.color = theme::ThemeService::instance().palette().primary_text;
+  // src: button-styles.ts:734-927 get3DInputStyle（6 套皮肤全部走 apply_theme）
+  f->apply_theme();
   f->style_.size = 13;
-  f->style_.align_h = AlignH::Center;
+  f->style_.align_h = AlignH::Center;  // basic-settings-card.tsx:238-251
   f->caret_color_ = f->style_.color;
 }
 
 }  // namespace
 
 // ---------- 皮肤/因子持久化（clashwin-skin.json） ----------
+// 因子按皮肤分别存储（← use-skin-controls.ts:13-24 readFactor）：
+//   JSON 形如 {"skin":"retro-3d","theme_mode":"dark",
+//              "factors":{"retro-3d":{"v1":0.3,"v2":1.0},
+//                         "original":{"v1":1.0,"v2":1.0}}}
+//   顶层 depth/vibrancy 保留为 retro-3d 的 legacy 位（← Mini 的
+//   'clash-mini-depth-factor' / 'clash-mini-vibrancy-factor'）。
 SkinPrefs load_skin_prefs() {
   SkinPrefs p;
   std::wstring path = util::dirs::app_home_dir() + L"\\clashwin-skin.json";
@@ -318,6 +319,12 @@ SkinPrefs load_skin_prefs() {
     p.theme_mode = j.value("theme_mode", p.theme_mode);
     p.depth = j.value("depth", p.depth);
     p.vibrancy = j.value("vibrancy", p.vibrancy);
+    if (j.contains("factors") && j["factors"].is_object()) {
+      for (const auto& [k, v] : j["factors"].items()) {
+        if (!v.is_object()) continue;
+        p.factors[k] = {v.value("v1", 1.0f), v.value("v2", 1.0f)};
+      }
+    }
   } catch (const std::exception&) {
     // 损坏 → 缺省
   }
@@ -331,8 +338,38 @@ void save_skin_prefs(const SkinPrefs& p) {
   j["theme_mode"] = p.theme_mode;
   j["depth"] = p.depth;
   j["vibrancy"] = p.vibrancy;
+  nlohmann::json fj = nlohmann::json::object();
+  for (const auto& [k, v] : p.factors) {
+    fj[k] = {{"v1", v.first}, {"v2", v.second}};
+  }
+  j["factors"] = std::move(fj);
   std::ofstream f(path, std::ios::binary);
   if (f.is_open()) f << j.dump();
+}
+
+// 取某皮肤的因子：优先该皮肤已存值 → retro-3d 回落到 legacy 顶层字段 →
+// skin_default_factors 缺省（retro-3d 0.3/1.0，其余 1.0/1.0）
+std::pair<float, float> skin_factors(const SkinPrefs& p,
+                                     const std::string& skin) {
+  auto it = p.factors.find(skin);
+  if (it != p.factors.end()) return it->second;
+  if (skin == "retro-3d") return {p.depth, p.vibrancy};
+  float d = 1.0f, v = 1.0f;
+  if (auto sid = theme::skin_from_name(skin))
+    theme::skin_default_factors(*sid, &d, &v);
+  else
+    theme::skin_default_factors(theme::SkinId::Retro3d, &d, &v);
+  return {d, v};
+}
+
+void set_skin_factors(SkinPrefs& p, const std::string& skin, float depth,
+                      float vibrancy) {
+  p.factors[skin] = {depth, vibrancy};
+  // retro-3d 同时写 legacy 顶层位（与 Mini 的双写语义一致）
+  if (skin == "retro-3d") {
+    p.depth = depth;
+    p.vibrancy = vibrancy;
+  }
 }
 
 // ---------- AccentColor（DWM） ----------
@@ -584,14 +621,22 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   depth_label_->style.align_v = AlignV::Center;  // ListItem alignItems center（:331）
   // src: theme-settings-card.tsx:344 variant="caption" → 常规字重（非 Bold）
   depth_label_->style.color = card_text();
-  depth_label_->set_text(L"Depth");
+  // src: theme-settings-card.tsx:59-75 getSlider1Label（逐皮肤：
+  //   Depth/Radius/Roundness/Opacity/Glow/Radius）
+  depth_label_->set_text(
+      theme::skin_slider_spec(ThemeService::instance().skin()).label1);
   add_child(std::move(dl));
   auto ds = std::make_unique<Slider>();
   depth_slider_ = ds.get();
-  // src: theme-settings-card.tsx:82-99 getSlider1Max retro-3d = 1.0，step .1
-  depth_slider_->min_ = 0;
-  depth_slider_->max_ = 1.0f;
-  depth_slider_->step_ = 0.1f;
+  // src: theme-settings-card.tsx:82-99 getSlider1Max（逐皮肤：retro 1.0 /
+  //   original 3.0 / modern 3.0 / frosted 5.0 / cyber 5.0 / mono 3.0），step .1
+  {
+    const auto spec =
+        theme::skin_slider_spec(ThemeService::instance().skin());
+    depth_slider_->min_ = 0;
+    depth_slider_->max_ = spec.max1;
+    depth_slider_->step_ = 0.1f;
+  }
   style_slider(depth_slider_);
   add_child(std::move(ds));
   auto dv = std::make_unique<Label>();
@@ -612,14 +657,22 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   vibrancy_label_->style.align_v = AlignV::Center;
   // src: theme-settings-card.tsx:393 variant="caption" → 常规字重（非 Bold）
   vibrancy_label_->style.color = card_text();
-  vibrancy_label_->set_text(L"Vibrancy");
+  // src: theme-settings-card.tsx:117-134 getSlider2Label（逐皮肤：
+  //   Vibrancy/Accent/Shadow/Blur/Speed/Border）
+  vibrancy_label_->set_text(
+      theme::skin_slider_spec(ThemeService::instance().skin()).label2);
   add_child(std::move(vl));
   auto vs = std::make_unique<Slider>();
   vibrancy_slider_ = vs.get();
-  // src: theme-settings-card.tsx:101-115 getSlider2Max retro-3d = 5.0
-  vibrancy_slider_->min_ = 0;
-  vibrancy_slider_->max_ = 5.0f;
-  vibrancy_slider_->step_ = 0.1f;
+  // src: theme-settings-card.tsx:101-115 getSlider2Max（retro 5.0 / original 3.0
+  //   / modern 5.0 / frosted 5.0 / cyber 5.0 / mono 5.0）
+  {
+    const auto spec =
+        theme::skin_slider_spec(ThemeService::instance().skin());
+    vibrancy_slider_->min_ = 0;
+    vibrancy_slider_->max_ = spec.max2;
+    vibrancy_slider_->step_ = 0.1f;
+  }
   style_slider(vibrancy_slider_);
   add_child(std::move(vs));
   auto vv = std::make_unique<Label>();
@@ -893,13 +946,43 @@ void SettingsDrawer::set_open(bool open) {
   if (on_open_changed) on_open_changed(open);
 }
 
+// 皮肤切换/恢复后，把滑块的量程、标签、当前值同步到该皮肤
+// src: theme-settings-card.tsx:59-134（max/label 逐皮肤）、
+//      :365-373/:414-421（value 与 factor 同源）
+void SettingsDrawer::sync_skin_sliders(theme::SkinId skin, float depth,
+                                       float vibrancy) {
+  if (!theme_card_) return;
+  const auto spec = theme::skin_slider_spec(skin);
+  if (theme_card_->depth_slider_) {
+    theme_card_->depth_slider_->max_ = spec.max1;
+    theme_card_->depth_slider_->set_value(depth, false);
+  }
+  if (theme_card_->vibrancy_slider_) {
+    theme_card_->vibrancy_slider_->max_ = spec.max2;
+    theme_card_->vibrancy_slider_->set_value(vibrancy, false);
+  }
+  if (theme_card_->depth_label_) theme_card_->depth_label_->set_text(spec.label1);
+  if (theme_card_->vibrancy_label_)
+    theme_card_->vibrancy_label_->set_text(spec.label2);
+  if (theme_card_->depth_value_)
+    theme_card_->depth_value_->set_text(fmt_factor(depth));
+  if (theme_card_->vibrancy_value_)
+    theme_card_->vibrancy_value_->set_text(fmt_factor(vibrancy));
+}
+
 void SettingsDrawer::select_skin(int i) {
   static const char* names[] = {"retro-3d", "original", "modern-flat",
                                 "frosted-glass", "cyberpunk", "monochrome"};
   if (i < 0 || i >= 6) return;
   if (auto skin = theme::skin_from_name(names[i])) {
-    ThemeService::instance().set_skin(*skin);
+    auto& svc = ThemeService::instance();
+    svc.set_skin(*skin);
     SkinPrefs p = load_skin_prefs();
+    // src: use-skin-controls.ts:37-46 切皮肤时读该皮肤自己的因子
+    //   （无历史值 → 该皮肤缺省：retro-3d 0.3/1.0，其余 1.0/1.0）
+    auto [d, v] = skin_factors(p, names[i]);
+    svc.set_factors(d, v);
+    sync_skin_sliders(*skin, d, v);
     p.skin = names[i];
     save_skin_prefs(p);
     if (on_patch_verge) on_patch_verge("clash_mini_control_skin", names[i]);
@@ -910,22 +993,25 @@ void SettingsDrawer::select_skin(int i) {
 void SettingsDrawer::apply_skin_prefs() {
   SkinPrefs p = load_skin_prefs();
   auto& svc = ThemeService::instance();
-  if (auto skin = theme::skin_from_name(p.skin)) svc.set_skin(*skin);
+  theme::SkinId sid = theme::SkinId::Retro3d;
+  if (auto skin = theme::skin_from_name(p.skin)) {
+    svc.set_skin(*skin);
+    sid = *skin;
+  }
   // "sys" 必须跟随 Windows 应用暗色（此前一律落到 Light，造成
   // “深色选中却走浅色分支”的反色现象）
   bool dark = p.theme_mode == "dark" ||
               (p.theme_mode != "light" && system_is_dark());
   svc.set_mode(dark ? theme::ThemeMode::Dark : theme::ThemeMode::Light);
-  svc.set_factors(p.depth, p.vibrancy);
+  // 因子按皮肤取（← readFactor）；retro-3d 回落 legacy 顶层字段
+  auto [d, v] = skin_factors(p, p.skin);
+  svc.set_factors(d, v);
   // 同步抽屉控件（不触发回调）
   if (theme_card_) {
     int idx = p.theme_mode == "light" ? 1 : (p.theme_mode == "dark" ? 2 : 0);
     theme_card_->mode_seg_->select_silent(idx);
-    theme_card_->depth_slider_->set_value(p.depth, false);
-    theme_card_->vibrancy_slider_->set_value(p.vibrancy, false);
-    theme_card_->depth_value_->set_text(fmt_factor(p.depth));
-    theme_card_->vibrancy_value_->set_text(fmt_factor(p.vibrancy));
   }
+  sync_skin_sliders(sid, d, v);
   restyle_cards();
 }
 
@@ -946,26 +1032,53 @@ void SettingsDrawer::restyle_cards() {
   auto set = [&](Label* l) {
     if (l) l->style.color = txt;
   };
+  // 【控件级重刷】TextField::apply_theme() / Segmented::gold_3d_ /
+  //   Slider::apply_theme() 都是「查表结果缓存进成员」，只在构造时调用一次。
+  //   切皮肤后这些缓存仍是旧皮肤的值 —— 输入框底色/描边/圆角、分段控件的
+  //   金渐变滑块、滑块尺寸都不会变。Mini 侧这些值是每次 render 现取的。
+  const bool retro = ThemeService::instance().skin() == theme::SkinId::Retro3d;
+  // Segmented 的金渐变滑块标志（← style_gold_segmented）随皮肤重设
+  auto restyle_seg = [&](Segmented* s) {
+    if (!s) return;
+    s->gold_3d_ = retro;
+    s->invalidate();
+  };
   if (profile_card_) {
     // src: profile-import-card.tsx:121 'inherit' → 继承卡片默认色
     //   get3DCardStyle('default').color = #3C2F0F / #2C1F03
     profile_card_->set_title_color(txt);
+    // URL 输入框：重新查表（底/描边/圆角随皮肤变，← get3DInputStyle）
+    if (auto* f = profile_card_->url_field()) {
+      f->apply_theme();
+      f->style_.size = 13;
+      f->style_.color = ThemeService::instance().text_primary();
+      f->placeholder_color_ = ThemeService::instance().palette().secondary_text;
+      f->caret_color_ = f->style_.color;
+    }
     profile_card_->invalidate();
   }
   if (takeover_card_) {
     set(takeover_card_->title_);
     set(takeover_card_->hint_);
+    // TakeoverSegmented 自绘（非 Segmented 子类）：仅需 invalidate 重刷
     if (takeover_card_->seg_) takeover_card_->seg_->invalidate();
   }
   if (routing_card_) {
     set(routing_card_->title_);
     set(routing_card_->hint_);
-    if (routing_card_->seg_) routing_card_->seg_->invalidate();
+    restyle_seg(routing_card_->seg_);
   }
   if (basic_card_) {
     set(basic_card_->title_);
     set(basic_card_->port_label_);
     for (auto* l : basic_card_->labels_) set(l);  // 4 个开关文案
+    if (basic_card_->port_field_) {
+      basic_card_->port_field_->apply_theme();
+      basic_card_->port_field_->style_.size = 13;
+      basic_card_->port_field_->style_.align_h = AlignH::Center;
+      basic_card_->port_field_->caret_color_ =
+          basic_card_->port_field_->style_.color;
+    }
   }
   if (theme_card_) {
     set(theme_card_->title_);
@@ -981,7 +1094,11 @@ void SettingsDrawer::restyle_cards() {
       theme_card_->copyright_->style.color =
           is_light() ? Color4f::hex(0x3C3C43, 0.6f)
                      : Color4f::hex(0xEBEBF5, 0.6f);
-    if (theme_card_->mode_seg_) theme_card_->mode_seg_->invalidate();
+    restyle_seg(theme_card_->mode_seg_);
+    // 滑块：重新查表（轨厚/滑块尺寸/渐变随皮肤变）
+    if (theme_card_->depth_slider_) theme_card_->depth_slider_->apply_theme();
+    if (theme_card_->vibrancy_slider_)
+      theme_card_->vibrancy_slider_->apply_theme();
     theme_card_->invalidate();
   }
   // 底部行六格：选中/未选中两态随皮肤与亮暗重刷（← _layout.tsx:1705-1749）
@@ -1131,24 +1248,14 @@ void SettingsDrawer::open_help_menu() {
   st.min_w = 160;
   st.radius = 6;
   st.font_size = 13.0f;
-  st.font_weight = static_cast<int>(Weight::Bold);
-  st.gold_hover = true;
-  st.gradient_panel = true;
   st.pad_v = 4;
   st.padding_h = 16;  // src: style-helpers.tsx:126-145 MenuItem padding '8px 16px'
   st.hover_inset = 0;
   st.border = Color4f(1, 1, 1, 0.12f);
   st.text = ThemeService::instance().text_primary();
   st.disabled_text = Color4f(st.text.r, st.text.g, st.text.b, 0.38f);
-  if (ThemeService::instance().is_light()) {
-    st.grad[0] = {0.0f, Color4f::hex(0xFFFDE7)};
-    st.grad[1] = {0.5f, Color4f::hex(0xFFF9C4)};
-    st.grad[2] = {1.0f, Color4f::hex(0xFFF59D)};
-  } else {
-    st.grad[0] = {0.0f, Color4f::hex(0x1A160E)};
-    st.grad[1] = {0.5f, Color4f::hex(0x2A2413)};
-    st.grad[2] = {1.0f, Color4f::hex(0x17140E)};
-  }
+  // 6 套皮肤：面板底/边框/圆角 + hover 全部走查表（← apply_menu_skin）
+  apply_menu_skin(st);
   // 6 项 + 2 分隔线（src: help-menu-button.tsx:114-205；文案同原生菜单）
   // 版本后缀（src: help-menu-button.tsx:190-205）：
   //   软件 = '(v' + appVersion + ')'；内核 = '(' + formatCoreVersion(core) + ')'，
@@ -1247,9 +1354,6 @@ void SettingsDrawer::open_profile_menu(const std::string& uid, PointF anchor) {
   st.min_w = 220;  // src: help-menu-button.tsx:103 minWidth '220px'
   st.radius = 6;
   st.font_size = 13.0f;
-  st.font_weight = static_cast<int>(Weight::Bold);
-  st.gold_hover = true;
-  st.gradient_panel = true;
   st.pad_v = 4;
   st.hover_inset = 0;
   st.border = Color4f(1, 1, 1, 0.12f);
@@ -1258,16 +1362,8 @@ void SettingsDrawer::open_profile_menu(const std::string& uid, PointF anchor) {
   // src: _theme.tsx:8/:24 error_color '#FF3B30'(light) / '#FF453A'(dark)
   st.danger_text =
       ThemeService::instance().is_light() ? Color4f::hex(0xFF3B30) : Color4f::hex(0xFF453A);
-  // theme-panel 135° 3 停靠（src: index.scss:126 dark / :147 light）
-  if (ThemeService::instance().is_light()) {
-    st.grad[0] = {0.0f, Color4f::hex(0xFFFDE7)};
-    st.grad[1] = {0.5f, Color4f::hex(0xFFF9C4)};
-    st.grad[2] = {1.0f, Color4f::hex(0xFFF59D)};
-  } else {
-    st.grad[0] = {0.0f, Color4f::hex(0x1A160E)};
-    st.grad[1] = {0.5f, Color4f::hex(0x2A2413)};
-    st.grad[2] = {1.0f, Color4f::hex(0x17140E)};
-  }
+  // 6 套皮肤：面板底/边框/圆角 + hover 全部走查表（← apply_menu_skin）
+  apply_menu_skin(st);
 
   // 5 项 + 2 分隔线：src: _layout.tsx:1820-1856（图标/文案取自 zh 语言包）
   std::vector<MenuItem> its;
@@ -1319,9 +1415,6 @@ void SettingsDrawer::open_url_menu(PointF anchor) {
   st.min_w = 160;  // src: _layout.tsx:1876 minWidth '160px'
   st.radius = 6;
   st.font_size = 13.0f;
-  st.font_weight = static_cast<int>(Weight::Bold);
-  st.gold_hover = true;
-  st.gradient_panel = true;
   st.pad_v = 4;
   st.hover_inset = 0;
   st.border = Color4f(1, 1, 1, 0.12f);
@@ -1330,15 +1423,8 @@ void SettingsDrawer::open_url_menu(PointF anchor) {
   // src: _theme.tsx:8/:24 error_color '#FF3B30'(light) / '#FF453A'(dark)
   st.danger_text =
       ThemeService::instance().is_light() ? Color4f::hex(0xFF3B30) : Color4f::hex(0xFF453A);
-  if (ThemeService::instance().is_light()) {
-    st.grad[0] = {0.0f, Color4f::hex(0xFFFDE7)};
-    st.grad[1] = {0.5f, Color4f::hex(0xFFF9C4)};
-    st.grad[2] = {1.0f, Color4f::hex(0xFFF59D)};
-  } else {
-    st.grad[0] = {0.0f, Color4f::hex(0x1A160E)};
-    st.grad[1] = {0.5f, Color4f::hex(0x2A2413)};
-    st.grad[2] = {1.0f, Color4f::hex(0x17140E)};
-  }
+  // 6 套皮肤：面板底/边框/圆角 + hover 全部走查表（← apply_menu_skin）
+  apply_menu_skin(st);
 
   // 5 项 + 1 分隔线：src: _layout.tsx:1886-1931（文案 zh: shared.json:27-31）
   std::vector<MenuItem> its;
@@ -1521,14 +1607,18 @@ void SettingsDrawer::wire_callbacks() {
     if (on_patch_verge)
       on_patch_verge("theme_mode", i == 1 ? "light" : (i == 2 ? "dark" : "system"));
   };
-  // Depth/Vibrancy 滑块
+  // Depth/Vibrancy 滑块（← theme-settings-card.tsx:365-373/:414-421）
+  // 值写回「当前皮肤」的因子槽（← use-skin-controls.ts:55-67：
+  //   localStorage['clash-mini-{skin}-val1/val2']，retro-3d 另写 legacy 键）
   theme_card_->depth_slider_->on_change = [this](float v) {
     auto& svc = ThemeService::instance();
     svc.set_factors(v, svc.vibrancy_factor());
     if (theme_card_->depth_value_)
       theme_card_->depth_value_->set_text(fmt_factor(v));
     SkinPrefs p = load_skin_prefs();
-    p.depth = v;
+    set_skin_factors(p, p.skin, v, p.factors.count(p.skin)
+                                         ? p.factors[p.skin].second
+                                         : svc.vibrancy_factor());
     save_skin_prefs(p);
   };
   theme_card_->vibrancy_slider_->on_change = [this](float v) {
@@ -1537,7 +1627,10 @@ void SettingsDrawer::wire_callbacks() {
     if (theme_card_->vibrancy_value_)
       theme_card_->vibrancy_value_->set_text(fmt_factor(v));
     SkinPrefs p = load_skin_prefs();
-    p.vibrancy = v;
+    set_skin_factors(p, p.skin, p.factors.count(p.skin)
+                                         ? p.factors[p.skin].first
+                                         : svc.depth_factor(),
+                      v);
     save_skin_prefs(p);
   };
 }

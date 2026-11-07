@@ -11,6 +11,7 @@
 
 #include "cmd/cmd_support.h"
 #include "config/config.h"
+#include "core/auto_select.h"
 #include "events/event_bus.h"
 #include "util/log.h"
 #include "util/node.h"
@@ -117,6 +118,16 @@ bool NodeData::test_group() {
   return true;
 }
 
+// ★ §5.2/§5.6「所见即所选」：批量测速可见子集 + 择优切换
+//   ← Mini proxy-groups.tsx:230-275 handleCheckAll
+//   视觉占位：先置 -2（testing）触发流光动画，再委托后端统一引擎
+bool NodeData::test_and_select(const std::vector<std::string>& nodes) {
+  // 视觉占位：立即将待测节点标记为「测速中」（← Mini setDelay(name, group, -2)）
+  for (const auto& n : nodes) set_delay(n, -2);
+  if (!hooks_.test_and_select) return false;
+  return hooks_.test_and_select(nodes);
+}
+
 namespace {
 // RFC3339 → epoch ms（无时区按 UTC，等价 JS Date.parse 的 Z 分支）
 bool parse_iso_time_ms(const std::string& s, int64_t* out) {
@@ -210,6 +221,30 @@ DataHooks NodeData::production_hooks(const std::string& group) {
     return true;
   };
   h.now_ms = [] { return static_cast<int64_t>(GetTickCount64()); };
+  // ★ §5.2/§5.6「所见即所选」：可见子集 → 测速 + 择优切换
+  //   ← Mini proxy-groups.tsx:230-275 handleCheckAll
+  //     triggerAutoSelect(currentUid, visibleNames, 0, true)
+  //   → cmd trigger_auto_select（cmd_profile.cpp:585）→ AutoSelect::trigger
+  h.test_and_select = [](const std::vector<std::string>& nodes) {
+    std::string uid;
+    try {
+      auto latest = config::Config::instance().profiles().latest_arc();
+      if (latest && latest->current) uid = *latest->current;
+    } catch (...) {}
+    if (uid.empty()) return false;
+    // sort_type=0（head state）；select=true（择优切换）
+    // nodes 为空 → 全量（与自动优选同语义）
+    auto outcome = core::AutoSelect::instance().trigger(
+        uid, nodes.empty() ? std::nullopt
+                            : std::optional<std::vector<std::string>>(nodes),
+        /*sort_type=*/0, /*select=*/true);
+    if (outcome.busy) {
+      CWLOG_WARN("test_and_select: AUTO_SELECT_BUSY（互斥占用，本次不执行）");
+      return false;
+    }
+    // 结果经 backend-delay-results 事件回灌缓存（AutoSelect 内部已发）
+    return true;
+  };
   return h;
 }
 

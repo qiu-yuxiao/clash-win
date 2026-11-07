@@ -27,6 +27,7 @@
 #include "ui/main_window.h"
 #include "util/dirs.h"
 #include "util/log.h"
+#include "util/node.h"
 
 #include <map>
 #include <vector>
@@ -381,6 +382,47 @@ bool App::init() {
             if (delay < core::kNodeDelayMinMs || delay >= core::kNodeDelayMaxMs) return false;
           }
           return true;
+        },
+        /*.active_node_name =*/
+        []() -> std::string {
+          // ★ §5.1 切换宽限期的起算依据（← Mini monitor.rs:1358 读 active_node_name）
+          auto grp = cmd::mihomo_unchecked().get_group_by_name("PROXY");
+          if (grp.is_err() || !grp.value().now) return std::string();
+          return *grp.value().now;
+        },
+        /*.is_dummy_active =*/
+        []() -> bool {
+          // ★ §5.4 第 3 道铁锁（← Mini monitor.rs:663-666）
+          auto grp = cmd::mihomo_unchecked().get_group_by_name("PROXY");
+          if (grp.is_err() || !grp.value().now || grp.value().now->empty()) return false;
+          return util::is_dummy_node(*grp.value().now);
+        },
+        /*.probe_metrics_with_fallback =*/
+        []() -> bool {
+          // ★ §5.8 测速失真复核（← Mini monitor.rs:188-223 probe_metrics_group）
+          //   主测速地址整体失败 → 备用地址复核；主备双双整体失败 → 链路不可用。
+          auto& client = cmd::mihomo_unchecked();
+          std::string main_url = "https://cp.cloudflare.com/generate_204";
+          try {
+            const auto& verge = *config::Config::instance().verge().latest_arc();
+            main_url = verge.default_latency_test.value_or(main_url);
+          } catch (...) {
+          }
+          auto r = client.delay_group("PROXY__METRICS", main_url,
+                                      core::kNodeDelayMaxMs, 5000);
+          if (r.is_ok()) return true;
+          CWLOG_WARN(
+              "CoreMonitor: 主测速地址整体失败，改用备用地址复核: " + main_url);
+          auto r2 = client.delay_group("PROXY__METRICS",
+                                       "https://www.gstatic.com/generate_204",
+                                       core::kNodeDelayMaxMs, 5000);
+          if (r2.is_ok()) {
+            CWLOG_INFO(
+                "CoreMonitor: 备用测速地址可用 → 判定为主测速地址失真，节点侧正常");
+            return true;
+          }
+          CWLOG_WARN("CoreMonitor: 主/备测速地址均整体失败 → 测速链路不可用");
+          return false;
         },
         /*.auto_select_trigger =*/
         []() -> Result<bool> {

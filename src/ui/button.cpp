@@ -3,6 +3,7 @@
 
 #include <algorithm>
 
+#include "card_draw.h"
 #include "theme/theme.h"
 
 namespace clashwin::ui {
@@ -39,43 +40,52 @@ void Button::draw_button_bg(IRenderTarget& rt, const RectF& r) {
     // 渐变 + 浮雕 + 外发光 + translateY 位移。
     auto p = theme::ThemeService::instance().button_paint(theme_color_type_);
     const bool disabled = (state() == State::Disabled);
+    const float d = theme::ThemeService::instance().depth_factor();
     const float vf = theme::ThemeService::instance().vibrancy_factor();
-    // 外发光（先于主体绘制形成光晕；vibrancy 调制）。D2D 无模糊滤镜，
-    // 用略大一圈的同色填充圆角矩形近似 halo（真实 glow=多层 boxShadow blur）。
-    if (p.glow.a > 0 && !disabled) {
-      float ga = std::min(1.0f, p.glow.a * (0.5f + 0.5f * vf));
-      if (ga > 0.01f) {
-        RectF gr{r.x - 3, r.y - 3, r.w + 6, r.h + 6};
-        Brush gb{Color4f{p.glow.r, p.glow.g, p.glow.b, ga}};
-        rt.round_rect(gr, p.radius + 3, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &gb);
-      }
-    }
+    // 外阴影（← 各皮肤 boxShadow 常规层）：D2D 无 box-shadow，多层外扩近似
+    if (p.has_shadow && !disabled)
+      draw_soft_shadow(rt, r, p.radius, p.shadow_color, p.shadow_dy,
+                       p.shadow_blur);
+    // 外发光（← boxShadow 0 0 calc(N * factor) color）。D2D 无模糊滤镜，
+    // 用多层递减 alpha 外扩近似（soft_shadow.h）。
+    if (p.glow.a > 0 && !disabled)
+      draw_glow(rt, r, p.radius, p.glow, p.glow_blur);
     // 主体：135° 多停渐变（retro）或单色填充（其余皮肤）
     if (p.use_grad && !disabled) {
       const GradientStop* gs = (state() == State::Hover) ? p.grad_hover : p.grad;
       rt.fill_round_rect_gradient_angle(r, p.radius, gs, p.grad_count, p.grad_angle);
       last_fill_ = gs[p.grad_count / 2].color;
-    } else {
-      Color4f fill;
-      switch (state()) {
-        case State::Hover: fill = p.fill_hover; break;
-        case State::Pressed: fill = p.fill_pressed; break;
-        case State::Disabled: fill = p.fill_disabled; break;
-        default: fill = p.fill; break;
+      // ← :84 border: calc(2px * depth) solid borderColor（渐变填充后单独描边）
+      if (p.border_w > 0.01f && p.border.a > 0.001f)
+        rt.round_rect(r, p.radius, Pen{p.border, p.border_w}, nullptr);
+      // ← :89-96 多层硬 bevel boxShadow（×depth）：
+      //   0 1px 0 bevelDark / 0 d 0 bevelDark / 0 2d 0 bevelDark / 0 3d 2d 黑影
+      if (p.bevel_dark.a > 0) {
+        rt.draw_line(PointF{r.x + p.radius, r.y + 1.0f},
+                     PointF{r.right() - p.radius, r.y + 1.0f},
+                     Pen{p.bevel_hi, 1.0f});
+        for (int i = 1; i <= 2; ++i) {
+          rt.draw_line(
+              PointF{r.x + p.radius, r.bottom() - 1.0f + i * d},
+              PointF{r.right() - p.radius, r.bottom() - 1.0f + i * d},
+              Pen{p.bevel_dark, 1.0f});
+        }
+        Color4f ds = Color4f::hex(0x000000, 0.35f);
+        draw_soft_shadow(rt, r, p.radius, ds, 3.0f * d, 2.0f * d);
       }
-      Brush b{fill};
-      rt.round_rect(r, p.radius, {p.border, p.border_w}, &b);
-      last_fill_ = fill;
+      return;
     }
-    // 3D 浮雕（retro 渐变皮肤）：顶部高光 + 底部暗边
-    if (p.use_grad && !disabled && p.bevel_dark.a > 0) {
-      rt.draw_line(PointF{r.x + p.radius, r.y + 1.0f},
-                   PointF{r.right() - p.radius, r.y + 1.0f},
-                   Pen{p.bevel_hi, 1.0f});
-      rt.draw_line(PointF{r.x + p.radius, r.bottom() - 1.0f},
-                   PointF{r.right() - p.radius, r.bottom() - 1.0f},
-                   Pen{p.bevel_dark, 1.0f});
+    Color4f fill;
+    switch (state()) {
+      case State::Hover: fill = p.fill_hover; break;
+      case State::Pressed: fill = p.fill_pressed; break;
+      case State::Disabled: fill = p.fill_disabled; break;
+      default: fill = p.fill; break;
     }
+    Brush b{fill};
+    Pen bp = disabled ? Pen{Color4f{0, 0, 0, 0}, 0.0f} : Pen{p.border, p.border_w};
+    rt.round_rect(r, p.radius, bp, &b);
+    last_fill_ = fill;
     return;
   }
   if (state() != State::Disabled && paint_params.grad_count > 0) {

@@ -43,6 +43,10 @@ class CoreMonitor {
     int alert_fail_threshold = 5;      // 自愈连续失败 5 次
     int64_t heal_cooldown_ms = 60000;  // 自愈 60s 冷却
     int64_t failed_server_cooldown_ms = 600000;  // 失败服务器 600s
+    // ★ §5.1 切换宽限期（← monitor.rs:74 SWITCH_GRACE_PERIOD_SECS = 60）
+    //   切换后 60s 内的失败判定只记日志、不计入连续失败次数
+    //   （防「切到尚未拨测的新节点 → 缓存陈旧误判 → 再次切走」的乒乓震荡）
+    int64_t switch_grace_ms = 60000;
   };
 
   struct Hooks {
@@ -56,6 +60,17 @@ class CoreMonitor {
     std::function<bool()> network_online;
     // 节点健康（生产 = T16 延迟缓存/测量组轻量判定；true=健康）
     std::function<bool()> node_healthy;
+    // ★ 当前活跃节点名（生产 = PROXY 组 .now；用于检测「节点切换」以起算宽限期）
+    //   ← Mini monitor.rs:1358-1370 的 active_node_name 读取
+    std::function<std::string()> active_node_name;
+    // ★ §5.8 测速失真复核（← Mini monitor.rs:188-223 probe_metrics_group）
+    //   生产 = 对 PROXY__METRICS 整组拨测：主 URL 整体失败 → 备用 URL 复核；
+    //   主备双双整体失败 → 返回 false = 「测速链路不可用」，**不可据此判节点已死**。
+    //   返回 true = 测速链路可用（本次测得结果可能是空的，但链路正常）。
+    std::function<bool()> probe_metrics_with_fallback;
+    // ★ §5.4 第 3 道铁锁：当前活跃节点是否为伪/广告节点
+    //   （← Mini monitor.rs:663-666 evaluate_failover 的 is_dummy_node 分支）
+    std::function<bool()> is_dummy_active;
     // 自愈选点触发（生产 = AutoSelect::instance().trigger(...)）
     // 返回值：true=已触发/成功；false=失败；"busy" 单列（见 HealResult）
     std::function<Result<bool>()> auto_select_trigger;
@@ -114,6 +129,9 @@ class CoreMonitor {
   int node_fail_count() const { return node_fail_count_.load(); }
   int heal_fail_count() const { return heal_fail_count_.load(); }
   int64_t last_heal_ms() const { return last_heal_ms_.load(); }
+  // ★ §5.1 切换宽限期：当前是否处于宽限期内（切节点后 60s）
+  bool in_switch_grace() const;
+  int64_t last_node_change_ms() const { return last_node_change_ms_.load(); }
 
   // 测试夹具：清空状态机计数/冷却/失败表（用例间隔离；生产勿调）
   void reset_state();
@@ -134,6 +152,16 @@ class CoreMonitor {
   std::atomic<bool> was_offline_{false};
   std::atomic<int64_t> last_heal_ms_{0};
   std::atomic<int64_t> last_tick_ms_{0};
+  // ★ §5.1 切换宽限期：最近一次「活跃节点发生变化」的时刻（ms）
+  //   ← Mini monitor.rs:1174 last_node_change_time
+  //   ★ 用独立标志位而非「值 != 0」判别：测试虚拟时钟可能从 0 起算，
+  //     0 既是合法时刻又是「从未切换」的哨兵 → 必须分开表达。
+  std::atomic<int64_t> last_node_change_ms_{0};
+  std::atomic<bool> has_node_change_{false};
+  // ★ 上一次观测到的活跃节点名（用于判定「是否发生切换」）
+  //   ← Mini monitor.rs:1173 last_active_node
+  std::mutex last_node_m_;
+  std::string last_active_node_;
 
   // 失败服务器表（server → 失败时刻 ms；600s 冷却）
   std::mutex failed_m_;

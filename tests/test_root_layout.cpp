@@ -130,20 +130,35 @@ UT_TEST(tfix_drawer_covers_content_not_titlebar) {
   Px bar_closed = pixel(135, 5);
   UT_CHECK(bar_closed.r > 0xF0 && bar_closed.r < 0xFB);
   // 打开态：抽屉只覆盖内容区（_layout.tsx:1254-1424，挂在 .layout-content），
-  //   标题栏 y<30 保持原样、按钮可点；y>=30 为 light theme-panel 亮金渐变。
+  //   标题栏 y<30 保持原样、按钮可点。
+  //   ★ 抽屉底 = .theme-panel（_layout.tsx:1405 className="theme-panel"），
+  //     故其底色**随皮肤**变：original 下是 var(--theme-panel-bg) 白底
+  //     （index.scss:298-320），retro-3d 下是亮金渐变（index.scss:145-153）。
+  //     此前 Win 侧恒画金色，本轮起改为按皮肤查表 → 断言须随皮肤区分。
   t.drawer->set_open(true);
   t.paint();
   Px bar_under = pixel(135, 10);
   UT_CHECK(bar_under.r > 0xF0 && bar_under.r < 0xFB);  // 标题栏未被面板吃掉
   Px content_panel = pixel(135, 40);
-  UT_CHECK(content_panel.r > 240 && content_panel.b < 240);  // 内容区亮金面板
+  // original：白底（近白、无金色偏蓝）
+  UT_CHECK(content_panel.r > 240 && content_panel.b > 240);
   Px panel = pixel(135, 297);  // 左列卡片间隙（profile/combo 之间 5px gap）
-  UT_CHECK(panel.r > 240);     // theme-panel 底（亮金）
+  UT_CHECK(panel.r > 240);     // theme-panel 底
   // 关闭恢复
   t.drawer->set_open(false);
   t.paint();
   Px bar_restored = pixel(135, 5);
   UT_CHECK(bar_restored.r > 0xF0 && bar_restored.r < 0xFB);
+
+  // ★ retro-3d：抽屉底必须是亮金渐变（index.scss:145-153 light）
+  svc.init(SkinId::Retro3d, ThemeMode::Light);
+  RootTree t2;
+  t2.layout(271, 680);
+  t2.drawer->set_open(true);
+  t2.paint();
+  Px gold_panel = pixel(135, 40);
+  UT_CHECK(gold_panel.r > 240 && gold_panel.b < 240);  // 亮金：r 高、b 低
+  svc.init(SkinId::Retro3d, ThemeMode::Light);
 }
 
 // ← _layout.tsx:1176-1186：按钮组容器 `marginLeft:'auto'`，三键永远贴右边缘

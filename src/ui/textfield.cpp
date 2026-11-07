@@ -6,6 +6,9 @@
 #include <algorithm>
 #include <utility>
 
+#include "soft_shadow.h"
+#include "theme/theme.h"
+
 namespace clashwin::ui {
 
 namespace {
@@ -323,10 +326,56 @@ void TextField::clamp_scroll() {
 }
 
 // ---- 绘制 ----
+void TextField::apply_theme() {
+  const auto p = theme::ThemeService::instance().input_paint();
+  bg_ = p.bg;
+  border_ = p.border;
+  border_focused_ = p.border_focused;
+  border_w_ = p.border_w;
+  border_w_focused_ = p.border_w_focused;
+  radius_ = p.radius;
+  placeholder_color_ = p.placeholder;
+  style_.color = p.text;
+  selection_bg_ = Color4f{p.border_focused.r, p.border_focused.g,
+                          p.border_focused.b, 0.25f};  // ← MUI selection 主色 25%
+  caret_color_ = p.border_focused;
+  has_inset_ = p.has_inset;
+  inset_color_ = p.inset_color;
+  inset_dy_ = p.inset_dy;
+  inset_blur_ = p.inset_blur;
+  inset_top_hi_ = p.inset_top_hi;
+  focus_glow_ = p.focus_glow;
+  focus_glow_color_ = p.focus_glow_color;
+  focus_glow_blur_ = p.focus_glow_blur;
+  focus_ring_ = p.focus_ring;
+  invalidate();
+}
+
 void TextField::on_paint(IRenderTarget& rt) {
   RectF r{0, 0, bounds().w, bounds().h};
+  // 聚焦外发光 / 硬环（← get3DInputStyle &.Mui-focused boxShadow）
+  if (focused() && focus_glow_ && focus_glow_color_.a > 0.004f)
+    draw_glow(rt, r, radius_, focus_glow_color_, focus_glow_blur_);
+  if (focused() && focus_ring_ > 0.01f) {
+    // CSS 0 0 0 Npx color = 紧贴外沿、宽 N 的实心环（无模糊）
+    RectF rr{r.x - focus_ring_ * 0.5f, r.y - focus_ring_ * 0.5f,
+             r.w + focus_ring_, r.h + focus_ring_};
+    rt.round_rect(rr, radius_ + focus_ring_ * 0.5f,
+                  Pen{focus_glow_color_, focus_ring_}, nullptr);
+  }
   Brush bg_b{bg_};
-  rt.round_rect(r, radius_, {focused() ? border_focused_ : border_, border_w_}, &bg_b);
+  const float bw = focused() && border_w_focused_ > 0.01f ? border_w_focused_
+                                                          : border_w_;
+  rt.round_rect(r, radius_, {focused() ? border_focused_ : border_, bw}, &bg_b);
+  // inset 内凹阴影（← get3DInputStyle inset 0 dy blur color）
+  if (has_inset_ && inset_color_.a > 0.004f) {
+    draw_inner_glow(rt, r, radius_, inset_color_, inset_blur_);
+    // CSS inset 的纵向偏移：把内阴影「上轻下重」的观感靠顶高光补齐
+    if (inset_top_hi_.a > 0.004f)
+      rt.draw_line({r.x + radius_, r.y + 0.5f},
+                   {r.right() - radius_, r.y + 0.5f},
+                   Pen{inset_top_hi_, 1.0f});
+  }
 
   TextStyle ts = style_;
   ts.wrap = false;

@@ -10,6 +10,8 @@
 #include "cmd/command_service.h"
 #include "config/config.h"
 #include "config/profiles.h"
+#include "ui/card_draw.h"
+#include "ui/soft_shadow.h"
 #include "ui/theme/theme.h"
 #include "util/dirs.h"
 #include "util/str_utils.h"
@@ -132,9 +134,8 @@ Color4f star_accent_color() {
   return is_light() ? Color4f::hex(0xB26A00) : Color4f::hex(0xFFD54F);
 }
 Color4f card_text_color() {
-  // src: get3DCardStyle :535 default textColor light #3C2F0F / dark #2C1F03
-  return is_retro() ? (is_light() ? Color4f::hex(0x3C2F0F) : Color4f::hex(0x2C1F03))
-                    : ThemeService::instance().palette().primary_text;
+  // src: utils/button-styles.ts:535/576 get3DCardStyle('default').color（6 套皮肤）
+  return ThemeService::instance().card_paint("default").text_color;
 }
 
 bool is_retro() {
@@ -164,100 +165,44 @@ void draw_text(IRenderTarget& rt, const std::wstring& text, const RectF& r,
   rt.draw_text(text, r, ts);
 }
 
-// 3D 金卡：src: get3DCardStyle :548-566（bevel 暗金 + 135° 四停靠渐变）
+// 3D 卡：6 套皮肤走 ThemeService::card_paint("default") 查表
+//   （src: utils/button-styles.ts:492-731 get3DCardStyle）
 void paint_card(IRenderTarget& rt, const RectF& r) {
-  if (!is_retro()) {
-    // 豁免: 非 retro-3d 皮肤由主题面板底色承载
-    Brush bg{ThemeService::instance().vars().theme_panel_bg};
-    rt.round_rect(r, kCardRadius, Pen{divider_color(), 1.0f}, &bg);
-    return;
-  }
-  // src: :556-565 box-shadow 0 1/2/3px bevel，引擎无阴影，偏移层模拟
-  Brush bevel{Color4f::hex(is_light() ? 0xB8860B : 0x755500)};
-  rt.round_rect({r.x, r.y + 3.0f, r.w, r.h}, kCardRadius, {}, &bevel);
-  Brush soft{Color4f::hex(0x000000, is_light() ? 0.35f : 0.6f)};
-  rt.round_rect({r.x, r.y + 5.0f, r.w, r.h}, kCardRadius, {}, &soft);
-
-  // src: get3DCardStyle :537-539 light FFFDE7/FFF9C4/FFF59D/FFE082；
-  //      dark FFF59D/FBC02D/F57F17/E65100（135deg）
-  const GradientStop light_stops[4] = {
-      {0.00f, Color4f::hex(0xFFFDE7)},  // src: :538
-      {0.35f, Color4f::hex(0xFFF9C4)},  // src: :538
-      {0.70f, Color4f::hex(0xFFF59D)},  // src: :538
-      {1.00f, Color4f::hex(0xFFE082)},  // src: :538
-  };
-  const GradientStop dark_stops[4] = {
-      {0.00f, Color4f::hex(0xFFF59D)},  // src: :539
-      {0.35f, Color4f::hex(0xFBC02D)},  // src: :539
-      {0.70f, Color4f::hex(0xF57F17)},  // src: :539
-      {1.00f, Color4f::hex(0xE65100)},  // src: :539
-  };
-  // src: :554-556 linear-gradient(135deg, ...)
-  rt.fill_round_rect_gradient_angle(r, kCardRadius,
-                                    is_light() ? light_stops : dark_stops, 4, 135.0f);
+  ::clashwin::ui::draw_card(rt, r,
+                            ThemeService::instance().card_paint("default"));
 }
 
 enum class BtnStyle { Primary, OutlinedDefault, OutlinedPrimary };
 
-// src: get3DButtonStyle :28-127（retro-3d 渐变 + 2px 描边 + 粗体）
+// 按钮：6 套皮肤走 ThemeService::button_paint() 查表
+//   （src: utils/button-styles.ts:22-490 get3DButtonStyle）
 void paint_button(IRenderTarget& rt, const RectF& r, BtnStyle style,
                   const std::wstring& label, float font_size) {
-  Color4f text_color;
-  if (!is_retro()) {
-    // 豁免: 非 retro 皮肤走主题主色平涂（其余皮肤分支未在本弹窗启用）
-    if (style == BtnStyle::Primary) {
-      Brush b{ThemeService::instance().primary()};
-      rt.round_rect(r, kRadiusBtn, {}, &b);
-      text_color = Color4f::hex(0xFFFFFF);
-    } else {
-      rt.round_rect(r, kRadiusBtn, Pen{ThemeService::instance().primary(), 1.0f},
-                    nullptr);
-      text_color = ThemeService::instance().primary();
-    }
-    draw_text(rt, label, r, font_size, static_cast<int>(Weight::Bold), text_color,
-              AlignH::Center);
-    return;
-  }
-
-  if (style == BtnStyle::Primary) {
-    // src: :38-39 主按钮 135° 六停靠
-    const GradientStop stops[6] = {
-        {0.00f, Color4f::hex(0xFFE082)},  // src: :39
-        {0.20f, Color4f::hex(0xFFD54F)},  // src: :39
-        {0.45f, Color4f::hex(0xFFC107)},  // src: :39
-        {0.70f, Color4f::hex(0xFFB300)},  // src: :39
-        {0.85f, Color4f::hex(0xD4AF37)},  // src: :39
-        {1.00f, Color4f::hex(0xB8860B)},  // src: :39
-    };
-    // src: :83 background linear-gradient(135deg ...)
-    rt.fill_round_rect_gradient_angle(r, kRadiusBtn, stops, 6, 135.0f);
-    // src: :36 borderColor light #8A6D00 / dark #634E00（2px）
-    rt.round_rect(r, kRadiusBtn,
-                  Pen{Color4f::hex(is_light() ? 0x8A6D00 : 0x634E00), 2.0f}, nullptr);
-    text_color = Color4f::hex(0x2C1F03);  // src: :35
+  auto& svc = ThemeService::instance();
+  const char* ctype = style == BtnStyle::Primary ? "primary" : "default";
+  const bool outlined = style != BtnStyle::Primary;
+  const auto bp = svc.button_paint(ctype, outlined);
+  if (bp.has_shadow)
+    draw_soft_shadow(rt, r, bp.radius, bp.shadow_color, bp.shadow_dy,
+                     bp.shadow_blur);
+  if (bp.glow.a > 0) draw_glow(rt, r, bp.radius, bp.glow, bp.glow_blur);
+  if (bp.use_grad) {
+    rt.fill_round_rect_gradient_angle(r, bp.radius, bp.grad, bp.grad_count,
+                                      bp.grad_angle);
   } else {
-    // src: :59-63 outlined default：to bottom 半透明金渐变
-    const GradientStop light_stops[2] = {
-        {0.00f, Color4f::hex(0xFFFDE7, 0.4f)},  // src: :61
-        {1.00f, Color4f::hex(0xFFF59D, 0.2f)},  // src: :61
-    };
-    const GradientStop dark_stops[2] = {
-        {0.00f, Color4f::hex(0x2A2413, 0.4f)},  // src: :62
-        {1.00f, Color4f::hex(0x17140B, 0.2f)},  // src: :62
-    };
-    // src: :61-62 linear-gradient(to bottom, ...)
-    rt.fill_round_rect_gradient_angle(r, kRadiusBtn,
-                                      is_light() ? light_stops : dark_stops, 2, 180.0f);
-    // src: :52 borderColor light #D4AF37 / dark #8A6D00（2px）
-    rt.round_rect(r, kRadiusBtn,
-                  Pen{Color4f::hex(is_light() ? 0xD4AF37 : 0x8A6D00), 2.0f}, nullptr);
-    // src: :47-51 outlined default text light #3C2F0F / dark #FFE082
-    text_color = style == BtnStyle::OutlinedPrimary
-                     ? Color4f::hex(0x2C1F03)
-                     : (is_light() ? Color4f::hex(0x3C2F0F) : Color4f::hex(0xFFE082));
+    Brush b{bp.fill};
+    rt.round_rect(r, bp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &b);
   }
-  draw_text(rt, label, r, font_size, static_cast<int>(Weight::Bold), text_color,
-            AlignH::Center);
+  if (bp.border_w > 0.01f)
+    rt.round_rect(r, bp.radius, Pen{bp.border, bp.border_w}, nullptr);
+  if (bp.use_grad && bp.bevel_dark.a > 0) {
+    rt.draw_line({r.x + bp.radius, r.y + 1.0f},
+                 {r.right() - bp.radius, r.y + 1.0f}, Pen{bp.bevel_hi, 1.0f});
+    rt.draw_line({r.x + bp.radius, r.bottom() - 1.0f},
+                 {r.right() - bp.radius, r.bottom() - 1.0f},
+                 Pen{bp.bevel_dark, 1.0f});
+  }
+  draw_text(rt, label, r, font_size, bp.weight, bp.text, AlignH::Center);
 }
 
 // src: :674-676 border 1px dashed（引擎无虚线图元，以离散段绘制）

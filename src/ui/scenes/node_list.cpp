@@ -10,6 +10,8 @@
 #include <memory>
 
 #include "../theme/theme.h"
+#include "../overlay_fade.h"   // OverlayFade::now_ms()（cyberpunk 呼吸相位的时间基准）
+#include "../soft_shadow.h"    // 外阴影/外发光近似（CSS box-shadow 的 D2D 替代）
 #include "util/log.h"
 #include "util/utf.h"
 #include "ui/i18n_text.h"  // F-D01
@@ -356,8 +358,20 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   bolt->box_w = bolt->box_h = 26;
   bolt->color_ = pal.primary_text;
   bolt->flex_weight = 0;
+  bolt_btn_ = bolt.get();
   bolt->on_click = [this] {
-    if (data_) data_->test_group();
+    // ★ §5.2/§5.6「所见即所选」（← Mini proxy-groups.tsx:230-275 handleCheckAll）：
+    //   测速范围 = 当前过滤后**可见**的节点子集，择优切换也限该子集。
+    //   与「全量自动优选」（F1 语义，走 AutoSelect 不传子集）区分。
+    if (!data_) return;
+    std::vector<std::string> names;
+    const auto& rows = data_->rows();
+    names.reserve(visible_.size());
+    for (int i : visible_) {
+      if (i < 0 || static_cast<size_t>(i) >= rows.size()) continue;
+      names.push_back(rows[static_cast<size_t>(i)].name);
+    }
+    data_->test_and_select(names);
   };
   bar_p->add_child(std::move(bolt));
 
@@ -391,16 +405,10 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   search_->flex_weight = 1;
   // placeholder src: base-search-box.tsx:117 shared.placeholders.filter
   search_->set_placeholder(tr("shared.placeholders.filter"));
-  search_->bg_ = light ? Color4f::hex(0xFFFFFF) : Color4f::hex(0x1A160E, 0.4f);
-  search_->border_ = Color4f::hex(0xD4AF37, light ? 0.35f : 0.25f);
-  search_->border_focused_ = light ? Color4f::hex(0xB8860B) : Color4f::hex(0xFFA000);
-  search_->border_w_ = 2.0f;
-  search_->style_.color = light ? Color4f::hex(0x2C1F03) : Color4f::hex(0xFFFDE7);
+  // src: button-styles.ts:734-927 get3DInputStyle（6 套皮肤全部走 apply_theme）
+  search_->apply_theme();
   search_->style_.size = 11;
-  search_->placeholder_color_ = light ? Color4f::hex(0x000000, 0.38f)
-                                     : Color4f::hex(0xFFFFFF, 0.40f);
   search_->caret_color_ = search_->style_.color;
-  search_->selection_bg_ = Color4f::hex(0x0075FF, 0.25f);
   search_->radius_ = 4;  // ← MUI shape.borderRadius（get3DInputStyle 未覆盖）
   search_->height_ = 26;
   // 清空按钮（opt-in）：src: base-search-box.tsx:121-140
@@ -507,6 +515,19 @@ void NodeList::toggle_sort() {
   sync_list();
 }
 
+// 皮肤/亮暗热切换：重刷控件级缓存
+// src: button-styles.ts:734-927 get3DInputStyle —— 每次 render 现取，
+//   Win 侧 apply_theme 把结果缓存进成员，切皮肤后必须重调。
+void NodeList::restyle_theme() {
+  if (search_) {
+    search_->apply_theme();
+    search_->style_.size = 11;
+    search_->caret_color_ = search_->style_.color;
+    search_->radius_ = 4;  // ← MUI shape.borderRadius（get3DInputStyle 未覆盖）
+  }
+  invalidate();
+}
+
 void NodeList::rebuild_visible() {
   visible_.clear();
   if (!data_) return;
@@ -581,32 +602,48 @@ bool NodeList::empty_state_visible() const {
 
 void NodeList::on_arrange(const RectF& area) {
   set_bounds(area);
-  // 【坐标约定】子布局局部坐标
-  // src: proxy-groups.tsx:327「mb: 1」→ 列表底部 8px 外边距
-  float list_h = area.h - kFilterBarH - kListTopGap - 8;
+  // 【坐标约定】子布局局部坐标。
+  // 结构 ← proxy-groups.tsx:381-421：
+  //   <Box className="theme-panel" boxSizing="border-box">  ← 外框（border: 4px double）
+  //     <ProxyHead/>                                         ← 过滤栏，在框内
+  //     <Box overflow:auto>…</Box>                           ← 滚动列表，在框内
+  //   </Box>
+  // 外层 margin ← proxy-groups.tsx:327 mx:1 / mb:1 → 左右各 8、底 8（顶部无外边距）。
+  // 「4px double」在 border-box 下向内占 4px，故过滤栏与列表都要再内缩 kPanelBorder
+  // ——此前把边框画在过滤栏下方、内容又从 x=0 起算，才出现「框和过滤栏分家」。
+  const float inset_x = kListInset + kPanelBorder;                      // 12
+  const float content_w = area.w - 2 * inset_x;                         // w-24
+  const float content_top = kPanelBorder;                               // 4
+  const float content_bottom = area.h - kListBottomGap - kPanelBorder;   // h-12
+  const float list_top = content_top + kFilterBarH + kListTopGap;        // 43
+  float list_h = content_bottom - list_top;
   if (list_h < 0) list_h = 0;
-  child(0)->layout_tree({0, 0, area.w, kFilterBarH});
+
+  child(0)->layout_tree({inset_x, content_top, content_w, kFilterBarH});
   // 清空按钮为 TextField 内建，无需独立布局
   // 行内嵌金边列表容器（src: proxy-render.tsx:88-89 行 pl2 + 容器边框 1）
-  list_->layout_tree({kListInset, kFilterBarH + kListTopGap,
-                      area.w - 2 * kListInset, list_h});
+  list_->layout_tree({inset_x, list_top, content_w, list_h});
 
   // 空态居中于列表区：src: proxy-render.tsx:65-76（flex column 居中，py 16）
   if (empty_icon_ && empty_label_ && empty_icon_->visible()) {
     SizeF ls = empty_label_->measure(1e6f, list_h);
     const float icon_sz = 40.0f;  // 2.5em × 16px（src: proxy-render.tsx:75）
     const float total = icon_sz + ls.h;
-    const float center_y = kFilterBarH + kListTopGap + list_h / 2.0f;
+    const float center_y = list_top + list_h / 2.0f;
     const float top = center_y - total / 2.0f;
-    empty_icon_->layout_tree({(area.w - icon_sz) / 2.0f, top, icon_sz, icon_sz});
-    empty_label_->layout_tree({(area.w - ls.w) / 2.0f, top + icon_sz, ls.w, ls.h});
+    empty_icon_->layout_tree(
+        {inset_x + (content_w - icon_sz) / 2.0f, top, icon_sz, icon_sz});
+    empty_label_->layout_tree(
+        {inset_x + (content_w - ls.w) / 2.0f, top + icon_sz, ls.w, ls.h});
   }
 
-  // 滚动置顶按钮：absolute bottom 20 / right 20（相对整个节点列容器）
+  // 滚动置顶按钮：absolute bottom 20 / right 20 —— 相对 proxy-groups.tsx:327 那个
+  // 带 mx:1 / mb:1 的外层 Box，因此还要让开 8px 外边距
   if (scroll_top_) {
-    scroll_top_->layout_tree({area.w - kScrollTopInset - kScrollTopBtnSize,
-                              area.h - kScrollTopInset - kScrollTopBtnSize,
-                              kScrollTopBtnSize, kScrollTopBtnSize});
+    scroll_top_->layout_tree(
+        {area.w - kListInset - kScrollTopInset - kScrollTopBtnSize,
+         area.h - kListBottomGap - kScrollTopInset - kScrollTopBtnSize,
+         kScrollTopBtnSize, kScrollTopBtnSize});
   }
 }
 
@@ -614,38 +651,74 @@ void NodeList::on_paint(IRenderTarget& rt) {
   const auto& svc = ThemeService::instance();
   const auto& vars = svc.vars();
   const bool light = svc.is_light();
-  const bool retro = svc.skin() == theme::SkinId::Retro3d;
   // 【UIFIX】局部坐标约定 {0,0,w,h}；底色 = list_bg（主题变量）
   const float w = bounds().w, h = bounds().h;
   rt.fill_rect({0, 0, w, h}, Brush{vars.list_bg});
-  // 工具条底边 1px palette.divider（无整圈描边）
+  // theme-panel 外框 ← src: proxy-groups.tsx:383「className="theme-panel"」+
+  //   index.scss:75「border: 4px double var(--theme-border)」/:125「4px double #B8860B」
+  //   范围 = 外层 mx:1 / mb:1 之内、顶部贴齐 → 过滤栏与列表同在一个框里。
+  const RectF panel{kListInset, 0, w - 2 * kListInset, h - kListBottomGap};
+  // 6 套皮肤的容器差异全部来自 ThemeService::panel_paint()
+  // （index.scss:74-84 基线 + :123-329 各皮肤 override；随 depth/vibrancy 变化）
+  const theme::PanelPaint pp = svc.panel_paint();
+
+  // ① 外阴影 / 外发光：先于本体绘制，避免压住边框
+  if (pp.has_shadow)
+    draw_soft_shadow(rt, panel, pp.radius, pp.shadow_color, pp.shadow_dy,
+                     pp.shadow_blur);
+  if (pp.has_glow)
+    draw_glow(rt, panel, pp.radius, pp.glow_color, pp.glow_blur);
+
+  // ② 本体背景：retro-3d 为 135° 三停渐变，其余为纯色/半透明
+  if (pp.grad_bg) {
+    rt.fill_round_rect_gradient_angle(panel, pp.radius, pp.grad, pp.grad_count,
+                                      pp.grad_angle);
+  } else if (pp.bg.a > 0.001f) {
+    Brush bg_brush{pp.bg};
+    rt.round_rect(panel, pp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &bg_brush);
+  }
+
+  // ②' 内浮雕（← retro-3d 的两层 inset boxShadow：左上高光 / 右下暗边）
+  if (pp.has_inner_bevel) {
+    const float ih = 3.0f;  // 贴着 double border 内沿
+    rt.draw_line({panel.x + pp.radius, panel.y + ih},
+                 {panel.right() - pp.radius, panel.y + ih},
+                 Pen{pp.inner_hi, 1.0f});
+    rt.draw_line({panel.x + ih, panel.y + pp.radius},
+                 {panel.x + ih, panel.bottom() - pp.radius},
+                 Pen{pp.inner_hi, 1.0f});
+    rt.draw_line({panel.x + pp.radius, panel.bottom() - ih},
+                 {panel.right() - pp.radius, panel.bottom() - ih},
+                 Pen{pp.inner_dark, 1.0f});
+    rt.draw_line({panel.right() - ih, panel.y + pp.radius},
+                 {panel.right() - ih, panel.bottom() - pp.radius},
+                 Pen{pp.inner_dark, 1.0f});
+  }
+
+  // 工具条底边 1px palette.divider（ProxyHead 的 borderBottom，位于框内）
   // src: proxy-head.tsx:75 borderBottom 1px divider；proxy-groups.tsx:397
   const Color4f bar_divider =
       light ? Color4f(0, 0, 0, 0.12f) : Color4f(1, 1, 1, 0.12f);
-  rt.fill_rect({0, kFilterBarH - 1, w, 1}, Brush{bar_divider});
-  // 列表容器：src: index.scss:125-126 retro-3d「border: 4px double #B8860B」+
-  //   135° 三停渐变；:147 亮色三停。其它皮肤边框 = --theme-border
-  const RectF panel{kListInset, kFilterBarH + kListPadTop, w - 2 * kListInset,
-                    h - kFilterBarH - kListPadTop - 8};
-  if (retro) {
-    GradientStop cs[3];
-    if (light) {
-      cs[0] = {0.00f, Color4f::hex(0xFFFDE7)};
-      cs[1] = {0.50f, Color4f::hex(0xFFF9C4)};
-      cs[2] = {1.00f, Color4f::hex(0xFFF59D)};
-    } else {
-      cs[0] = {0.00f, Color4f::hex(0x1A160E)};
-      cs[1] = {0.50f, Color4f::hex(0x2A2413)};
-      cs[2] = {1.00f, Color4f::hex(0x17140B)};
-    }
-    rt.fill_round_rect_gradient_angle(panel, 8, cs, 3, 135.0f);
+  rt.fill_rect({panel.x + kPanelBorder, kPanelBorder + kFilterBarH - 1,
+                panel.w - 2 * kPanelBorder, 1},
+               Brush{bar_divider});
+
+  // ③ 边框：4px double = 两道 1px 环（src: index.scss:75/125）
+  //    cyberpunk 的呼吸边框按 vibrancy 决定的周期在 from→to 之间往返
+  if (pp.border == theme::PanelPaint::BorderKind::None) return;
+  Color4f bc = pp.border_color;
+  if (pp.pulse) {
+    // 与极光层同一时间基准：进程启动毫秒数（GetTickCount64，windows.h 已引入）
+    const float now_s = static_cast<float>(GetTickCount64()) / 1000.0f;
+    bc = Color4f::lerp(pp.pulse_from, pp.pulse_to, svc.pulse_phase(now_s));
   }
-  // 4px double = 两道 1px 环（src: index.scss:75/125）
-  const Color4f bc = retro ? Color4f::hex(0xB8860B) : vars.theme_border;
-  Pen border{bc, 1};
-  rt.round_rect(panel, 8, border, nullptr);
-  rt.round_rect({panel.x + 3, panel.y + 3, panel.w - 6, panel.h - 6}, 5, border,
-                nullptr);
+  // 线宽取 1.34 逻辑 px ≈ 2 物理 px：CSS「4px double」的单边在 1.5× DPI 下正好是
+  //   2 物理 px 满色；若按 1 逻辑 px 画，D2D 抗锯齿会把它摊成两半，观感明显偏暗。
+  Pen border{bc, 1.34f};
+  rt.round_rect(panel, pp.radius, border, nullptr);
+  const float inner_r = pp.radius > 3.0f ? pp.radius - 3.0f : 0.0f;
+  rt.round_rect({panel.x + 3, panel.y + 3, panel.w - 6, panel.h - 6}, inner_r,
+                border, nullptr);
 }
 
 }  // namespace clashwin::ui::scene

@@ -8,6 +8,7 @@
 #include <map>
 
 #include "../theme/theme.h"
+#include "../soft_shadow.h"  // 卡面阴影/发光近似（随 depth/vibrancy）
 #include "node_list.h"  // delay_tier / delay_tier_color（与节点表格同源五档色）
 #include "util/log.h"
 #include "util/utf.h"
@@ -60,29 +61,32 @@ inline bool is_retro3d_dark() {
          !ThemeService::instance().is_light();
 }
 
-// 选中卡渐变：135° 四停靠，深浅主题各一套。
-// src: utils/button-styles.ts:538 (light) / :539 (dark)，角度见 :538 '135deg'。
+// 选中卡卡面：6 套皮肤统一取自 ThemeService::card_paint("default")
+// 出处：utils/button-styles.ts:492-731 get3DCardStyle('default')。
+// 旧实现只画 retro-3d 的浅黄渐变，其它皮肤下这张卡仍是金色 —— 已修正。
 void paint_card_gradient(IRenderTarget& rt, const RectF& r) {
-  const bool light = ThemeService::instance().is_light();
-  GradientStop stops[4];
-  if (light) {  // src: button-styles.ts:538
-    stops[0] = {0.00f, Color4f::hex(0xFFFDE7)};
-    stops[1] = {0.35f, Color4f::hex(0xFFF9C4)};
-    stops[2] = {0.70f, Color4f::hex(0xFFF59D)};
-    stops[3] = {1.00f, Color4f::hex(0xFFE082)};
-  } else {  // src: button-styles.ts:539
-    stops[0] = {0.00f, Color4f::hex(0xFFF59D)};
-    stops[1] = {0.35f, Color4f::hex(0xFBC02D)};
-    stops[2] = {0.70f, Color4f::hex(0xF57F17)};
-    stops[3] = {1.00f, Color4f::hex(0xE65100)};
+  const theme::CardPaint cp =
+      ThemeService::instance().card_paint("default");
+  if (cp.has_shadow)
+    draw_soft_shadow(rt, r, cp.radius, cp.shadow_color, cp.shadow_dy,
+                     cp.shadow_blur);
+  if (cp.has_glow) draw_glow(rt, r, cp.radius, cp.glow_color, cp.glow_blur);
+  if (cp.grad_bg) {
+    rt.fill_round_rect_gradient_angle(r, cp.radius, cp.grad, cp.grad_count,
+                                      cp.grad_angle);
+  } else if (cp.bg.a > 0.001f) {
+    Brush bg{cp.bg};
+    rt.round_rect(r, cp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &bg);
   }
-  // src: button-styles.ts:549 borderRadius 6px；角度 135deg
-  rt.fill_round_rect_gradient_angle(r, 6.0f, stops, 4, 135.0f);
+  if (cp.border_w > 0.0f) {
+    rt.round_rect(r, cp.radius, Pen{cp.border, cp.border_w}, nullptr);
+  }
 }
 
-// 选中卡正文色：src: button-styles.ts:535（light #3C2F0F / dark #2C1F03）
+// 选中卡正文色：随皮肤取自 card_paint().text_color
+// （retro-3d light #3C2F0F / dark #2C1F03；original/monochrome 黑白对调…）
 inline Color4f card_ink() {
-  return Color4f::hex(ThemeService::instance().is_light() ? 0x3C2F0F : 0x2C1F03);
+  return ThemeService::instance().card_paint("default").text_color;
 }
 // 选中卡 bevel 暗边：src: button-styles.ts:540（light #B8860B / dark #755500）
 inline Color4f card_bevel_dark() {
@@ -91,59 +95,46 @@ inline Color4f card_bevel_dark() {
 
 // quickbar 右侧 pin/gear 的 3D 按钮底：Mini 用 IconButton + get3DButtonStyle
 // src: _layout.tsx:1338-1348（pin，contained/default 或 pinned→primary）、
-//      :1375-1381（gear，contained/default）、button-styles.ts:78-83（圆角6 + 2px 描边）。
+//      :1375-1381（gear，contained/default）
+// T12：改为 ThemeService::button_paint() 查表（6 套皮肤 × 亮暗 × 状态），
+//   此前写死 retro-3d 金色，切皮肤后这两个按钮仍是金色 —— 是最显眼的残留。
 void paint_button_bg(IRenderTarget& rt, const RectF& r, bool primary, bool hover,
                      bool pressed) {
-  const bool light = ThemeService::instance().is_light();
-  if (primary) {
-    // src: button-styles.ts:39 固定六停靠（与原色无关）
-    GradientStop s[6] = {{0.00f, Color4f::hex(0xFFE082)},
-                         {0.20f, Color4f::hex(0xFFD54F)},
-                         {0.45f, Color4f::hex(0xFFC107)},
-                         {0.70f, Color4f::hex(0xFFB300)},
-                         {0.85f, Color4f::hex(0xD4AF37)},
-                         {1.00f, Color4f::hex(0xB8860B)}};
-    rt.fill_round_rect_gradient_angle(r, 6.0f, s, 6, 135.0f);
-    rt.round_rect(r, 6.0f,
-                  Pen{Color4f::hex(light ? 0x8A6D00 : 0x634E00), 2.0f}, nullptr);
+  auto& svc = ThemeService::instance();
+  const auto p = svc.button_paint(primary ? "primary" : "default");
+  // 外阴影 + 外发光（← boxShadow 常规层与 0 0 N 光晕）
+  if (p.has_shadow) draw_soft_shadow(rt, r, p.radius, p.shadow_color,
+                                     p.shadow_dy, p.shadow_blur);
+  if (p.glow.a > 0) draw_glow(rt, r, p.radius, p.glow, p.glow_blur);
+  // 主体
+  if (p.use_grad) {
+    const GradientStop* gs = hover ? p.grad_hover : p.grad;
+    rt.fill_round_rect_gradient_angle(r, p.radius, gs, p.grad_count, p.grad_angle);
   } else {
-    GradientStop s[4];
-    if (light) {  // src: button-styles.ts:55
-      s[0] = {0.00f, Color4f::hex(0xFFFDE7)};
-      s[1] = {0.35f, Color4f::hex(0xFFF9C4)};
-      s[2] = {0.70f, Color4f::hex(0xFFF59D)};
-      s[3] = {1.00f, Color4f::hex(0xFFE082)};
-    } else {  // src: button-styles.ts:56
-      s[0] = {0.00f, Color4f::hex(0xFFF59D)};
-      s[1] = {0.35f, Color4f::hex(0xFBC02D)};
-      s[2] = {0.70f, Color4f::hex(0xF57F17)};
-      s[3] = {1.00f, Color4f::hex(0xE65100)};
-    }
-    rt.fill_round_rect_gradient_angle(r, 6.0f, s, 4, 135.0f);
-    rt.round_rect(r, 6.0f,
-                  Pen{Color4f::hex(light ? 0xD4AF37 : 0x8A6D00), 2.0f}, nullptr);
+    Color4f fill = pressed ? p.fill_pressed : (hover ? p.fill_hover : p.fill);
+    Brush fb{fill};
+    rt.round_rect(r, p.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &fb);
   }
-  // src: button-styles.ts:89-101 boxShadow：底部 bevel 暗线 + 外侧 glow
-  const Color4f bevel = Color4f::hex(light ? 0x8A6D00 : 0x634E00, 0.55f);
-  rt.fill_rect({r.x + 2, r.bottom(), r.w - 4, 1}, Brush{bevel});
-  const Color4f glow = Color4f::hex(light ? 0xFFC107 : 0x8A6D00);
-  for (int i = 1; i <= 3; ++i) {
-    Color4f g = glow;
-    g.a = 0.10f / static_cast<float>(i);
-    rt.round_rect({r.x - i, r.y - i, r.w + 2 * i, r.h + 2 * i}, 6.0f + i * 0.5f,
-                  Pen{g, 1.0f}, nullptr);
+  if (p.border_w > 0.01f)
+    rt.round_rect(r, p.radius, Pen{p.border, p.border_w}, nullptr);
+  // retro 浮雕：顶部内高光 + 底部 bevel 暗线（← :89-96 多层 boxShadow）
+  if (p.use_grad && p.bevel_dark.a > 0) {
+    rt.draw_line({r.x + p.radius, r.y + 1.0f},
+                 {r.right() - p.radius, r.y + 1.0f}, Pen{p.bevel_hi, 1.0f});
+    rt.draw_line({r.x + p.radius, r.bottom() - 1.0f},
+                 {r.right() - p.radius, r.bottom() - 1.0f},
+                 Pen{p.bevel_dark, 1.0f});
   }
-  // src: button-styles.ts:102-137 hover/active：hover 提亮、active 压暗 + 内高光
+  // hover/active 叠加（← button-styles.ts 各皮肤 &:hover / &:active）
   if (hover || pressed) {
     Pen none{Color4f(0, 0, 0, 0), 0};
     Brush ov{1, 1, 1, pressed ? 0.04f : 0.12f};
-    rt.round_rect(r, 6.0f, none, &ov);
+    rt.round_rect(r, p.radius, none, &ov);
   }
   if (pressed) {
     Pen none{Color4f(0, 0, 0, 0), 0};
     Brush ov{0, 0, 0, 0.10f};
-    rt.round_rect({r.x + 2, r.y + 2, r.w - 4, r.h - 4}, 5.0f, none, &ov);
-    // inset 0 1px 0 0 rgba(255,255,255,.5)：顶部内高光
+    rt.round_rect({r.x + 2, r.y + 2, r.w - 4, r.h - 4}, p.radius, none, &ov);
     rt.fill_rect({r.x + 2, r.y + 2, r.w - 4, 1},
                  Brush{Color4f(1, 1, 1, 0.50f)});
   }

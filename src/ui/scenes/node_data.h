@@ -51,6 +51,12 @@ struct DataHooks {
   std::function<bool(const std::string& node)> select_node;
   // 触发组测速（delay_group；结果经 backend-delay-results 事件回灌）
   std::function<bool(const std::string& group)> test_group;
+  // ★ §5.2/§5.6「所见即所选」：批量测速 + 择优切换（限可见子集）
+  //   ← Mini proxy-groups.tsx:230-275 handleCheckAll：
+  //     可见节点子集 → 置 -2 testing → triggerAutoSelect(uid, visibleNames, 0, true)
+  //   生产 = AutoSelect::trigger(uid, 子集, sort_type=0, select=true)
+  //   nodes 为空 → 全量（与 F1 自动优选同语义）
+  std::function<bool(const std::vector<std::string>& nodes)> test_and_select;
   std::function<int64_t()> now_ms;  // 时钟注入（TTL/测试确定性）
 };
 
@@ -73,6 +79,12 @@ class NodeData {
 
   // 触发组测速
   bool test_group();
+
+  // ★ §5.2/§5.6「所见即所选」：批量测速可见子集 + 择优切换
+  //   ← Mini proxy-groups.tsx:230-275 handleCheckAll
+  //   nodes 非空 → 仅在子集内测速与择优；nodes 空 → 全量
+  //   返回 false = 未执行（测速未执行 ≠ Timeout）
+  bool test_and_select(const std::vector<std::string>& nodes);
 
   // ---- 读取 ----
   const std::vector<NodeRow>& rows() const { return rows_; }

@@ -34,6 +34,9 @@ class Slider : public Widget {
   float thumb_d_ = 14;  // ← 滑块直径 14
   // 金色立体（3D 停靠）← get3DSliderStyle retro-3d；true 时轨道/滑块走金渐变+描边
   bool gold_3d_ = false;
+  // T12：themed_ = 走 ThemeService::slider_paint()（6 套皮肤查表）
+  bool themed_ = false;
+  void apply_theme();
 
  private:
   float value_at(float local_x);   // x → 量化值

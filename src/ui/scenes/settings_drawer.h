@@ -23,8 +23,10 @@
 //   allow-lan/ipv6；Mixed Port→verge_mixed_port（Enter 提交）；
 //   主题/滑条→ThemeService+clashwin-skin.json。
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -40,6 +42,7 @@
 #include "../slider.h"
 #include "../switch_w.h"
 #include "../textfield.h"
+#include "../theme/theme.h"
 #include "../widget.h"
 #include "profile_import_card.h"
 #include "quick_bar.h"  // TakeoverSegmented（T13）
@@ -50,14 +53,26 @@ namespace clashwin::ui::scene {
 class EditProfileModal;
 
 // 皮肤/因子持久化（clashwin-skin.json）
+// 因子按皮肤分别存储（← use-skin-controls.ts:13-24 readFactor：
+//   localStorage['clash-mini-{skin}-val1' / '-val2']）。
+//   只有 retro-3d 有 legacy 键（'clash-mini-depth-factor' /
+//   '-vibrancy-factor'，即下方的 depth/vibrancy 顶层字段）；
+//   其余 5 套皮肤无历史值时缺省 1.0/1.0（不是 retro 的 0.3/1.0）。
 struct SkinPrefs {
   std::string skin = "retro-3d";
   std::string theme_mode = "dark";  // sys/light/dark；src: verge.rs:345 缺省 "dark"
-  float depth = 0.3f;
-  float vibrancy = 1.0f;
+  float depth = 0.3f;                // legacy（仅 retro-3d 生效）
+  float vibrancy = 1.0f;             // legacy（仅 retro-3d 生效）
+  // 逐皮肤因子：skin → (val1, val2)
+  std::map<std::string, std::pair<float, float>> factors;
 };
 SkinPrefs load_skin_prefs();
 void save_skin_prefs(const SkinPrefs& p);
+// 取某皮肤的因子（未保存时按 skin_default_factors 缺省；retro-3d 回落 legacy 顶层字段）
+std::pair<float, float> skin_factors(const SkinPrefs& p, const std::string& skin);
+// 写入某皮肤的因子
+void set_skin_factors(SkinPrefs& p, const std::string& skin, float depth,
+                      float vibrancy);
 
 // AccentColor（T17 接 T12 遗留）：DWM ColorizationColor → RGB
 std::optional<uint32_t> system_accent_color_rgb();
@@ -193,6 +208,8 @@ class SettingsDrawer : public Stack {
   void refresh_skin_cells();
   // 皮肤选择（主题卡隐藏钮与底部行共用）
   void select_skin(int i);
+  // 皮肤切换/恢复后同步滑块量程（max 逐皮肤）、标签与当前值
+  void sync_skin_sliders(theme::SkinId skin, float depth, float vibrancy);
 
   // 底部行（_layout.tsx:1534-1720）：窗口高 ≥831 DIP 才显示；
   //   左 0..80 = ? 帮助、80..177.5 = Language、177.5..640 = 6 个皮肤格

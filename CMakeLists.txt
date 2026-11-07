@@ -328,6 +328,9 @@ add_executable(clashwin_test
   tests/test_ui_window_persist.cpp
   tests/test_theme_core.cpp
   tests/test_theme_widgets.cpp
+  tests/test_theme_switch.cpp
+  tests/test_theme_factors.cpp
+  tests/test_theme_switch_diag.cpp
   tests/test_scene_node.cpp
   tests/test_scene_traffic.cpp
   tests/test_t15_profile.cpp
@@ -343,6 +346,8 @@ add_executable(clashwin_test
   tests/test_t24_updater_diagnostics.cpp
   tests/test_t25_p1_finalization.cpp
   tests/test_t26_delta_parity.cpp
+  tests/test_t27_monitor_heal.cpp
+  tests/test_t28_bolt_subset.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_app clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32 bcrypt)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)

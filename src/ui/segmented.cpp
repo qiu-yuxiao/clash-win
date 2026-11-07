@@ -5,6 +5,7 @@
 
 #include "i18n/i18n.h"
 #include "i18n_text.h"
+#include "soft_shadow.h"
 #include "theme/theme.h"
 
 namespace clashwin::ui {
@@ -115,8 +116,17 @@ void Segmented::on_paint(IRenderTarget& rt) {
   }
   RectF r{0, 0, bounds().w, bounds().h};
   Color4f bg_c = bg_, act_bg = selected_bg_, act_txt = selected_text_color_,
-         txt_c = text_color_, act_border{};
+         txt_c = text_color_, act_border{}, cont_border{};
   float act_radius = radius_ - 2;
+  float cont_bw = gold_3d_ ? 1.0f : 0.0f;
+  float cont_radius = radius_;
+  // ★ d/v 消费（← button-styles.ts:932-990 容器 + :992-1103 选中块）
+  bool cont_inset = false;
+  Color4f cont_inset_color{}, cont_top_hi{};
+  float cont_inset_dy = 0, cont_inset_blur = 0;
+  bool act_has_bevel = false, act_has_glow = false;
+  Color4f act_bevel_dark{}, act_glow_color{};
+  float act_bevel_dy = 0, act_glow_blur = 0;
   if (themed_) {
     // T12：ThemeService 查表（← get3DSegmented* 三函数）
     auto p = theme::ThemeService::instance().segmented_paint();
@@ -126,17 +136,38 @@ void Segmented::on_paint(IRenderTarget& rt) {
     act_border = p.active_border;
     act_radius = p.active_radius;
     txt_c = p.text;
+    cont_border = p.container_border;  // ← get3DSegmentedContainerStyle borderColor
+    cont_bw = 1.0f;                    // ← 容器恒 1px
+    cont_inset = p.container_inset;
+    cont_inset_color = p.container_inset_color;
+    cont_inset_dy = p.container_inset_dy;
+    cont_inset_blur = p.container_inset_blur;
+    cont_top_hi = p.container_top_hi;
+    act_has_bevel = p.active_has_bevel;
+    act_bevel_dark = p.active_bevel_dark;
+    act_bevel_dy = p.active_bevel_dy;
+    act_has_glow = p.active_has_glow;
+    act_glow_color = p.active_glow_color;
+    act_glow_blur = p.active_glow_blur;
+    if (p.container_radius > 0.01f) cont_radius = p.container_radius;
   }
   Brush bg{bg_c};
   // src: button-styles.ts:939-945 容器 1px rgba(212,175,55,.35/.22)（gold_3d_）
-  Color4f border_c = act_border;
-  if (gold_3d_ && !themed_)
+  Color4f border_c = themed_ ? cont_border : act_border;
+  if (!themed_ && gold_3d_)
     border_c = Color4f::hex(0xD4AF37, theme::ThemeService::instance().is_light()
                                           ? 0.35f
                                           : 0.22f);
-  rt.round_rect(r, radius_, {(themed_ || gold_3d_) ? border_c : Color4f(0, 0, 0, 0),
-                             (themed_ || gold_3d_) ? 1.0f : 0.0f},
-                &bg);
+  // 容器 inset 内凹阴影（← :934-938 retro-3d）
+  if (cont_inset)
+    draw_top_inset_shadow(rt, r, cont_radius, cont_inset_color, cont_inset_dy,
+                          cont_inset_blur);
+  rt.round_rect(r, cont_radius, {border_c, cont_bw}, &bg);
+  // 容器顶部高光线（← 0 1px 0 rgba(255,255,255,.8|.08)）
+  if (cont_top_hi.a > 0.004f)
+    rt.draw_line({r.x + cont_radius, r.y + 0.5f},
+                 {r.right() - cont_radius, r.y + 0.5f},
+                 Pen{cont_top_hi, 1.0f});
   if (options_.empty()) return;
   float seg_w = r.w / static_cast<float>(options_.size());
   for (int i = 0; i < static_cast<int>(options_.size()); ++i) {
@@ -163,8 +194,25 @@ void Segmented::on_paint(IRenderTarget& rt) {
                               : Color4f::hex(0x634E00),
                           1.0f},
                       nullptr);
+        // ★ 选中块硬浮雕 + 金辉光（← :1009-1020，×depth / ×vibrancy）
+        //   boxShadow: 0 1d 0 0 bevelDark, 0 2d 0 0 bevelDark, …,
+        //              0 0 calc(6px*v) rgba(255,193,7, calc(.2*v))
+        if (act_has_bevel && act_bevel_dark.a > 0.004f) {
+          const float by = act_bevel_dy;
+          rt.draw_line({sr.x + act_radius, sr.bottom() + 0.5f},
+                       {sr.right() - act_radius, sr.bottom() + 0.5f},
+                       Pen{act_bevel_dark, 1.0f});
+          if (by > 0.5f)
+            rt.draw_line({sr.x + act_radius, sr.bottom() + by + 0.5f},
+                         {sr.right() - act_radius, sr.bottom() + by + 0.5f},
+                         Pen{act_bevel_dark, 1.0f});
+        }
+        if (act_has_glow)
+          draw_glow(rt, sr, act_radius, act_glow_color, act_glow_blur);
       } else {
         Brush sel_bg{act_bg};
+        if (act_has_glow)
+          draw_glow(rt, sr, act_radius, act_glow_color, act_glow_blur);
         rt.round_rect(sr, act_radius,
                       themed_ && act_border.a > 0 ? Pen{act_border, 1}
                                                   : Pen{Color4f(0, 0, 0, 0), 0},

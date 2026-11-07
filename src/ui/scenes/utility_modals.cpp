@@ -5,6 +5,8 @@
 #include <iomanip>
 #include <sstream>
 
+#include "ui/card_draw.h"
+#include "ui/soft_shadow.h"
 #include "ui/theme/theme.h"
 #include "util/str_utils.h"
 #include "util/utf.h"
@@ -109,14 +111,39 @@ void EditProfileModal::on_paint(IRenderTarget& rt) {
   // 1. MUI 缺省遮罩 rgba(0,0,0,.5)
   rt.fill_rect({0, 0, bounds().w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
 
-  // 2. 卡片底座（radius 8 / 1px 分隔线色 / theme-panel）
-  Brush shadow_b{Color4f(0, 0, 0, 0.22f)};
-  rt.round_rect({card_rect_.x - 2, card_rect_.y - 1, card_rect_.w + 4, card_rect_.h + 5}, 9.0f,
-                {}, &shadow_b);
-  const Color4f paper = light ? Color4f::hex(0xFFFFFF) : vars.list_bg;
-  const Color4f card_edge = light ? Color4f(0, 0, 0, 0.12f) : Color4f(1, 1, 1, 0.12f);
-  Brush card_bg{paper};
-  rt.round_rect(card_rect_, 8.0f, {card_edge, 1.0f}, &card_bg);
+  // 2. 卡片底座（theme-panel：6 套皮肤查表）
+  // src: layout-dialogs.tsx:119-137 paper className='theme-panel' + radius 8
+  //   + border 1px rgba(255,255,255,.12)
+  //   → 但 index.scss:108-115 对 .MuiDialog-paper.theme-panel 强制纯色底
+  {
+    const auto pp = ThemeService::instance().panel_paint();
+    if (pp.has_shadow)
+      draw_soft_shadow(rt, card_rect_, pp.radius, pp.shadow_color,
+                       pp.shadow_dy, pp.shadow_blur);
+    if (pp.has_glow)
+      draw_glow(rt, card_rect_, pp.radius, pp.glow_color, pp.glow_blur);
+    if (pp.grad_bg) {
+      rt.fill_round_rect_gradient_angle(card_rect_, pp.radius, pp.grad,
+                                        pp.grad_count, pp.grad_angle);
+    } else if (pp.bg.a > 0.001f) {
+      Brush b{pp.bg};
+      rt.round_rect(card_rect_, pp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &b);
+    }
+    if (pp.border != theme::PanelPaint::BorderKind::None) {
+      Color4f bc = pp.border_color;
+      if (pp.pulse) {
+        const float now_s = static_cast<float>(GetTickCount64()) / 1000.0f;
+        bc = Color4f::lerp(pp.pulse_from, pp.pulse_to,
+                           ThemeService::instance().pulse_phase(now_s));
+      }
+      Pen border{bc, 1.34f};
+      rt.round_rect(card_rect_, pp.radius, border, nullptr);
+      const float inner_r = pp.radius > 3.0f ? pp.radius - 3.0f : 0.0f;
+      rt.round_rect({card_rect_.x + 3, card_rect_.y + 3, card_rect_.w - 6,
+                     card_rect_.h - 6},
+                    inner_r, border, nullptr);
+    }
+  }
 
   // 3. 标题（h6 20 bold）
   TextStyle title_ts;
@@ -144,16 +171,13 @@ void EditProfileModal::on_paint(IRenderTarget& rt) {
                {card_rect_.x + 24.0f, card_rect_.y + 220.0f, card_rect_.w - 48.0f, 20.0f},
                label_ts);
 
-  // 5. 输入框（get3DInputStyle：outline 2px / 深底 .4 / 圆角 4 / size small 40）
+  // 5. 输入框（get3DInputStyle：6 套皮肤查表）
   TextStyle val_ts;
   val_ts.size = 14.0f;
   val_ts.align_v = AlignV::Center;
   val_ts.ellipsis = true;
-  const Color4f gold = Color4f::hex(0xD4AF37, light ? 0.35f : 0.25f);
-  const Color4f gold_focus = light ? Color4f::hex(0xB8860B) : Color4f::hex(0xFFA000);
-  const Color4f field_bg = light ? Color4f::hex(0xFFFDE7, 0.8f)
-                                 : Color4f::hex(0x1A160E, 0.4f);
-  const Color4f text_on = light ? Color4f::hex(0x2C1F03) : Color4f::hex(0xFFFDE7);
+  // src: layout-dialogs.tsx:164-216 各 TextField sx={get3DInputStyle(theme)}
+  const theme::InputPaint ip = ThemeService::instance().input_paint();
   // src: MUI .Mui-disabled { opacity: 0.38 } —— 整控件（底/描边/文字）统一叠乘
   const float kDisabledOpacity = 0.38f;
 
@@ -162,13 +186,15 @@ void EditProfileModal::on_paint(IRenderTarget& rt) {
     return c;
   };
   auto draw_field = [&](const RectF& r, const std::wstring& text, int field_idx, bool off) {
-    Brush bg{off ? fade(field_bg, kDisabledOpacity) : field_bg};
-    const Pen pen{off ? fade(gold, kDisabledOpacity)
-                      : (focused_field_ == field_idx ? gold_focus : gold),
-                  2.0f};
-    rt.round_rect(r, 4.0f, pen, &bg);
+    Brush bg{off ? fade(ip.bg, kDisabledOpacity) : ip.bg};
+    const Pen pen{off ? fade(ip.border, kDisabledOpacity)
+                      : (focused_field_ == field_idx ? ip.border_focused : ip.border),
+                  off ? ip.border_w : (focused_field_ == field_idx
+                                           ? ip.border_w_focused
+                                           : ip.border_w)};
+    rt.round_rect(r, ip.radius, pen, &bg);
     TextStyle ts = val_ts;
-    ts.color = off ? fade(text_on, kDisabledOpacity) : text_on;
+    ts.color = off ? fade(ip.text, kDisabledOpacity) : ip.text;
     rt.draw_text(text, {r.x + 10.0f, r.y, r.w - 20.0f, r.h}, ts);
   };
 
@@ -185,24 +211,45 @@ void EditProfileModal::on_paint(IRenderTarget& rt) {
   draw_field(interval_input_rect_, iw, 3, is_local_);
 
   // 6. 按钮（h28 / fs12 / 取消→保存）
+  // src: layout-dialogs.tsx:220-243 取消 defaultBtn3DStyle、保存 primaryBtn3DStyle，
+  //   两者都是 get3DButtonStyle(theme,'contained', ...) → 6 套皮肤查表
   TextStyle btn_ts;
   btn_ts.size = 12.0f;
   btn_ts.align_h = AlignH::Center;
   btn_ts.align_v = AlignV::Center;
 
-  Color4f c_bg = hover_cancel_ ? Color4f::hex(0xD4AF37, 0.18f)
-                               : (light ? Color4f::hex(0xF5F5F5) : Color4f::hex(0x2A2A2A));
-  Brush cb{c_bg};
-  rt.round_rect(btn_cancel_rect_, 4.0f, {card_edge, 1.0f}, &cb);
-  btn_ts.color = pal.primary_text;
-  rt.draw_text(tr("shared.actions.cancel"), btn_cancel_rect_, btn_ts);
-
-  Color4f s_bg = Color4f::hex(hover_save_ ? 0xE0BC55 : 0xD4AF37);
-  Brush sb{s_bg};
-  rt.round_rect(btn_save_rect_, 4.0f, {}, &sb);
-  btn_ts.weight = static_cast<int>(Weight::Bold);
-  btn_ts.color = Color4f::hex(0x2C1F03);
-  rt.draw_text(tr("shared.actions.save"), btn_save_rect_, btn_ts);
+  auto paint_btn = [&](const RectF& r, const char* ctype, bool hover,
+                       const std::wstring& label) {
+    const auto bp = ThemeService::instance().button_paint(ctype);
+    if (bp.has_shadow)
+      draw_soft_shadow(rt, r, bp.radius, bp.shadow_color, bp.shadow_dy,
+                       bp.shadow_blur);
+    if (bp.glow.a > 0) draw_glow(rt, r, bp.radius, bp.glow, bp.glow_blur);
+    if (bp.use_grad) {
+      const GradientStop* gs = hover ? bp.grad_hover : bp.grad;
+      rt.fill_round_rect_gradient_angle(r, bp.radius, gs, bp.grad_count,
+                                        bp.grad_angle);
+    } else {
+      Brush fb{hover ? bp.fill_hover : bp.fill};
+      rt.round_rect(r, bp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &fb);
+    }
+    if (bp.border_w > 0.01f)
+      rt.round_rect(r, bp.radius, Pen{bp.border, bp.border_w}, nullptr);
+    if (bp.use_grad && bp.bevel_dark.a > 0) {
+      rt.draw_line({r.x + bp.radius, r.y + 1.0f},
+                   {r.right() - bp.radius, r.y + 1.0f}, Pen{bp.bevel_hi, 1.0f});
+      rt.draw_line({r.x + bp.radius, r.bottom() - 1.0f},
+                   {r.right() - bp.radius, r.bottom() - 1.0f},
+                   Pen{bp.bevel_dark, 1.0f});
+    }
+    btn_ts.weight = bp.weight;
+    btn_ts.color = bp.text;
+    rt.draw_text(label, r, btn_ts);
+  };
+  paint_btn(btn_cancel_rect_, "default", hover_cancel_,
+            tr("shared.actions.cancel"));
+  paint_btn(btn_save_rect_, "primary", hover_save_,
+            tr("shared.actions.save"));
 }
 
 bool EditProfileModal::on_mouse(const MouseEvent& e) {

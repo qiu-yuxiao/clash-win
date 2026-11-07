@@ -230,21 +230,11 @@ ProfileImportCard::ProfileImportCard(Widget* parent) : Widget(parent) {
   auto uf = std::make_unique<TextField>();
   url_field_ = uf.get();
   url_field_->set_placeholder(tr("settings.mini.importPlaceholder"));
+  url_field_->apply_theme();  // ← get3DInputStyle 6 套皮肤查表（:734-927）
   url_field_->style_.size = 13;
-  url_field_->bg_ = ThemeService::instance().is_light()
-                        ? Color4f::hex(0xFFFDE7, 0.8f)    // :742-744
-                        : Color4f::hex(0x1A160E, 0.4f);
-  url_field_->border_ = ThemeService::instance().is_light()
-                            ? Color4f::hex(0xD4AF37, 0.35f)  // :753-755
-                            : Color4f::hex(0xD4AF37, 0.25f);
-  url_field_->border_focused_ = ThemeService::instance().is_light()
-                                    ? Color4f::hex(0xB8860B)  // :772
-                                    : Color4f::hex(0xFFA000);
-  url_field_->style_.color = ThemeService::instance().text_primary();
-  url_field_->placeholder_color_ = ThemeService::instance().palette().secondary_text;
-  url_field_->radius_ = 4;   // MUI OutlinedInput 缺省 radius
-  url_field_->border_w_ = 2;  // src: button-styles.ts:752 calc(2px * depth)
   url_field_->height_ = 27;  // src: :158-163 py4 + 13px*1.4375 + py4 ≈ 27
+  // 【保留】MUI OutlinedInput 缺省 radius 4：original/modern 由 apply_theme 给出
+  //   8*d/6*d 更接近源码，此处不再覆盖。
   // 右键：5 项编辑命令菜单（_layout.tsx:1859-1932）
   url_field_->on_context_menu = [this](PointF anchor) {
     if (on_url_context_menu) on_url_context_menu(anchor);

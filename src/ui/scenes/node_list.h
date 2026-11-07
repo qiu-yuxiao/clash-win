@@ -31,7 +31,10 @@ inline constexpr float kListTopGap = 4;      // src: proxy-head.tsx:77 mb 0.5=4
 inline constexpr float kNodeTypeColW = 55;   // src: proxy-item.tsx:106 width 55
 inline constexpr float kNodeDelayColW = 65;  // src: proxy-item.tsx:200 width 65
 inline constexpr float kListInset = 8;       // src: proxy-groups.tsx:327 mx: 1 → 8
-inline constexpr float kListPadTop = 4;      // src: proxy-head.tsx:77 mb 0.5(=4)
+// theme-panel 的「border: 4px double」（src: index.scss:75/125）在 border-box 下向内占 4px：
+// 过滤栏与列表都是它的子节点，必须整体内缩，否则边框圈不到过滤栏（见 on_arrange）。
+inline constexpr float kPanelBorder = 4;
+inline constexpr float kListBottomGap = 8;   // src: proxy-groups.tsx:327 mb: 1 → 8
 inline constexpr float kNodeBorderW = 2;     // src: proxy-item.tsx:75 borderBottom 2px
 inline constexpr float kNodeSelectBorderW = 3;  // src: proxy-item.tsx 选中 borderLeft 3px
 // 滚动置顶按钮几何 ← scroll-top-button.tsx:18-19 / proxy-groups.tsx:171
@@ -119,6 +122,13 @@ class NodeList : public Widget {
   ScrollList* list() const { return list_; }
   TextField* search_box() const { return search_; }
   ScrollTopButton* scroll_top_button() const { return scroll_top_; }
+  // ★ §5.2/§5.6 闪电（批量测速）按钮（测试断言用；点击语义见 node_list.cpp）
+  //   ← Mini proxy-head.tsx:81-107 BoltOutlined → proxy-groups.tsx:230 handleCheckAll
+  IconW* bolt_button() const { return bolt_btn_; }
+
+  // 皮肤/亮暗热切换：把控件级缓存（输入框查表结果）重刷为当前皮肤值
+  // （TextField::apply_theme 只在构造时调一次，切皮肤后缓存仍是旧皮肤的）
+  void restyle_theme();
 
   // 点击节点回调（NodeData::select 由宿主接，失败回弹由 NodeList 处理：
   // select 失败时不更新选中态）
@@ -136,6 +146,7 @@ class NodeList : public Widget {
   TextField* search_ = nullptr;
   Widget* search_wrap_ = nullptr;  // src: proxy-head.tsx:142-148 ml4 + flex1 外层
   IconW* sort_btn_ = nullptr;   // src: proxy-head.tsx:109-140 3 态排序钮
+  IconW* bolt_btn_ = nullptr;   // src: proxy-head.tsx:81-107 ⚡ 批量测速钮
   IconW* empty_icon_ = nullptr;   // src: proxy-render.tsx:75 InboxRounded 2.5em
   Label* empty_label_ = nullptr;  // src: proxy-render.tsx:76 "No Proxies"
   ScrollTopButton* scroll_top_ = nullptr;  // ← scroll-top-button.tsx（proxy-groups.tsx:330）

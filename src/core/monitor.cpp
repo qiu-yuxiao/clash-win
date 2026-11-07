@@ -168,8 +168,29 @@ void CoreMonitor::reset_state() {
   was_offline_.store(false);
   last_heal_ms_.store(0);
   last_tick_ms_.store(0);
+  last_node_change_ms_.store(0);
+  has_node_change_.store(false);
+  {
+    std::lock_guard<std::mutex> lock(last_node_m_);
+    last_active_node_.clear();
+  }
   std::lock_guard<std::mutex> lock(failed_m_);
   failed_servers_.clear();
+}
+
+// ★ §5.1 切换宽限期判定（← Mini monitor.rs:1383-1396）
+//   切换后 60s 内：失败判定只记日志、不计入连续失败次数。
+bool CoreMonitor::in_switch_grace() const {
+  if (!has_node_change_.load()) return false;
+  int64_t changed = last_node_change_ms_.load();
+  int64_t now = hooks_.now_ms ? hooks_.now_ms()
+                              : static_cast<int64_t>(GetTickCount64());
+  int64_t grace;
+  {
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(m_));
+    grace = params_.switch_grace_ms;
+  }
+  return (now - changed) < grace;
 }
 
 CoreMonitor::Action CoreMonitor::tick_once() {
@@ -218,9 +239,67 @@ CoreMonitor::Action CoreMonitor::tick_once() {
   }
   api_fail_count_.store(0);
 
+  // ★ §5.1 活跃节点切换检测（← Mini monitor.rs:1358-1370）
+  //   节点发生变化（含自动选点与手动切换）→ 记录切换时刻、起算 60s 宽限期，
+  //   并立即清零连续失败计数与重试模式（Mini 同语义）。
+  if (h.active_node_name) {
+    const std::string active = h.active_node_name();
+    bool changed = false;
+    {
+      std::lock_guard<std::mutex> lock(last_node_m_);
+      if (active != last_active_node_) {
+        last_active_node_ = active;
+        changed = true;
+      }
+    }
+    if (changed) {
+      last_node_change_ms_.store(
+          h.now_ms ? h.now_ms() : static_cast<int64_t>(GetTickCount64()));
+      has_node_change_.store(true);
+      node_fail_count_.store(0);
+      CWLOG_INFO("CoreMonitor: 活跃节点发生变化，起算 60s 切换宽限期");
+    }
+  }
+
+  // ★ §5.4 第 3 道铁锁：假/广告节点 → 直接判需重选（← Mini monitor.rs:663-666）
+  //   「内核重载默认选中伪节点 → 后台自愈切回真节点 → 重载再次切回伪节点」死循环防线。
+  //   注意：此处必须走「假节点 = 需切换」而非「健康」——与 Mini 语义完全一致。
+  if (h.is_dummy_active) {
+    if (h.is_dummy_active()) {
+      CWLOG_WARN("CoreMonitor: 活跃节点是伪节点（广告/公告节点），触发重选");
+      // 伪节点属于「明确异常」，不适用切换宽限期的宽松判定
+      node_fail_count_.store(0);
+      std::string uid = h.current_uid ? h.current_uid() : std::string();
+      if (!uid.empty()) return heal(uid);
+      return Action::Idle;
+    }
+  }
+
+  // ★ §5.8 测速失真复核（← Mini monitor.rs:685-703）
+  //   拨测链路整体失败（主/备双地址均失败）= 测速链路不可用，
+  //   **不可据此判定节点已死** → 本轮 NoAction，等下一周期重试。
+  //   （2026-10-18 实测：机场劫持 HTTP 测速地址期间内核返回 all proxies timeout，
+  //     app 误判「所有节点不可达」→ 连续多轮自愈全部落空。）
+  if (h.probe_metrics_with_fallback) {
+    if (!h.probe_metrics_with_fallback()) {
+      CWLOG_WARN(
+          "CoreMonitor: 测速链路不可用（主/备测速地址均整体失败），本轮不判定节点死活");
+      node_fail_count_.store(0);
+      return Action::Idle;
+    }
+  }
+
   // 4. 节点健康：连续 2 次判死 → 自愈
   bool node_ok = h.node_healthy ? h.node_healthy() : true;
   if (!node_ok) {
+    // ★ §5.1 切换宽限期：切到新节点后 60s 内失败判定可接受，
+    //   不累计连续失败次数（防乒乓震荡）——← Mini monitor.rs:1383-1396
+    if (in_switch_grace()) {
+      CWLOG_INFO(
+          "CoreMonitor: 活跃节点检测异常，当前处于切换宽限期，不计入连续失败");
+      node_fail_count_.store(0);
+      return Action::Idle;
+    }
     int fails = node_fail_count_.fetch_add(1) + 1;
     if (fails >= p.node_dead_threshold) {
       node_fail_count_.store(0);
