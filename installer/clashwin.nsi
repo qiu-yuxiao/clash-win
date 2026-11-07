@@ -762,7 +762,9 @@ Function un.ConfirmShow
   IntOp $5 $5 / 96
   IntOp $6 $6 / 96
   IntOp $7 $7 / 96
-  System::Call 'user32::CreateWindowEx(i 0, w "BUTTON", w "$(deleteAppData)", i 0x50010002, i 0, i r5, i r6, i r7, p r1, i0, i0, i0) i .s'
+  ; BS_AUTOCHECKBOX (0x50010003)：点击自动切换勾选态，无需对话框过程处理 BN_CLICKED。
+  ; 原 0x50010002 是 BS_CHECKBOX（手动切换），因无 BN_CLICKED 处理导致无法勾选。
+  System::Call 'user32::CreateWindowEx(i 0, w "BUTTON", w "$(deleteAppData)", i 0x50010003, i 0, i r5, i r6, i r7, p r1, i0, i0, i0) i .s'
   Pop $DeleteAppDataCheckbox
   SendMessage $HWNDPARENT ${WM_GETFONT} 0 0 $1
   SendMessage $DeleteAppDataCheckbox ${WM_SETFONT} $1 1
