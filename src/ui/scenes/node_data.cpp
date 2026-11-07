@@ -96,6 +96,12 @@ bool NodeData::apply_delay_results(const nlohmann::json& payload) {
   return applied > 0;
 }
 
+void NodeData::set_delays_batch(const std::vector<std::string>& names, int delay) {
+  int64_t now = hooks_.now_ms ? hooks_.now_ms() : 0;
+  for (const auto& name : names) delay_cache_[name] = {delay, now};
+  if (!names.empty()) notify();
+}
+
 void NodeData::set_delay(const std::string& name, int delay) {
   int64_t now = hooks_.now_ms ? hooks_.now_ms() : 0;
   delay_cache_[name] = {delay, now};
@@ -123,7 +129,15 @@ bool NodeData::test_group() {
 //   视觉占位：先置 -2（testing）触发流光动画，再委托后端统一引擎
 bool NodeData::test_and_select(const std::vector<std::string>& nodes) {
   // 视觉占位：立即将待测节点标记为「测速中」（← Mini setDelay(name, group, -2)）
-  for (const auto& n : nodes) set_delay(n, -2);
+  bool need_batch = false;
+  for (const auto& n : nodes) {
+    auto it = delay_cache_.find(n);
+    if (it == delay_cache_.end() || it->second.first != -2) {
+      need_batch = true;
+      break;
+    }
+  }
+  if (need_batch) set_delays_batch(nodes, -2);
   if (!hooks_.test_and_select) return false;
   return hooks_.test_and_select(nodes);
 }

@@ -1,4 +1,4 @@
-﻿# ClashWin installer build wrapper
+# ClashWin installer build wrapper
 # Stages the Release artifacts and invokes NSIS (makensis) to produce
 # dist\ClashWin_<version>_x64-setup.exe. Fails loudly when anything is missing.
 [CmdletBinding()]
@@ -6,7 +6,7 @@ param(
     [ValidateSet('Release', 'Debug')]
     [string]$Configuration = 'Release',
     [string]$Makensis = '',
-    [string]$Version = '0.1.0',
+    [string]$Version = '0.1.1',
     [switch]$SkipStage
 )
 

@@ -1178,6 +1178,8 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
   log_ts.size = 10.5f;
   // src: log-item.tsx:14 fontFamily: typography.fontFamily（非等宽终端字体）
   log_ts.align_v = AlignV::Center;
+  log_ts.wrap = false;
+  log_ts.ellipsis = true;
   const auto& pal = theme::ThemeService::instance().palette();
 
   for (size_t i = 0; i < visible_entries.size(); ++i) {

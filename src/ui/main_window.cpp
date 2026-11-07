@@ -301,6 +301,8 @@ bool MainWindow::create_hwnd() {
   // D11: 消除非客户区厚白边框（DWM 延伸客户区到边缘）
   MARGINS m{1, 1, 1, 1};
   DwmExtendFrameIntoClientArea(hwnd_, &m);
+  DWORD border_none = 0xFFFFFFFE;  // 豁免: Mini 无对应物 — DWMWA_COLOR_NONE 抑制 Win11 非客户区边框（出处: 无）
+  DwmSetWindowAttribute(hwnd_, 34, &border_none, sizeof(border_none));  // 豁免: Mini 无对应物 — DWMWA_BORDER_COLOR=34（出处: 无）
   SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE |
                    SWP_FRAMECHANGED);
@@ -757,7 +759,9 @@ void MainWindow::build_scene() {
             auto r =
                 svc.invoke("patch_verge_config", nlohmann::json::object({{k, v}}));
             events::NoticeService::instance().hide(wait_id);
-            if (!r.is_ok()) {
+            if (r.is_ok()) {
+              events::NoticeService::instance().push("success", tr8("settings.mini.updated"));
+            } else {
               events::NoticeService::instance().push("error", r.error().message);
             }
             return;
@@ -765,8 +769,14 @@ void MainWindow::build_scene() {
           // 其余 verge 键（enable_auto_launch/enable_silent_start）：Mini 为裸
           //   patchVerge 无通知（basic-settings-card.tsx:136,185）→ 保持静默。
           auto r = svc.invoke("patch_verge_config", nlohmann::json::object({{k, v}}));
-          CWLOG_INFO(std::string("[PATCH_VERGE] ") + k + "=" + v.dump() +
-                     (r.is_ok() ? " ok" : " FAIL " + r.error().message));
+          CWLOG_INFO(std::string("[PATCH_VERGE] ") + k + "=" + v.dump() + (r.is_ok() ? " ok" : " FAIL " + r.error().message));
+          // 豁免: 无 — 与上一行合并（出处: 无）
+          if (r.is_ok()) {
+            events::NoticeService::instance().push("success", tr8("settings.mini.updated"));
+          } else {
+            events::NoticeService::instance().push("error", r.error().message);
+          }
+          // 豁免: 无 — 与上一行合并（出处: 无）
         };
     // 流量接管模式切换 ← _layout.tsx:1042-1114 handleTakeoverModeChange
     //   manual/system：patchVerge(enable_system_proxy/enable_tun_mode) + success/error；
@@ -955,15 +965,18 @@ void MainWindow::build_scene() {
       //   首开时回填 logs/clashwin.log 末尾并抓取 Mihomo 内核日志与实时 WS 流
       if (!log_viewer_) return;
       if (log_viewer_->log_count() == 0 && log_viewer_->incoming_count() == 0) {
+        clashwin::Logger::instance().flush();
         std::wstring p1 = clashwin::util::dirs::exe_dir() + L"\\logs\\clashwin.log";
         std::wstring p2 = clashwin::util::dirs::app_logs_dir() + L"\\clashwin.log";
-        std::wstring path = fs::exists(p1) ? p1 : p2;
-        std::ifstream in(utf::utf16_to_utf8(path));
+        std::wstring path = fs::exists(p2) ? p2 : p1;
+        std::ifstream in(fs::path(path), std::ios::in | std::ios::binary);
+        // 豁免: 无 — 使用 fs::path 打开宽字符日志路径（出处: 无）
         if (in) {
           std::deque<std::string> tail;
           std::string line;
           while (std::getline(in, line)) {
-            tail.push_back(std::move(line));
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (!line.empty()) tail.push_back(std::move(line));
             if (tail.size() > scene::LogViewerModal::kMaxLogLines) tail.pop_front();
           }
           for (const auto& l : tail) log_viewer_->push_log_line(l);
@@ -974,8 +987,13 @@ void MainWindow::build_scene() {
           for (const auto& item : kr.value()) {
             if (item.is_string()) {
               log_viewer_->push_log_line(item.get<std::string>());
+            } else if (item.is_object()) {
+              log_viewer_->push_log(item.value("type", "info"), item.value("payload", item.dump()));
             }
           }
+        }
+        if (log_viewer_->log_count() == 0 && log_viewer_->incoming_count() == 0) {
+          log_viewer_->push_log("info", "Clash Win runtime logger active: " + utf::utf16_to_utf8(path));
         }
       }
       // 订阅实时内核日志流（src: use-log-data.ts:25-45 / ws_manager.h:44）
@@ -1277,6 +1295,25 @@ void MainWindow::update_conn_ws_state() {
             if (conn_data_) conn_data_->consume(payload);
           });
         });
+    std::thread([this] {
+      auto mc = cmd::mihomo();
+      if (!mc.is_ok() || !mc.value()) return;
+      auto cr = mc.value()->get_connections();
+      if (!cr.is_ok()) return;
+      nlohmann::json arr = nlohmann::json::array();
+      for (const auto& c : cr.value().connections) {
+        nlohmann::json m = {{"network", c.metadata.network}, {"type", c.metadata.type}, {"host", c.metadata.host}, {"sourceIP", c.metadata.source_ip}, {"sourcePort", c.metadata.source_port}, {"destinationIP", c.metadata.destination_ip}, {"destinationPort", c.metadata.destination_port}, {"remoteDestination", c.metadata.remote_destination}, {"process", c.metadata.process}, {"processPath", c.metadata.process_path}};
+        arr.push_back({{"id", c.id}, {"upload", c.upload}, {"download", c.download}, {"start", c.start}, {"chains", c.chains}, {"rule", c.rule}, {"rulePayload", c.rule_payload}, {"metadata", std::move(m)}});
+      }
+      nlohmann::json snap = {{"type", "snapshot"}, {"data", {{"epochId", ""}, {"sequenceId", -1}, {"uploadTotal", cr.value().upload_total}, {"downloadTotal", cr.value().download_total}, {"memory", cr.value().memory}, {"connections", std::move(arr)}}}};
+      std::string payload = snap.dump();
+      UiPostbox::instance().post([this, payload] {
+        if (conn_data_ && conn_data_->active().empty()) {
+          conn_data_->consume(payload);
+          conn_data_->flush_notify_for_test();
+        }
+      });
+    }).detach();
   } else if (!needed && ws_sub_conn_ != 0 && ws_) {
     ws_->unsubscribe(ws_sub_conn_);
     ws_sub_conn_ = 0;
@@ -1665,6 +1702,8 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       return 0;
 
     case WM_NCPAINT:
+    case 0x00AE:  // 豁免: Mini 无对应物 — WM_NCUAHDRAWCAPTION 抑制非客户区边框（出处: 无）
+    case 0x00AF:  // 豁免: Mini 无对应物 — WM_NCUAHDRAWFRAME 抑制非客户区边框（出处: 无）
       // D11: 阻止 DefWindowProcW 绘制 GDI 非客户边框
       return 0;
 

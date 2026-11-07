@@ -295,6 +295,7 @@ void WsManager::worker_loop(Channel* ch, WsManager* self, std::string ws_path) {
       std::shared_ptr<PipeWebSocket> old;
       {
         std::lock_guard<std::mutex> lk(ch->mu);
+      // reset transformer only on new connection (see below)
         old = std::move(ch->ws);
       }
       if (old) old->close();
@@ -304,6 +305,7 @@ void WsManager::worker_loop(Channel* ch, WsManager* self, std::string ws_path) {
     std::shared_ptr<PipeWebSocket> idle;
     {
       std::lock_guard<std::mutex> lk(ch->mu);
+      // reset transformer only on new connection (see below)
       has_subs = !ch->subs.empty();
       if (!has_subs && ch->ws) {
         // 订阅归零兜底（unsubscribe 已处理常态）；close 会 join 读线程，
@@ -320,6 +322,7 @@ void WsManager::worker_loop(Channel* ch, WsManager* self, std::string ws_path) {
     bool open = false;
     {
       std::lock_guard<std::mutex> lk(ch->mu);
+      // reset transformer only on new connection (see below)
       open = ch->ws && ch->ws->is_open();
     }
     if (open) {
@@ -367,6 +370,8 @@ void WsManager::worker_loop(Channel* ch, WsManager* self, std::string ws_path) {
     if (r.is_ok()) {
       chp->logged_err = false;
       std::lock_guard<std::mutex> lk(ch->mu);
+      // reset transformer only on new connection (see below)
+      if (ch->transformer) ch->transformer = std::make_unique<ConnectionsTransformer>();
       ch->ws = std::move(ws);
     } else {
       if (!chp->logged_err) {

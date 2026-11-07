@@ -20,7 +20,8 @@ void Logger::init(const std::wstring& exe_dir) {
   const std::wstring dir = exe_dir + L"\\logs";
   CreateDirectoryW(dir.c_str(), nullptr);  // 已存在则忽略
   const std::wstring path = dir + L"\\clashwin.log";
-  HANDLE h = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ,
+  HANDLE h = CreateFileW(path.c_str(), FILE_APPEND_DATA,
+                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                          nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (h == INVALID_HANDLE_VALUE) return;  // 静默降级：日志不可用不影响主流程
   file_ = h;

@@ -25,6 +25,7 @@
 #include "test_util.h"
 #include "ui/main_window.h"
 #include "ui/notice_handler.h"
+#include "ui/scenes/first_run_guide_dialog.h"
 #include "ui/scenes/node_data.h"
 #include "ui/scenes/node_list.h"
 #include "ui/scenes/profile_import_card.h"
@@ -403,4 +404,60 @@ UT_TEST(t36_d11_window_non_client_suppression) {
   UT_CHECK_EQ(cr.bottom - cr.top, wr.bottom - wr.top);
 
   DestroyWindow(hwnd);
+}
+
+// ---------------------------------------------------------------------------
+// 8. 初次运行引导框：Step 1 订阅输入框完整功能 + Step 2 进阶指南链接零重叠
+// ---------------------------------------------------------------------------
+UT_TEST(t36_first_run_guide_input_and_step2_layout) {
+  make_offscreen(271, 680, 96);
+  FirstRunGuideDialog dlg;
+  dlg.layout_tree({0, 0, 271.0f, 680.0f});
+  dlg.open();
+
+  // 8a) Step 1：url_field_ 可见、聚焦、覆盖完整输入框并支持输入与右键菜单
+  auto* tf = dlg.url_field();
+  UT_CHECK(tf != nullptr);
+  if (!tf) return;
+  UT_CHECK(tf->visible());
+  UT_CHECK(tf->focused());
+  UT_CHECK(near_f(tf->bounds().w, dlg.input_rect().w));
+  UT_CHECK(near_f(tf->bounds().h, dlg.input_rect().h));
+  UT_CHECK(near_f(tf->right_pad_, 28.0f));
+
+  // hit_test 在输入框中心命中 url_field_
+  PointF center{dlg.input_rect().x + dlg.input_rect().w * 0.5f,
+                dlg.input_rect().y + dlg.input_rect().h * 0.5f};
+  UT_CHECK(dlg.hit_test(center) == tf);
+
+  // 模拟键入字符 'h', 't', 't', 'p'
+  for (wchar_t ch : {L'h', L't', L't', L'p'}) {
+    KeyEvent ke;
+    ke.type = KeyEventType::Char;
+    ke.ch = ch;
+    UT_CHECK(tf->on_key(ke));
+  }
+  UT_CHECK_EQ(dlg.url(), std::string("http"));
+
+  // 右键菜单弹出且 hit_test 命中菜单
+  dlg.open_url_menu(center);
+  UT_CHECK(dlg.url_menu() != nullptr);
+  if (dlg.url_menu()) {
+    UT_CHECK(dlg.url_menu()->is_open());
+    UT_CHECK(dlg.url_menu()->bounds().w >= 270.0f);
+    dlg.url_menu()->close();
+  }
+
+  // 8b) Step 2：窄窗 271×680 下 star_body 与「查看 Wiki 进阶指南」按钮严格不重叠
+  dlg.set_active_node_name("HK-IEPL-01");
+  dlg.set_active_delay_ms(42);
+  dlg.set_takeover_active(true);
+  dlg.set_step(FirstRunStep::Ready);
+  dlg.layout_tree({0, 0, 271.0f, 680.0f});
+
+  const RectF star_r = dlg.star_card_rect();
+  const RectF wiki_r = dlg.wiki_btn_rect();
+  const float body_bottom = star_r.y + 10.0f + dlg.star_title_h() + 6.0f + dlg.star_body_h();
+  UT_CHECK(wiki_r.y >= body_bottom + 4.0f);
+  UT_CHECK(wiki_r.bottom() <= star_r.bottom() - 8.0f);
 }

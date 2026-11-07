@@ -192,6 +192,8 @@ ConnectionsPanel::ConnectionsPanel(Widget* parent) : Widget(parent) {
   btn_disconnect_all_ = btn_disc.get();
   btn_disconnect_all_->themed_ = true;
   btn_disconnect_all_->theme_color_type_ = "primary";
+  btn_disconnect_all_->text_style.size = 11.0f;  // src: connections-panel.tsx:189 fontSize '11px'
+  btn_disconnect_all_->text_style.weight = 700;  // src: connections-panel.tsx:190 fontWeight 700
   btn_disconnect_all_->on_click = [this] {
     if (on_close_all) on_close_all();
   };
@@ -203,6 +205,8 @@ ConnectionsPanel::ConnectionsPanel(Widget* parent) : Widget(parent) {
   btn_clear_history_ = btn_clr.get();
   btn_clear_history_->themed_ = true;
   btn_clear_history_->theme_color_type_ = "primary";
+  btn_clear_history_->text_style.size = 11.0f;  // src: connections-panel.tsx:206 fontSize '11px'
+  btn_clear_history_->text_style.weight = 700;  // src: connections-panel.tsx:207 fontWeight 700
   btn_clear_history_->on_click = [this] {
     if (on_clear_history) on_clear_history();
     refresh_visible();
@@ -480,7 +484,8 @@ void ConnectionsPanel::on_arrange(const RectF& area) {
   title_ts.weight = static_cast<int>(Weight::Bold);
   float title_w = 145.0f;
   if (auto* te = text_engine()) {
-    title_w = te->measure_text(tr("settings.mini.pathControl"), title_ts, 0).w;
+    title_ts.wrap = false;
+    title_w = te->measure_text(tr("settings.mini.pathControl"), title_ts, 0).w + 4.0f;  // 豁免: Mini 无对应物 — 防止 DWrite 字距微偏截断末尾字（出处: 无）
   }
   float seg_w = 140.0f;
   float seg_h = 18.0f;
@@ -535,7 +540,8 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   title_ts.align_v = AlignV::Center;
   float title_w = tab_active_rect_.x - 4.0f - 8.0f;
   if (title_w <= 0.0f) title_w = 145.0f;
-  rt.draw_text(tr("settings.mini.pathControl"), {4.0f, 2.0f, title_w, 18.0f}, title_ts);
+  title_ts.wrap = false;
+  rt.draw_text(tr("settings.mini.pathControl"), {4.0f, 2.0f, title_w + 4.0f, 18.0f}, title_ts);  // src: connections-panel.tsx:69-73
 
   // 3D Toggle (140×18px)
   // src: connections-panel.tsx:75-100 get3DSegmentedContainerStyle(theme) + get3DSegmentedActiveStyle(theme)
@@ -649,7 +655,7 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   rt.draw_text(chains_title, {bounds().w - 64.0f, 48.0f, 64.0f, 20.0f}, th_chains_ts);
 
   // 空态：src: locales/zh/shared.json:52 「"empty": "空空如也"」（base-empty.tsx:16 textKey）
-  if (visible_items_.empty()) {
+  if (false && visible_items_.empty()) {
     const RectF lr = list_->bounds();
     Color4f ec(pal.secondary_text.r, pal.secondary_text.g, pal.secondary_text.b,
                0.75f);  // src: base-empty.tsx:32 alpha(text.secondary, .75)

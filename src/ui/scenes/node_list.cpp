@@ -216,7 +216,7 @@ void NodeRowWidget::on_paint(IRenderTarget& rt) {
       ds.align_h = AlignH::Center;
       ds.align_v = AlignV::Center;
       rt.draw_text(format_delay(delay_),
-                   {delay_r.x + 3, delay_r.y + 1, delay_r.w - 6, 22.0f}, ds);
+                   {delay_r.x + 3, delay_r.y, delay_r.w - 6, r.h - kNodeBorderW}, ds);  // src: proxy-item.tsx:28-31
     }
   }
 
@@ -376,8 +376,9 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
       names.push_back(rows[static_cast<size_t>(i)].name);
     }
     // src: proxy-groups.tsx:256-258 视觉占位：UI 线程立即置 -2 触发 BaseLoading 脉冲
-    for (const auto& n : names) {
-      data_->set_delay(n, -2);
+    data_->set_delays_batch(names, -2);
+    if (false) {
+      // batch applied above
     }
     invalidate();
     // src: proxy-groups.tsx:263 异步后台线程执行测速，保障 UI 线程 60fps 脉冲动画

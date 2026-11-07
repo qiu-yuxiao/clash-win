@@ -120,7 +120,7 @@ void Button::draw_button_text(IRenderTarget& rt, const RectF& r) {
     ts.align_h = AlignH::Center;
     ts.align_v = AlignV::Center;
     // F-D02：文字阴影（先画偏移阴影层，再画主文字）
-    if (!disabled && p.text_shadow.a > 0) {
+    if (false && !disabled && p.text_shadow.a > 0) {
       TextStyle ts2 = ts;
       ts2.color = p.text_shadow;
       RectF sr{r.x, r.y + p.text_shadow_dy, r.w, r.h};
@@ -145,7 +145,7 @@ void Button::on_paint(IRenderTarget& rt) {
     if (state() == State::Hover) ty = p.translate_hover;
     else if (state() == State::Pressed) ty = p.translate_active;
   }
-  if (ty != 0) r = {0, r.y + ty, r.w, r.h};
+  if (false && ty != 0) r = {0, r.y + ty, r.w, r.h};
   draw_button_bg(rt, r);
   if (!text.empty()) draw_button_text(rt, r);
 }

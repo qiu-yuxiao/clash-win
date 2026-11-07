@@ -58,7 +58,7 @@ RectF TextField::clear_button_rect() const {
 
 float TextField::text_right_pad() const {
   // 清空按钮 24 + 右内距 4 + 文本右内距 4 ≈ 32（src: base-search-box.tsx:123 pr 4）
-  return clear_button_ ? 32.0f : 8.0f;
+  return std::max(clear_button_ ? 32.0f : 8.0f, right_pad_);  // src: base-search-box.tsx:123 pr 4
 }
 
 std::wstring TextField::tooltip_text() const {
@@ -240,7 +240,8 @@ bool TextField::on_mouse(const MouseEvent& e) {
     if (e.buttons & kMouseRight) {
       // 右键：焦点 + 选区外点击移动光标（Win32 编辑控件行为），再交给宿主弹菜单
       request_focus();
-      int idx = hit_index(e.pos.x);
+      if (right_pad_ > 0 && (e.buttons & kMouseRight) == 0 && e.pos.x >= bounds().w - right_pad_) { request_focus(); return true; }
+    int idx = hit_index(e.pos.x);
       if (idx < std::min(cursor_, anchor_) || idx > std::max(cursor_, anchor_))
         cursor_ = anchor_ = idx;
       clamp_scroll();
@@ -256,12 +257,17 @@ bool TextField::on_mouse(const MouseEvent& e) {
       return true;
     }
     request_focus();
+    if (right_pad_ > 0 && e.pos.x >= bounds().w - right_pad_) { request_focus(); return true; }
     int idx = hit_index(e.pos.x);
     cursor_ = anchor_ = idx;
     invalidate();
     return true;
   }
   if (e.type == MouseEventType::Move) {
+    if (right_pad_ > 0) {
+      bool eh = e.pos.x >= bounds().w - right_pad_;
+      if (eh != enter_hover_) { enter_hover_ = eh; invalidate(); }
+    }
     if (clear_button_) {
       bool h = !text_.empty() && clear_button_rect().contains(e.pos.x, e.pos.y);
       if (h != clear_hover_) {
@@ -272,13 +278,14 @@ bool TextField::on_mouse(const MouseEvent& e) {
     return false;
   }
   if (e.type == MouseEventType::Leave) {
+    if (enter_hover_) { enter_hover_ = false; invalidate(); }
     if (clear_hover_) {
       clear_hover_ = false;
       invalidate();
     }
     return false;
   }
-  if (e.type == MouseEventType::Up) {
+  if (e.type == MouseEventType::Up) { if (right_pad_ > 0 && e.pos.x >= bounds().w - right_pad_ && on_submit) on_submit();
     return true;
   }
   return false;
@@ -390,7 +397,14 @@ void TextField::on_paint(IRenderTarget& rt) {
   if (text_.empty() && composition_.empty()) {
     if (!placeholder_.empty()) {
       ts.color = placeholder_color_;
-      rt.draw_text(placeholder_, text_r, ts);
+      if (multiline_) {
+        ts.wrap = true;
+        ts.align_v = AlignV::Top;
+        // src: profile-import-card.tsx:164 '& .MuiInputBase-input': { py: '4px' }
+        rt.draw_text(placeholder_, {text_r.x, 4.0f, text_r.w, r.h - 8.0f}, ts);
+      } else {
+        rt.draw_text(placeholder_, text_r, ts);
+      }
     }
   } else {
     rt.push_clip(text_r);
@@ -414,7 +428,15 @@ void TextField::on_paint(IRenderTarget& rt) {
     if (!composition_.empty()) {
       rt.draw_text(composition_, text_rect, ts);
     } else {
-      rt.draw_text(text_, text_rect, ts);
+      if (multiline_ && !focused()) {
+        // src: profile-import-card.tsx:140-165 multiline minRows=2, py='4px'
+        TextStyle mts = ts;
+        mts.wrap = true;
+        mts.align_v = AlignV::Top;
+        rt.draw_text(text_, {text_r.x, 4.0f, text_r.w, r.h - 8.0f}, mts);
+      } else {
+        rt.draw_text(text_, text_rect, ts);
+      }
       // src: index.scss:29 ::selection { color: var(--selection-color) }：
       //   选区内的文字需以 --selection-color 重绘（剪裁到高亮矩形）
       if (has_sel && sx1 > sx0) {
@@ -454,6 +476,15 @@ void TextField::on_paint(IRenderTarget& rt) {
     cts.color = style_.color;
     cts.color.a = text_.empty() ? 0.5f : (clear_hover_ ? 1.0f : 0.9f);
     rt.draw_text(L"✕", clear_button_rect(), cts);
+  }
+  if (right_pad_ > 0) {
+    // src: first-run-guide-dialog.tsx:713-728 endAdornment KeyboardReturn 16px
+    TextStyle ets = ts;
+    ets.size = 16.0f;  // src: first-run-guide-dialog.tsx:725 fontSize 16
+    ets.align_h = AlignH::Center;
+    ets.align_v = AlignV::Center;
+    ets.color = enter_hover_ ? theme::ThemeService::instance().primary() : placeholder_color_;
+    rt.draw_text(L"⏎", {r.w - right_pad_, 0, right_pad_, r.h}, ets);
   }
 }
 

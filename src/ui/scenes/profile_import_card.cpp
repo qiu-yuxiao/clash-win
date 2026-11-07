@@ -233,6 +233,7 @@ ProfileImportCard::ProfileImportCard(Widget* parent) : Widget(parent) {
   url_field_->apply_theme();  // ← get3DInputStyle 6 套皮肤查表（:734-927）
   url_field_->style_.size = 13;
   url_field_->height_ = 46.0f;  // src: profile-import-card.tsx:145-165 py4 + 2×13px*1.4375 + py4 ≈ 46
+  url_field_->multiline_ = true;  // src: profile-import-card.tsx:140 multiline minRows=2
   // 【保留】MUI OutlinedInput 缺省 radius 4：original/modern 由 apply_theme 给出
   //   8*d/6*d 更接近源码，此处不再覆盖。
   // 右键：5 项编辑命令菜单（_layout.tsx:1859-1932）

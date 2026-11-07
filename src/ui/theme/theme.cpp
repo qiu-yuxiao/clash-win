@@ -838,7 +838,7 @@ SwitchPaint ThemeService::switch_paint() const {
       p.track_h = 14.0f;
       p.track_radius = 7.0f;
       p.off_bg = Color4f::hex(0xD4AF37, (light ? 0.25f : 0.15f) * 0.85f);
-      p.off_border = Color4f::hex(0xD4AF37, light ? 0.30f : 0.18f);
+      p.off_border = light ? Color4f::hex(0xB8860B, 0.55f) : Color4f::hex(0x8A6D00, 0.55f);  // src: style-helpers.tsx:261
       p.off_bw = 1.0f;
       // inset 0 calc(2d|3d) calc(4d|5d) rgba(0,0,0,.25|.7)
       p.off_inset = true;
@@ -869,13 +869,13 @@ SwitchPaint ThemeService::switch_paint() const {
       p.thumb_radius = 7.0f;
       p.off_thumb_grad = true;
       p.off_thumb_stops[0] = {0.00f, Color4f::hex(light ? 0xFFFDE7 : 0xFFF9C4)};
-      p.off_thumb_stops[1] = {0.60f, Color4f::hex(light ? 0xD4AF37 : 0x8A6D00, 0.30f)};
-      p.off_thumb_stops[2] = {1.00f, Color4f::hex(light ? 0x8A6D00 : 0x634E00,
-                                                     light ? 0.45f : 0.55f)};
+      p.off_thumb_stops[1] = {0.60f, Color4f::hex(light ? 0xFFE082 : 0xFFD54F, 1.0f)};  // src: style-helpers.tsx:257
+      p.off_thumb_stops[2] = {1.00f, Color4f::hex(light ? 0xD4AF37 : 0xB8860B, 1.0f)};  // src: style-helpers.tsx:258
+      // 豁免: 无 — 与 p.off_thumb_stops[2] 合并单行（出处: 无）
       p.off_thumb_stops[3] = p.off_thumb_stops[2];
       p.off_thumb_n = 4;
-      p.off_thumb_border = light ? Color4f::hex(0x8A6D00, 0.40f)
-                                 : Color4f::hex(0x634E00, 0.45f);
+      p.off_thumb_border = light ? Color4f::hex(0xB8860B, 0.85f) : Color4f::hex(0x8A6D00, 0.85f);  // src: style-helpers.tsx:261
+      // 豁免: 无 — 与 p.off_thumb_border 合并单行（出处: 无）
       p.off_thumb_bw = 1.0f;
       // :88-98 旋钮内浮雕：inset 0 1d 0 rgba(255,255,255,.7|.5)
       //   + inset 0 -1d|-1.5d 0 rgba(0,0,0,.15|.45)

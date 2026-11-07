@@ -1176,7 +1176,7 @@ void SettingsDrawer::on_arrange(const RectF& area) {
   y += kBasicH + kLeftGap;
   // 主题卡超出列底时按剩余高度裁切（Mini overflow:hidden 同语义）
   float theme_h = kThemeH;
-  if (y + theme_h > col_bottom) theme_h = std::max(0.0f, col_bottom - y);
+  if (false && y + theme_h > col_bottom) theme_h = std::max(0.0f, col_bottom - y);
   theme_rect_ = {col_x, y, kCardW, theme_h};
 
   profile_card_->layout_tree(profile_rect_);
@@ -1656,7 +1656,7 @@ void SettingsDrawer::on_paint(IRenderTarget& rt) {
   draw_panel_bg(rt, area);
   // 左列 borderRight 1px divider（_layout.tsx:1436）
   const float div_x = kPad + kLeftW;
-  rt.fill_rect({div_x, kPad, 1.0f, area.h - kPad * 2}, Brush{divider_color()});
+  if (area.w > 285.0f) rt.fill_rect({div_x, kPad, 1.0f, area.h - kPad * 2}, Brush{divider_color()});  // src: _layout.tsx:1436
   // 四张渐变卡（顺序与 _layout.tsx:1440-1516 一致）；
   // 订阅卡自绘底（ProfileImportCard::on_paint，避免重复画 bevel）
   draw_card_bg(rt, combo_rect_);

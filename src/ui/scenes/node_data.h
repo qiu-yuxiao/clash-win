@@ -73,6 +73,7 @@ class NodeData {
 
   // 单点写入（手动单节点测速完成时）
   void set_delay(const std::string& name, int delay);
+  void set_delays_batch(const std::vector<std::string>& names, int delay);
 
   // 切换节点：select_node 成功后更新 now_（失败返回 false，UI 回弹）
   bool select(const std::string& node);

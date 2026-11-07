@@ -300,10 +300,17 @@ FirstRunGuideDialog::FirstRunGuideDialog(Widget* parent) : Widget(parent) {
   url_field_->apply_theme();  // ← get3DInputStyle 6 套皮肤查表
   url_field_->style_.size = 13;
   url_field_->height_ = kFieldH;  // src: size="small" 输入框高 40
+  url_field_->right_pad_ = 28.0f;  // src: first-run-guide-dialog.tsx:714 endAdornment 预留
   url_field_->set_visible(false);  // 默认隐藏，open()/on_arrange 按步显隐
   url_field_->on_text_changed = [this](const std::wstring& t) {
     // src: :704-707 onChange：setUrl(e.target.value) + 清错误
-    set_url(utf::utf16_to_utf8(t));
+    const bool was_empty = url_.empty();
+    url_ = utf::utf16_to_utf8(t);
+    error_message_.clear();
+    if (was_empty != url_.empty() && bounds().w > 0.0f && bounds().h > 0.0f) {
+      on_arrange(bounds());
+    }
+    invalidate();
   };
   url_field_->on_submit = [this]() {
     // src: :715-728 回车图标 endAdornment onClick → handleSubmitImport
@@ -318,6 +325,7 @@ FirstRunGuideDialog::FirstRunGuideDialog(Widget* parent) : Widget(parent) {
   // 订阅链接右键编辑菜单（← profile_import_card 同款 open_url_menu）
   auto um = std::make_unique<ContextMenu>(this);
   url_menu_ = um.get();
+  url_menu_->set_z_order(1050);  // src: MUI Menu zIndex 1300（高于 url_field_）
   add_child(std::move(um));
 }
 
@@ -331,6 +339,8 @@ void FirstRunGuideDialog::open() {
   retesting_ = false;
   // 订阅框复位（src: :698-707 autoFocus + value 受控）
   if (url_field_) {
+    url_field_->apply_theme();
+    url_field_->style_.size = 13;  // src: first-run-guide-dialog.tsx:743 fontSize 13px
     url_field_->set_enabled(true);
     url_field_->set_text(L"");
     url_field_->set_visible(true);
@@ -344,6 +354,7 @@ void FirstRunGuideDialog::open() {
   last_poll_ms_ = 0;
   auto_retested_ = false;
   check_clipboard();
+  if (bounds().w > 0.0f && bounds().h > 0.0f) on_arrange(bounds());
   invalidate();
 }
 
@@ -351,7 +362,8 @@ void FirstRunGuideDialog::close() {
   if (!open_) return;
   open_ = false;
   fade_.hide();  // 画面延后 195ms 消失（MUI leave），交互立刻失效
-  if (url_field_) url_field_->blur();
+  if (url_field_) { url_field_->blur(); url_field_->set_visible(false); }
+  if (url_menu_ && url_menu_->is_open()) url_menu_->close();
   invalidate();
   if (on_dismiss) on_dismiss();
 }
@@ -365,7 +377,15 @@ void FirstRunGuideDialog::set_step(FirstRunStep s) {
 }
 
 void FirstRunGuideDialog::set_url(const std::string& u) {
+  const bool was_empty = url_.empty();
   url_ = u;
+  error_message_.clear();
+  if (url_field_ && utf::utf16_to_utf8(url_field_->text()) != u) {
+    url_field_->set_text(utf::utf8_to_utf16(u));
+  }
+  if (was_empty != url_.empty() && bounds().w > 0.0f && bounds().h > 0.0f) {
+    on_arrange(bounds());
+  }
   error_message_.clear();
   // 反向同步到 TextField（剪贴板横幅/粘贴按钮改写 url_ 时同步显示）
   // 用「字段当前文本 != u」作递归护栏：避免 set_text→on_text_changed→set_url 死循环
@@ -511,6 +531,8 @@ void FirstRunGuideDialog::submit_import() {
     gave_up_ = false;
     ready_started_ms_ = 0;
     last_poll_ms_ = 0;
+    if (bounds().w > 0.0f && bounds().h > 0.0f) on_arrange(bounds());
+    invalidate();
     invalidate();
 
     // src: :207-225 首次进入 ready 且未就绪 → 后台全节点测速优选（仅一次）
@@ -580,6 +602,8 @@ float FirstRunGuideDialog::layout_pills(float pills_y, float inner_x, float inne
 
 void FirstRunGuideDialog::on_arrange(const RectF& area) {
   set_bounds(area);
+  if (url_menu_) url_menu_->layout_tree({0, 0, area.w, area.h});
+  set_bounds(area);
   // src: :545-557 paper width 100% / maxWidth 520（窗口侧留 32px 呼吸）
   const float cw = std::min(kCardMaxW, area.w - 32.0f);
   const bool has_banner =
@@ -610,13 +634,52 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
   // 仅累计实际出现的块：导入行 + 状态行 +（可选）节点块 +（可选）重测按钮 +
   //（可选）接管提示。kReadyNodeH 仅作无块时的上界默认。
   float node_h = kReadyNodeH;
+  float star_h = kReadyStarH;
+  status_h_ = kStatusH;
+  star_title_h_ = kStarTitleH;
+  star_body_h_ = kStarBodyH;
+  if (step_ == FirstRunStep::Ready) {
+    const float card_text_w = std::max(60.0f, cw - kTitlePadX * 2.0f - kCardPad * 2.0f);  // src: first-run-guide-dialog.tsx:866,1022
+    const bool ready = proxy_ready();
+    const bool unconf = unconfirmed();
+    if (ITextEngine* te = text_engine()) {
+      const std::wstring st_txt =
+          ready ? tr("layout.components.firstRun.readyOk")
+                : (unconf ? tr("layout.components.firstRun.readyUnconfirmed")
+                          : tr("layout.components.firstRun.checking"));
+      TextStyle sts;
+      sts.size = kStatusFont;
+      sts.weight = static_cast<int>(Weight::Bold);
+      sts.wrap = true;
+      const float st_w = card_text_w - (ready || unconf ? 0.0f : 18.0f);  // src: :899 spinner 12+gap 6
+      const SizeF ss = te->measure_text(st_txt, sts, st_w);
+      if (ss.h > 0) status_h_ = std::max(kStatusH, ss.h + 2.0f);
+
+      TextStyle tts;
+      tts.size = kStarTitleFont;
+      tts.weight = static_cast<int>(Weight::Bold);
+      tts.wrap = true;
+      const SizeF ts_sz = te->measure_text(
+          L"⭐ " + tr("layout.components.firstRun.starTitle"), tts, card_text_w);
+      if (ts_sz.h > 0) star_title_h_ = std::max(kStarTitleH, ts_sz.h + 2.0f);
+
+      TextStyle bts;
+      bts.size = kStarBodyFont;
+      bts.wrap = true;
+      const SizeF bs_sz = te->measure_text(
+          tr("layout.components.firstRun.wikiHint"), bts, card_text_w);
+      if (bs_sz.h > 0) star_body_h_ = std::max(kStarBodyH, bs_sz.h + 4.0f);  // src: :1052 lineHeight 1.55
+    }
+    star_h = kCardPad + star_title_h_ + kImportedMb + star_body_h_ + kStarBtnMt +
+             kStarBtnH + kCardPad;
+  }
   if (step_ == FirstRunStep::Ready) {
     const bool show_node = !active_node_name_.empty() && (proxy_ready() || unconfirmed());
     const bool show_retest = !proxy_ready() && (unconfirmed() || retesting_);
     const bool show_warn = !takeover_active_;
     float ny = kCardPad;
     ny += kImportedH + kImportedMb;
-    ny += kStatusMt + kStatusH;
+    ny += kStatusMt + status_h_;
     if (show_node) ny += kNodeMt + kNodePt + 1.0f + kNodeLabelH + kNodeGap + kNodeNameH;
     if (show_retest) ny += kRetestMt + kRetestH;
     if (show_warn) ny += kWarnMt + kWarnH;
@@ -626,8 +689,9 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
                  ? kInputStepH + (intro_h_ - kIntroH) + pills_extra +
                        (has_banner ? kBannerH + kBannerMb : 0.0f)
                  : kTitleBlockH + kContentPad + node_h + kReadyGap +
-                       kReadyStarH + kContentPad + kActionsH;
-  ch = std::min(ch, area.h - 16.0f);
+                       star_h + kContentPad + kActionsH;
+  ch = std::min(ch, area.h - 8.0f);  // 豁免: Mini 无对应物 — 窄高视口防溢出安全留边 4px×2
+
   const float cx = std::max(0.0f, (area.w - cw) / 2.0f);
   const float cy = std::max(0.0f, (area.h - ch) / 2.0f);
   card_rect_ = {cx, cy, cw, ch};
@@ -650,7 +714,7 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     // 订阅链接 TextField：占满输入框宽，右留 26px 给回车图标（src: endAdornment）
     if (url_field_) {
       url_field_->set_visible(true);
-      url_field_->set_bounds({input_rect_.x, field_y, inner_w - 26.0f, kFieldH});
+      url_field_->set_bounds({input_rect_.x, field_y, inner_w, kFieldH});
     }
     // src: :715-729 endAdornment KeyboardReturn 16px（点击即导入）
     btn_enter_rect_ = {input_rect_.right() - 26.0f, field_y + 12.0f, 16.0f, 16.0f};
@@ -673,7 +737,7 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     const bool show_node = !active_node_name_.empty() && (proxy_ready() || unconfirmed());
     const bool show_retest = !proxy_ready() && (unconfirmed() || retesting_);
     const bool show_warn = !takeover_active_;  // 与 node_h 计算块同源，避免「检测中」态错位
-    float ny = content_y + kCardPad + kImportedH + kImportedMb + kStatusMt + kStatusH;
+    float ny = content_y + kCardPad + kImportedH + kImportedMb + kStatusMt + status_h_;
     if (show_node) ny += kNodeMt + kNodePt + 1.0f + kNodeLabelH + kNodeGap + kNodeNameH;
     if (show_retest) {
       ny += kRetestMt;
@@ -685,13 +749,32 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     // 不依赖重测按钮是否出现，避免「检测中」态错位。
     warn_y_ = show_warn ? (ny + kWarnMt) : ny;
 
-    const float star_y = content_y + node_h + kReadyGap;
-    card_star_rect_ = {inner_x, star_y, inner_w, kReadyStarH};
-    // src: :1059-1082 Wiki 文本按钮右对齐
-    const float wiki_y = star_y + kCardPad + kStarTitleH + kImportedMb + kStarBodyH +
+    float star_y = content_y + node_h + kReadyGap;
+    const float pre_actions = cy + ch - kActionsH;
+    if (star_y + star_h > pre_actions - 4.0f) {
+      star_y = std::max(content_y + node_h + 4.0f, pre_actions - 4.0f - star_h);  // 豁免: 极矮视口下防底栏重叠
+    }
+    card_star_rect_ = {inner_x, star_y, inner_w, star_h};
+    // src: :1059-1082 Wiki 文本按钮右对齐（紧随实测 star_body_h_ 下方，杜绝重叠）
+    const float wiki_y = star_y + kCardPad + star_title_h_ + kImportedMb + star_body_h_ +
                          kStarBtnMt;
-    btn_wiki_rect_ = {card_star_rect_.right() - kCardPad - kStarBtnW, wiki_y,
-                     kStarBtnW, kStarBtnH};
+    float wiki_w = kStarBtnW;
+    if (ITextEngine* te = text_engine()) {
+      TextStyle wts;
+      wts.size = kHintFont;
+      wts.weight = static_cast<int>(Weight::Bold);
+      const SizeF ws = te->measure_text(
+          L"📖 " + tr("layout.components.firstRun.openWiki") + L" ↗", wts, 0);
+      wiki_w = std::min(inner_w - kCardPad * 2.0f, std::max(kStarBtnW, ws.w + 12.0f));  // src: :1071 px: 0.75 (6px*2)
+    }
+    btn_wiki_rect_ = {card_star_rect_.right() - kCardPad - wiki_w, wiki_y,
+                      wiki_w, kStarBtnH};
+
+    // src: :1059-1082 Wiki 文本按钮右对齐
+    const float wiki_y_unused = star_y + kCardPad + kStarTitleH + kImportedMb + kStarBodyH +
+                         kStarBtnMt;
+    (void)wiki_y_unused;
+
 
     const float actions_top = cy + ch - kActionsH;
     btn_finish_star_rect_ = {inner_x, actions_top + kActionPadY, inner_w, kPrimaryBtnH};
@@ -782,7 +865,7 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
 
     // ---- 剪贴板智能探测横幅（src: :650-695）----
     if (!detected_clipboard_url_.empty() && url_.empty()) {
-      const RectF br = {inner_x, pills_y + kPillH + kPillMb, inner_w, kBannerH};
+      const RectF br = {inner_x, pills_y + pills_h_ + kPillMb, inner_w, kBannerH};
       banner_clip_rect_ = br;
       // src: :667-676 retro rgba(27,94,32,.12) / dark rgba(46,125,50,.18) /
       //      light rgba(46,125,50,.1)，边框 1px dashed
@@ -875,12 +958,12 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
                      : tr("layout.components.firstRun.checking"));
     draw_text(rt, status_text,
               {nc.x + kCardPad + (ready || unconfirmed ? 0.0f : 18.0f), status_y,
-               nc.w - kCardPad * 2.0f - (ready || unconfirmed ? 0.0f : 18.0f), kStatusH},
+               nc.w - kCardPad * 2.0f - (ready || unconfirmed ? 0.0f : 18.0f), status_h_},
               kStatusFont, static_cast<int>(Weight::Bold), status_color, AlignH::Left,
               AlignV::Top, true);
 
     // src: :921-981 当前最优节点（仅在测速完成/超时确认后展示）
-    const float node_top = status_y + kStatusH + kNodeMt;
+    const float node_top = status_y + status_h_ + kNodeMt;
     if (!active_node_name_.empty() && (ready || unconfirmed)) {
       // src: :926-930 borderTop 1px dashed rgba(128,128,128,.25)
       dashed_line(rt, nc.x + kCardPad, node_top + kNodePt, nc.w - kCardPad * 2.0f,
@@ -932,13 +1015,13 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
 
     // src: :1035-1046 ⭐ 标题
     draw_text(rt, L"⭐ " + tr("layout.components.firstRun.starTitle"),
-              {sc.x + kCardPad, sc.y + kCardPad, sc.w - kCardPad * 2.0f, kStarTitleH},
-              kStarTitleFont, static_cast<int>(Weight::Bold), star_accent_color());
+              {sc.x + kCardPad, sc.y + kCardPad, sc.w - kCardPad * 2.0f, star_title_h_},
+              kStarTitleFont, static_cast<int>(Weight::Bold), star_accent_color(), AlignH::Left, AlignV::Top, true);
     // src: :1048-1057 正文
     draw_text(rt,
               tr("layout.components.firstRun.wikiHint"),
-              {sc.x + kCardPad, sc.y + kCardPad + kStarTitleH + kImportedMb,
-               sc.w - kCardPad * 2.0f, kStarBodyH},
+              {sc.x + kCardPad, sc.y + kCardPad + star_title_h_ + kImportedMb,
+               sc.w - kCardPad * 2.0f, star_body_h_},
               kStarBodyFont, static_cast<int>(Weight::Normal), secondary_text(),
               AlignH::Left, AlignV::Top, true);
     // src: :1059-1082 Wiki 文本按钮
@@ -1032,6 +1115,8 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
           gave_up_ = false;
           ready_started_ms_ = 0;
           last_poll_ms_ = 0;
+    if (bounds().w > 0.0f && bounds().h > 0.0f) on_arrange(bounds());
+    invalidate();
           if (bounds().w > 0.0f && bounds().h > 0.0f) {
             on_arrange(bounds());
           }

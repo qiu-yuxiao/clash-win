@@ -107,6 +107,10 @@ class FirstRunGuideDialog : public Widget {
   bool hit_self(PointF local) const override {
     return open_ && Widget::hit_self(local);
   }
+  Widget* hit_test(PointF global) override {
+    if (!open_) return nullptr;
+    return Widget::hit_test(global);
+  }
 
   // 几何区域供单测断言
   RectF card_rect() const { return card_rect_; }
@@ -118,6 +122,11 @@ class FirstRunGuideDialog : public Widget {
   RectF later_btn_rect() const { return btn_later_rect_; }
   RectF star_card_rect() const { return card_star_rect_; }
   RectF retest_btn_rect() const { return btn_retest_rect_; }
+  RectF wiki_btn_rect() const { return btn_wiki_rect_; }
+  float star_title_h() const { return star_title_h_; }
+  float star_body_h() const { return star_body_h_; }
+  TextField* url_field() const { return url_field_; }
+  ContextMenu* url_menu() const { return url_menu_; }
 
  private:
   bool open_ = false;
@@ -164,6 +173,9 @@ class FirstRunGuideDialog : public Widget {
   RectF btn_finish_star_rect_;
   RectF btn_finish_rect_;
   float warn_y_ = 0.0f;  // 接管提示绘制 y（随绿色卡内部块流式定位，不再依赖重测按钮）
+  float status_h_ = 37.5f;      // src: first-run-guide-dialog.tsx:909 动态测量折行高
+  float star_title_h_ = 19.6f;  // src: first-run-guide-dialog.tsx:1041 动态测量折行高
+  float star_body_h_ = 58.2f;   // src: first-run-guide-dialog.tsx:1052 动态测量折行高
 
   bool hover_banner_ = false;
   bool hover_paste_ = false;
