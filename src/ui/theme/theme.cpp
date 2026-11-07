@@ -96,6 +96,55 @@ void skin_default_factors(SkinId skin, float* depth, float* vibrancy) {
   }
 }
 
+// ★ §2.7 每皮肤全局字体（← Mini layout.scss 的 --control-font-family）
+//   layout.scss:319 把该变量作用到 .MuiSlider-root / .MuiInputBase-root /
+//   .MuiTypography-root / .MuiListItem-root / .MuiMenuItem-root /
+//   .MuiListItemButton-root —— 即「除图标字体外的全部文本」。
+//
+//   各皮肤定义（← layout.scss:324/328/352/371/418/442）：
+//     retro-3d      Trebuchet MS, SimHei, sans-serif
+//     original      Segoe UI, Microsoft YaHei, sans-serif
+//     modern-flat   Outfit, DengXian, sans-serif
+//     frosted-glass Segoe UI Light, Microsoft YaHei Light, sans-serif
+//     cyberpunk     Consolas, NSimSun, monospace
+//     monochrome    Georgia, KaiTi, serif
+//
+//   ★ Mini 是 CSS font-family **列表**（多字体回退）。DirectWrite 的
+//     CreateTextFormat 只接受单一 family，因此这里保留完整候选链，
+//     由 D2D 层按「本机是否安装该字体」择一 —— 首选缺失时落到同族下一候选，
+//     而不是静默变成默认字体（那会让 6 套皮肤在缺字体机型上看起来一样）。
+const std::vector<std::wstring>& skin_font_candidates(SkinId skin) {
+  // 末位统一是 Windows 通用族，任何机器都至少有其中之一
+  static const std::vector<std::wstring> kRetro3d = {
+      L"Trebuchet MS", L"SimHei", L"Microsoft YaHei", L"Segoe UI"};
+  static const std::vector<std::wstring> kOriginal = {
+      L"Segoe UI", L"Microsoft YaHei", L"Tahoma"};
+  static const std::vector<std::wstring> kModernFlat = {
+      L"Outfit", L"DengXian", L"Microsoft YaHei", L"Segoe UI"};
+  static const std::vector<std::wstring> kFrostedGlass = {
+      L"Segoe UI Light", L"Microsoft YaHei Light", L"Segoe UI",
+      L"Microsoft YaHei"};
+  static const std::vector<std::wstring> kCyberpunk = {
+      L"Consolas", L"NSimSun", L"Courier New"};
+  static const std::vector<std::wstring> kMonochrome = {
+      L"Georgia", L"KaiTi", L"SimSun", L"Times New Roman"};
+  switch (skin) {
+    case SkinId::Retro3d:
+      return kRetro3d;
+    case SkinId::Original:
+      return kOriginal;
+    case SkinId::ModernFlat:
+      return kModernFlat;
+    case SkinId::FrostedGlass:
+      return kFrostedGlass;
+    case SkinId::Cyberpunk:
+      return kCyberpunk;
+    case SkinId::Monochrome:
+      return kMonochrome;
+  }
+  return kOriginal;
+}
+
 ThemeService& ThemeService::instance() {
   static ThemeService svc;
   return svc;
@@ -111,6 +160,7 @@ void ThemeService::init(SkinId skin, ThemeMode mode,
   //   Win 侧此前 init() 不重置因子，导致切皮肤后仍沿用 retro-3d 的 0.3 ——
   //   original 的 `--border-radius: calc(8px * val1)` 会算成 2.4px 而非 8px。
   skin_default_factors(skin_, &depth_, &vibrancy_);
+  ui_font_.clear();  // ★ §2.7 init 可能换皮肤 → 字体失效重解析
   rebuild();
 }
 
@@ -121,7 +171,6 @@ void ThemeService::set_factors(float depth, float vibrancy) {
   rebuild();  // original 的 --primary-main 由 val2 决定，必须重算
   notify();   // 关键：不 notify 则滑块只改数值不重绘（此前"能滑但没效果"的根因之一）
 }
-
 void ThemeService::rebuild() {
   palette_ = base_palette(mode_);
   // ← use-custom-theme.ts:170-181 主色解析链：
@@ -160,6 +209,8 @@ void ThemeService::unsubscribe(uint64_t id) {
 void ThemeService::set_skin(SkinId skin) {
   if (skin_ == skin) return;
   skin_ = skin;
+  // ★ §2.7 皮肤切换 → 全局字体失效（下次取文本格式时按新皮肤候选链重解析）
+  ui_font_.clear();
   rebuild();
   notify();  // → 控件 invalidate（热生效）
 }

@@ -70,7 +70,10 @@ enum class AlignH { Left, Center, Right };
 enum class AlignV { Top, Center, Bottom };
 
 struct TextStyle {
-  std::wstring font_family = L"Segoe UI";
+  // ★ 空 = 跟随当前皮肤的全局字体（← Mini layout.scss:319 --control-font-family）
+  //   非空 = 显式指定（图标字体 Segoe MDL2 Assets / Segoe Fluent Icons、
+  //   代码框 Consolas 等）。皮肤字体候选链见 theme::skin_font_candidates。
+  std::wstring font_family;
   float size = 12;                 // 逻辑 px（MUI 基准 fontSize 12）
   int weight = static_cast<int>(Weight::Normal);
   bool italic = false;

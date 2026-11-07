@@ -317,6 +317,12 @@ SkinSliderSpec skin_slider_spec(SkinId skin);
 //   `--border-radius: calc(8px * val1)` 会算成 2.4px 而不是 8px。
 void skin_default_factors(SkinId skin, float* depth, float* vibrancy);
 
+// ★ §2.7 每皮肤全局字体候选链（← layout.scss 的 --control-font-family）
+//   Mini 的 font-family 是**列表**（多字体回退）；DirectWrite 只接受单一
+//   family，故保留完整链，由 D2D 层按本机字体存在性择一。
+//   各皮肤定义见 layout.scss:324/328/352/371/418/442。
+const std::vector<std::wstring>& skin_font_candidates(SkinId skin);
+
 // ---------- 因子语义（← Mini 的四变量注入模型） ----------
 // Mini（use-skin-controls.ts:70-93）把两个滑块值注入**四个** CSS 变量：
 //   --depth-factor ≡ --control-skin-val1 ≡ val1
@@ -377,6 +383,19 @@ class ThemeService {
   Color4f primary() const { return palette_.primary_color; }
   Color4f text_primary() const { return palette_.primary_text; }
 
+  // ★ §2.7 每皮肤全局字体（← Mini layout.scss:319 --control-font-family）
+  //   Mini 通过 CSS 变量把字体作用到 .MuiSlider-root / .MuiInputBase-root /
+  //   .MuiTypography-root / .MuiListItem-root / .MuiMenuItem-root /
+  //   .MuiListItemButton-root —— 即「除图标字体外的全部文本」。
+  //   Win 侧对应：TextStyle::font_family 为空时取本值（跟随皮肤）。
+  //   各皮肤定义见 layout.scss:324/328/352/371/418/442。
+  //
+  //   ui_font() 返回**本机实际生效**的字体名（首选字体缺失时按候选链回退，
+  //   由 D2D 层解析后写回）；skin_font_candidates() 是纯候选链。
+  const std::wstring& ui_font() const { return ui_font_; }
+  // 由 D2D 层在首次需要时解析并回填（存在性检测需要 DirectWrite）
+  void set_ui_font(const std::wstring& f) { ui_font_ = f; }
+
   // 控件族查表
   // outlined=true → 源码 variant==="outlined"（retro-3d 有独立的半透明渐变）
   ButtonPaint button_paint(const char* color_type = "default",
@@ -415,6 +434,8 @@ class ThemeService {
   float vibrancy_ = 1.0f;  // ← val2 缺省（vibrancy-factor）
   Palette palette_{};
   CssVars vars_{};
+  // ★ §2.7 每皮肤全局字体（← layout.scss 的 --control-font-family）
+  std::wstring ui_font_{L"Segoe UI"};
   std::vector<std::pair<uint64_t, std::function<void()>>> subs_;
   uint64_t next_id_ = 1;
 };

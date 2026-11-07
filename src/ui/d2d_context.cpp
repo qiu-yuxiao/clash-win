@@ -15,6 +15,7 @@
 #include <unordered_map>
 
 #include "util/log.h"
+#include "ui/theme/theme.h"
 
 namespace clashwin::ui {
 
@@ -265,6 +266,32 @@ uint32_t D2dRenderTarget::key_of(const Color4f& c) {
 }
 
 // ---- 文本格式缓存 ----
+
+namespace {
+// ★ §2.7 皮肤字体解析：本机是否安装了某个字体
+//   DirectWrite 的 GetFontCollection + FindFamilyName 是权威判据
+//   （与 CSS font-family 的可用性判定一致）。
+bool font_installed(IDWriteFactory* f, const std::wstring& name) {
+  if (!f || name.empty()) return false;
+  IDWriteFontCollection* coll = nullptr;
+  if (FAILED(f->GetSystemFontCollection(&coll, FALSE)) || !coll) return false;
+  UINT32 index = 0;
+  BOOL exists = FALSE;
+  const HRESULT hr = coll->FindFamilyName(name.c_str(), &index, &exists);
+  coll->Release();
+  return SUCCEEDED(hr) && exists == TRUE;
+}
+
+// 按候选链择一：首个本机已安装者胜出；全缺则回退 Segoe UI。
+std::wstring resolve_skin_font(IDWriteFactory* f,
+                                const std::vector<std::wstring>& cands) {
+  for (const auto& c : cands) {
+    if (font_installed(f, c)) return c;
+  }
+  return L"Segoe UI";
+}
+}  // namespace
+
 IDWriteTextFormat* D2dRenderTarget::format(const TextStyle& ts) {
   // 【SCALEFIX】1:1 物理像素：scale()=1.0，字号直接用 ts.size（12=12 物理），
   // 不 ×1.5 也不 /1.5；key 含 dpi_ 位仅为防御（现为常量）。
@@ -272,9 +299,22 @@ IDWriteTextFormat* D2dRenderTarget::format(const TextStyle& ts) {
                  (static_cast<uint64_t>(ts.weight) << 32) ^
                  (static_cast<uint64_t>(ts.italic) << 40) ^
                  (static_cast<uint64_t>(static_cast<uint32_t>(dpi_)) << 48);
+  // ★ §2.7 字体解析：font_family 为空 → 跟随当前皮肤
+  //   （← Mini layout.scss:319 --control-font-family 全局生效）
+  std::wstring family = ts.font_family;
+  if (family.empty()) {
+    auto& theme = theme::ThemeService::instance();
+    family = theme.ui_font();
+    if (family.empty()) {
+      // 首次解析：按候选链择一（本机字体存在性检测需 DirectWrite）
+      family = resolve_skin_font(ctx_.dwrite(),
+                                 theme::skin_font_candidates(theme.skin()));
+      theme.set_ui_font(family);
+    }
+  }
   // family 哈希（FNV-1a 32）
   uint64_t h = 2166136261u;
-  for (wchar_t ch : ts.font_family) {
+  for (wchar_t ch : family) {
     h ^= static_cast<uint64_t>(ch);
     h *= 16777619u;
   }
@@ -284,7 +324,7 @@ IDWriteTextFormat* D2dRenderTarget::format(const TextStyle& ts) {
 
   IDWriteTextFormat* f = nullptr;
   HRESULT hr = ctx_.dwrite()->CreateTextFormat(
-      ts.font_family.c_str(), nullptr,
+      family.c_str(), nullptr,
       static_cast<DWRITE_FONT_WEIGHT>(ts.weight), DWRITE_FONT_STYLE_NORMAL,
       DWRITE_FONT_STRETCH_NORMAL, ts.size, L"", &f);
   if (FAILED(hr)) return nullptr;

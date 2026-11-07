@@ -616,8 +616,9 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   auto dl = std::make_unique<Label>();
   depth_label_ = dl.get();
   depth_label_->style.size = 13;  // src: theme-settings-card.tsx:345 fontSize 13
-  // src: layout.scss:324 --control-font-family 'Trebuchet MS, SimHei, sans-serif'
-  depth_label_->style.font_family = L"Trebuchet MS";
+  // ★ §2.7 字体跟随皮肤（← layout.scss:319 --control-font-family 全局生效；
+  //   layout.scss:324 只是 retro-3d 的取值，其余皮肤各有其字体）
+  depth_label_->style.font_family.clear();
   depth_label_->style.align_v = AlignV::Center;  // ListItem alignItems center（:331）
   // src: theme-settings-card.tsx:344 variant="caption" → 常规字重（非 Bold）
   depth_label_->style.color = card_text();
@@ -643,7 +644,7 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   depth_value_ = dv.get();
   dv->style.size = 12;  // src: theme-settings-card.tsx:355 fontSize 12 bold
   dv->style.weight = static_cast<int>(Weight::Bold);
-  dv->style.font_family = L"Trebuchet MS";  // src: layout.scss:324
+  dv->style.font_family.clear();  // ★ §2.7 跟随皮肤（layout.scss:319）
   dv->style.align_v = AlignV::Center;
   dv->style.align_h = AlignH::Right;        // src: :335-338 space-between
   // src: :357 'text.secondary'（retro 暗态 #2C1F03）
@@ -653,7 +654,7 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   auto vl = std::make_unique<Label>();
   vibrancy_label_ = vl.get();
   vibrancy_label_->style.size = 13;  // src: theme-settings-card.tsx:400 fontSize 13
-  vibrancy_label_->style.font_family = L"Trebuchet MS";  // src: layout.scss:324
+  vibrancy_label_->style.font_family.clear();  // ★ §2.7 跟随皮肤（layout.scss:319）
   vibrancy_label_->style.align_v = AlignV::Center;
   // src: theme-settings-card.tsx:393 variant="caption" → 常规字重（非 Bold）
   vibrancy_label_->style.color = card_text();
@@ -679,7 +680,7 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   vibrancy_value_ = vv.get();
   vv->style.size = 12;  // src: theme-settings-card.tsx:414 fontSize 12 bold
   vv->style.weight = static_cast<int>(Weight::Bold);
-  vv->style.font_family = L"Trebuchet MS";  // src: layout.scss:324
+  vv->style.font_family.clear();  // ★ §2.7 跟随皮肤（layout.scss:319）
   vv->style.align_v = AlignV::Center;
   vv->style.align_h = AlignH::Right;        // src: :335-338 space-between
   // src: :406 'text.secondary'（retro 暗态 #2C1F03）
@@ -835,7 +836,7 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
   lang_btn_ = lb.get();
   style_cell(lang_btn_, 11.0f);  // src: _layout.tsx:1586 fontSize 11
   lang_btn_->text_style.weight = 700;  // src: :1587 fontWeight 'bold'
-  lang_btn_->text_style.font_family = L"Trebuchet MS";  // src: :1588
+  lang_btn_->text_style.font_family.clear();  // src: :1588 var(--control-font-family)
   lang_btn_->paint_params.radius = 6.0f;  // src: button-styles.ts:79
   // src: button-styles.ts:36 borderColor #8A6D00/#634E00、:81 2px（!important 覆盖）
   lang_btn_->paint_params.border =
@@ -885,14 +886,18 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
   static const wchar_t* kSkinNames[6] = {L"Trump-3D", L"Original", L"Modern",
                                          L"Frosted", L"Cyberpunk", L"Monochrome"};
   // src: _layout.tsx:1663-1688 每皮肤独立 fontFamily
-  static const wchar_t* kSkinFonts[6] = {L"Trebuchet MS", L"Segoe UI", L"Outfit",
-                                         L"Segoe UI Light", L"Consolas", L"Georgia"};
+  //   ★ 取候选链首项（与全局皮肤字体共用 skin_font_candidates 单一真源）
+  const theme::SkinId kSkinIds[6] = {
+      theme::SkinId::Retro3d,   theme::SkinId::Original,
+      theme::SkinId::ModernFlat, theme::SkinId::FrostedGlass,
+      theme::SkinId::Cyberpunk,  theme::SkinId::Monochrome};
   for (int i = 0; i < 6; ++i) {
     auto b = std::make_unique<SkinCell>(kSkinNames[i]);
     SkinCell* raw = b.get();
     style_cell(raw, 11.0f);
     raw->text_style.weight = static_cast<int>(Weight::Bold);
-    raw->text_style.font_family = kSkinFonts[i];
+    const auto& fc = theme::skin_font_candidates(kSkinIds[i]);
+    if (!fc.empty()) raw->text_style.font_family = fc.front();
     raw->on_click = [this, i]() { select_skin(i); };
     skin_row_.push_back(raw);
     panel_->add_child(std::move(b));
