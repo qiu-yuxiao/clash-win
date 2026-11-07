@@ -4,7 +4,7 @@
 - 事实源：`C:\Users\sun_y\Documents\AntiGravity_Projects\ClashVerge\clash_mini_agreements.md`（744 行，8 大章 + 附录 A/B）
 - 参照实现：Clash Mini **v3.2.2 当前内容**（`ClashVerge` 工作区，只读）
 - 审计方法：逐条读 agreements 条目 → 定位 Mini 对应源码 `file:line` → 在 Win 侧 `src/` 找对应实现 → 判定「已落地 / 缺失 / 形态差异」
-- 结论：**128 条 = 已落地 121 / 本轮补齐 4 / 形态差异 3**（详见 §三）
+- 结论：**128 条 = 已落地 121 / 本轮补齐 6 / 形态差异 3**（详见 §三）
 
 ---
 
@@ -13,7 +13,7 @@
 | 章 | 标题 | 条目数 | 结论 |
 |---|---|---|---|
 | 一 | 项目定位与架构基石 | 8 | ✅ 全部落地（§1.1 品牌名为**唯一豁免**，端口属共存资源标识豁免） |
-| 二 | 界面美学与交互体系 | 12 | ✅ 全部落地（§2.3/§2.6 本轮复核铁律级一致） |
+| 二 | 界面美学与交互体系 | 12 | 🔧 **本轮补齐 2 条**（§2.7 每皮肤全局字体 / §2.9 皮肤交互态三态）+ 1 条 UI 层修正（§5.2 所见即所选） |
 | 三 | 内核生态与运行时管控 | 7 | ✅ 全部落地（§3.4 geodata-loader 为 Mini 侧亦无 → 形态差异） |
 | 四 | 轻量级模式与窗口生命周期 | 5 | ⚠️ 形态差异（Webview2 ↔ 原生窗口，无销毁语义） |
 | 五 | 后台监控、健康探针与自愈体系 | 8 | 🔧 **本轮补齐 3 条**（§5.1 宽限期 / §5.4 假节点 / §5.8 测速失真）+ 1 条 UI 层修正（§5.2 所见即所选） |
@@ -23,7 +23,7 @@
 
 ---
 
-## 二、本轮补齐的 4 条（agreements 有、Mini 源码有、Win 侧缺）
+## 二、本轮补齐的 6 条（agreements 有、Mini 源码有、Win 侧缺）
 
 ### ① §5.1 切换宽限期 60s
 
@@ -76,6 +76,97 @@
   走 `AutoSelect::trigger(uid, 子集, sort_type=0, select=true)`；
   `NodeList::bolt_button()` 暴露按钮指针供测试。
 - **测试**：`tests/test_t28_bolt_subset.cpp` 6 个用例（走真实点击路径）。
+
+### ⑤ §2.7 每皮肤全局字体（`--control-font-family`）
+
+- **Mini 事实源**：`layout.scss:319` 把 CSS 变量 `--control-font-family` 作用到
+  `.MuiSlider-root` / `.MuiInputBase-root` / `.MuiTypography-root` /
+  `.MuiListItem-root` / `.MuiMenuItem-root` / `.MuiListItemButton-root`
+  —— 即「除图标字体外的全部文本」。各皮肤定义：
+  `layout.scss:324` retro-3d = `Trebuchet MS, SimHei, sans-serif`；
+  `:328` original = `Segoe UI, Microsoft YaHei, sans-serif`；
+  `:352` modern-flat = `Outfit, DengXian, sans-serif`；
+  `:371` frosted-glass = `Segoe UI Light, Microsoft YaHei Light, sans-serif`；
+  `:418` cyberpunk = `Consolas, NSimSun, monospace`；
+  `:442` monochrome = `Georgia, KaiTi, serif`。
+- **Win 原状**：`TextStyle::font_family` 为空即走全局默认字体，
+  6 套皮肤**文字完全同款**（仅颜色/圆角/阴影不同）→ 皮肤辨识度缺失；
+  切皮肤时文字也不重解析。
+- **移植**：
+  - `theme.h:384-388` `skin_font_candidates(SkinId)` 返回每皮肤**完整候选链**
+    （保留 Mini 的 CSS font-family 多字体回退语义）；
+  - `theme.cpp:116-147` 6 套皮肤候选链落地，末位统一是 Windows 通用族
+    （任何机器至少命中其一，不会静默变成默认字体）；
+  - `theme.h:450-461` `ui_font()` / `set_ui_font()`：D2D 层用 DirectWrite
+    `FindFamilyName` 探测本机存在性后**择一写回**；
+  - `TextStyle::font_family` 为空 → 自动跟随皮肤（`theme.h:450-454` 注释锁定）；
+  - `init()` / `set_skin()` 时失效重解析（字体缓存随皮肤切换重建）。
+- **测试**：`tests/test_t29_skin_fonts.cpp` 8 个用例（6 套皮肤候选链首位正确、
+  候选链非空且末位通用族、各皮肤候选链互不相同、
+  `set_skin` 后 `ui_font` 跟随切换）。
+
+### ⑥ §2.9 皮肤交互态三态（Switch / Slider 的 hover + active + 键盘）
+
+- **Mini 事实源**（`style-helpers.tsx` 与 `base-switch.tsx`）：
+  - **Slider thumb 常态**：retro-3d `:274-291`（14×14 radial 四停 + 1px 边 +
+    `0 3d|4d 6d|8d rgba(0,0,0,.25|.6)` + `inset 0 1d 0 rgba(255,255,255,.8|.4)` +
+    `0 0 8v|10v rgba(255,193,7,.25v|.3v)`）；original `:328`（12×12 白底 2px 主色边 +
+    `0 1px 2px rgba(0,0,0,.15)`）；modern-flat `:356`（同 original，radius
+    `calc(6px*val1)`）；frosted `:387`（12×12 半透明白）；cyberpunk `:421`
+    （8×12 方角 + `0 0 5px` 同色 glow）；monochrome `:450`（10×10 方角 + 无阴影）。
+  - **Slider thumb `:hover, &.Mui-focusVisible`**：retro-3d `:292-305`
+    （`scale(1.2)` + `brightness(1.15)` + 阴影升级 `0 5d|6d 10d|12d rgba(0,0,0,.35|.7)` +
+    `inset 0 1d 0 rgba(255,255,255,.9|.5)` + 金 glow `0 0 12v|14v rgba(255,193,7,.35v|.4v)`）；
+    original `:334` / modern-flat `:363` / frosted `:395-404`（`scale(1.15)` +
+    变实心白 `rgba(255,255,255,1.0)` + 亮态 `0 2px 5px rgba(0,0,0,.18)` /
+    暗态 `0 0 4px rgba(255,255,255,.4)`）/ cyberpunk `:427-430`（`scale(1.15)` +
+    glow 5px→8px）；**monochrome 无 hover 规则**。
+  - **Slider thumb `:active`（Mui-active，仅 retro-3d）**：`:306-307`
+    `scale(0.92)` + `inset 1d|1.5d 1d|1.5d 2d|2.5d rgba(0,0,0,.15|.5)`。
+  - **Switch thumb hover**（`base-switch.tsx`）：retro-3d `:114-128`
+    （`scale(1.2)` + `brightness(1.15)` + `0 4d|5d 8d|10d rgba(0,0,0,.3|.6)` +
+    顶高光 `inset 0 1d|1.2d 0 rgba(255,255,255,.8|.6)` +
+    底暗线 `inset 0 -1d|-1.5d 0 rgba(0,0,0,.1|.4)` + `0 0 10v rgba(255,193,7,.35v)`）；
+    modern-flat `:361-363` `scale(1.1)`；monochrome `:543-545` `scale(1.05)`；
+    cyberpunk `:442-444` `boxShadow:'0 0 10px currentColor'`
+    （off `#ff0055` / on `#00b0ff`|`#00f0ff`）；
+    **original `:133-204` 与 frosted-glass `:280-372` 无 hover 规则**。
+  - **retro-3d 开关 on 态旋钮内浮雕**：`base-switch.tsx:97-98` 的
+    `.Mui-checked .MuiSwitch-thumb` **只覆盖 `background` 与 `border`**，
+    boxShadow 继承基础 thumb 的 `inset 0 1d 0` 顶高光 + `inset 0 -1d 0` 底暗线。
+  - **MUI Slider 键盘语义**：`node_modules/@mui/material/Slider/useSlider.js:326-370`
+    —— ArrowUp/ArrowRight `+step`；ArrowDown/ArrowLeft `-step`；
+    Shift+方向键 ±`shiftStep`(缺省 10，见 `:182`)；PageUp/PageDown ±10；
+    Home→min；End→max；钳制 `getNewValue`（`:27-29`）。
+- **Win 原状**：
+  - `SwitchW` 与 `Slider` **完全没有 hover / active 概念**（`on_mouse` 不区分
+    Enter/Leave，`on_paint` 恒定常态绘制）→ 6 套皮肤的 hover 视觉全部缺失；
+  - retro-3d 开关 **on 态旋钮缺内浮雕**（Win 侧此前只设了 off 态）；
+  - Slider thumb 常态缺 `inset 0 1d 0` 顶高光与 `:active` 内凹；
+  - `Slider` **完全无键盘交互**（`wants_key()` 未置位，`on_key` 未实现）。
+- **移植**：
+  - `theme.h` 新增 `SliderPaint` / `SwitchPaint` 的 hover 态字段族
+    （scale / brightness / shadow 覆盖 / glow 覆盖 / inset_hi 覆盖 /
+    inset_dark 覆盖 / 底色覆盖 / on 态 glow 双色）；
+  - `theme.cpp` 逐皮肤照搬 Mini 原文（含「original / frosted / monochrome
+    无 hover 规则 → 不加戏」的负向结论）；
+  - `switch_w.cpp:47-58` Enter/Leave 维护 `thumb_hovered_`；
+    `switch_w.cpp:175` 起 hover 态渲染（缩放绕旋钮中心、阴影/辉光/内外浮雕覆盖、
+    brightness 提亮、on/off 双色 glow）；
+  - `slider.cpp:47` `Slider::update_hover()` 依据 `last_mouse_x_` 与 thumb 中心
+    距离判定悬停，在 `on_mouse(Move)`（`:88`）/ `set_value()`（`:23`）/
+    `apply_theme()`（`:162`）三处刷新（贴近 CSS `:hover` 的实时语义）；
+  - `slider.cpp:115-145` `Slider::on_key()` 移植 MUI 键盘语义（方向键 / Shift /
+    PageUp/PageDown / Home / End + 钳制），`slider.h:33` `wants_key()` 置位，
+    鼠标 Down 时 `request_focus()`（`slider.cpp:82`）。
+- **测试**：`tests/test_t30_slider_thumb_inset.cpp` 6 个用例（retro-3d 顶高光与
+  active 内凹的精确数值 + 其余 5 套皮肤负向断言 + Slider/Switch 字段彼此独立）；
+  `tests/test_t31_interactive_states.cpp` 12 个用例（逐皮肤 hover 缩放表、
+  cyberpunk 双色 glow、retro-3d on 态内浮雕、滑块键盘全语义 + 钳制）；
+  `tests/test_t32_hover_pixels.cpp` 6 个用例（**像素级实证**：retro-3d 开关
+  hover 前后 `max_delta >= 8`；original 开关 hover 前后**完全一致**（差异 == 0，
+  验证「不擅自加戏」）；monochrome 滑块 hover 前后完全一致且 `thumb_hovered()`
+  仍为 false；retro-3d on 态旋钮顶缘亮度 > 中部）。
 
 ---
 
@@ -135,7 +226,9 @@
   - **判定入口唯一**：`Breakpoints` 类统一派生 `is_narrow()` / `is_mini()`。
   - **计时器无条件自续期**：`main_window.cpp:1586` `stealth_.tick(now_ms)`
     —— 调用方无条件再排；几何变化亦续期（`:1561`）。
-- §2.7 皮肤体系：本轮已 1:1 对齐（见 `2026-11-07-skin-slider-semantics.md`）。
+- §2.7 皮肤体系：本轮已 1:1 对齐（见 `2026-11-07-skin-slider-semantics.md`）；
+  每皮肤全局字体（`--control-font-family`）与交互态三态（hover / active / 键盘）
+  见本报告 §二 ⑤⑥。
 
 ### 第三章
 
@@ -204,5 +297,13 @@
 2. **frosted-glass 的 val2（Blur）**：D2D 无 `backdrop-filter` 原语，
    `soft_shadow.h` 只能近似阴影，背景模糊无法 1:1 → 需登记为渲染能力差异，
    **不可做假映射**（假映射会让用户以为滑块生效但画面不变）。
+   当前处置：`theme.cpp:762` 已写明该限制；该滑块仍可拖动，
+   但**不产生背景模糊变化**（唯一一处滑块「有交互无视觉」的已知例外）。
 3. **便携包需重打**：`dist/ClashWin_0.1.0_x64_portable.zip` 早于本轮全部改动。
 4. **未 push**：本地领先 origin/dev 多个提交（push 需单独确认）。
+5. **剩余硬编码审计**：仍有金色等固定色散落在
+   `settings_drawer.cpp`(33) / `profile_import_card.cpp`(10) /
+   `segmented.cpp`(8) / `quick_bar.cpp`(8) / `first_run_guide_dialog.cpp`(7) /
+   `utility_modals.cpp`(6) / `context_menu.cpp`(3) / `traffic_pane.cpp`(2) /
+   `main_window.cpp`(2) —— 应改由 `ThemeService` 查表输出（按皮肤取色），
+   否则 6 套皮肤下这些位置仍是 retro-3d 金色。

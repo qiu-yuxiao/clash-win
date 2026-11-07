@@ -44,6 +44,19 @@ void SwitchW::update_drag(float local_x) {
 
 bool SwitchW::on_mouse(const MouseEvent& e) {
   switch (e.type) {
+    case MouseEventType::Enter:
+      // ★ 悬停态（← Mini `&:hover .MuiSwitch-thumb`）
+      if (!thumb_hovered_) {
+        thumb_hovered_ = true;
+        invalidate();
+      }
+      return true;
+    case MouseEventType::Leave:
+      if (thumb_hovered_) {
+        thumb_hovered_ = false;
+        invalidate();
+      }
+      return true;
     case MouseEventType::Down:
       if (!enabled()) return true;
       press_x_ = e.pos.x;
@@ -158,15 +171,28 @@ void SwitchW::on_paint(IRenderTarget& rt) {
   }
 
   // ---- 旋钮 ----
-  const float td = sp.thumb_d;
-  const float tx = sp.thumb_margin + a * (w - td - sp.thumb_margin * 2.0f);
-  const float ty = (h - td) / 2.0f;
-  const RectF tr{tx, ty, td, td};
-  if (sp.thumb_shadow) {
-    Color4f sc = sp.thumb_shadow_color;
+  // ★ 悬停态（← Mini `&:hover .MuiSwitch-thumb`）：悬停整个开关即生效。
+  const bool hover = thumb_hovered_ && sp.thumb_hover;
+  const float tscale = hover ? sp.thumb_hover_scale : 1.0f;
+  const float td = sp.thumb_d * tscale;
+  const float t_radius = sp.thumb_radius * tscale;
+  const float tx = sp.thumb_margin + a * (w - sp.thumb_d - sp.thumb_margin * 2.0f);
+  // 缩放围绕旋钮中心
+  const float tcx = tx + sp.thumb_d / 2.0f;
+  const float tcy = (h - sp.thumb_d) / 2.0f + sp.thumb_d / 2.0f;
+  const float ty = tcy - td / 2.0f;
+  const float tx0 = tcx - td / 2.0f;
+  const RectF tr{tx0, ty, td, td};
+
+  // ★ hover 阴影覆盖（← `:hover` 的 boxShadow 覆盖常态）
+  const bool use_hs = hover && sp.thumb_hover_shadow;
+  if (use_hs || sp.thumb_shadow) {
+    Color4f sc = use_hs ? sp.thumb_hover_shadow_color : sp.thumb_shadow_color;
     sc.a *= dis;
-    draw_soft_shadow(rt, tr, sp.thumb_radius, sc, sp.thumb_shadow_dy,
-                     sp.thumb_shadow_blur);
+    draw_soft_shadow(rt, tr, t_radius, sc,
+                     use_hs ? sp.thumb_hover_shadow_dy : sp.thumb_shadow_dy,
+                     use_hs ? sp.thumb_hover_shadow_blur
+                            : sp.thumb_shadow_blur);
   }
   const bool on_side = a > 0.5f;
   const GradientStop* gs = on_side ? sp.on_thumb_stops : sp.off_thumb_stops;
@@ -177,45 +203,76 @@ void SwitchW::on_paint(IRenderTarget& rt) {
     for (int i = 0; i < gn; ++i) {
       st[i] = gs[i];
       st[i].color.a *= dis;
+      // ★ hover 亮度（← `filter: brightness(1.15)`，retro-3d 定义）
+      if (hover && sp.thumb_hover_brightness != 1.0f) {
+        const float b = sp.thumb_hover_brightness;
+        st[i].color.r = std::min(1.0f, st[i].color.r * b);
+        st[i].color.g = std::min(1.0f, st[i].color.g * b);
+        st[i].color.b = std::min(1.0f, st[i].color.b * b);
+      }
     }
     // CSS circle at 35% 35%：半径取 farthest-corner
     const float corner_r = std::sqrt(2.0f) * (td * 0.65f);
-    rt.fill_round_rect_radial(tr, sp.thumb_radius, st, gn, 0.35f, 0.35f,
+    rt.fill_round_rect_radial(tr, t_radius, st, gn, 0.35f, 0.35f,
                               corner_r, corner_r);
   } else {
     Color4f tc = on_side ? sp.on_thumb : sp.off_thumb;
     tc.a *= dis;
+    if (hover && sp.thumb_hover_brightness != 1.0f) {
+      const float b = sp.thumb_hover_brightness;
+      tc.r = std::min(1.0f, tc.r * b);
+      tc.g = std::min(1.0f, tc.g * b);
+      tc.b = std::min(1.0f, tc.b * b);
+    }
     Brush tb{tc};
-    rt.round_rect(tr, sp.thumb_radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &tb);
+    rt.round_rect(tr, t_radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &tb);
   }
   const float bw = on_side ? sp.on_thumb_bw : sp.off_thumb_bw;
   if (bw > 0.01f) {
     Color4f bc = on_side ? sp.on_thumb_border : sp.off_thumb_border;
     bc.a *= dis;
-    rt.round_rect(tr, sp.thumb_radius, Pen{bc, bw}, nullptr);
+    rt.round_rect(tr, t_radius, Pen{bc, bw}, nullptr);
   }
   // 旋钮内浮雕（inset 0 dy 0 color）：顶部高光线 + 底部暗线
   //   src: base-switch.tsx:88-98（retro-3d）
-  if (on_side ? sp.on_thumb_inset_hi : sp.off_thumb_inset_hi) {
-    Color4f c = on_side ? sp.on_thumb_inset_hi_color : sp.off_thumb_inset_hi_color;
+  // ★ hover 覆盖（← `:hover` 的 inset 顶高光 rgba(255,255,255,.8|.6)）
+  const bool use_hih = hover && sp.thumb_hover_inset_hi;
+  if (use_hih || (on_side ? sp.on_thumb_inset_hi : sp.off_thumb_inset_hi)) {
+    Color4f c = use_hih
+                    ? sp.thumb_hover_inset_hi_color
+                    : (on_side ? sp.on_thumb_inset_hi_color
+                               : sp.off_thumb_inset_hi_color);
     c.a *= dis;
-    const float dy = on_side ? sp.on_thumb_inset_hi_dy : sp.off_thumb_inset_hi_dy;
-    const float half = std::min(sp.thumb_radius, td * 0.5f);
+    const float dy = use_hih ? sp.thumb_hover_inset_hi_dy
+                             : (on_side ? sp.on_thumb_inset_hi_dy
+                                        : sp.off_thumb_inset_hi_dy);
+    const float half = std::min(t_radius, td * 0.5f);
     rt.draw_line({tr.x + half, tr.y + dy}, {tr.right() - half, tr.y + dy},
                  Pen{c, 1.0f});
   }
-  if (on_side ? sp.on_thumb_inset_dark : sp.off_thumb_inset_dark) {
-    Color4f c = on_side ? sp.on_thumb_inset_dark_color : sp.off_thumb_inset_dark_color;
+  const bool use_hdk = hover && sp.thumb_hover_inset_dark;
+  if (use_hdk || (on_side ? sp.on_thumb_inset_dark : sp.off_thumb_inset_dark)) {
+    Color4f c = use_hdk
+                    ? sp.thumb_hover_inset_dark_color
+                    : (on_side ? sp.on_thumb_inset_dark_color
+                               : sp.off_thumb_inset_dark_color);
     c.a *= dis;
-    const float dy = on_side ? sp.on_thumb_inset_dark_dy : sp.off_thumb_inset_dark_dy;
-    const float half = std::min(sp.thumb_radius, td * 0.5f);
+    const float dy = use_hdk ? sp.thumb_hover_inset_dark_dy
+                             : (on_side ? sp.on_thumb_inset_dark_dy
+                                        : sp.off_thumb_inset_dark_dy);
+    const float half = std::min(t_radius, td * 0.5f);
     rt.draw_line({tr.x + half, tr.bottom() - 1.0f + dy},
                  {tr.right() - half, tr.bottom() - 1.0f + dy}, Pen{c, 1.0f});
   }
-  if (sp.thumb_glow) {
-    Color4f g = sp.thumb_glow_color;
+  // ★ hover 辉光覆盖（← cyberpunk `:hover` boxShadow 0 0 10px currentColor）
+  const bool use_hg = hover && sp.thumb_hover_glow;
+  if (use_hg || sp.thumb_glow) {
+    Color4f g = use_hg ? (on_side ? sp.on_thumb_hover_glow_color
+                                  : sp.thumb_hover_glow_color)
+                       : sp.thumb_glow_color;
     g.a *= dis;
-    draw_glow(rt, tr, sp.thumb_radius, g, sp.thumb_glow_blur);
+    draw_glow(rt, tr, t_radius, g,
+              use_hg ? sp.thumb_hover_glow_blur : sp.thumb_glow_blur);
   }
 }
 

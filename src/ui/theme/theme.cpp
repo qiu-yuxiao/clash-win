@@ -885,6 +885,16 @@ SwitchPaint ThemeService::switch_paint() const {
       p.on_thumb_n = 4;
       p.on_thumb_border = light ? Color4f::hex(0x8A6D00) : Color4f::hex(0x634E00);
       p.on_thumb_bw = 1.0f;
+      // ★ on 态旋钮同样带内浮雕（← base-switch.tsx:97-98）
+      //   `.Mui-checked .MuiSwitch-thumb` 只覆盖 background 与 border，
+      //   boxShadow 继承基础 `.MuiSwitch-thumb` 的 inset 顶高光 + 底暗线。
+      p.on_thumb_inset_hi = true;
+      p.on_thumb_inset_hi_color = Color4f::hex(0xFFFFFF, light ? 0.70f : 0.50f);
+      p.on_thumb_inset_hi_dy = 1.0f * d;
+      p.on_thumb_inset_dark = true;
+      p.on_thumb_inset_dark_color =
+          Color4f::hex(0x000000, light ? 0.15f : 0.45f);
+      p.on_thumb_inset_dark_dy = (light ? -1.0f : -1.5f) * d;
       p.thumb_shadow = true;
       p.thumb_shadow_color = light ? Color4f::hex(0x000000, 0.20f)
                                    : Color4f::hex(0x000000, 0.50f);
@@ -893,6 +903,31 @@ SwitchPaint ThemeService::switch_paint() const {
       p.on_glow = true;
       p.on_glow_color = Color4f::hex(0xFFC107, 0.40f * v);
       p.on_glow_blur = 8.0f * v;
+      // ★ 旋钮悬停态（← base-switch.tsx:114-128 `&:hover .MuiSwitch-thumb`）
+      //   transform scale(1.2) + filter brightness(1.15)
+      //   boxShadow 覆盖：0 4d|5d 8d|10d rgba(0,0,0,.3|.6)
+      //                + inset 0 1d|1.2d 0 rgba(255,255,255,.8|.6)
+      //                + inset 0 -1d|-1.5d 0 rgba(0,0,0,.1|.4)
+      //                + 0 0 10v rgba(255,193,7,.35v)
+      p.thumb_hover = true;
+      p.thumb_hover_scale = 1.2f;
+      p.thumb_hover_brightness = 1.15f;
+      p.thumb_hover_shadow = true;
+      p.thumb_hover_shadow_color = light ? Color4f::hex(0x000000, 0.30f)
+                                         : Color4f::hex(0x000000, 0.60f);
+      p.thumb_hover_shadow_dy = (light ? 4.0f : 5.0f) * d;
+      p.thumb_hover_shadow_blur = (light ? 8.0f : 10.0f) * d;
+      p.thumb_hover_inset_hi = true;
+      p.thumb_hover_inset_hi_color =
+          Color4f::hex(0xFFFFFF, light ? 0.80f : 0.60f);
+      p.thumb_hover_inset_hi_dy = (light ? 1.0f : 1.2f) * d;
+      p.thumb_hover_inset_dark = true;
+      p.thumb_hover_inset_dark_color =
+          Color4f::hex(0x000000, light ? 0.10f : 0.40f);
+      p.thumb_hover_inset_dark_dy = (light ? -1.0f : -1.5f) * d;
+      p.thumb_hover_glow = true;
+      p.thumb_hover_glow_color = Color4f::hex(0xFFC107, 0.35f * v);
+      p.thumb_hover_glow_blur = 10.0f * v;
       break;
     }
     case SkinId::Original:
@@ -910,6 +945,8 @@ SwitchPaint ThemeService::switch_paint() const {
       p.off_thumb_bw = 0.0f;
       p.on_thumb = Color4f::hex(0xFFFFFF);
       p.on_thumb_bw = 0.0f;
+      // ★ original 皮肤**无** hover 规则（← base-switch.tsx:133-204 内无
+      //   '&:hover .MuiSwitch-thumb'），悬停时保持常态。
       break;
 
     case SkinId::ModernFlat:
@@ -931,6 +968,10 @@ SwitchPaint ThemeService::switch_paint() const {
       p.thumb_shadow_color = Color4f::hex(0x000000, 0.15f);
       p.thumb_shadow_dy = 1.0f;
       p.thumb_shadow_blur = 2.0f;
+      // ★ 旋钮悬停态（← base-switch.tsx:361-363 `&:hover .MuiSwitch-thumb`）
+      //   transform: scale(1.1) —— 仅缩放，不改阴影。
+      p.thumb_hover = true;
+      p.thumb_hover_scale = 1.1f;
       break;
 
     case SkinId::FrostedGlass:
@@ -968,6 +1009,8 @@ SwitchPaint ThemeService::switch_paint() const {
         p.thumb_shadow_dy = 1.0f;
         p.thumb_shadow_blur = 2.0f;
       }
+      // ★ frosted-glass 皮肤**无** hover 规则（← base-switch.tsx:280-372 内无
+      //   '&:hover .MuiSwitch-thumb'），悬停时保持常态。
       break;
 
     case SkinId::Cyberpunk:
@@ -994,8 +1037,16 @@ SwitchPaint ThemeService::switch_paint() const {
       p.thumb_glow_blur = 4.0f;
       p.on_thumb = p.on_border;
       p.on_thumb_bw = 0.0f;
+      // ★ 旋钮悬停态（← base-switch.tsx:442-444 `&:hover .MuiSwitch-thumb`）
+      //   boxShadow: '0 0 10px currentColor' —— currentColor = 旋钮自身 color，
+      //   off 态 #ff0055 / on 态 #00b0ff|#00f0ff（:418-419, :430-432）。
+      p.thumb_hover = true;
+      p.thumb_hover_glow = true;
+      p.thumb_hover_glow_color = Color4f::hex(0xFF0055, 0.85f);
+      p.on_thumb_hover_glow_color =
+          Color4f::hex(light ? 0x00B0FF : 0x00F0FF, 0.85f);
+      p.thumb_hover_glow_blur = 10.0f;
       break;
-
     case SkinId::Monochrome:
       // :454-545：28×14、track r14、off #e5e7eb/#374151 无边、
       //   thumb 12 + margin 1 r6 #000/#fff + 0 1 2 .15；
@@ -1018,6 +1069,10 @@ SwitchPaint ThemeService::switch_paint() const {
       p.thumb_shadow_color = Color4f::hex(0x000000, 0.15f);
       p.thumb_shadow_dy = 1.0f;
       p.thumb_shadow_blur = 2.0f;
+      // ★ 旋钮悬停态（← base-switch.tsx:543-545 `&:hover .MuiSwitch-thumb`）
+      //   transform: scale(1.05) —— 仅缩放，不改阴影。
+      p.thumb_hover = true;
+      p.thumb_hover_scale = 1.05f;
       break;
   }
   return p;
@@ -1077,6 +1132,42 @@ SliderPaint ThemeService::slider_paint() const {
       p.thumb_glow_color =
           Color4f::hex(0xFFC107, (light ? 0.25f : 0.30f) * v);
       p.thumb_glow_blur = (light ? 8.0f : 10.0f) * v;
+      // ★ thumb 内凹顶高光（← style-helpers.tsx:285/288）
+      //   `inset 0 calc(1px * var(--depth-factor)) 0 rgba(255,255,255,.8|.4)`
+      p.thumb_inset_hi = true;
+      p.thumb_inset_hi_color = light ? Color4f::hex(0xFFFFFF, 0.80f)
+                                     : Color4f::hex(0xFFFFFF, 0.40f);
+      p.thumb_inset_hi_dy = 1.0f * d;
+      // ★ thumb 按下内凹（← style-helpers.tsx:306-307 `:active`）
+      //   light: inset 1d 1d 2d rgba(0,0,0,.15) / dark: inset 1.5d 1.5d 2.5d rgba(0,0,0,.5)
+      p.thumb_active_inset = true;
+      p.thumb_active_inset_color =
+          Color4f::hex(0x000000, light ? 0.15f : 0.50f);
+      p.thumb_active_inset_dx = (light ? 1.0f : 1.5f) * d;
+      p.thumb_active_inset_dy = (light ? 1.0f : 1.5f) * d;
+      p.thumb_active_inset_blur = (light ? 2.0f : 2.5f) * d;
+      // ★ thumb 悬停/聚焦态（← style-helpers.tsx:292-305
+      //   `'&:hover, &.Mui-focusVisible'`）
+      //   transform scale(1.2) + filter brightness(1.15)
+      //   boxShadow: 0 5d|6d 10d|12d rgba(0,0,0,.35|.7)
+      //            + inset 0 1d 0 rgba(255,255,255,.9|.5)
+      //            + 0 0 12v|14v rgba(255,193,7,.35v|.4v)
+      p.thumb_hover = true;
+      p.thumb_hover_scale = 1.2f;
+      p.thumb_hover_brightness = 1.15f;
+      p.thumb_hover_shadow = true;
+      p.thumb_hover_shadow_color = light ? Color4f::hex(0x000000, 0.35f)
+                                         : Color4f::hex(0x000000, 0.70f);
+      p.thumb_hover_shadow_dy = (light ? 5.0f : 6.0f) * d;
+      p.thumb_hover_shadow_blur = (light ? 10.0f : 12.0f) * d;
+      p.thumb_hover_inset_hi = true;
+      p.thumb_hover_inset_hi_color =
+          Color4f::hex(0xFFFFFF, light ? 0.90f : 0.50f);
+      p.thumb_hover_inset_hi_dy = 1.0f * d;
+      p.thumb_hover_glow = true;
+      p.thumb_hover_glow_color =
+          Color4f::hex(0xFFC107, (light ? 0.35f : 0.40f) * v);
+      p.thumb_hover_glow_blur = (light ? 12.0f : 14.0f) * v;
       break;
     }
     case SkinId::Original:
@@ -1094,6 +1185,10 @@ SliderPaint ThemeService::slider_paint() const {
       p.thumb_shadow_color = Color4f::hex(0x000000, 0.15f);
       p.thumb_shadow_dy = 1.0f;
       p.thumb_shadow_blur = 2.0f;
+      // ★ thumb 悬停态（← style-helpers.tsx:334-336 `&:hover, &.Mui-focusVisible`）
+      //   transform: scale(1.15) —— 仅缩放。
+      p.thumb_hover = true;
+      p.thumb_hover_scale = 1.15f;
       break;
 
     case SkinId::ModernFlat:
@@ -1113,6 +1208,10 @@ SliderPaint ThemeService::slider_paint() const {
       p.thumb_shadow_color = Color4f::hex(0x000000, 0.15f);
       p.thumb_shadow_dy = 1.0f;
       p.thumb_shadow_blur = 2.0f;
+      // ★ thumb 悬停态（← style-helpers.tsx:363-365 `&:hover, &.Mui-focusVisible`）
+      //   transform: scale(1.15) —— 仅缩放。
+      p.thumb_hover = true;
+      p.thumb_hover_scale = 1.15f;
       break;
 
     case SkinId::FrostedGlass:
@@ -1138,6 +1237,25 @@ SliderPaint ThemeService::slider_paint() const {
         p.thumb_shadow_dy = 1.0f;
         p.thumb_shadow_blur = 3.0f;
       }
+      // ★ thumb 悬停态（← style-helpers.tsx:395-404 `&:hover, &.Mui-focusVisible`）
+      //   transform scale(1.15)
+      //   bgcolor rgba(255,255,255,1.0)      （常态 rgba(255,255,255,.9|.8)）
+      //   boxShadow 亮态 '0 2px 5px rgba(0,0,0,0.18)'
+      //             暗态 '0 0 4px rgba(255,255,255,0.4)'
+      p.thumb_hover = true;
+      p.thumb_hover_scale = 1.15f;
+      p.thumb_hover_fill = true;
+      p.thumb_hover_fill_color = Color4f::hex(0xFFFFFF, 1.0f);
+      if (light) {
+        p.thumb_hover_shadow = true;
+        p.thumb_hover_shadow_color = Color4f::hex(0x000000, 0.18f);
+        p.thumb_hover_shadow_dy = 2.0f;
+        p.thumb_hover_shadow_blur = 5.0f;
+      } else {
+        p.thumb_hover_glow = true;
+        p.thumb_hover_glow_color = Color4f::hex(0xFFFFFF, 0.40f);
+        p.thumb_hover_glow_blur = 4.0f;
+      }
       break;
 
     case SkinId::Cyberpunk:
@@ -1157,6 +1275,13 @@ SliderPaint ThemeService::slider_paint() const {
       p.thumb_glow = true;
       p.thumb_glow_color = with_alpha(p.track, 0.75f);
       p.thumb_glow_blur = 5.0f;
+      // ★ thumb 悬停态（← style-helpers.tsx:427-430 `&:hover, &.Mui-focusVisible`）
+      //   transform scale(1.15) + boxShadow '0 0 8px <主色>'（常态 0 0 5px）
+      p.thumb_hover = true;
+      p.thumb_hover_scale = 1.15f;
+      p.thumb_hover_glow = true;
+      p.thumb_hover_glow_color = with_alpha(p.track, 0.75f);
+      p.thumb_hover_glow_blur = 8.0f;
       break;
 
     case SkinId::Monochrome:

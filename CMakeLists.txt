@@ -349,6 +349,9 @@ add_executable(clashwin_test
   tests/test_t27_monitor_heal.cpp
   tests/test_t28_bolt_subset.cpp
   tests/test_t29_skin_font.cpp
+  tests/test_t30_slider_thumb_inset.cpp
+  tests/test_t31_interactive_states.cpp
+  tests/test_t32_hover_pixels.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_app clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32 bcrypt)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)

@@ -17,6 +17,10 @@ class Slider : public Widget {
   std::optional<float> value2_;   // 双滑块预留（T17 Depth/Vibrancy 单滑块）
   int active_thumb_ = 0;          // 0 = value_，1 = value2_
   bool dragging() const { return dragging_; }
+  // ★ thumb 悬停态（← Mini `.MuiSlider-thumb:hover`）——测试检查点
+  bool thumb_hovered() const { return thumb_hovered_; }
+  // ★ 键盘焦点（← Mini `.Mui-focusVisible`）——测试检查点
+  bool key_focused() const { return key_focused_; }
 
   std::function<void(float)> on_change;
 
@@ -24,7 +28,9 @@ class Slider : public Widget {
 
   SizeF on_measure(float max_w, float max_h) override;
   bool on_mouse(const MouseEvent& e) override;
+  bool on_key(const KeyEvent& e) override;
   void on_paint(IRenderTarget& rt) override;
+  bool wants_key() const override { return true; }
 
   // 绘制参数
   Color4f track_ = Color4f::hex(0x000000, 0.20f);  // ← 滑轨 20% 黑
@@ -41,7 +47,15 @@ class Slider : public Widget {
  private:
   float value_at(float local_x);   // x → 量化值
   void update(float local_x);
+  void update_hover();             // 依据 last_mouse_x_ 刷新 thumb 悬停态
   bool dragging_ = false;
+  // ★ thumb 悬停判定（Mini `.MuiSlider-thumb:hover`）
+  //   last_mouse_x_ 记录最近一次鼠标位置；on_paint 时判断是否落在某个 thumb 上。
+  float last_mouse_x_ = -1.0f;
+  bool has_mouse_ = false;
+  bool thumb_hovered_ = false;
+  // ★ 键盘焦点（MUI `.Mui-focusVisible` 与 `:hover` 共用同一组样式）
+  bool key_focused_ = false;
 };
 
 }  // namespace clashwin::ui

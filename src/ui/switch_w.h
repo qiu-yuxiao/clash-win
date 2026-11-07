@@ -14,6 +14,8 @@ class SwitchW : public Widget {
   bool checked() const { return checked_; }
   bool dragging() const { return dragging_; }
   float anim() const { return anim_; }  // 测试检查点
+  // ★ 旋钮悬停态（← Mini `&:hover .MuiSwitch-thumb`）——测试检查点
+  bool thumb_hovered() const { return thumb_hovered_; }
   // fire=false 时只改状态不触发回调（恢复内核实际值用）
   bool set_checked(bool v, bool fire = true);
 
@@ -36,6 +38,8 @@ class SwitchW : public Widget {
   bool drag_moved_ = false;  // Down 后有超过阈值的位移 = 拖动（否则单击）
   float press_x_ = 0;
   float anim_ = 0;
+  // ★ 悬停态（Mini 的 hover 挂在开关根上：`&:hover .MuiSwitch-thumb`）
+  bool thumb_hovered_ = false;
 };
 
 }  // namespace clashwin::ui

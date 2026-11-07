@@ -220,6 +220,41 @@ struct SliderPaint {
   bool thumb_glow = false;
   Color4f thumb_glow_color;
   float thumb_glow_blur = 0;
+  // ★ thumb 内凹高光（← style-helpers.tsx:285/288 `inset 0 calc(1px*d) 0 rgba(255,255,255,.8|.4)`）
+  //   retro-3d 滑块旋钮顶部的内高光 —— 缺了旋钮会显得扁平（无实体感）
+  bool thumb_inset_hi = false;
+  Color4f thumb_inset_hi_color;
+  float thumb_inset_hi_dy = 0;
+  // ★ thumb 按下内凹（← style-helpers.tsx:306-307 `:active` 的 inset 1d/1d/2d rgba(0,0,0,.15|.5)）
+  bool thumb_active_inset = false;
+  Color4f thumb_active_inset_color;
+  float thumb_active_inset_dx = 0;
+  float thumb_active_inset_dy = 0;
+  float thumb_active_inset_blur = 0;
+
+  // ★ thumb 悬停态（← style-helpers.tsx:292 `&:hover, &.Mui-focusVisible`）
+  //   retro-3d: transform scale(1.2) + filter brightness(1.15)
+  //             + boxShadow 0 5d|6d 10d|12d rgba(0,0,0,.35|.7)
+  //                       + inset 0 1d 0 rgba(255,255,255,.9|.5)
+  //                       + 0 0 12v|14v rgba(255,193,7,.35v|.4v)
+  //   original / modern-flat / frosted-glass / cyberpunk: transform scale(1.15)
+  //   frosted-glass 另加 bgcolor rgba(255,255,255,1.0)（常态 .9|.8）
+  //   cyberpunk 另加 boxShadow 0 0 8px <主色>（常态 0 0 5px）
+  bool thumb_hover = false;
+  float thumb_hover_scale = 1.0f;      // transform: scale()
+  float thumb_hover_brightness = 1.0f; // filter: brightness()
+  bool thumb_hover_shadow = false;      // 覆盖常态 thumb_shadow
+  Color4f thumb_hover_shadow_color;
+  float thumb_hover_shadow_dy = 0;
+  float thumb_hover_shadow_blur = 0;
+  bool thumb_hover_glow = false;        // 覆盖常态 thumb_glow
+  Color4f thumb_hover_glow_color;
+  float thumb_hover_glow_blur = 0;
+  bool thumb_hover_inset_hi = false;    // 覆盖常态 thumb_inset_hi
+  Color4f thumb_hover_inset_hi_color;
+  float thumb_hover_inset_hi_dy = 0;
+  bool thumb_hover_fill = false;        // 覆盖常态 thumb 底色（frosted-glass 悬停变实心白）
+  Color4f thumb_hover_fill_color;
 };
 
 // ---------- 开关（base-switch.tsx）绘制参数 ----------
@@ -295,6 +330,35 @@ struct SwitchPaint {
   bool thumb_glow = false;
   Color4f thumb_glow_color;
   float thumb_glow_blur = 0;
+
+  // ★ 旋钮悬停态（← base-switch.tsx 各皮肤 '&:hover .MuiSwitch-thumb'）
+  //   retro-3d(:114)      scale(1.2) + brightness(1.15)
+  //                        + boxShadow 0 4d|5d 8d|10d rgba(0,0,0,.3|.6)
+  //                                + inset 0 1d|1.2d 0 rgba(255,255,255,.8|.6)
+  //                                + inset 0 -1d|-1.5d 0 rgba(0,0,0,.1|.4)
+  //                                + 0 0 10v rgba(255,193,7,.35v)
+  //   original(:271)      无 hover 规则（保持常态）
+  //   modern-flat(:361)   scale(1.1)
+  //   frosted-glass(:442) 无 hover 规则（保持常态）
+  //   cyberpunk(:442)     boxShadow 0 0 10px currentColor（常态 0 0 4px）
+  //   monochrome(:543)    scale(1.05)
+  bool thumb_hover = false;
+  float thumb_hover_scale = 1.0f;      // transform: scale()
+  float thumb_hover_brightness = 1.0f; // filter: brightness()
+  bool thumb_hover_shadow = false;      // 覆盖常态 thumb_shadow
+  Color4f thumb_hover_shadow_color;
+  float thumb_hover_shadow_dy = 0;
+  float thumb_hover_shadow_blur = 0;
+  bool thumb_hover_glow = false;        // 覆盖常态 thumb_glow
+  Color4f thumb_hover_glow_color;       // off 态（cyberpunk 用 currentColor=#ff0055）
+  Color4f on_thumb_hover_glow_color;     // on 态（cyberpunk #00b0ff|#00f0ff）
+  float thumb_hover_glow_blur = 0;
+  bool thumb_hover_inset_hi = false;    // 覆盖常态 inset 顶高光
+  Color4f thumb_hover_inset_hi_color;
+  float thumb_hover_inset_hi_dy = 0;
+  bool thumb_hover_inset_dark = false;  // 覆盖常态 inset 底暗线
+  Color4f thumb_hover_inset_dark_color;
+  float thumb_hover_inset_dark_dy = 0;
 };
 
 // ---------- 逐皮肤的滑块规格 ----------
