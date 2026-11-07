@@ -93,13 +93,18 @@ class TextField : public Widget {
   Color4f bg_ = Color4f::hex(0xFFFFFF);  // src: MUI background.paper #fff
   Color4f border_ = Color4f::hex(0x000000, 0.23f);  // src: MUI OutlinedInput 23%
   Color4f border_focused_ = Color4f::hex(0x007AFF);  // ← 聚焦主色缺省（主题注入前）
-  Color4f selection_bg_ = Color4f::hex(0x007AFF, 0.25f);  // ← MUI selection 主色 25%
+  // src: index.scss:28-31 ::selection { color: var(--selection-color);
+  //      background-color: var(--primary-main); } → 不透明主色底（非 25% alpha）
+  Color4f selection_bg_ = Color4f::hex(0x5B5C9D);  // src: index.scss:19 --primary-main 缺省 #5b5c9d
+  // src: index.scss:29 color: var(--selection-color)（:21 缺省 #f5f5f5；
+  //      use-custom-theme.ts:365 selectColor 亮 #f5f5f5 / 暗 #3E3E3E → :371 setProperty）
+  Color4f selection_text_ = Color4f::hex(0xF5F5F5);  // src: index.scss:21
   Color4f placeholder_color_ = Color4f::hex(0x000000, 0.38f);  // src: MUI text.disabled
   Color4f caret_color_ = Color4f::hex(0x007AFF);  // ← 光标主色缺省
   float radius_ = 4;  // ← MUI shape.borderRadius 4
   float border_w_ = 1;  // ← MUI OutlinedInput 缺省 1px；retro-3d outline 2px
   float border_w_focused_ = 0;  // 0 = 沿用 border_w_（← get3DInputStyle focus 单独宽）
-  // inset 内凹阴影 / 聚焦外发光（← get3DInputStyle boxShadow；D2D 用 soft_shadow 近似）
+  // inset 内凹阴影 / 聚焦外发光（← get3DInputStyle boxShadow；D2D 用 soft_shadow 等效实现）
   bool has_inset_ = false;
   Color4f inset_color_ = Color4f(0, 0, 0, 0);
   float inset_dy_ = 0;

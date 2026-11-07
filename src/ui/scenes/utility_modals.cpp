@@ -455,8 +455,13 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
   set_opacity(fade_.value());        // 每帧同步整棵子树的不透明度
   if (fade_.hidden()) return;
 
+  // src: node_modules/@mui/material/Backdrop/Backdrop.js:48
+  //   MUI v5 Dialog Backdrop 缺省 rgba(0,0,0,.5)；Mini 业务源码未覆写 → 取框架缺省
   rt.fill_rect({0, 0, bounds().w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
 
+  // 豁免: Mini 无对应物 — D2D 无 box-shadow 原语；MUI Dialog paper elevation:24
+  //   （node_modules/@mui/material/Dialog/Dialog.js:343）阴影由 CSS 运行时生成，
+  //   此处以 0.22 alpha 软阴影等效（出处: 无）
   Brush shadow_b{Color4f(0, 0, 0, 0.22f)};
   rt.round_rect({card_rect_.x - 2, card_rect_.y - 1, card_rect_.w + 4, card_rect_.h + 5}, 9.0f,
                 {}, &shadow_b);
@@ -722,13 +727,20 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
   if (fade_.hidden()) return;
 
   const auto& vars = ThemeService::instance().vars();
+  // src: node_modules/@mui/material/Backdrop/Backdrop.js:48
+  //   MUI v5 Dialog Backdrop 缺省 rgba(0,0,0,.5)；Mini 业务源码未覆写 → 取框架缺省
   rt.fill_rect({0, 0, bounds().w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
 
+  // 豁免: Mini 无对应物 — D2D 无 box-shadow 原语；MUI Dialog paper elevation:24
+  //   （node_modules/@mui/material/Dialog/Dialog.js:343）阴影由 CSS 运行时生成，
+  //   此处以 0.22 alpha 软阴影等效（出处: 无）
   Brush shadow_b{Color4f(0, 0, 0, 0.22f)};
   rt.round_rect({card_rect_.x - 2, card_rect_.y - 1, card_rect_.w + 4, card_rect_.h + 5}, 9.0f,
                 {}, &shadow_b);
 
   Brush card_bg{vars.theme_bg};
+  // src: pages/_layout/components/layout-dialogs.tsx:131-132（paper borderRadius 8px
+  //      + border 1px solid rgba(255,255,255,.12)；同名定义见 :264-265 / :433-434）
   rt.round_rect(card_rect_, 8.0f, {Color4f(1, 1, 1, 0.12f), 1.0f}, &card_bg);
 
   // 标题（h6 = 20px bold）

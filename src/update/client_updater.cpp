@@ -387,7 +387,10 @@ Result<AppUpdateInfo> ClientUpdater::check_app_update() {
     return Result<AppUpdateInfo>::err(make_err("downloader not configured"));
   }
   const std::string manifest_url =
-      "https://raw.githubusercontent.com/qiu-yuxiao/clash-mini/dev/updater/app-update.json";  // ← MC:tauri.conf.json:31-35 端点（原 clash-win 自研，按 1:1 对齐 Mini 源）
+      // src: tauri.conf.json:31-35（端点结构 1:1）
+      //   §5.1 品牌位 + §5.3 自家 0.1.x 版本线：仓库/分支改指 Clash Win 自身。
+      //   保留 Mini 原值会让 0.1.0 客户端读到 Mini 3.2.2 清单并下载安装 Clash Mini。
+      "https://raw.githubusercontent.com/qiu-yuxiao/clash-win/main/updater/app-update.json";
   auto res = downloader_->fetch_manifest(manifest_url);
   if (!res.is_ok()) {
     return Result<AppUpdateInfo>::err(res.error());

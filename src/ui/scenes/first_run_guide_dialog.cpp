@@ -969,7 +969,8 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
           on_open_wiki();
         } else {
           ShellExecuteW(nullptr, L"open",
-                        L"https://github.com/qiu-yuxiao/clash-mini/wiki", nullptr,
+                        // §5.1 品牌位：Clash Mini → Clash Win（发布后不得把用户导向 Mini 仓库）
+                        L"https://github.com/qiu-yuxiao/clash-win/wiki", nullptr,
                         nullptr, SW_SHOWNORMAL);
         }
         return true;
@@ -979,7 +980,8 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
         if (on_open_github) {
           on_open_github();
         } else {
-          ShellExecuteW(nullptr, L"open", L"https://github.com/qiu-yuxiao/clash-mini",
+          // §5.1 品牌位：Clash Mini → Clash Win
+          ShellExecuteW(nullptr, L"open", L"https://github.com/qiu-yuxiao/clash-win",
                         nullptr, nullptr, SW_SHOWNORMAL);
         }
         finish();

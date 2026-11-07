@@ -1,0 +1,352 @@
+# Clash Win — Release Build
+#
+# 形态对照：仿 Clash Mini `.github/workflows/release.yml` 的
+#   validate → build → publish 分阶段骨架，但全部替换为 Clash Win 自家交付链：
+#     Mini : pnpm + Tauri + Rust / NSIS bundle / package.json 版本 / tauri signer
+#     Win  : CMake + VS2022 + C++20 / installer\clashwin.nsi / constants.h kAppVersion
+#            / Authenticode 签名 best-effort（v0.1.0 产物未签名，非发布门禁）
+# 刻意不照抄 Mini 的两处（见 docs/KNOWN_LIMITATIONS_0.1.0.md）：
+#   - 不做 update_dev / 不回写 updater\app-update.json：v0.1.0 应用内更新为空通道
+#     （platforms 为 {}），尚未建立自家 minisign 密钥对，写清单只会指向死链。
+#   - 不引用 TAURI_PRIVATE_KEY / TAURI_KEY_PASSWORD / pnpm tauri signer sign / .exe.sig：
+#     那是 Mini 的 Tauri 更新签名体系（minisign），不是 Authenticode。Win 侧
+#     Authenticode 由 installer\build_installer.ps1 → scripts\sign.ps1 做 best-effort
+#     自签，但在非交互 / 无法提升的发布会话里不可用；v0.1.0 因此发布**未签名资产**，
+#     签名状态只记录、不阻断，SHA256SUMS.txt 为信任锚（见 Known Limitation (d)）。
+#
+# 两个真实约束（不掩盖、不假装 CI 已闭环）：
+#   1) sidecar 5 个 exe 因 .gitignore 的 *.exe 未入库。CI 全新 checkout 后 sidecar 为空，
+#      portable.ps1 / build_installer.ps1 都会因缺内核而失败。故需仓库变量
+#      vars.SIDECAR_ARCHIVE_URL 提供一个受控归档；未配置则 fail-fast 并给出说明。
+#      还原后一律用 scripts\verify_sidecar.ps1 做 5/5 基线校验。
+#   2) scripts\run_tests_py.py:11 把仓库根硬编码为开发机绝对路径，CI 上不可复用。
+#      因此 CI 内联等价的隔离执行逻辑（复制 test exe + 资源到 build\cwtest，
+#      重定向 TMP/TEMP），只断言 EXIT=0 + 0 failed + 0 assertion failures，
+#      不写死用例数（用例集仍在增长）。
+
+name: Release Build (Clash Win)
+
+on:
+  # 仅通过 git tag 触发，避免重复发布；产物版本线为自家 0.1.x
+  push:
+    tags:
+      - 'v*'
+  # 手动补发：允许在 tag 已存在时重跑（version 不带前导 v）
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without leading v (e.g. 0.1.0)'
+        required: true
+        default: '0.1.0'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: '${{ github.workflow }} - ${{ github.ref }}'
+  cancel-in-progress: false
+
+env:
+  PRODUCT_NAME: 'Clash Win'
+  REPO: 'qiu-yuxiao/clash-win'
+
+jobs:
+  # ========== 1. 快速验证：版本单一事实源 + 发布材料齐备 ==========
+  validate:
+    name: Validate tag / version / release materials
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Bad version '$VERSION' (expected 0.1.x style semver)."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "TAG_NAME=v$VERSION" >> "$GITHUB_ENV"
+          echo "Resolved Clash Win version: $VERSION"
+
+      # 对应 Mini 的 "Check tag and package.json version"：Win 的单一事实源是 constants.h
+      - name: Check tag vs kAppVersion (single source of truth)
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_VERSION=$(sed -n 's/.*kAppVersion[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+                        include/clashwin/config/constants.h | head -1)
+          echo "constants.h kAppVersion : $APP_VERSION"
+          echo "release tag version      : $VERSION"
+          if [ -z "$APP_VERSION" ]; then
+            echo "::error::kAppVersion not found in include/clashwin/config/constants.h"
+            exit 1
+          fi
+          if [ "$APP_VERSION" != "$VERSION" ]; then
+            echo "::error::Version mismatch. Update constants.h kAppVersion before tagging."
+            exit 1
+          fi
+          echo "OK: version is consistent with the shipped binary."
+
+      - name: Check release materials exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in CHANGELOG.md \
+                   docs/RELEASE_NOTES_${VERSION}.md \
+                   docs/KNOWN_LIMITATIONS_${VERSION}.md \
+                   scripts/portable.ps1 \
+                   scripts/verify_sidecar.ps1 \
+                   scripts/sign.ps1 \
+                   installer/build_installer.ps1 \
+                   installer/clashwin.nsi; do
+            if [ ! -f "$f" ]; then
+              echo "::error::Missing release material: $f"
+              exit 1
+            fi
+            echo "OK  $f"
+          done
+          grep -q "^## v${VERSION}" CHANGELOG.md || {
+            echo "::error::CHANGELOG.md has no '## v${VERSION}' entry."; exit 1; }
+
+      - name: Pre-validate GitHub authentication
+        run: gh auth status
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ========== 2. Windows x64 构建：源码 → 门禁 → 便携包 + NSIS 安装包 ==========
+  build:
+    name: Build Windows x64 (Setup + Portable)
+    needs: [validate]
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild (VS2022)
+        uses: microsoft/setup-msbuild@v2
+
+      # ---- sidecar 还原：Known Limitation (f) 的 CI 落地 ----
+      # 未配置归档地址时明确失败，不静默产出「可编译但不可运行」的包。
+      - name: Restore sidecar kernels (5 upstream binaries, not in git)
+        shell: pwsh
+        env:
+          SIDECAR_ARCHIVE_URL: ${{ vars.SIDECAR_ARCHIVE_URL }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:SIDECAR_ARCHIVE_URL)) {
+            throw @'
+sidecar 5 个 exe 因 .gitignore 的 *.exe 未入库，CI 全新 checkout 后不含内核。
+请在仓库变量中配置 SIDECAR_ARCHIVE_URL（受控归档，解压后为 5 个上游原版 exe），
+或改用已预置 sidecar/ 的 self-hosted runner。
+说明见 docs/05-sidecar-内核资产.md 与 docs/KNOWN_LIMITATIONS_0.1.0.md (f)。
+'@
+          }
+          New-Item -ItemType Directory -Force -Path sidecar | Out-Null
+          $archive = Join-Path $env:RUNNER_TEMP 'clashwin-sidecar.zip'
+          Invoke-WebRequest -Uri $env:SIDECAR_ARCHIVE_URL -OutFile $archive -UseBasicParsing
+          Expand-Archive -LiteralPath $archive -DestinationPath sidecar -Force
+          Get-ChildItem sidecar -Filter *.exe | ForEach-Object {
+            "restored: $($_.Name)  $($_.Length) bytes" }
+
+      - name: Verify sidecar baseline (5/5)
+        shell: pwsh
+        run: |
+          & .\scripts\verify_sidecar.ps1
+          if ($LASTEXITCODE -ne 0) { throw "sidecar baseline verification failed" }
+
+      - name: Configure (CMake / VS2022 x64)
+        shell: pwsh
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build Release
+        shell: pwsh
+        run: cmake --build build --config Release
+
+      - name: Verify build outputs
+        shell: pwsh
+        run: |
+          $exe = 'build\bin\Release\clashwin.exe'
+          $test = 'build\bin\Release\clashwin_test.exe'
+          foreach ($f in @($exe, $test)) {
+            if (-not (Test-Path -LiteralPath $f)) { throw "Missing build output: $f" }
+            $i = Get-Item -LiteralPath $f
+            "OK  $f  $($i.Length) bytes"
+          }
+
+      # ---- 全量回归：run_tests_py.py 有硬编码绝对路径，CI 内联等价隔离逻辑 ----
+      # 门禁只断言 EXIT=0 + 0 failed + 0 assertion failures，不写死用例数。
+      - name: Full regression (isolated, fail-fast)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runDir = 'build\cwtest'
+          New-Item -ItemType Directory -Force -Path $runDir, "$runDir\tmp" | Out-Null
+          Copy-Item 'build\bin\Release\clashwin_test.exe' "$runDir\clashwin_test.exe" -Force
+          foreach ($pair in @(
+              @('sidecar', "$runDir\sidecar"),
+              @('build\bin\Release\locales', "$runDir\locales"),
+              @('build\bin\Release\resources', "$runDir\resources"),
+              @('assets\locales', "$runDir\assets\locales"))) {
+            if (Test-Path -LiteralPath $pair[0]) {
+              Copy-Item -LiteralPath $pair[0] -Destination $pair[1] -Recurse -Force
+            }
+          }
+          $ErrorActionPreference = 'Continue'   # 避免 native stderr 被当成终止错误
+          $env:TMP  = (Resolve-Path "$runDir\tmp").Path
+          $env:TEMP = $env:TMP
+          $log = 'build\cwtest_logs\tests_full.log'
+          New-Item -ItemType Directory -Force -Path 'build\cwtest_logs' | Out-Null
+          # 直接重定向到文件（不经 ErrorRecord），保证 $LASTEXITCODE 可用
+          & "$runDir\clashwin_test.exe" > $log 2>&1
+          $code = $LASTEXITCODE
+          $summary = (Get-Content $log -Tail 5) -join "`n"
+          "---- regression summary ----`n$summary`nEXIT=$code"
+          if ($code -ne 0) { throw "Regression EXIT=$code" }
+          # 解析数字而非子串匹配："10 failed" 也含 "0 failed" 子串
+          if ($summary -match '(\d+)\s+failed') {
+            if ([int]$Matches[1] -ne 0) { throw "Regression reported $($Matches[1]) failed" }
+          } else { throw "Regression summary missing 'N failed'" }
+          if ($summary -match '(\d+)\s+assertion\s+failures') {
+            if ([int]$Matches[1] -ne 0) { throw "Regression reported $($Matches[1]) assertion failures" }
+          } else { throw "Regression summary missing 'N assertion failures'" }
+          "OK: EXIT=0 / 0 failed / 0 assertion failures"
+
+      - name: Build portable ZIP
+        shell: pwsh
+        run: |
+          & .\scripts\portable.ps1 -Version $env:VERSION -Configuration Release
+          if ($LASTEXITCODE -ne 0) { throw "portable.ps1 failed" }
+
+      # ---- NSIS 安装包 ----
+      # build_installer.ps1 内部链接 sign.ps1 与 !uninstfinalize 卸载器签名钩子，
+      # 均为 best-effort：能提升且有证书时做本机自签（对公网仍「未知发布者」），
+      # 不可用时产物按**未签名资产**发布。签名状态只记录、不阻断（v0.1.0 口径，
+      # 见 Known Limitation (d) / SECURITY.md）；SHA256SUMS.txt 才是信任锚。
+      # 若卸载器 blob 启发式定位失败，此步 fail-fast，不产出半成品安装包。
+      - name: Build NSIS setup.exe
+        shell: pwsh
+        run: |
+          & .\installer\build_installer.ps1 -Version $env:VERSION -Configuration Release
+          if ($LASTEXITCODE -ne 0) { throw "build_installer.ps1 failed" }
+
+      - name: Verify release artifacts & write checksums
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip  = "dist\ClashWin_$($env:VERSION)_x64_portable.zip"
+          $setup = "dist\ClashWin_$($env:VERSION)_x64-setup.exe"
+          foreach ($f in @($zip, $setup)) {
+            if (-not (Test-Path -LiteralPath $f)) { throw "Missing artifact: $f" }
+          }
+          # 便携包关键条目预检（防空包 / 防漏内核）
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip))
+          try {
+            $names = $z.Entries | ForEach-Object { $_.FullName.Replace('\', '/') }
+          } finally { $z.Dispose() }
+          foreach ($n in @('clashwin.exe', '.config/PORTABLE',
+                           'sidecar/mini-mihomo.exe', '用户必读.txt')) {
+            if ($names -notcontains $n) { throw "portable.zip missing entry: $n" }
+          }
+          "OK  portable entries: $($names.Count)"
+          # SHA256 清单（用户可离线校验，见 docs/RELEASE_NOTES_0.1.0.md）
+          $lines = foreach ($f in @($zip, $setup)) {
+            $h = (Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$h  $(Split-Path $f -Leaf)"
+          }
+          $lines | Out-File 'dist\SHA256SUMS.txt' -Encoding utf8
+          Get-Content 'dist\SHA256SUMS.txt'
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: clashwin-${{ needs.validate.outputs.version }}-x64
+          path: |
+            dist/ClashWin_${{ needs.validate.outputs.version }}_x64_portable.zip
+            dist/ClashWin_${{ needs.validate.outputs.version }}_x64-setup.exe
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  # ========== 3. 发布正式 Release ==========
+  # 与 Mini 不同：此处不生成 / 不回写 updater\app-update.json。
+  # v0.1.0 应用内更新为空通道（platforms: {}），见 Known Limitation (c)。
+  publish:
+    name: Publish Release
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout repository (for release notes)
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: clashwin-${{ needs.validate.outputs.version }}-x64
+          path: dist
+
+      - name: Verify downloaded assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -la dist/
+          for f in "ClashWin_${VERSION}_x64_portable.zip" \
+                   "ClashWin_${VERSION}_x64-setup.exe" "SHA256SUMS.txt"; do
+            [ -s "dist/$f" ] || { echo "::error::missing/empty asset: $f"; exit 1; }
+          done
+
+      - name: Assemble release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            cat "docs/RELEASE_NOTES_${VERSION}.md"
+            printf '\n\n---\n\n'
+            printf '## 已知限制 / Known Limitations\n\n'
+            printf '完整清单见 [docs/KNOWN_LIMITATIONS_%s.md](https://github.com/qiu-yuxiao/clash-win/blob/main/docs/KNOWN_LIMITATIONS_%s.md)。\n' "$VERSION" "$VERSION"
+            printf '\n## 校验 / Checksums\n\n'
+            printf '随 Release 提供 `SHA256SUMS.txt`（portable zip + setup.exe）。\n'
+            printf '\n> v0.1.0 产物**未做 Authenticode 签名**（发布会话无法 UAC 提升，签名状态只记录、不阻断）。\n'
+            printf '> Windows 会提示「未知发布者」/ SmartScreen 警告；请在运行前用 `SHA256SUMS.txt` 校验哈希。\n'
+            printf '> 详见 [Known Limitations (d)](https://github.com/qiu-yuxiao/clash-win/blob/main/docs/KNOWN_LIMITATIONS_%s.md)。\n' "$VERSION"
+            printf '\n## 下载地址\n\n'
+            printf -- '- [Windows x64 安装版](https://github.com/qiu-yuxiao/clash-win/releases/download/v%s/ClashWin_%s_x64-setup.exe)\n' "$VERSION" "$VERSION"
+            printf -- '- [Windows x64 便携版](https://github.com/qiu-yuxiao/clash-win/releases/download/v%s/ClashWin_%s_x64_portable.zip)\n' "$VERSION" "$VERSION"
+          } > release_body.md
+          cat release_body.md
+
+      - name: Create / update Release and upload assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="v${VERSION}"
+          TITLE="Clash Win Ver.${VERSION}"
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $TAG exists -> uploading with --clobber"
+            gh release upload "$TAG" dist/* --repo "$REPO" --clobber
+            gh release edit "$TAG" --repo "$REPO" --title "$TITLE" \
+              --notes-file release_body.md
+          else
+            echo "Creating release $TAG"
+            gh release create "$TAG" dist/* --repo "$REPO" \
+              --title "$TITLE" --notes-file release_body.md --verify-tag
+          fi
+          echo "Published: https://github.com/${REPO}/releases/tag/${TAG}"

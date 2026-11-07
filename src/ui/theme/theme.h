@@ -133,9 +133,9 @@ struct PanelPaint {
   BorderKind border = BorderKind::Double;
   Color4f border_color;
 
-  float radius = 8.0f;  // 已含 skin 的 base×depth
+  float radius = 8.0f;  // ← utils/button-styles.ts:598/639/661（card 8px×val1），已含 skin 的 base×depth
 
-  // 外阴影（多层近似，见 ui/soft_shadow.h）
+  // 外阴影（多层等效，见 ui/soft_shadow.h）
   bool has_shadow = false;
   Color4f shadow_color;
   float shadow_dy = 0.0f;
@@ -172,7 +172,7 @@ struct CardPaint {
   Color4f bg;  // 非渐变底色
   Color4f border;
   float border_w = 0.0f;  // 0 = 无边框
-  float radius = 6.0f;    // 已含 skin 的 base×depth
+  float radius = 6.0f;    // ← utils/button-styles.ts:79（button 6px），已含 skin 的 base×depth
   bool has_shadow = false;
   Color4f shadow_color;
   float shadow_dy = 0.0f;

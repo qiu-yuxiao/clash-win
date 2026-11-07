@@ -1,5 +1,6 @@
 #pragma once
-// TooltipW（T10）：悬停提示——悬停 500ms 后显示（MUI Tooltip 语义）。
+// TooltipW（T10）：悬停提示——悬停 100ms 后显示。
+// src: node_modules/@mui/material/Tooltip/Tooltip.js:331（enterDelay 缺省 100）
 // 作为 overlay 挂根 Stack（z_order 1200）；宿主（route 层/T13）在鼠标 Move
 // 时调 hover()/leave()；时间推进经 tick_now()（窗口层帧驱动，测试可注入）。
 #include <string>
@@ -15,12 +16,12 @@ class TooltipHost : public Widget {
     set_visible(false);
   }
 
-  static constexpr int kShowDelayMs = 500;  // 豁免: Mini 无对应物 — 悬停防抖 500ms（MUI 默认 100ms，应用自定）
+  static constexpr int kShowDelayMs = 100;  // src: node_modules/@mui/material/Tooltip/Tooltip.js:331 enterDelay = 100
 
   // 鼠标悬停在带 tooltip_text() 的 widget 上时由宿主调用（全局坐标）
   void hover(Widget* target, PointF global);
   void leave();                      // 离开/移出目标
-  void tick_now(int64_t now_ms);     // 时间推进：到 500ms 显示
+  void tick_now(int64_t now_ms);     // 时间推进：到 100ms 显示
   bool showing() const { return visible(); }
   const std::wstring& text() const { return text_; }
   RectF tip_bounds() const { return bounds(); }

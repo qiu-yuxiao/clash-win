@@ -1,0 +1,73 @@
+name: 功能请求 / Feature request
+title: '[Feature] '
+description: 提出你的功能请求 / Propose a feature request
+labels: ['enhancement']
+type: 'Feature'
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 在提交之前，请确认以下事项：
+
+        1. 请 **确保** 已查阅 [Clash Win Wiki](https://github.com/qiu-yuxiao/clash-win/wiki)，确认软件不存在类似功能
+        2. 请 **确保** [已有的问题](https://github.com/qiu-yuxiao/clash-win/issues?q=is%3Aissue) 中没有相似 issue
+        3. 请 **务必** 先查看 [v0.1.0 已知限制](https://github.com/qiu-yuxiao/clash-win/blob/main/docs/KNOWN_LIMITATIONS_0.1.0.md)：部分功能属于已登记的未实现项，不需要重复提出
+        4. 请 **务必** 使用 [最新 Release](https://github.com/qiu-yuxiao/clash-win/releases/latest) 确认该功能尚未实现
+
+        ## 关于 1:1 移植范围 / About 1:1 parity
+
+        Clash Win 是 Clash Mini v3.2.2 的 Windows 原生 1:1 移植，唯一公开差异是显示名。
+        若请求的是「Mini 本身没有的新功能」，请说明它为何不应进入上游、而应由本项目承接。
+
+        ## Before submitting:
+
+        1. Please read the [Clash Win Wiki](https://github.com/qiu-yuxiao/clash-win/wiki)
+        2. Please check [existing issues](https://github.com/qiu-yuxiao/clash-win/issues?q=is%3Aissue)
+        3. Please check the [v0.1.0 Known Limitations](https://github.com/qiu-yuxiao/clash-win/blob/main/docs/KNOWN_LIMITATIONS_0.1.0.md)
+        4. Please confirm on the [latest release](https://github.com/qiu-yuxiao/clash-win/releases/latest)
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 功能描述 / Feature description
+      description: 清晰描述你想要的功能 / A clear and concise description of the feature
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: 使用场景 / Use case
+      description: 请描述该功能的使用场景与要解决的问题 / Describe the use case and the problem it solves
+    validations:
+      required: true
+
+  - type: textarea
+    id: mini-behavior
+    attributes:
+      label: 与 Clash Mini 的对照 / Clash Mini behavior
+      description: 若该功能与 Mini 行为有关，请说明 Mini v3.2.2 当前怎么做（最好给出文件路径）/ If related to Mini, describe its current v3.2.2 behavior (file path preferred)
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: 影响范围 / Scope
+      options:
+        - label: 界面 / 视觉（Direct2D 渲染、皮肤）/ UI & visuals
+        - label: 代理 / 网络行为 / Proxy & networking
+        - label: 安装 / 便携 / 更新 / Installer, portable, updater
+        - label: 多语言 / i18n
+        - label: 构建 / CI / 文档 / Build, CI, docs
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 提交前确认 / Checklist
+      options:
+        - label: 我已阅读 v0.1.0 已知限制，确认这不是已登记项 / I have read the v0.1.0 Known Limitations
+          required: true

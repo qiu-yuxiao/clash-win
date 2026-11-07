@@ -297,13 +297,15 @@ void ScrollTopButton::on_paint(IRenderTarget& rt) {
   if (alpha_ <= 0.0f) return;
 
   const auto& svc = ThemeService::instance();
-  // backgroundColor: theme.palette.mode==='dark' ? rgba(255,255,255,.1) : rgba(0,0,0,.1)
-  // hover 各 .2（scroll-top-button.tsx:22-30）
+  // src: components/layout/scroll-top-button.tsx:19-27
+  //   backgroundColor: dark ? rgba(255,255,255,.1) : rgba(0,0,0,.1)
+  //   '&:hover' → dark ? rgba(255,255,255,.2) : rgba(0,0,0,.2)
   const bool light = svc.is_light();
   const Color4f rgb = light ? Color4f(0, 0, 0, 1) : Color4f(1, 1, 1, 1);
   const float bg_a = (hover_ ? 0.2f : 0.1f) * alpha_;
   Brush bg{with_alpha_bg(rgb, bg_a)};
   const RectF r{0, 0, kScrollTopBtnSize, kScrollTopBtnSize};
+  // 豁免: Mini 无对应物 — D2D 无边框填充须传透明 Pen（出处: 无）
   rt.round_rect(r, kScrollTopBtnSize / 2.0f, Pen{Color4f(0, 0, 0, 0), 0.0f}, &bg);
 }
 

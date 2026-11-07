@@ -336,8 +336,11 @@ void TextField::apply_theme() {
   radius_ = p.radius;
   placeholder_color_ = p.placeholder;
   style_.color = p.text;
-  selection_bg_ = Color4f{p.border_focused.r, p.border_focused.g,
-                          p.border_focused.b, 0.25f};  // ← MUI selection 主色 25%
+  // src: index.scss:28-31 ::selection 背景 = var(--primary-main)（不透明），
+  //      选中文字 = var(--selection-color)（use-custom-theme.ts:365 selectColor 亮 #f5f5f5
+  //      / 暗 #3E3E3E，:371 setProperty('--selection-color')）
+  selection_bg_ = theme::ThemeService::instance().primary();
+  selection_text_ = theme::ThemeService::instance().vars().selection_color;
   caret_color_ = p.border_focused;
   has_inset_ = p.has_inset;
   inset_color_ = p.inset_color;
@@ -391,22 +394,36 @@ void TextField::on_paint(IRenderTarget& rt) {
     }
   } else {
     rt.push_clip(text_r);
-    // 选区高亮
+    // 选区高亮：src: index.scss:28-31 ::selection 背景 = var(--primary-main)（不透明）
     int lo = std::min(cursor_, anchor_), hi = std::max(cursor_, anchor_);
-    if (lo != hi && focused()) {
+    const bool has_sel = (lo != hi && focused());
+    float sx0 = 0.0f, sx1 = 0.0f;
+    if (has_sel) {
       float x0 = 8, x1 = 8;
       if (ITextEngine* eng = text_engine()) {
         x0 = 8 + eng->measure_text(text_.substr(0, static_cast<size_t>(lo)), ts, 0).w;
         x1 = 8 + eng->measure_text(text_.substr(0, static_cast<size_t>(hi)), ts, 0).w;
       }
+      sx0 = x0 - scroll_x_;
+      sx1 = x1 - scroll_x_;
       Brush sel_b{selection_bg_};
-      rt.fill_rect({x0 - scroll_x_, 3, x1 - x0, r.h - 6}, sel_b);
+      rt.fill_rect({sx0, 3, sx1 - sx0, r.h - 6}, sel_b);
     }
     // 文本 / composition 预编辑串
+    const RectF text_rect{text_r.x - scroll_x_, 0, text_r.w, r.h};
     if (!composition_.empty()) {
-      rt.draw_text(composition_, {text_r.x - scroll_x_, 0, text_r.w, r.h}, ts);
+      rt.draw_text(composition_, text_rect, ts);
     } else {
-      rt.draw_text(text_, {text_r.x - scroll_x_, 0, text_r.w, r.h}, ts);
+      rt.draw_text(text_, text_rect, ts);
+      // src: index.scss:29 ::selection { color: var(--selection-color) }：
+      //   选区内的文字需以 --selection-color 重绘（剪裁到高亮矩形）
+      if (has_sel && sx1 > sx0) {
+        rt.push_clip({sx0, 0, sx1 - sx0, r.h});
+        TextStyle sel_ts = ts;
+        sel_ts.color = selection_text_;
+        rt.draw_text(text_, text_rect, sel_ts);
+        rt.pop_clip();
+      }
     }
     rt.pop_clip();
   }

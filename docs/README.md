@@ -23,7 +23,7 @@
 **已验收**
 - 共存：Mini 与本程序可同时运行；本程序端口 `10811/10812/10813/10814`、单实例 `33337`（`include/clashwin/config/constants.h:24-29`）；控制面实际走命名管道 `\\.\pipe\mini-mihomo-win`（`src/util/dirs.cpp:210`），`9108` 仅配置值、未监听（实机 `Get-NetTCPConnection` 只见 10811/33337）；`/proxy.pac` 404 属预期（未开 PAC）。
 - TUN：`verge.yaml enable_tun_mode=false`，默认路由已回 WLAN/直连，`10811` 出网 204。
-- P0-1～P0-6 均已改完并通过隔离模式全量测试（531 cases / 0 failed）。
+- P0-1～P0-6 均已改完并通过隔离模式全量测试（用例数按动态基线、不写死数字，结论 0 failed；以冻结重跑日志为准，详见 `docs/evidence/`）。
 - 抽屉改为挂载在标题栏下方内容区（与 Mini `src/pages/_layout.tsx:1254-1424` 同构），标题栏常驻可点；关闭钮、主题卡（标题/Depth/Vibrancy）、日志入口 `LogViewerModal` 已实机验证。卡片/面板渐变已按源码 `button-styles.ts:538-539`（4 停靠）与 `index.scss:126/147`（3 停靠）重写（`src/ui/scenes/settings_drawer.cpp:133-173`），135° 单渐变，无竖向条纹；不再以单点采样判色。
 - quickbar 胶囊：名称可收缩省略、延迟固定宽完整显示、gap 12px、字号 12/11 DIP；实测 CJK 字高 16～18 物理像素（≈12 DIP，与 Mini 同高 17 物理像素一致）。
 - 节点行点击已修复（`NodeRowWidget::on_mouse` Down 未返回 true 导致 capture 被祖先截走，`src/ui/scenes/node_list.cpp:154-160`）；实机点行可切换，切节点后流量总量保留（47.8M→47.8M 不清零）。
@@ -47,8 +47,8 @@
 
 **2026-11-05 安装器与验收（本轮）**
 - 0.1.0 包已按本轮源码重打：`dist\ClashWin_0.1.0_x64-setup.exe`
-  （18,215,213 字节，SHA256 `75F66429DDC637D66FCB7B56C4BADD4D8CD56F9DC1CF6C625A054FEB37482447`，`NotSigned`）；
-  签名版 `dist\ClashWin_0.1.0_x64-setup-signed.exe`（18,270,488 字节，`Valid / CN=ClashWin`，带 RFC3161 时间戳）。
+  （体积 / SHA256 / 签名状态的具体值不在此写死，指向 `build\bin\Release\.delivery\stamp.json` 与 `docs/evidence/` 对应验收证据；当时为 `NotSigned`）；
+  签名版 `dist\ClashWin_0.1.0_x64-setup-signed.exe`（本机 `Valid / CN=ClashWin` + RFC3161 时间戳；体积 / 哈希以交付记录为准）。
   **2026-11-06 按磁盘实测校正**：此处原把签名包的字节数与 `Valid` 写在了不带 `-signed` 的路径上，与本文件「待办」段及 `README.md` 矛盾，见 `evidence/2026-11-06-regression.md` §4。
 - `/KEEP` 连续两次静默安装实测：`exit=0`，安装后 `Program Files\ClashWin\clashwin.exe` 时间戳 = `installer\stage` 的 03:41:42；
   配置目录 `%APPDATA%\io.github.clash-win.clash-win` 的 10 个文件 SHA256 在两次安装前后**完全一致**
@@ -112,14 +112,16 @@ Mini 侧没有任何自定义 NSIS 配置 —— `src-tauri/tauri.conf.json` 的
 - 客户端/内核更新在下载/检查中点遮罩与 Esc 不关闭（对齐 Mini `onClose` 守卫，
   `utility_modals.cpp:484-487,495-501,717-723,731-740`）
 - 安装器补 **Russian**（`clashwin.nsi:128-130`），三语与 Mini 一致；`makensis` 编译通过
-- `updater/app-update.json` GitHub 地址 → `local://…`
+- 更新通道（2026-11-07 已按 §5.4 第三条整体改向 Clash Win 自身）：endpoint `qiu-yuxiao/clash-mini/dev/updater/app-update.json` → `qiu-yuxiao/clash-win/main/updater/app-update.json`；`updater/app-update.json` 改为自家 `version 0.1.0` / `platforms: {}` 空通道；首启引导两外链 `clash-mini` → `clash-win`。原「GitHub 地址 → `local://…`」为 11-05 旧记录，已作废，见总纲 `移植基本准则.md` §5.4 第三条。
 
-**既定口径偏差（不追）**
+**既定口径偏差（历史时间线记录，不构成豁免）**
+> 2026-11-07 口径校正：本栏与下方「刻意偏差」栏**均不构成豁免**（总纲 `移植基本准则.md` §5.6）。遮罩 0.5、安装时 `.bak-N` 重命名、`app-update.json` 旧记录等须逐条按 1:1 重新对齐 Mini 源码；现行唯一允许的偏差以总纲 §5（尤其 §5.4 当前三条）为准。以下条目保留作时间线，不作涂抹、不作为放行依据。
 - 窗口 407×1020 vs Mini 407×1022：271×680 DIP @150% 取整（`main_window.cpp:192-223`，源码 `window.rs:18-19`）
 - 开关行内以布局 23.8×11.9 等价 `scale(.85)`，非 CSS transform；实测 ±1 px AA
 - 字体度量不逐字宽（DirectWrite vs WebView2 字体栈）
 
-**刻意偏差（用户指令，保留）**
+**刻意偏差（历史时间线记录，不构成豁免；现行清单见总纲 §5.4）**
+> 2026-11-07 口径校正：本栏不构成豁免（总纲 §5.6）。现行刻意偏差共三条、统一登记于总纲 `移植基本准则.md` §5.4（安装器语言→首启语言、对外发布与发布动作授权、更新通道指向 Clash Win 自身），本栏 `.bak-N` 条目须按 §5.6 逐条重新对齐 Mini 源码，不再默认「保留」。
 - 安装默认「全新安装」会整目录 `Rename` 为 `%APPDATA%\io.github.clash-win.clash-win.bak-N`
   （非删除；Mini 安装从不移动配置）。生成规则：`clashwin.nsi:389-403` 从 `bak-1` 起取第一个空号。
   恢复：退出程序 → `%APPDATA%` 下把 `.bak-N` 改名回去（保留当前目录留底）。
@@ -142,21 +144,18 @@ Mini 侧没有任何自定义 NSIS 配置 —— `src-tauri/tauri.conf.json` 的
 | 4 | 卸载实测 | `"C:\Program Files\ClashWin\uninstall.exe" /S` | 一次 UAC；程序文件移除、配置目录保留 |
 | 5 | UAC 发布者目视确认 | 双击安装包，看提示框顶部 | 显示「ClashWin」 |
 
-**2026-11-06 实测结果（#1～#4）**：#2 产出 `dist\ClashWin_0.1.0_x64-setup.exe` 18,354,760 B / SHA256 `3B536480…`；#1 `Valid / CN=ClashWin` + RFC3161 时间戳；#3 两次 `/S /KEEP` 后配置目录三份快照各 18 行、两两 `diff` 为空；#4 `uninstall.exe /S` 退出 0，`C:\Program Files\ClashWin` 已移除、配置目录保留。原始报告见 `evidence/acceptance-uac-20261106-134426.md`。#0 / #5 仍需人工。
+**2026-11-06 实测结果（#1～#4）**：#2 产出签名安装包；#1 本机 `Valid / CN=ClashWin` + RFC3161 时间戳（**签名状态只记录、不作发布门禁**，见 `06-验收状态台账.md` §2 与 §4 第 6 条）；#3 两次 `/S /KEEP` 后配置目录三份快照两两 `diff` 为空；#4 `uninstall.exe /S` 退出 0，`C:\Program Files\ClashWin` 已移除、配置目录保留。体积 / 哈希不写死具体值，以构建产物与 `build\bin\Release\.delivery\stamp.json` 交付记录为准。原始报告见 `evidence/acceptance-uac-20261106-134426.md`。#0 / #5 仍需人工。
 
 **待办**
 - 逐页并排图覆盖：已产出 主页/抽屉首屏/抽屉下半/连接面板/日志/编辑订阅(remote)/帮助菜单
   （`pair_07_help.png`，自绘 `ContextMenu` 已实拍，含动态版本后缀）；
   首次引导、添加网址、编辑订阅(local)、解锁整页——仍待实机产出。
   **2026-11-06 校正**：`pair_07_help.png` 等 `pair_*` 与 `ACCEPTANCE-20261105.md` 均从未入库，仓库内无逐组结论文件；现状见 [06-验收状态台账.md](06-验收状态台账.md) B/C 节。
-- 全量测试：2026-11-06 以当前构建隔离模式复跑 **547 cases / 0 failed / 0 assertion failures**（EXIT=0）；
-  原始日志 `tests_full.log` 由 `run_tests_v4.ps1` 写到项目外 `C:\Users\sun_y\Documents\Trae-CN\temp_20261102_02\`（`*.log` 被忽略），
-  结果摘要见 `evidence/2026-11-06-regression.md` §3。11-05 历史值为 531。
+- 全量测试：**用例数按动态基线，以冻结重跑后的全量回归日志为准，详见 `docs/evidence/`，文档不写死任何数字**（531 / 547 / 557 / 655 均为历史时点值，口径统一为行首 `UT_TEST(` 宏调用数）；结论口径 `0 failed / EXIT=0`。冻结重跑后须把 `tests_full.log` 副本落到 `docs/evidence/` 并写明 HEAD + exe SHA256 + 用例数 + 0 failed；原始日志路径与 `*.log` 忽略规则见 `evidence/2026-11-06-regression.md` §3。
 - 启动自检：`scripts\run_app_test.ps1 -AppDir build\bin\Release -Runs 3` → **PASS ×3**，
   Post **clean**、**NET-RESTORED**；21 条 `threads=0` 僵尸 PID 不计存活。
-- 安装包（**以下为 11-05 历史值**）：未签名包 18,215,213 B / `75F66429…` / `NotSigned`、签名版 `dist\ClashWin_0.1.0_x64-setup-signed.exe` 18,270,488 B / `Valid`，原件备份于 `%TEMP%\clashwin_dist_backup_20261106\`。
-  **2026-11-06 13:43 重打包后**，`dist\ClashWin_0.1.0_x64-setup.exe` 为 **18,354,760 B** / SHA256 `3B536480F2301A9B05347EAA66FBFAECBC51594C94C3FBD3E52198086F8263FB` / `Valid / CN=ClashWin` + 时间戳；已通过 `/KEEP` ×2 与卸载实测。
-- **不对外发布**：不建 Release、不推 tag、不上传资产；包只留本地 `dist\`。
+- 安装包（历史时间线）：11-05 有未签名 / 签名两版，11-06 重打包后为一版带本机签名的 `dist\ClashWin_0.1.0_x64-setup.exe`；体积 / SHA256 / 签名状态的具体值不写死，一律以构建产物与 `build\bin\Release\.delivery\stamp.json` 交付记录为准，原件备份信息见 `evidence/2026-11-06-regression.md` §4。已通过 `/KEEP` ×2 与卸载实测。**以上 11-05 / 11-06 的 `Valid / CN=ClashWin` 均为当时一次性 UAC 提权下的实测值，保留作时间线，不代表 v0.1.0 发布资产状态（见下条与 `06-验收状态台账.md` §4 第 6 条）。**
+- **对外发布口径（2026-11-07 最终裁决）**：用户已全权授权对外发布，发布动作自主执行，不再逐动作确认；旧「不对外发布：不建 Release / 不推 tag / 不上传资产 / 包只留本地 `dist\`」口径已被当场指令覆盖。依据与原口径存档见总纲 `移植基本准则.md` §5.4 第二条。**v0.1.0 发布未签名资产**：实测当前会话非管理员、`Set-AuthenticodeSignature` 返回 `UnknownError / NotSigned`，`sign.ps1` 与 `build_installer.ps1` 需 UAC 提升、非交互会话不可用；签名状态只记录、不作发布门禁，与 Mini v3.2.2 安装包未做 Authenticode 签名一致，并在 Release Notes / Known Limitations 如实披露「未签名，Windows SmartScreen / UAC 可能提示未知发布者」。详见 `06-验收状态台账.md` §4 第 6 条。
 - 窄窗抽屉高度差已归零：订阅卡 117 → 180 为主因（+94.5 px），主题卡标题行盒 18 → 20.4（半行距 1.2），
   三行 OCR **745/785/820** 与 Mini 零差（`settings_drawer.cpp:556-564`）。
 
@@ -171,10 +170,10 @@ Mini 侧没有任何自定义 NSIS 配置 —— `src-tauri/tauri.conf.json` 的
 > 本节为地基整理后的权威索引。**上文 11-05 记录与本节冲突之处，以本节及 `06-验收状态台账.md` 为准**；11-05 原文保留作时间线，不作涂抹。
 
 - **状态矩阵**：[06-验收状态台账.md](06-验收状态台账.md) —— 逐项标注【本轮实测】/【文档记载】/【待验】/【已知缺口】。
-- **本轮实测证据**：`evidence/2026-11-06-regression.md` —— sidecar 5/5、UI 门禁 PASS、全量 547/0/0、安装包字节/哈希/签名。
+- **本轮实测证据**：`evidence/2026-11-06-regression.md` —— sidecar 5/5、UI 门禁 PASS、全量回归 `0 failed`（用例数按动态基线，以 `docs/evidence/` 冻结重跑日志为准）、安装包验收（体积 / 哈希 / 签名具体值以构建产物与交付记录为准）。
 - **原始验收报告**：`ACCEPTANCE-20261105.md` **从未入库**，其「第九～十一节」「10.5 六步操作」无法还原；上文所有指向它的引用一律以状态矩阵为准。`pair_*.png`、`cmp_*.png`、`out/*.png`、`tests_full.log` 同样从未入库，不伪造补图；**`hash_*.txt` 已于 2026-11-06 实测生成并入库** `evidence/`。
 - **外部参照**：`clash_mini_agreements.md` §1.8 位于 `ClashVerge` 参考仓库，不在本仓库内；该目录按铁律只读参考，不得改动、移动或覆写。
 - **一键验收入口**：`scripts\acceptance_uac.ps1`（把 UAC 清单 #1～#4 编排为一次授权、自动留证；#0 重启与 #5 目视标 MANUAL；提权失败固定 `exit 2`，不写假报告）、`scripts\run_uac_acceptance.cmd`（双击 → 一次 UAC → 自动跑完并显示退出码）、`scripts\acceptance_clean_machine.ps1`（干净机 P0 链路留证，默认只读、绝不自动开 TUN/系统代理）。`-DryRun` 只预演、不改动系统、不写报告。
-- **交付链现状（2026-11-06 13:44 已收敛）**：`build\bin\Release\clashwin.exe` 与 `installer\stage\clashwin.exe` 均为 `60ECEDAF…`（4,598,240 B，已签名）；`dist` 下两个 10-30 / 11-02 历史解压目录仍是旧值，属归档不覆盖。`scripts\delivery_check.ps1 -Record` 实跑 PASS（7 个接线标记全 PASS），`.delivery\stamp.json` 已由 `CA35E302…` 重登记为 `60ECEDAF…`。详见台账 §4 第 1/2 条。
+- **交付链现状（2026-11-07 口径校正）**：哈希 / 体积 / 时点值一律不写死，以 `build\bin\Release\clashwin.exe` 构建产物、`build\bin\Release\.delivery\stamp.json` 与 `scripts\delivery_check.ps1` 的交付记录为准，详见台账 §4 第 1/2 条。**当前 exe 与工作区源码不同源、交付基线尚未冻结**：`delivery_check.ps1` 已加工作区门禁，有未提交改动时 `-Record` 与非 `-Record` 一律 FAIL。按 2026-11-07 最终裁决的冻结顺序执行：**写完 → 单次冻结提交 → 从干净 HEAD 重建 → 全量重跑 → 重挂证据 → 发布**（「停止写入」与用户「一直做下去」直接抵触，不采纳）；重挂时重新登记 stamp，方能建立可追溯的发布对象。原「2026-11-06 13:44 已收敛」及 `60ECEDAF…` 等具体值仅为历史时点，不作为当前发布基线。
 - **回归链**：`ui_src_gate.ps1` → `cmake --build build --config Release` → `run_tests_v4.ps1` → `run_app_test.ps1 -AppDir build\bin\Release -Runs 3` → Post `clean` + `NET-RESTORED`（`02-方法与流程.md:43`）。`run_app_test.ps1` 默认 `AppDir` 原指向已清理的 `build_verify\`，2026-11-06 已改为 `build\bin\Release`。
-- **方针不变**：不对外发布（不建 Release / 不推 tag / 不上传资产）。
+- **方针更新（2026-11-07）**：不新增页面、不改内核、不做兼容层三条边界不变；用户已全权授权对外发布，旧「不对外发布 / 逐动作确认」口径由总纲 `移植基本准则.md` §5.4 第二条覆盖，不再适用。发布相关的已知限制（安装包未签名、backdrop-blur 未迁移、hover 0.15s 补间未迁移）在 Release Notes / Known Limitations 如实披露。

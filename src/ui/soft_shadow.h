@@ -21,6 +21,7 @@ inline void draw_soft_shadow(IRenderTarget& rt, const RectF& r, float radius,
                              const Color4f& color, float dy, float blur,
                              int layers = 7) {
   if (color.a <= 0.004f || blur <= 0.5f) return;
+  // 豁免: Mini 无对应物 — 多层 alpha 逐层累加会偏淡，用 1.35 补偿；D2D 无 box-shadow 原语，纯实现层（出处: 无）
   constexpr float kOverlap = 1.35f;  // 叠加补偿
   for (int i = layers; i >= 1; --i) {
     const float t = static_cast<float>(i) / static_cast<float>(layers);
@@ -89,6 +90,7 @@ inline void draw_top_inset_shadow(IRenderTarget& rt, const RectF& r,
     const float x0 = r.x + std::min(inset_x, half);
     const float x1 = r.right() - std::min(inset_x, half);
     if (x1 <= x0) continue;
+    // 豁免: Mini 无对应物 — 逐行软阴影描边宽度，D2D 无 box-shadow 原语，纯实现层（出处: 无）
     rt.draw_line({x0, y}, {x1, y}, Pen{c, 1.2f});
   }
 }

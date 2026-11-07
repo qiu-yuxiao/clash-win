@@ -1,14 +1,18 @@
 # Clash Win
 
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/qiu-yuxiao/clash-win?style=flat-square&label=Release&color=e8890c)](https://github.com/qiu-yuxiao/clash-win/releases/latest)
+[![GitHub all releases](https://img.shields.io/github/downloads/qiu-yuxiao/clash-win/total?style=flat-square&label=Downloads&color=0ea5e9)](https://github.com/qiu-yuxiao/clash-win/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg?style=flat-square)](https://www.gnu.org/licenses/gpl-3.0)
 [![Language: C++20](https://img.shields.io/badge/Language-C%2B%2B20-00599C?style=flat-square&logo=c%2B%2B)](https://isocpp.org)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-0078D6?style=flat-square&logo=windows)](https://github.com/qiu-yuxiao/clash-win)
 
-> **Clash Win v0.1.0** — the pure Windows native C++ rewrite of [Clash Mini](https://github.com/qiu-yuxiao/clash-mini).
+> **Clash Win v0.1.0** — the pure Windows native C++ rewrite of Clash Mini.
 > Zero web engine. Zero JavaScript runtime. Built with Win32 API, Direct2D/DirectWrite, and modern C++20.
 
-Clash Win keeps everything you love about Clash Mini — the minimalist zero-config workflow, the 3D skeuomorphic visuals, the auto node switching and rule updates — but replaces the Tauri/WebView layer with hand-written native rendering. The result: **~15–25 MB runtime memory**, **sub-150 ms cold startup**, and a **120 fps Direct2D** interface, while remaining fully feature-aligned with Clash Mini.
+Clash Win keeps everything you love about Clash Mini — the minimalist zero-config workflow, the 3D skeuomorphic visuals, the auto node switching and rule updates — but replaces the Tauri/WebView layer with hand-written native rendering. The result: **~15–25 MB runtime memory**, **sub-150 ms cold startup**, and a **120 fps Direct2D** interface, with behavior aligned 1:1 to the source it ports (see [Known Limitations](docs/KNOWN_LIMITATIONS_0.1.0.md) for the differences registered in v0.1.0).
+
+> [!NOTE]
+> **v0.1.0 is a first release with explicitly registered gaps** — frosted-glass Blur, hover interpolation, an in-app update channel, code signing (the release assets are unsigned, no Authenticode signature), and clean-machine acceptance are documented in [KNOWN_LIMITATIONS_0.1.0.md](docs/KNOWN_LIMITATIONS_0.1.0.md). It is not claimed to be a perfect 1:1 copy.
 
 ---
 
@@ -56,6 +60,45 @@ Click the [Gear] button in the upper right corner of Clash Win, paste your subsc
 * **[迷你监控]**：将窗口缩小至最小尺寸，应用变为小巧的流量监控器。
 * **[右键路由]**：在连接列表中右键任意域名，可直连、代理或拒绝（需最大化窗口）。
 * **[100% 原生]**：无 Chromium、无 WebView2、无 JS 运行时，单一原生可执行文件。
+
+---
+
+## Download & Installation / 下载与安装
+
+Get the artifacts from the [Releases page](https://github.com/qiu-yuxiao/clash-win/releases). Each Release ships two Windows x64 builds plus checksums:
+
+| Artifact / 产物 | Form / 形态 | Notes / 说明 |
+| :--- | :--- | :--- |
+| `ClashWin_<version>_x64-setup.exe` | NSIS installer / 安装版 | per-machine (`Program Files`), **requires a UAC prompt** at install time; installs/shares `clash_verge_service` / 安装时需 UAC 授权，安装或共用 Windows 服务 |
+| `ClashWin_<version>_x64_portable.zip` | Portable / 便携版 | extract & run, `.config/PORTABLE` included, no installer, no registry writes / 解压即用、不写注册表 |
+| `SHA256SUMS.txt` | Checksums / 校验 | SHA256 of both artifacts / 两个产物的 SHA256 |
+
+1. Download either artifact from [Releases](https://github.com/qiu-yuxiao/clash-win/releases) and verify its SHA256 against `SHA256SUMS.txt` before running.
+2. **Installer**: double-click, accept the UAC prompt, follow the wizard (Simplified Chinese / English / Русский start language).
+3. **Portable**: extract to any folder and run `clashwin.exe`.
+4. Import a subscription and you are done. See [Release notes](docs/RELEASE_NOTES_0.1.0.md) for the full v0.1.0 scope.
+
+```powershell
+Get-FileHash .\ClashWin_0.1.0_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\ClashWin_0.1.0_x64_portable.zip -Algorithm SHA256
+```
+
+> [!WARNING]
+> **v0.1.0 release assets are unsigned — no Authenticode signature.** The signing step needs an elevated (UAC) session that was unavailable in the non-interactive release environment, so the signature status is recorded but does not block the release. Windows will show "**Unknown publisher**" and SmartScreen may warn on every machine. **Always verify the download against `SHA256SUMS.txt`** — the checksum is the only trust anchor. This matches Clash Mini v3.2.2 installers, which likewise carry no Authenticode signature. See [Known Limitations (d)](docs/KNOWN_LIMITATIONS_0.1.0.md) and [SECURITY.md](SECURITY.md).
+
+---
+
+## System Requirements / 系统要求
+
+| Item | Requirement |
+| :--- | :--- |
+| OS | **Windows 10 / 11, x64 only** (Clash Win is Windows-native; no Linux/macOS build) |
+| Runtime | Direct2D 1.0 / DirectWrite (present on supported Windows versions); no WebView2, no .NET, no Chromium |
+| Privileges | Installer form needs administrator rights once (UAC) for per-machine install and service setup; portable form needs none |
+| Disk | ~50 MB for the extracted client plus the bundled rules/GeoIP resources |
+| Network | A user-supplied subscription / node config; the client itself does not provide proxy servers |
+
+To **build from source** you additionally need Visual Studio 2022 (Desktop development with C++), CMake 3.20+, and NSIS 3.x for the installer — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
@@ -111,36 +154,43 @@ cmake -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 
 # 3. Run
-.\build\bin\Release\ClashWin.exe
+.\build\bin\Release\clashwin.exe
 ```
 
-The repository ships a large unit-test suite (offscreen pixel assertions included); run it via CTest against the built test target before submitting changes.
+The repository ships a large unit-test suite (offscreen pixel assertions included); run `python3 scripts/run_tests_py.py` against the built test target before submitting changes. **A fresh clone compiles but cannot run**: the five `sidecar/*.exe` upstream binaries are not committed (`.gitignore` excludes `*.exe`). See [docs/05-sidecar-内核资产.md](docs/05-sidecar-内核资产.md) and `scripts/verify_sidecar.ps1`.
 
 ---
 
-## Install & Usage
+## FAQ & Troubleshooting / 常见问题入口
 
-1. Download the latest zip from [Releases](https://github.com/qiu-yuxiao/clash-win/releases) (current line: **v0.1.0**).
-2. Extract to any folder (portable — no installer, no registry writes).
-3. Run `ClashWin.exe`, import your subscription, done.
+| Question | Where to look |
+| :--- | :--- |
+| Where do I download / 在哪下载 | [Releases](https://github.com/qiu-yuxiao/clash-win/releases) |
+| Usage, config, subscription import / 使用与配置 | [Wiki](https://github.com/qiu-yuxiao/clash-win/wiki) |
+| "Unknown publisher" / SmartScreen warning / 未知发布者 | [Known Limitations (d)](docs/KNOWN_LIMITATIONS_0.1.0.md) · [SECURITY.md](SECURITY.md) |
+| Why does a source-only build not run / 源码编译后无法运行 | [Known Limitations (f)](docs/KNOWN_LIMITATIONS_0.1.0.md) |
+| "Check for updates" does nothing / 检查更新无反应 | [Known Limitations (c)](docs/KNOWN_LIMITATIONS_0.1.0.md) |
+| Ports, coexistence, service conflicts / 端口与双开共存 | [Relationship with Clash Mini](#relationship-with-clash-mini-与-clash-mini-的关系) |
+| Something else is broken / 其他问题 | [Issues](https://github.com/qiu-yuxiao/clash-win/issues) (please use the templates) · [Discussions](https://github.com/qiu-yuxiao/clash-win/discussions) |
+| Report a vulnerability / 报告安全漏洞 | [SECURITY.md](SECURITY.md) — **privately**, not via a public issue |
 
 ---
 
 ## Relationship with Clash Mini (与 Clash Mini 的关系)
 
-**Clash Win is the Windows-native C++ rewrite of [Clash Mini](https://github.com/qiu-yuxiao/clash-mini).**
+**Clash Win is the Windows-native C++ rewrite of Clash Mini.**
 
 | | Clash Mini | Clash Win |
 | :--- | :--- | :--- |
 | UI layer | Tauri + WebView2 + Rust | Pure Win32 + Direct2D + C++20 |
 | Web engine | Yes (Chromium/WebView2) | **None** |
-| Feature set | Baseline | **Aligned 1:1** (pixel-parity layout, same workflows) |
+| Feature set | Baseline | **Aligned 1:1 in scope** (pixel-parity layout, same workflows) — with [registered v0.1.0 gaps](docs/KNOWN_LIMITATIONS_0.1.0.md) |
 | Version line | 3.x | **Independent, starting from 0.1.0** |
 
 Key facts:
 
 * **Feature-aligned, implementation-independent.** Clash Win reproduces Clash Mini's user-visible behavior (layout, skins, workflows, rule engine pipeline) with a completely separate C++ codebase — no shared Tauri/Rust/TypeScript code.
-* **Not an official replacement and not an upstream fork.** Clash Win is a sibling project by the same author; Clash Mini remains the primary line and is developed on its own track.
+* **Not an official replacement and not an upstream fork.** Clash Win is a sibling project by the same author. Clash Mini is a separate project with its own release track; this repository's links intentionally stay within `qiu-yuxiao/clash-win`.
 * **Designed to coexist with Clash Mini on the same machine.** All network ports are deliberately staggered:
 
   | Port | Clash Win | Clash Mini |
@@ -153,24 +203,49 @@ Key facts:
   | Single-instance / PAC | `33337` | `33335` (Release) / `33336` (Dev) |
 
   Both clients share the same `clash_verge_service` Windows service (the `clash-verge-service` name refers only to its binary/installer file). The one rule: **do not enable TUN mode or system proxy on both clients at the same time** — enable exactly one active proxy path.
-* **Independent versioning.** Clash Win versions from **0.1.0** and does not track Clash Mini's 3.x release numbers.
+* **Independent versioning.** Clash Win versions from **0.1.0** and does not track Clash Mini's 3.x release numbers; `3.2.2` is only the source-reference anchor used when citing ported code.
 
 ---
 
 ## Copyright and Licensing
 
-* **Lineage**: Clash Win is a clean-room native rewrite aligned with the features of [Clash Mini](https://github.com/qiu-yuxiao/clash-mini), which is itself a derivative of [Clash Verge Rev](https://github.com/clash-verge-rev/clash-verge-rev). We respect and acknowledge the copyright of the original authors.
+* **Lineage**: Clash Win is a clean-room native rewrite aligned with the feature set of Clash Mini, which is itself a derivative of [Clash Verge Rev](https://github.com/clash-verge-rev/clash-verge-rev). We respect and acknowledge the copyright of the original authors.
 * **Custom Portions**: Copyright (c) 2026 秋雨潇潇 <qiuyuxiao@gmail.com>. All rights reserved.
-* **License**: GPL-3.0-only. See the [GNU GPL v3](https://www.gnu.org/licenses/gpl-3.0) for the full text.
+* **License**: **GPL-3.0-only**. See the full text in [LICENSE](LICENSE) and the [GNU GPL v3](https://www.gnu.org/licenses/gpl-3.0). By contributing, you agree your contributions are licensed under the same terms.
+
+## License
+
+Clash Win is distributed under the **GNU General Public License v3.0 only (GPL-3.0-only)**. You may use, study, modify and redistribute it under those terms; the full license text is in [LICENSE](LICENSE). Copyright for the native rewrite and custom modifications belongs to the author above; upstream copyrights remain with their respective holders (see [Acknowledgements](#acknowledgements)).
+
+## Acknowledgements
+
+* [Clash Verge Rev](https://github.com/clash-verge-rev/clash-verge-rev) — the upstream project whose feature set and workflows this port reproduces.
+* [Mihomo](https://github.com/MetaCubeX/mihomo) — the proxy engine shipped as the sidecar core.
+* Clash Mini (v3.2.2 source) — the reference implementation for the 1:1 behavior and pixel-level layout; used as a read-only source anchor.
+* The vendored third-party libraries under `third_party/` (yaml-cpp, nlohmann/json, QuickJS and others), each under its own license.
+
+## Disclaimer / 免责声明
+
+* Clash Win is an **independent native rewrite**, not an official release, fork, or endorsement of Clash Verge Rev or Clash Mini. All project links in this repository point to `qiu-yuxiao/clash-win`.
+* This software **does not provide any subscription, node, or proxy server**, and does not contain preconfigured third-party endpoints. Users are solely responsible for the sources they import and for complying with applicable laws and the terms of their network/service providers.
+* It is provided **without warranty of any kind**, to the extent permitted by GPL-3.0. Use it at your own risk; the authors are not responsible for misuse, data loss, or network-configuration side effects.
+* Enabling TUN mode or system proxy modifies machine network settings. On a machine also running Clash Mini, enable exactly one active proxy path. See [SECURITY.md](SECURITY.md) for the security-relevant properties of v0.1.0.
+
+---
 
 ## Development and Contributions
 
+* [CONTRIBUTING.md](CONTRIBUTING.md) — environment setup, 1:1 parity discipline, tests, packaging, PR checklist.
+* [CHANGELOG.md](CHANGELOG.md) — version history (newest first).
+* [docs/RELEASE_NOTES_0.1.0.md](docs/RELEASE_NOTES_0.1.0.md) — v0.1.0 release scope and artifacts.
+* [docs/KNOWN_LIMITATIONS_0.1.0.md](docs/KNOWN_LIMITATIONS_0.1.0.md) — registered gaps in v0.1.0.
+* [移植基本准则.md](移植基本准则.md) — the project constitution (parity rules, version line, evidence discipline).
 * Design documents: [`docs/phase1`](docs/phase1) (frontend/backend census, PRD) and [`docs/phase2`](docs/phase2) (C++20 architecture, task breakdown, user rulings).
-* Each task (T01–T26) is one compilable, linkable, smoke-tested commit; see the git history for per-task acceptance criteria.
-* Wiki: [Clash Win Wiki](https://github.com/qiu-yuxiao/clash-win/wiki)
+* [SECURITY.md](SECURITY.md) — supported versions and private vulnerability reporting.
 
 ## Links
 
-* [Clash Mini](https://github.com/qiu-yuxiao/clash-mini) — the original Tauri-based client
-* [Clash Verge Rev](https://github.com/clash-verge-rev/clash-verge-rev) — upstream lineage
-* [Mihomo Core](https://github.com/MetaCubeX/mihomo) — the proxy engine
+* [Releases / 下载](https://github.com/qiu-yuxiao/clash-win/releases) · [Latest release](https://github.com/qiu-yuxiao/clash-win/releases/latest)
+* [Wiki / 使用文档](https://github.com/qiu-yuxiao/clash-win/wiki) · [Discussions / 讨论](https://github.com/qiu-yuxiao/clash-win/discussions)
+* [Issues / 问题反馈](https://github.com/qiu-yuxiao/clash-win/issues) (please use the templates)
+* [Upstream: Clash Verge Rev](https://github.com/clash-verge-rev/clash-verge-rev) · [Mihomo Core](https://github.com/MetaCubeX/mihomo)

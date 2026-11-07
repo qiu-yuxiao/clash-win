@@ -254,7 +254,8 @@ class SvgPathParser {
     return false;
   }
 
-  static constexpr int kSeg = 12;  // 每段曲线扁平化细分数（≤20px 下足够圆滑）
+  // 豁免: Mini 无对应物 — D2D 贝塞尔曲线扁平化细分数（Mini 的 SVG path 由 WebView2 栅格化），纯实现层（出处: 无）
+  static constexpr int kSeg = 12;  // 每段曲线扁平化细分数
 
   static void flatten_cubic(std::vector<PointF>& out, PointF p0, PointF p1,
                             PointF p2, PointF p3) {

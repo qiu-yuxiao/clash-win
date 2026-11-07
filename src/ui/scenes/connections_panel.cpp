@@ -6,6 +6,7 @@
 
 #include "core/quick_routing.h"
 #include "events/event_bus.h"
+#include "ui/icon_w.h"
 #include "ui/theme/theme.h"
 #include "util/utf.h"
 #include "ui/i18n_text.h"  // F-D01
@@ -446,16 +447,24 @@ void ConnTableOverlay::on_paint(IRenderTarget& rt) {
   stroke(0.75f);
   stroke(3.25f);
   if (!empty) return;
-  // src: base-empty.tsx:19-45 居中「空空如也」（shared.json:52），
-  //   图标 4em / 文字 1.25em / 色 alpha(text.secondary,.75)
-  TextStyle ts;
-  ts.size = 16.0f;
+  // src: base-empty.tsx:19-45 居中「空空如也」（shared.json:52）：
+  //   :35 <InboxRounded fontSize='4em' />（4em × 16px = 64px）
+  //   :36 <Typography fontSize='1.25em' />（1.25em × 16px = 20px）
+  //   :32 color: alpha(palette.text.secondary, 0.75)
   Color4f c = theme::ThemeService::instance().palette().secondary_text;
-  c.a *= 0.75f;
+  c.a *= 0.75f;  // src: base-empty.tsx:32
+  const float icon_sz = 64.0f;  // src: base-empty.tsx:35 '4em'
+  const float cx = r.x + r.w / 2.0f;
+  const float cy = r.y + r.h / 2.0f;
+  IconW::paint_at(rt, "inbox",
+                  {cx - icon_sz / 2.0f, cy - icon_sz + 4.0f, icon_sz, icon_sz}, c);
+  TextStyle ts;
+  ts.size = 20.0f;  // src: base-empty.tsx:36 '1.25em'
   ts.color = c;
   ts.align_h = AlignH::Center;
   ts.align_v = AlignV::Center;
-  rt.draw_text(tr("shared.statuses.empty"), r, ts);
+  rt.draw_text(tr("shared.statuses.empty"),
+               {r.x, cy + 8.0f, r.w, 24.0f}, ts);
 }
 
 void ConnectionsPanel::on_arrange(const RectF& area) {
@@ -519,7 +528,11 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   float seg_x = tab_active_rect_.x;
   float seg_w = 140.0f;
   float seg_h = 18.0f;
-  Brush seg_bg{Color4f::hex(0x000000, 0.08f)};  // 豁免: Mini 无对应物 — 分段容器底 8% 黑（MUI 分段无 container bg）
+  // src: connections-panel.tsx:89 bgcolor: 'action.hover'
+  //   → node_modules/@mui/material/styles/createPalette.js:46 light rgba(0,0,0,.04)
+  //     / :78 dark rgba(255,255,255,.08)
+  Brush seg_bg{theme.is_light() ? Color4f::hex(0x000000, 0.04f)
+                                : Color4f::hex(0xFFFFFF, 0.08f)};
   rt.round_rect({seg_x, 2.0f, seg_w, seg_h}, 4.0f, {}, &seg_bg);
 
   // 滑块指示背景
@@ -589,13 +602,21 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
 
   // 空态：src: locales/zh/shared.json:52 「"empty": "空空如也"」（base-empty.tsx:16 textKey）
   if (visible_items_.empty()) {
+    const RectF lr = list_->bounds();
+    Color4f ec(pal.secondary_text.r, pal.secondary_text.g, pal.secondary_text.b,
+               0.75f);  // src: base-empty.tsx:32 alpha(text.secondary, .75)
+    const float icon_sz = 64.0f;  // src: base-empty.tsx:35 '4em'
+    const float cx = lr.x + lr.w / 2.0f;
+    const float cy = lr.y + lr.h / 2.0f;
+    IconW::paint_at(rt, "inbox",
+                    {cx - icon_sz / 2.0f, cy - icon_sz + 4.0f, icon_sz, icon_sz}, ec);
     TextStyle empty_ts;
-    empty_ts.size = 20.0f;  // src: base-empty.tsx:36 fontSize '1.25em'（MUI body1 16px × 1.25）
-    empty_ts.color = Color4f(pal.secondary_text.r, pal.secondary_text.g, pal.secondary_text.b,
-                             0.75f);  // src: base-empty.tsx:32 alpha(text.secondary, .75)
+    empty_ts.size = 20.0f;  // src: base-empty.tsx:36 '1.25em'
+    empty_ts.color = ec;
     empty_ts.align_h = AlignH::Center;
     empty_ts.align_v = AlignV::Center;
-    rt.draw_text(tr("shared.statuses.empty"), list_->bounds(), empty_ts);
+    rt.draw_text(tr("shared.statuses.empty"),
+                 {lr.x, cy + 8.0f, lr.w, 24.0f}, empty_ts);
   }
 }
 

@@ -19,6 +19,10 @@ namespace clashwin::ui::win {
 
 class MainWindow;
 
+// 标题栏底色（src: layout.scss:166 / :356）。暴露供 t35 回归断言
+// 「alpha 跟随 --depth-factor」，避免滑块被写死常量架空。
+Color4f title_bar_bg(const theme::ThemeService& svc);
+
 class TitleBarButton : public Widget {
  public:
   TitleBarButton(wchar_t glyph, Widget* parent = nullptr)

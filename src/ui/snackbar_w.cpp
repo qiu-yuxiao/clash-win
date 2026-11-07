@@ -22,6 +22,8 @@ float srgb_to_linear(float c) {
   return c <= 0.03928f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
 }
 
+// src: node_modules/@mui/material/styles/createPalette.js:27（dark.text.primary = rgba(0,0,0,.87)）
+//      :211（contrastThreshold = 3）、:230（getContrastText 取 dark/light.text.primary）
 // MUI getContrastText：相对亮度 < contrastThreshold(3 对应的 0.5 判据) → 白字
 Color4f contrast_text(const Color4f& bg) {
   const float lum = 0.2126f * srgb_to_linear(bg.r) +
@@ -100,8 +102,9 @@ void SnackbarW::on_arrange(const RectF& area) {
 }
 
 RectF SnackbarW::close_rect(const RectF& item) {
-  // action：padding 4px 0 0 16px / marginRight -8px；IconButton size=small
-  //   （padding 5 + icon 20）= 30×30
+  // src: components/layout/notice-manager.tsx:206-212（action 用 IconButton size="small"）
+  //      + node_modules/@mui/material/IconButton/IconButton.js:136（sizeSmall padding 5）
+  //   命中盒 30×30（MUI small IconButton 的图标 20 + 上下各 padding 5）
   constexpr float kBtn = 30.0f;
   return {item.x + item.w - 8.0f - kBtn, item.y + 10.0f, kBtn, kBtn};
 }
@@ -172,6 +175,7 @@ void SnackbarW::on_paint(IRenderTarget& rt) {
     const RectF r = item_rects_[static_cast<size_t>(i)];
     const Color4f bg = severity_color(items_[static_cast<size_t>(i)].type);
     Brush b{bg};
+    // 豁免: Mini 无对应物 — D2D 无边框填充须传透明 Pen（出处: 无）
     rt.round_rect(r, kRadius, Pen{Color4f(0, 0, 0, 0), 0.0f}, &b);
 
     // Alert root 为 flex + alignItems:center：图标/消息/action 均垂直居中

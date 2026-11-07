@@ -1,0 +1,50 @@
+# Security Policy
+
+## Supported versions
+
+| Version | Supported |
+| :--- | :--- |
+| `0.1.x` (latest release) | ✅ |
+| Older / pre-release builds | ❌ |
+
+Clash Win is currently on its initial `0.1.0` line. Security fixes are delivered as a new `0.1.x` release; there are no long-term support branches yet. Releases and checksums are published at [qiu-yuxiao/clash-win/releases](https://github.com/qiu-yuxiao/clash-win/releases).
+
+## Reporting a vulnerability
+
+**Please do not open a public issue for a security vulnerability.** Use GitHub's private vulnerability reporting for this repository:
+
+- [Report a vulnerability privately](https://github.com/qiu-yuxiao/clash-win/security/advisories/new)
+
+Include, where possible:
+
+- the affected Clash Win version and form (`setup.exe` / portable zip),
+- Windows version and build number,
+- reproduction steps and a proof of concept,
+- the impact you believe it has, and the relevant `file:line` if you have located it.
+
+You will receive an acknowledgement as soon as the report is triaged; there is no guaranteed response SLA for this volunteer project. Please keep the report private until a fix is released.
+
+## Scope
+
+In scope: the native C++20 client in `src/`, `include/`, the NSIS installer in `installer/`, the packaging scripts in `scripts/portable.ps1`, and the update-manifest parsing in `src/update/`.
+
+Out of scope / upstream: the Mihomo core and the Clash Verge service shipped as sidecar binaries are **upstream components** — report issues with them to their own projects. Vulnerabilities in subscription links, third-party rule providers, or the user's own proxy configuration are the operator's responsibility.
+
+## Security-relevant properties of v0.1.0 (disclosed, not hidden)
+
+These are registered in [docs/KNOWN_LIMITATIONS_0.1.0.md](docs/KNOWN_LIMITATIONS_0.1.0.md); they are stated here so users can make an informed trust decision:
+
+- **Binary trust**: **v0.1.0 release assets are unsigned — no Authenticode signature is applied.** The signing step (`scripts/sign.ps1` / `installer/build_installer.ps1`) requires UAC elevation, unavailable in the non-interactive release session, so the signature status is recorded but does not block the release. Windows will show "Unknown publisher" and SmartScreen may warn on every machine. `SHA256SUMS.txt` is therefore the only trust anchor for v0.1.0 — always verify the downloaded file against it before running it. This matches Clash Mini v3.2.2 installers, which likewise carry no Authenticode signature; Mini's `.exe.sig` files are Tauri updater (minisign) signatures, a different mechanism.
+- **Sidecar provenance**: the five `sidecar/*.exe` binaries are **not committed** (`.gitignore` excludes `*.exe`). Their upstream originals and the byte/SHA256 baseline are documented in [docs/05-sidecar-内核资产.md](docs/05-sidecar-内核资产.md); `scripts/verify_sidecar.ps1` checks 5/5. Obtain them only from a source you trust and verify them before use.
+- **Update channel**: the in-app updater is an **empty channel** in v0.1.0 (`updater/app-update.json` has `platforms: {}`), so no download or signature verification is triggered. The embedded verification public key is still the one inherited from Clash Mini; a project-owned minisign keypair is required before the channel can be enabled. Do not treat "check for updates" as a security control in this release.
+- **Privileges**: the NSIS installer is per-machine (`RequestExecutionLevel admin`) and installs/shares the `clash_verge_service` Windows service; enabling TUN mode or the system proxy writes machine/user network settings. On a machine also running Clash Mini, enable exactly one active proxy path.
+- **No telemetry**: Clash Win does not phone home beyond the subscription/rule URLs the user configures and the (currently empty) update manifest endpoint.
+
+## Verification of downloads
+
+```powershell
+# In the folder containing the downloaded artifacts:
+Get-FileHash .\ClashWin_0.1.0_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\ClashWin_0.1.0_x64_portable.zip -Algorithm SHA256
+# Compare against the SHA256SUMS.txt attached to the same Release.
+```

@@ -52,8 +52,11 @@ bool register_app_icon(D2dRenderTarget& rt) {
   return rt.has_bitmap(kAppIconBitmapId);
 }
 
+}  // namespace（匿名）
+
 // 标题栏底色：layout.scss:166 .the_titlebar !important 覆写 inline
 // var(--background-color)；皮肤分支 :323-460（retro-3d 无专属覆写，走 :166 基线）
+// 暴露为命名空间级函数：便于 t35 回归锁死「alpha 跟随 depth 滑块」。
 Color4f title_bar_bg(const theme::ThemeService& svc) {
   using theme::SkinId;
   const bool light = svc.is_light();
@@ -62,23 +65,27 @@ Color4f title_bar_bg(const theme::ThemeService& svc) {
       return light ? Color4f::hex(0xf5f5f5) : Color4f::hex(0x121212);
     case SkinId::ModernFlat:  // src: layout.scss:338 var(--theme-bg)=:458-459
       return light ? Color4f::hex(0xf0f5ff) : Color4f::hex(0x0f1423);
-    case SkinId::FrostedGlass:
-      // 0.02 + 0.12×1.0（depth 回退 1.0；src: layout.scss:356）
-      return light ? Color4f::hex(0xF0F5FF, 0.14f)
-                   : Color4f::hex(0x0F1423, 0.14f);  // src: use-custom-theme.ts:466-468
+    case SkinId::FrostedGlass: {
+      // src: layout.scss:356 calc(0.02 + 0.12 * var(--depth-factor, 1.0))
+      //   → 必须跟随 depth 滑块；写死 0.14 会让 Opacity/Blur 页首屏标题栏失效
+      const float a = 0.02f + 0.12f * svc.depth();
+      return light ? Color4f::hex(0xF0F5FF, a)
+                   : Color4f::hex(0x0F1423, a);  // src: use-custom-theme.ts:466-468
+    }
     case SkinId::Cyberpunk:  // src: layout.scss:389/:409
       return light ? Color4f::hex(0xe2e8f0) : Color4f::hex(0x0d1117);
     case SkinId::Monochrome:  // src: layout.scss:427 var(--background-color)
       return light ? Color4f::hex(0xECECEC) : Color4f::hex(0x2E303D);
     case SkinId::Retro3d:
-    default:
-      // rgba(base-rgb, 1 - 0.2×1.0)=0.8（src: layout.scss:166；
-      // base-rgb light 240,245,255 / dark 15,20,35 ← use-custom-theme.ts:466-468）
-      return light ? Color4f::hex(0xF0F5FF, 0.8f)
-                   : Color4f::hex(0x0F1423, 0.8f);
+    default: {
+      // src: layout.scss:166 calc(1 - 0.2 * var(--depth-factor, 1.0))
+      //   retro-3d 缺省 depth=0.3 → 应为 0.94；写死 0.8 既错又让 Depth 滑块失效
+      const float a = 1.0f - 0.2f * svc.depth();
+      // base-rgb light 240,245,255 / dark 15,20,35 ← use-custom-theme.ts:466-468
+      return light ? Color4f::hex(0xF0F5FF, a) : Color4f::hex(0x0F1423, a);
+    }
   }
 }
-}  // namespace
 
 void TitleBarIcon::on_paint(IRenderTarget& rt) {
   if (auto* d2d = dynamic_cast<D2dRenderTarget*>(&rt)) {

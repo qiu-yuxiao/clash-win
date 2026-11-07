@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用问答 / Q&A and Discussion
+    url: https://github.com/qiu-yuxiao/clash-win/discussions
+    about: 使用、配置、订阅导入等一般性问题请到 Discussions / For usage and configuration questions, please use Discussions
+  - name: 常见问题与使用说明 / FAQ & Wiki
+    url: https://github.com/qiu-yuxiao/clash-win/wiki
+    about: 提交 issue 前请先查 Wiki 与 FAQ / Please check the Wiki and FAQ before filing an issue
+  - name: 版本发布与下载 / Releases
+    url: https://github.com/qiu-yuxiao/clash-win/releases
+    about: 下载安装包、便携包与校验文件 / Download installers, portable packages and checksums
