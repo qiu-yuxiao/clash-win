@@ -165,6 +165,10 @@ UT_TEST(t33_primary_button_matches_mini_per_skin) {
              ch(bp.text, 2) == 0x03);  // :35
   }
   // original：var(--primary-main)（:152-...）
+  //   ★ 但 index.scss:299 `html[data-control-skin="original"]` 用 **!important**
+  //     把 --primary-main 覆盖为 hsl(calc(239 * var(--control-skin-val2)), 26%, 49%)，
+  //     !important 胜过 use-custom-theme.ts:373 的 JS inline style。
+  //     ⇒ original 的主色**由 val2（Accent 色相）驱动**，不是色板缺省。
   svc.init(SkinId::Original, ThemeMode::Light);
   {
     const ButtonPaint bp = svc.button_paint("primary");
@@ -174,13 +178,21 @@ UT_TEST(t33_primary_button_matches_mini_per_skin) {
     UT_CHECK(ch(bp.fill, 2) == ch(svc.primary(), 2));
     UT_CHECK(ch(bp.text, 0) == 0xFF && ch(bp.text, 1) == 0xFF &&
              ch(bp.text, 2) == 0xFF);  // :160 白字
+    // hsl(239, 26%, 49%) ≈ rgb(93, 94, 157)（= index.scss:19 的 #5b5c9d 附近）
+    UT_CHECK(near_c(svc.primary().r * 255.0f, 93.0f, 2.0f));
+    UT_CHECK(near_c(svc.primary().g * 255.0f, 94.0f, 2.0f));
+    UT_CHECK(near_c(svc.primary().b * 255.0f, 157.0f, 2.0f));
   }
-  // modern-flat：palette.primary.main（:220-...）—— 与 original 同色（Mini 事实）
+  // modern-flat：palette.primary.main（:220-...）—— **与 original 不同**
+  //   （original 走 --primary-main 的 !important 覆盖，modern-flat 走色板缺省）
   svc.init(SkinId::ModernFlat, ThemeMode::Light);
   {
     const ButtonPaint bp = svc.button_paint("primary");
     UT_CHECK(!bp.use_grad);
     UT_CHECK(ch(bp.fill, 0) == ch(svc.primary(), 0));
+    // 色板缺省 primary_color = #007AFF（Mini _theme.tsx:3）
+    UT_CHECK(ch(svc.primary(), 0) == 0x00 && ch(svc.primary(), 1) == 0x7A &&
+             ch(svc.primary(), 2) == 0xFF);
   }
   // frosted-glass：rgba(primary, 0.25)（:291-294）
   svc.init(SkinId::FrostedGlass, ThemeMode::Light);
