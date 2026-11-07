@@ -76,7 +76,6 @@ constexpr float kInputStepH = 357.0f;    // src: 68.5+14+(41.6+12+22.2+14+40+8+3
 constexpr float kReadyNodeH = 206.0f;    // src: :865-1016 绿色卡流式高（含重测/接管提示预留）
 constexpr float kReadyStarH = 134.0f;    // src: :1019-1083 Star 卡流式高（正文 3 行）
 constexpr float kReadyGap = 12.0f;       // src: :877 mb: 1.5
-constexpr float kReadyStepH = 545.0f;    // src: 68.5+14+206+12+134+14+96.4
 
 // 绿色卡内部（src: :862-1016）
 constexpr float kCardPad = 12.0f;        // src: :866 p: 1.5
@@ -292,6 +291,34 @@ bool FirstRunGuideDialog::has_real_profile() {
 
 FirstRunGuideDialog::FirstRunGuideDialog(Widget* parent) : Widget(parent) {
   set_z_order(980);
+
+  // 订阅链接 TextField（src: :698-732 真实 MUI TextField 可编辑组件）
+  auto uf = std::make_unique<TextField>(this);
+  url_field_ = uf.get();
+  url_field_->set_placeholder(
+      L"https://example.com/api/v1/client/subscribe?token=...");
+  url_field_->apply_theme();  // ← get3DInputStyle 6 套皮肤查表
+  url_field_->style_.size = 13;
+  url_field_->height_ = kFieldH;  // src: size="small" 输入框高 40
+  url_field_->set_visible(false);  // 默认隐藏，open()/on_arrange 按步显隐
+  url_field_->on_text_changed = [this](const std::wstring& t) {
+    // src: :704-707 onChange：setUrl(e.target.value) + 清错误
+    set_url(utf::utf16_to_utf8(t));
+  };
+  url_field_->on_submit = [this]() {
+    // src: :715-728 回车图标 endAdornment onClick → handleSubmitImport
+    if (!is_importing_) submit_import();
+  };
+  url_field_->on_context_menu = [this](PointF anchor) {
+    // src: :711 onContextMenu={handleContextMenu}
+    open_url_menu(anchor);
+  };
+  add_child(std::move(uf));
+
+  // 订阅链接右键编辑菜单（← profile_import_card 同款 open_url_menu）
+  auto um = std::make_unique<ContextMenu>(this);
+  url_menu_ = um.get();
+  add_child(std::move(um));
 }
 
 void FirstRunGuideDialog::open() {
@@ -302,7 +329,13 @@ void FirstRunGuideDialog::open() {
   is_importing_ = false;
   error_message_.clear();
   retesting_ = false;
-  input_focused_ = false;
+  // 订阅框复位（src: :698-707 autoFocus + value 受控）
+  if (url_field_) {
+    url_field_->set_enabled(true);
+    url_field_->set_text(L"");
+    url_field_->set_visible(true);
+    url_field_->request_focus();  // ← src: autoFocus
+  }
   // src: :143-166/:209-244 就绪态全部复位（activeDelay=null、未超时、未自动重测）
   active_node_name_.clear();
   active_delay_ms_ = -1;
@@ -318,6 +351,7 @@ void FirstRunGuideDialog::close() {
   if (!open_) return;
   open_ = false;
   fade_.hide();  // 画面延后 195ms 消失（MUI leave），交互立刻失效
+  if (url_field_) url_field_->blur();
   invalidate();
   if (on_dismiss) on_dismiss();
 }
@@ -330,6 +364,11 @@ void FirstRunGuideDialog::set_step(FirstRunStep s) {
 void FirstRunGuideDialog::set_url(const std::string& u) {
   url_ = u;
   error_message_.clear();
+  // 反向同步到 TextField（剪贴板横幅/粘贴按钮改写 url_ 时同步显示）
+  // 用「字段当前文本 != u」作递归护栏：避免 set_text→on_text_changed→set_url 死循环
+  if (url_field_ && utf::utf16_to_utf8(url_field_->text()) != u) {
+    url_field_->set_text(utf::utf8_to_utf16(u));
+  }
   invalidate();
 }
 
@@ -383,6 +422,9 @@ bool FirstRunGuideDialog::unconfirmed() const {
 
 void FirstRunGuideDialog::submit_import() {
   if (is_importing_) return;
+
+  // src: :703 disabled={submitting} —— 导入期间禁用订阅框
+  if (url_field_) url_field_->set_enabled(false);
 
   std::string target_url = util::trim(url_);
   if (target_url.empty()) {
@@ -452,6 +494,7 @@ void FirstRunGuideDialog::submit_import() {
 
     // src: :401 setStep('ready')；BUG-311 守卫先释放，避免阻塞后续测速
     is_importing_ = false;
+    if (url_field_) url_field_->set_enabled(true);  // 下一步隐藏，先复位可用态
     step_ = FirstRunStep::Ready;
     gave_up_ = false;
     ready_started_ms_ = 0;
@@ -466,6 +509,7 @@ void FirstRunGuideDialog::submit_import() {
   } else {
     // src: :403 errImport
     is_importing_ = false;
+    if (url_field_) url_field_->set_enabled(true);  // 留在导入步，允许重新编辑
     error_message_ = "订阅导入失败，请检查链接是否有效后重试";
     invalidate();
   }
@@ -550,10 +594,27 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     pills_h_ = layout_pills(0.0f, 0.0f, cw - kTitlePadX * 2.0f);
     pills_extra = std::max(0.0f, pills_h_ - kPillH);
   }
+  // 就绪步绿色卡高度随内部块增减（src: :864-1016 无固定 height，流式自增）。
+  // 仅累计实际出现的块：导入行 + 状态行 +（可选）节点块 +（可选）重测按钮 +
+  //（可选）接管提示。kReadyNodeH 仅作无块时的上界默认。
+  float node_h = kReadyNodeH;
+  if (step_ == FirstRunStep::Ready) {
+    const bool show_node = !active_node_name_.empty() && (proxy_ready() || unconfirmed());
+    const bool show_retest = !proxy_ready() && (unconfirmed() || retesting_);
+    const bool show_warn = !takeover_active_;
+    float ny = kCardPad;
+    ny += kImportedH + kImportedMb;
+    ny += kStatusMt + kStatusH;
+    if (show_node) ny += kNodeMt + kNodePt + 1.0f + kNodeLabelH + kNodeGap + kNodeNameH;
+    if (show_retest) ny += kRetestMt + kRetestH;
+    if (show_warn) ny += kWarnMt + kWarnH;
+    node_h = ny + kCardPad;  // 底部留白
+  }
   float ch = step_ == FirstRunStep::Input
                  ? kInputStepH + (intro_h_ - kIntroH) + pills_extra +
                        (has_banner ? kBannerH + kBannerMb : 0.0f)
-                 : kReadyStepH;
+                 : kTitleBlockH + kContentPad + node_h + kReadyGap +
+                       kReadyStarH + kContentPad + kActionsH;
   ch = std::min(ch, area.h - 16.0f);
   const float cx = std::max(0.0f, (area.w - cw) / 2.0f);
   const float cy = std::max(0.0f, (area.h - ch) / 2.0f);
@@ -574,6 +635,11 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
                           (has_banner ? kBannerH + kBannerMb : 0.0f);
     banner_clip_rect_ = {inner_x, pills_y + pills_h_ + kPillMb, inner_w, kBannerH};
     input_rect_ = {inner_x, field_y, inner_w, kFieldH};
+    // 订阅链接 TextField：占满输入框宽，右留 26px 给回车图标（src: endAdornment）
+    if (url_field_) {
+      url_field_->set_visible(true);
+      url_field_->set_bounds({input_rect_.x, field_y, inner_w - 26.0f, kFieldH});
+    }
     // src: :715-729 endAdornment KeyboardReturn 16px（点击即导入）
     btn_enter_rect_ = {input_rect_.right() - 26.0f, field_y + 12.0f, 16.0f, 16.0f};
 
@@ -584,16 +650,29 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     btn_later_rect_ = {inner_x, btn_submit_rect_.bottom() + kActionGap, inner_w,
                        kSecondaryBtnH};
   } else {
-    // src: :863-1083 绿色仪表卡 → Star 卡（卡间 mb 12）
-    card_node_rect_ = {inner_x, content_y, inner_w, kReadyNodeH};
-    // src: :984-999 重测按钮 fullWidth，内距 12 + mt 8.8
-    const float retest_y = content_y + kCardPad + kImportedH + kImportedMb + kStatusMt +
-                           kStatusH + kNodeMt + kNodePt + 1.0f + kNodeLabelH +
-                           kNodeGap + kNodeNameH + kRetestMt;
-    btn_retest_rect_ = {card_node_rect_.x + kCardPad, retest_y,
-                        card_node_rect_.w - kCardPad * 2.0f, kRetestH};
+    // 订阅链接 TextField 在就绪步隐藏并释放焦点（src: 仅 STEP 1 存在）
+    if (url_field_) {
+      url_field_->set_visible(false);
+      url_field_->blur();
+    }
+    // src: :863-1083 绿色仪表卡 → Star 卡（卡间 mb 12）；绿卡高度流式自增
+    card_node_rect_ = {inner_x, content_y, inner_w, node_h};
+    // src: :984-999 重测按钮 fullWidth，仅 !ready && (unconfirmed||retesting) 出现
+    const bool show_node = !active_node_name_.empty() && (proxy_ready() || unconfirmed());
+    const bool show_retest = !proxy_ready() && (unconfirmed() || retesting_);
+    float ny = content_y + kCardPad + kImportedH + kImportedMb + kStatusMt + kStatusH;
+    if (show_node) ny += kNodeMt + kNodePt + 1.0f + kNodeLabelH + kNodeGap + kNodeNameH;
+    if (show_retest) {
+      ny += kRetestMt;
+      btn_retest_rect_ = {card_node_rect_.x + kCardPad, ny,
+                          card_node_rect_.w - kCardPad * 2.0f, kRetestH};
+      ny += kRetestH;
+    }
+    // 接管提示 y：始终接在最后一个可见块之后（src: :1002-1015 mt 0.75），
+    // 不依赖重测按钮是否出现，避免「检测中」态错位。
+    warn_y_ = show_warn ? (ny + kWarnMt) : ny;
 
-    const float star_y = content_y + kReadyNodeH + kReadyGap;
+    const float star_y = content_y + node_h + kReadyGap;
     card_star_rect_ = {inner_x, star_y, inner_w, kReadyStarH};
     // src: :1059-1082 Wiki 文本按钮右对齐
     const float wiki_y = star_y + kCardPad + kStarTitleH + kImportedMb + kStarBodyH +
@@ -708,25 +787,9 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
     }
 
     // ---- 凹陷订阅输入框（src: :697-733 + get3DInputStyle :734-927）----
-    // ★ 输入框逐皮肤查表（get3DInputStyle 6 套皮肤各自一套），不是「retro 金 +
-    //   其余一律金色描边」。
-    const float field_y = input_rect_.y;
-    const auto ip = ThemeService::instance().input_paint();
-    const Color4f field_bg = ip.bg;
-    const Color4f field_bd = input_focused_ ? ip.border_focused : ip.border;
-    // 描边宽逐皮肤（retro 2px×depth / original·modern 1px / frosted 1px / cyber 1px）
-    const float field_bw = input_focused_ ? ip.border_w_focused : ip.border_w;
-    Brush fbg{field_bg};
-    rt.round_rect(input_rect_, ip.radius, Pen{field_bd, field_bw}, &fbg);
-    const std::wstring display_url =
-        url_.empty() ? L"https://example.com/api/v1/client/subscribe?token=..."
-                     : utf::utf8_to_utf16(url_);
-    // src: :708 placeholder；:704 onChange 文本色继承（retro 深棕）
-    draw_text(rt, display_url,
-              {input_rect_.x + 12.0f, field_y, input_rect_.w - 44.0f, kFieldH},
-              kIntroSize, static_cast<int>(Weight::Normal),
-              url_.empty() ? disabled_text() : text_color, AlignH::Left, AlignV::Center,
-              false, true);
+    // ★ 输入框本体为 Win 端 TextField 子控件（见构造），由引擎自绘（bg/描边/
+    //   文本/占位符/光标），此处仅绘制右侧回车图标 endAdornment
+    //   （src: :713-728 KeyboardReturn 16px，hover 变主色，点击即导入）。
     // src: :725-727 KeyboardReturn 16px color text.disabled
     draw_text(rt, L"⏎", btn_enter_rect_, 16.0f,
               static_cast<int>(Weight::Normal),
@@ -838,9 +901,8 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
 
     // src: :1002-1015 接管未开启提示
     if (!takeover_active_) {
-      const float warn_y = btn_retest_rect_.bottom() + kWarnMt;
       draw_text(rt, L"⚠️ " + tr("layout.components.firstRun.sysProxyOff"),
-                {nc.x + kCardPad, warn_y, nc.w - kCardPad * 2.0f, kWarnH}, 12.0f,
+                {nc.x + kCardPad, warn_y_, nc.w - kCardPad * 2.0f, kWarnH}, 12.0f,
                 static_cast<int>(Weight::Bold), warning_color());
     }
 
@@ -929,21 +991,17 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
           banner_clip_rect_.contains(pt.x, pt.y)) {
         // src: :650-657 点击横幅填入
         set_url(detected_clipboard_url_);
-        input_focused_ = true;
+        if (url_field_) url_field_->request_focus();
         return true;
       }
       if (btn_paste_rect_.contains(pt.x, pt.y)) {
         std::string clip = read_clipboard_url();
         if (!clip.empty()) set_url(clip);
+        if (url_field_) url_field_->request_focus();
         return true;
       }
       if (btn_enter_rect_.contains(pt.x, pt.y) || btn_submit_rect_.contains(pt.x, pt.y)) {
         submit_import();
-        return true;
-      }
-      if (input_rect_.contains(pt.x, pt.y)) {
-        input_focused_ = true;
-        invalidate();
         return true;
       }
       if (btn_later_rect_.contains(pt.x, pt.y)) {
@@ -1024,22 +1082,61 @@ bool FirstRunGuideDialog::on_key(const KeyEvent& e) {
       }
       return true;
     }
-    if (e.key == VK_BACK && input_focused_ && step_ == FirstRunStep::Input) {
-      if (!url_.empty()) {
-        url_.pop_back();
-        invalidate();
-      }
-      return true;
-    }
-  } else if (e.type == KeyEventType::Char && input_focused_ && step_ == FirstRunStep::Input) {
-    if (e.ch >= 32 && e.ch < 127) {
-      url_.push_back(static_cast<char>(e.ch));
-      invalidate();
-      return true;
-    }
   }
 
+  // 字符输入（打字/删除/IME/选区/剪贴板）已交由订阅框 TextField 子控件处理
+  // （← Mini :698-732 真实 MUI TextField；wants_key 自动获焦），本对话框不再手绘吃键。
+  // 此外窗口级 handler（main_window WM_KEYDOWN）也会在弹窗打开时统一接管 Esc/Enter，
+  // 保证就绪步（订阅框已隐藏）键位仍可用。
   return false;
+}
+
+void FirstRunGuideDialog::open_url_menu(PointF anchor) {
+  if (!url_menu_ || !url_field_) return;
+  TextField* f = url_field_.get();
+
+  // 外观：src: _layout.tsx:1872-1884（minWidth 160 / radius 6 / border 1px
+  //   rgba(255,255,255,.12) / List padding 4px 0）+ style-helpers.tsx:126-145
+  MenuStyle st;
+  st.item_h = 48;
+  st.padding_h = 16;
+  st.min_w = 160;  // src: _layout.tsx:1876 minWidth '160px'
+  st.radius = 6;
+  st.font_size = 13.0f;
+  st.pad_v = 4;
+  st.hover_inset = 0;
+  st.border = Color4f(1, 1, 1, 0.12f);
+  st.text = ThemeService::instance().text_primary();
+  st.disabled_text = Color4f(st.text.r, st.text.g, st.text.b, 0.38f);
+  // src: _theme.tsx:8/:24 error_color '#FF3B30'(light) / '#FF453A'(dark)
+  st.danger_text =
+      ThemeService::instance().is_light() ? Color4f::hex(0xFF3B30) : Color4f::hex(0xFF453A);
+  // 6 套皮肤：面板底/边框/圆角 + hover 全部走查表（← apply_menu_skin）
+  apply_menu_skin(st);
+
+  // 5 项 + 1 分隔线：src: _layout.tsx:1886-1931（文案 zh: shared.json:27-31）
+  std::vector<MenuItem> its;
+  its.push_back({L"✂️ " + tr("shared.actions.cut"), !f->can_cut(), false, L"", false});
+  its.push_back({L"📋 " + tr("shared.actions.copy"), !f->can_copy(), false, L"", false});
+  its.push_back({L"📥 " + tr("shared.actions.paste"), !f->can_paste(), false, L"", false});
+  its.push_back({L"🔍 " + tr("shared.actions.selectAll"), !f->can_select_all(), false, L"", false});
+  its.push_back({L"", false, true, L"", false});
+  its.push_back({L"🧹 " + tr("shared.actions.clearInput"), !f->can_clear(), false, L"", true});
+
+  url_menu_->style_ = st;
+  url_menu_->on_select = [f](int idx) {
+    switch (idx) {
+      case 0: f->cut(); break;
+      case 1: f->copy(); break;
+      case 2: f->paste(); break;
+      case 3: f->select_all(); break;
+      case 5: f->clear_text(); break;
+      default: break;
+    }
+    f->request_focus();
+  };
+  // ContextMenu 是 dialog 子件：锚点转 dialog 局部坐标
+  url_menu_->open(its, to_local(anchor));
 }
 
 }  // namespace clashwin::ui::scene

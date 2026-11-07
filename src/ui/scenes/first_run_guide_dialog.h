@@ -7,12 +7,15 @@
 // - 无 ✕ 关闭、无“清除”按钮（源码仅遮罩/Esc/稍后/完成出口）
 // - 剪贴板嗅探 http(s)/clash://，Enter 全局提交
 // - BUG-311 守卫提前释放；BUG-310 导入成功后自动接管系统代理
+#include <memory>
 #include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
 
+#include "ui/context_menu.h"
 #include "ui/overlay_fade.h"
+#include "ui/textfield.h"
 #include "ui/widget.h"
 
 namespace clashwin::ui::scene {
@@ -94,7 +97,11 @@ class FirstRunGuideDialog : public Widget {
   void on_arrange(const RectF& area) override;
   void on_paint(IRenderTarget& rt) override;
   bool on_mouse(const MouseEvent& e) override;
-  bool on_key(const KeyEvent& e) override;
+
+  bool is_ready_step() const { return step_ == FirstRunStep::Ready; }
+
+  // 订阅链接 TextField 右键 → 编辑命令菜单（← Mini handleContextMenu :711）
+  void open_url_menu(PointF anchor);
 
   bool hit_self(PointF local) const override {
     return open_ && Widget::hit_self(local);
@@ -155,6 +162,7 @@ class FirstRunGuideDialog : public Widget {
   RectF btn_wiki_rect_;
   RectF btn_finish_star_rect_;
   RectF btn_finish_rect_;
+  float warn_y_ = 0.0f;  // 接管提示绘制 y（随绿色卡内部块流式定位，不再依赖重测按钮）
 
   bool hover_banner_ = false;
   bool hover_paste_ = false;
@@ -165,7 +173,12 @@ class FirstRunGuideDialog : public Widget {
   bool hover_finish_star_ = false;
   bool hover_finish_ = false;
   bool hover_enter_ = false;
-  bool input_focused_ = false;
+
+  // 订阅链接：复用 Win 端 TextField（← Mini :698-732 真实 MUI TextField
+  //   autoFocus/fullWidth/value+onChange/onContextMenu/endAdornment 回车图标）
+  std::unique_ptr<TextField> url_field_;
+  // 订阅链接右键编辑菜单（剪切/复制/粘贴/全选/清空，← Mini :1859-1932）
+  std::unique_ptr<ContextMenu> url_menu_;
 };
 
 }  // namespace clashwin::ui::scene

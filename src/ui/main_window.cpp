@@ -1694,6 +1694,20 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       e.ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
       e.shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
       e.alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+      // 首启引导弹窗：Esc 关闭、就绪步 Enter 完成（src: :533-542 / :417-446）。
+      // 订阅框 TextField 已吞掉输入步的字符/Enter（on_submit），此处仅在就绪步
+      // 接管 Enter，并对两步统一接管 Esc——对话框 on_key 焦点已被输入框抢占。
+      if (first_run_ && first_run_->is_open() && msg == WM_KEYDOWN) {
+        if (wp == VK_ESCAPE) {
+          if (!first_run_->is_importing()) first_run_->finish();
+          return 0;
+        }
+        if (wp == VK_RETURN && first_run_->is_ready_step() &&
+            !first_run_->is_importing()) {
+          first_run_->finish();
+          return 0;
+        }
+      }
       if (route_key_event(&root_, e)) return 0;
       break;  // 未处理 → DefWindowProc（助记符/系统键）
     }
