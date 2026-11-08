@@ -191,9 +191,12 @@ void Widget::paint(IRenderTarget& rt, const RectF& clip) {
   // on_paint 约定局部坐标 {0,0,w,h}：把绘制原点切到本 widget 全局原点
   PointF prev_origin = rt.origin();
   rt.set_origin({g.x, g.y});
-  // clip 随 origin 局部化（visible 是全局矩形；push 在新 transform 下
-  // 才不会错位——嵌套时旧实现会把内容裁光）
-  rt.push_clip({visible.x - g.x, visible.y - g.y, visible.w, visible.h});
+  // clip 随 origin 局部化（默认按父区域裁剪允许阴影/位移外溢，clip_to_bounds_ 开启时限制在自身几何）
+  if (clip_to_bounds_) {
+    rt.push_clip({visible.x - g.x, visible.y - g.y, visible.w, visible.h});
+  } else {
+    rt.push_clip({clip.x - g.x, clip.y - g.y, clip.w, clip.h});
+  }
   const bool faded = opacity_ < 0.999f;
   if (faded) rt.push_opacity(opacity_);
   on_paint(rt);

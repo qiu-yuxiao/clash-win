@@ -185,9 +185,12 @@ UT_TEST(service_startup_decision) {
   // 非 TUN → Sidecar，无回退
   auto d1 = decide_startup_mode(false, false, false);
   UT_CHECK(!d1.use_service && !d1.fallback_sysproxy);
-  // TUN + 管理员 → Sidecar（自身可建 TUN）
+  // TUN + 管理员 + 服务未就绪 → Sidecar（应急容灾）
   auto d2 = decide_startup_mode(true, true, false);
   UT_CHECK(!d2.use_service && !d2.fallback_sysproxy);
+  // TUN + 管理员 + 服务就绪 → Service（优先走特权服务，避免管理员 Sidecar 路线）
+  auto d2b = decide_startup_mode(true, true, true);
+  UT_CHECK(d2b.use_service && !d2b.fallback_sysproxy);
   // TUN + 非管理员 + 服务就绪 → Service
   auto d3 = decide_startup_mode(true, false, true);
   UT_CHECK(d3.use_service && !d3.fallback_sysproxy);

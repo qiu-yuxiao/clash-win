@@ -883,9 +883,8 @@ SwitchPaint ThemeService::switch_paint() const {
       p.thumb_radius = 7.0f;
       p.off_thumb_grad = true;
       p.off_thumb_stops[0] = {0.00f, Color4f::hex(light ? 0xFFFDE7 : 0xFFF9C4)};
-      p.off_thumb_stops[1] = {0.60f, Color4f::hex(light ? 0xFFE082 : 0xFFD54F, 1.0f)};  // src: style-helpers.tsx:257
-      p.off_thumb_stops[2] = {1.00f, Color4f::hex(light ? 0xD4AF37 : 0xB8860B, 1.0f)};  // src: style-helpers.tsx:258
-      // 豁免: 无 — 与 p.off_thumb_stops[2] 合并单行（出处: 无）
+      p.off_thumb_stops[1] = {0.60f, light ? Color4f::hex(0xD4AF37, 0.30f) : Color4f::hex(0x8A6D00, 0.30f)};  // base-switch.tsx:91-92
+      p.off_thumb_stops[2] = {1.00f, light ? Color4f::hex(0x8A6D00, 0.45f) : Color4f::hex(0x634E00, 0.55f)};  // base-switch.tsx:91-92
       p.off_thumb_stops[3] = p.off_thumb_stops[2];
       p.off_thumb_n = 4;
       p.off_thumb_border = light ? Color4f::hex(0xB8860B, 0.85f) : Color4f::hex(0x8A6D00, 0.85f);  // src: style-helpers.tsx:261

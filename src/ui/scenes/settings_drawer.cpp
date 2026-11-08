@@ -548,21 +548,26 @@ void BasicCard::on_arrange(const RectF& area) {
   // src: basic-settings-card.tsx:101-113 subtitle2 13px/1.57=20.4、mb 0.5=4
   title_->layout_tree({pad, pad, area.w - pad * 2, 20.4f});
   const float grid_y = pad + 20.4f + 4.0f;
-  const float gap_x = 10.0f;                        // 豁免: 抽屉紧凑布局，缩小列间距防标签与开关重叠（出处: basic-settings-card.tsx:147）
-  const float col_w = (area.w - pad * 2 - gap_x) / 2;
+  const float gap_x = 6.0f;
+  const float col0_w = 106.0f;
+  const float col1_w = std::max(90.0f, area.w - pad * 2 - gap_x - col0_w);
   const float row_h = 24.0f;    // caption 13px*1.66=21.6 + py 0.15*2=2.4（src: :23-29）
   SwitchW* sws[4] = {sw_auto_launch_, sw_allow_lan_, sw_silent_start_,
                      sw_allow_ipv6_};
   for (int i = 0; i < 4; ++i) {
-    float cx = pad + (i % 2) * (col_w + gap_x);
-    float cy = grid_y + (i / 2) * row_h;
-    labels_[i]->style.size = 12.0f;  // 豁免: 紧凑版排版微调，防文字与开关重叠
+    const bool is_col1 = (i % 2) != 0;
+    const float cw = is_col1 ? col1_w : col0_w;
+    const float cx = pad + (is_col1 ? (col0_w + gap_x) : 0.0f);
+    const float cy = grid_y + (i / 2) * row_h;
+    labels_[i]->style.size = 12.0f;
+    labels_[i]->style.weight = static_cast<int>(Weight::Bold);
+    labels_[i]->style.wrap = false;
     labels_[i]->style.ellipsis = true;
-    labels_[i]->layout_tree({cx + 2.0f, cy, col_w - 4.0f - 26.0f, row_h});
-    // 开关 scale(0.85)：28×14 → 23.8×11.9，marginRight 1=8、右对齐垂直居中
+    labels_[i]->layout_tree({cx, cy, cw - 28.0f, row_h});
+    // 开关 scale(0.85)：28×14 → 24×12，右对齐垂直居中
     // src: basic-settings-card.tsx:147-150 / base-switch.tsx:26
-    sws[i]->layout_tree({cx + col_w - 24.0f,
-                         cy + (row_h - 11.9f) / 2.0f, 23.8f, 11.9f});
+    sws[i]->layout_tree({cx + cw - 24.0f,
+                         cy + (row_h - 12.0f) / 2.0f, 24.0f, 12.0f});
   }
   // Mixed Port 行：grid 第 3 行跨两列，mt 0.25=2（src: :210-217）
   const float mixed_y = grid_y + row_h * 2 + 2.0f;

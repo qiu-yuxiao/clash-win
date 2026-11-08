@@ -1,6 +1,6 @@
 {
-  "version": "0.1.4",
-  "notes": "Clash Win v0.1.4 — stability & UI fidelity update. See the GitHub Release page for assets and checksums.",
+  "version": "0.1.5",
+  "notes": "Clash Win v0.1.5 — onboarding guide layout, button tactile response, basic settings switches & TUN service elevation parity.",
   "pub_date": "2026-11-07T09:40:30Z",
   "platforms": {}
 }

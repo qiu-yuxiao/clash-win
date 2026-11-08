@@ -175,33 +175,82 @@ enum class BtnStyle { Primary, OutlinedDefault, OutlinedPrimary };
 
 // 按钮：6 套皮肤走 ThemeService::button_paint() 查表
 //   （src: utils/button-styles.ts:22-490 get3DButtonStyle）
-void paint_button(IRenderTarget& rt, const RectF& r, BtnStyle style,
-                  const std::wstring& label, float font_size) {
+void paint_button(IRenderTarget& rt, const RectF& orig_r, BtnStyle style,
+                  const std::wstring& label, float font_size,
+                  bool hover = false, bool pressed = false) {
   auto& svc = ThemeService::instance();
   const char* ctype = style == BtnStyle::Primary ? "primary" : "default";
   const bool outlined = style != BtnStyle::Primary;
   const auto bp = svc.button_paint(ctype, outlined);
-  if (bp.has_shadow)
-    draw_soft_shadow(rt, r, bp.radius, bp.shadow_color, bp.shadow_dy,
-                     bp.shadow_blur);
-  if (bp.glow.a > 0) draw_glow(rt, r, bp.radius, bp.glow, bp.glow_blur);
+  const float d = svc.depth_factor();
+
+  float ty = 0.0f;
+  if (pressed) ty = bp.translate_active;
+  else if (hover) ty = bp.translate_hover;
+
+  RectF r = {orig_r.x, orig_r.y + ty, orig_r.w, orig_r.h};
+
+  if (bp.has_shadow) {
+    if (pressed) {
+      Color4f ds = Color4f::hex(0x000000, svc.is_light() ? 0.45f : 0.65f);
+      draw_soft_shadow(rt, r, bp.radius, ds, 1.0f * d, 1.5f * d);
+    } else {
+      float blur = hover ? (bp.shadow_blur * 1.3f) : bp.shadow_blur;
+      draw_soft_shadow(rt, r, bp.radius, bp.shadow_color, bp.shadow_dy, blur);
+    }
+  }
+  if (bp.glow.a > 0 && !pressed) {
+    float glow_blur = hover ? (bp.glow_blur * 1.4f) : bp.glow_blur;
+    draw_glow(rt, r, bp.radius, bp.glow, glow_blur);
+  }
+
+  if (bp.use_grad && bp.bevel_dark.a > 0 && !pressed) {
+    Color4f ds = Color4f::hex(0x000000, svc.is_light() ? 0.35f : 0.60f);
+    draw_soft_shadow(rt, r, bp.radius, ds, 3.0f * d, 2.0f * d);
+    for (int i = 2; i >= 1; --i) {
+      RectF br{r.x, r.y + i * d, r.w, r.h};
+      Brush bb{bp.bevel_dark};
+      rt.round_rect(br, bp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &bb);
+    }
+  }
+
   if (bp.use_grad) {
-    rt.fill_round_rect_gradient_angle(r, bp.radius, bp.grad, bp.grad_count,
-                                      bp.grad_angle);
+    const GradientStop* gs = (hover || pressed) ? bp.grad_hover : bp.grad;
+    rt.fill_round_rect_gradient_angle(r, bp.radius, gs, bp.grad_count, bp.grad_angle);
   } else {
-    Brush b{bp.fill};
+    Color4f fill = pressed ? bp.fill_pressed : (hover ? bp.fill_hover : bp.fill);
+    Brush b{fill};
     rt.round_rect(r, bp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &b);
   }
+
   if (bp.border_w > 0.01f)
     rt.round_rect(r, bp.radius, Pen{bp.border, bp.border_w}, nullptr);
-  if (bp.use_grad && bp.bevel_dark.a > 0) {
-    rt.draw_line({r.x + bp.radius, r.y + 1.0f},
-                 {r.right() - bp.radius, r.y + 1.0f}, Pen{bp.bevel_hi, 1.0f});
-    rt.draw_line({r.x + bp.radius, r.bottom() - 1.0f},
-                 {r.right() - bp.radius, r.bottom() - 1.0f},
-                 Pen{bp.bevel_dark, 1.0f});
+
+  if (bp.bevel_dark.a > 0) {
+    if (pressed) {
+      rt.draw_line({r.x + bp.radius, r.y + 1.0f},
+                   {r.right() - bp.radius, r.y + 1.0f}, Pen{bp.bevel_dark, 1.0f});
+      if (d > 1.0f) {
+        rt.draw_line({r.x + bp.radius, r.y + 2.0f},
+                     {r.right() - bp.radius, r.y + 2.0f}, Pen{bp.bevel_dark, 1.0f});
+      }
+    } else {
+      rt.draw_line({r.x + bp.radius, r.y + 1.0f},
+                   {r.right() - bp.radius, r.y + 1.0f}, Pen{bp.bevel_hi, 1.0f});
+    }
   }
-  draw_text(rt, label, r, font_size, bp.weight, bp.text, AlignH::Center);
+
+  if (bp.text_shadow.a > 0 && !pressed) {
+    TextStyle ts_sh;
+    ts_sh.size = font_size;
+    ts_sh.weight = bp.weight;
+    ts_sh.color = bp.text_shadow;
+    ts_sh.align_h = AlignH::Center;
+    ts_sh.align_v = AlignV::Center;
+    RectF sr{r.x, r.y + bp.text_shadow_dy, r.w, r.h};
+    rt.draw_text(label, sr, ts_sh);
+  }
+  draw_text(rt, label, r, font_size, bp.weight, bp.text, AlignH::Center, AlignV::Center);
 }
 
 // src: :674-676 border 1px dashed（引擎无虚线图元，以离散段绘制）
@@ -619,6 +668,19 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
   const bool has_banner =
       step_ == FirstRunStep::Input && detected_clipboard_url_.empty() == false &&
       url_.empty();
+  banner_h_ = kBannerH;
+  if (has_banner) {
+    if (ITextEngine* te = text_engine()) {
+      TextStyle bts;
+      bts.size = kBannerFont;
+      bts.weight = static_cast<int>(Weight::Bold);
+      const float avail_w = (cw - kTitlePadX * 2.0f) - kBannerPadX * 2.0f;
+      const SizeF b_sz = te->measure_text(L"✨ " + tr("layout.components.firstRun.clipboardDetected"), bts, 0);
+      if (b_sz.w > avail_w) {
+        banner_h_ = 46.0f;
+      }
+    }
+  }
   // 引导文案实测高度（src: :593-603 是流式 Typography，行数随语言变化）：
   //   固定 2 行高度会让后续胶囊/输入框压在文字上（日/德文案实测 4~5 行）
   {
@@ -697,7 +759,7 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
   }
   float ch = step_ == FirstRunStep::Input
                  ? kInputStepH + (intro_h_ - kIntroH) + pills_extra +
-                       (has_banner ? kBannerH + kBannerMb : 0.0f)
+                       (has_banner ? banner_h_ + kBannerMb : 0.0f)
                  : kTitleBlockH + kContentPad + node_h + kReadyGap +
                        star_h + kContentPad + kActionsH;
   ch = std::min(ch, area.h - 8.0f);  // 豁免: Mini 无对应物 — 窄高视口防溢出安全留边 4px×2
@@ -718,8 +780,8 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     pills_h_ = layout_pills(pills_y, inner_x, inner_w);
 
     const float field_y = pills_y + pills_h_ + kPillMb +
-                          (has_banner ? kBannerH + kBannerMb : 0.0f);
-    banner_clip_rect_ = {inner_x, pills_y + pills_h_ + kPillMb, inner_w, kBannerH};
+                          (has_banner ? banner_h_ + kBannerMb : 0.0f);
+    banner_clip_rect_ = {inner_x, pills_y + pills_h_ + kPillMb, inner_w, banner_h_};
     input_rect_ = {inner_x, field_y, inner_w, kFieldH};
     // 订阅链接 TextField：占满输入框宽，右留 26px 给回车图标（src: endAdornment）
       if (url_field_) {
@@ -874,21 +936,22 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
 
     // ---- 剪贴板智能探测横幅（src: :650-695）----
     if (!detected_clipboard_url_.empty() && url_.empty()) {
-      const RectF br = {inner_x, pills_y + pills_h_ + kPillMb, inner_w, kBannerH};
+      const float banner_y = pills_y + pills_h_ + kPillMb + (hover_banner_ ? -1.0f : 0.0f);
+      const RectF br = {inner_x, banner_y, inner_w, banner_h_};
       banner_clip_rect_ = br;
       // src: :667-676 retro rgba(27,94,32,.12) / dark rgba(46,125,50,.18) /
       //      light rgba(46,125,50,.1)，边框 1px dashed
       const Color4f b_bg = is_retro()
-                               ? Color4f::hex(0x1B5E20, 0.12f)
-                               : (is_light() ? Color4f::hex(0x2E7D32, 0.10f)
-                                             : Color4f::hex(0x2E7D32, 0.18f));
+                               ? Color4f::hex(0x1B5E20, hover_banner_ ? 0.18f : 0.12f)
+                               : (is_light() ? Color4f::hex(0x2E7D32, hover_banner_ ? 0.15f : 0.10f)
+                                             : Color4f::hex(0x2E7D32, hover_banner_ ? 0.24f : 0.18f));
       const Color4f b_bd = is_retro() ? Color4f::hex(0x1B5E20, 0.45f) : ready_color();
       Brush bbg{b_bg};
       rt.round_rect(br, 6.0f, {}, &bbg);
       dashed_rect(rt, br, b_bd);
       draw_text(rt, L"✨ " + tr("layout.components.firstRun.clipboardDetected"),
-                {br.x + kBannerPadX, br.y, br.w - kBannerPadX * 2.0f, br.h}, kBannerFont,
-                static_cast<int>(Weight::Bold), ready_color());
+                {br.x + kBannerPadX, br.y + 4.0f, br.w - kBannerPadX * 2.0f, br.h - 8.0f}, kBannerFont,
+                static_cast<int>(Weight::Bold), ready_color(), AlignH::Center, AlignV::Center, true);
     }
 
     // ---- 凹陷订阅输入框（src: :697-733 + get3DInputStyle :734-927）----
@@ -902,7 +965,9 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
               AlignH::Center);
 
     // ---- 粘贴按钮（src: :750-779）----
-    draw_text(rt, L"📋 " + tr("layout.components.firstRun.paste"), btn_paste_rect_, kPasteFont,
+    draw_text(rt, L"📋 " + tr("layout.components.firstRun.paste"),
+              {btn_paste_rect_.x, btn_paste_rect_.y + (pressed_paste_ ? 1.0f : 0.0f),
+               btn_paste_rect_.w, btn_paste_rect_.h}, kPasteFont,
               static_cast<int>(Weight::Bold),
               hover_paste_ ? warning_color() : ThemeService::instance().primary(),
               AlignH::Center);
@@ -927,9 +992,13 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
                  Brush{divider_color()});
     // src: :803-815 contained primary
     // src: locales/zh/layout.json:8 「"importAndStart": "立即导入并开启"」（Button loading 仅展示 spinner）
-    paint_button(rt, btn_submit_rect_, BtnStyle::Primary, tr("layout.components.firstRun.importAndStart"), 13.0f);
+    paint_button(rt, btn_submit_rect_, BtnStyle::Primary,
+                 tr("layout.components.firstRun.importAndStart"), 13.0f,
+                 hover_submit_, pressed_submit_);
     // src: :816-827 outlined default
-    paint_button(rt, btn_later_rect_, BtnStyle::OutlinedDefault, tr("layout.components.firstRun.later"), 12.5f);
+    paint_button(rt, btn_later_rect_, BtnStyle::OutlinedDefault,
+                 tr("layout.components.firstRun.later"), 12.5f,
+                 hover_later_, pressed_later_);
 
   } else {
     // ================= STEP 2：就绪仪表盘（src: :830-1119）=================
@@ -1001,7 +1070,8 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
     // src: :983-1000 重测并优选（仅在未就绪/重测中显示）
     if (!ready && (unconfirmed || retesting_)) {
       paint_button(rt, btn_retest_rect_, BtnStyle::OutlinedPrimary,
-                   L"🔄 " + tr("layout.components.firstRun.retestNodes"), 12.5f);
+                   L"🔄 " + tr("layout.components.firstRun.retestNodes"), 12.5f,
+                   hover_retest_, pressed_retest_);
     }
 
     // src: :1002-1015 接管未开启提示
@@ -1036,7 +1106,9 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
               kStarBodyFont, static_cast<int>(Weight::Normal), secondary_text(),
               AlignH::Left, AlignV::Top, true, true);
     // src: :1059-1082 Wiki 文本按钮
-    draw_text(rt, L"📖 " + tr("layout.components.firstRun.openWiki") + L" ↗", btn_wiki_rect_, kHintFont,
+    draw_text(rt, L"📖 " + tr("layout.components.firstRun.openWiki") + L" ↗",
+              {btn_wiki_rect_.x, btn_wiki_rect_.y + (pressed_wiki_ ? 1.0f : 0.0f),
+               btn_wiki_rect_.w, btn_wiki_rect_.h}, kHintFont,
               static_cast<int>(Weight::Bold),
               hover_wiki_ ? warning_color() : ThemeService::instance().primary(),
               AlignH::Right);
@@ -1046,14 +1118,49 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
                   card_rect_.w, 1.0f},
                  Brush{divider_color()});
     paint_button(rt, btn_finish_star_rect_, BtnStyle::Primary,
-                 L"⭐ " + tr("layout.components.firstRun.openGithubStar"), 13.0f);
-    paint_button(rt, btn_finish_rect_, BtnStyle::OutlinedDefault, tr("layout.components.firstRun.finish"), 12.5f);
+                 L"⭐ " + tr("layout.components.firstRun.openGithubStar"), 13.0f,
+                 hover_finish_star_, pressed_finish_star_);
+    paint_button(rt, btn_finish_rect_, BtnStyle::OutlinedDefault,
+                 tr("layout.components.firstRun.finish"), 12.5f,
+                 hover_finish_, pressed_finish_);
   }
 }
 
 bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
   if (!open_) return false;
   const PointF pt = e.pos;
+
+  if (e.type == MouseEventType::Leave) {
+    hover_banner_ = hover_paste_ = hover_submit_ = hover_later_ = hover_enter_ = false;
+    hover_retest_ = hover_wiki_ = hover_finish_star_ = hover_finish_ = false;
+    pressed_banner_ = pressed_paste_ = pressed_enter_ = pressed_submit_ = pressed_later_ = false;
+    pressed_retest_ = pressed_wiki_ = pressed_finish_star_ = pressed_finish_ = false;
+    invalidate();
+    return true;
+  }
+
+  if (e.type == MouseEventType::Down) {
+    if (step_ == FirstRunStep::Input) {
+      if (!detected_clipboard_url_.empty() && url_.empty() &&
+          banner_clip_rect_.contains(pt.x, pt.y)) {
+        pressed_banner_ = true;
+      }
+      if (btn_paste_rect_.contains(pt.x, pt.y)) pressed_paste_ = true;
+      if (btn_enter_rect_.contains(pt.x, pt.y)) pressed_enter_ = true;
+      if (btn_submit_rect_.contains(pt.x, pt.y)) pressed_submit_ = true;
+      if (btn_later_rect_.contains(pt.x, pt.y)) pressed_later_ = true;
+    } else {
+      if (btn_retest_rect_.contains(pt.x, pt.y) &&
+          !proxy_ready() && (unconfirmed() || retesting_)) {
+        pressed_retest_ = true;
+      }
+      if (btn_wiki_rect_.contains(pt.x, pt.y)) pressed_wiki_ = true;
+      if (btn_finish_star_rect_.contains(pt.x, pt.y)) pressed_finish_star_ = true;
+      if (btn_finish_rect_.contains(pt.x, pt.y)) pressed_finish_ = true;
+    }
+    invalidate();
+    return true;
+  }
 
   if (e.type == MouseEventType::Move) {
     if (step_ == FirstRunStep::Input) {
@@ -1091,6 +1198,10 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
   }
 
   if (e.type == MouseEventType::Up) {
+    pressed_banner_ = pressed_paste_ = pressed_enter_ = pressed_submit_ = pressed_later_ = false;
+    pressed_retest_ = pressed_wiki_ = pressed_finish_star_ = pressed_finish_ = false;
+    invalidate();
+
     // src: :533-542 导入进行中点遮罩/Esc 均不关闭
     if (is_importing_) return true;
 

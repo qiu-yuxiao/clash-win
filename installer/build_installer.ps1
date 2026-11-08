@@ -6,7 +6,7 @@ param(
     [ValidateSet('Release', 'Debug')]
     [string]$Configuration = 'Release',
     [string]$Makensis = '',
-    [string]$Version = '0.1.4',
+    [string]$Version = '0.1.5',
     [switch]$SkipStage,
     [switch]$SkipSign
 )

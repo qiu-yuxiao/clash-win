@@ -55,24 +55,40 @@ void Button::draw_button_bg(IRenderTarget& rt, const RectF& r) {
       //   0 1px 0 bevelDark / 0 d 0 bevelDark / 0 2d 0 bevelDark / 0 3d 2d 黑影
       //   圆角矩形底沿与内嵌平滑过渡，避免底部断裂直硬线
       if (p.bevel_dark.a > 0) {
-        Color4f ds = Color4f::hex(0x000000, theme::ThemeService::instance().is_light() ? 0.35f : 0.60f);
-        draw_soft_shadow(rt, r, p.radius, ds, 3.0f * d, 2.0f * d);
-        for (int i = 2; i >= 1; --i) {
-          RectF br{r.x, r.y + i * d, r.w, r.h};
-          Brush bb{p.bevel_dark};
-          rt.round_rect(br, p.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &bb);
+        if (state() == State::Pressed) {
+          Color4f ds = Color4f::hex(0x000000, theme::ThemeService::instance().is_light() ? 0.45f : 0.65f);
+          draw_soft_shadow(rt, r, p.radius, ds, 1.0f * d, 1.5f * d);
+        } else {
+          Color4f ds = Color4f::hex(0x000000, theme::ThemeService::instance().is_light() ? 0.35f : 0.60f);
+          draw_soft_shadow(rt, r, p.radius, ds, 3.0f * d, 2.0f * d);
+          for (int i = 2; i >= 1; --i) {
+            RectF br{r.x, r.y + i * d, r.w, r.h};
+            Brush bb{p.bevel_dark};
+            rt.round_rect(br, p.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &bb);
+          }
         }
       }
-      const GradientStop* gs = (state() == State::Hover) ? p.grad_hover : p.grad;
+      const GradientStop* gs = (state() == State::Hover || state() == State::Pressed) ? p.grad_hover : p.grad;
       rt.fill_round_rect_gradient_angle(r, p.radius, gs, p.grad_count, p.grad_angle);
       last_fill_ = gs[p.grad_count / 2].color;
       // ← button-styles.ts:84 border: calc(2px * depth) solid borderColor（渐变填充后单独描边）
       if (p.border_w > 0.01f && p.border.a > 0.001f)
         rt.round_rect(r, p.radius, Pen{p.border, p.border_w}, nullptr);
       if (p.bevel_dark.a > 0) {
-        rt.draw_line(PointF{r.x + p.radius, r.y + 1.0f},
-                     PointF{r.right() - p.radius, r.y + 1.0f},
-                     Pen{p.bevel_hi, 1.0f});
+        if (state() == State::Pressed) {
+          rt.draw_line(PointF{r.x + p.radius, r.y + 1.0f},
+                       PointF{r.right() - p.radius, r.y + 1.0f},
+                       Pen{p.bevel_dark, 1.0f});
+          if (d > 1.0f) {
+            rt.draw_line(PointF{r.x + p.radius, r.y + 2.0f},
+                         PointF{r.right() - p.radius, r.y + 2.0f},
+                         Pen{p.bevel_dark, 1.0f});
+          }
+        } else {
+          rt.draw_line(PointF{r.x + p.radius, r.y + 1.0f},
+                       PointF{r.right() - p.radius, r.y + 1.0f},
+                       Pen{p.bevel_hi, 1.0f});
+        }
       }
       return;
     }
@@ -120,7 +136,7 @@ void Button::draw_button_text(IRenderTarget& rt, const RectF& r) {
     ts.align_h = AlignH::Center;
     ts.align_v = AlignV::Center;
     // F-D02：文字阴影（先画偏移阴影层，再画主文字）
-    if (false && !disabled && p.text_shadow.a > 0) {
+    if (!disabled && state() != State::Pressed && p.text_shadow.a > 0) {
       TextStyle ts2 = ts;
       ts2.color = p.text_shadow;
       RectF sr{r.x, r.y + p.text_shadow_dy, r.w, r.h};
@@ -145,7 +161,7 @@ void Button::on_paint(IRenderTarget& rt) {
     if (state() == State::Hover) ty = p.translate_hover;
     else if (state() == State::Pressed) ty = p.translate_active;
   }
-  if (false && ty != 0) r = {0, r.y + ty, r.w, r.h};
+  if (ty != 0) r = {r.x, r.y + ty, r.w, r.h};
   draw_button_bg(rt, r);
   if (!text.empty()) draw_button_text(rt, r);
 }

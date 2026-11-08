@@ -187,6 +187,18 @@ class FirstRunGuideDialog : public Widget {
   bool hover_finish_ = false;
   bool hover_enter_ = false;
 
+  bool pressed_banner_ = false;
+  bool pressed_paste_ = false;
+  bool pressed_submit_ = false;
+  bool pressed_later_ = false;
+  bool pressed_retest_ = false;
+  bool pressed_wiki_ = false;
+  bool pressed_finish_star_ = false;
+  bool pressed_finish_ = false;
+  bool pressed_enter_ = false;
+
+  float banner_h_ = 31.4f;
+
   // 订阅链接：复用 Win 端 TextField（← Mini :698-732 真实 MUI TextField
   //   autoFocus/fullWidth/value+onChange/onContextMenu/endAdornment 回车图标）
   TextField* url_field_ = nullptr;

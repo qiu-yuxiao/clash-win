@@ -103,6 +103,8 @@ class Widget {
   void relayout();  // 根调用：按根 bounds 重排整树（measure+arrange 快捷方式）
 
   // ---- 绘制 ----
+  bool clip_to_bounds() const { return clip_to_bounds_; }
+  void set_clip_to_bounds(bool c) { clip_to_bounds_ = c; }
   void paint(IRenderTarget& rt, const RectF& clip);
   void paint_all(IRenderTarget& rt);  // 根入口（clip = 全域）
   virtual void on_paint(IRenderTarget& rt) { (void)rt; }
@@ -180,6 +182,7 @@ class Widget {
   Padding padding_{};
   bool visible_ = true;
   bool enabled_ = true;
+  bool clip_to_bounds_ = false;
   float opacity_ = 1.0f;  // 子树不透明度（← MUI Fade）
   int z_order_ = 0;
   std::wstring tooltip_text_;

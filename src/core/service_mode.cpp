@@ -303,16 +303,17 @@ StartupDecision decide_startup_mode(bool needs_tun, bool is_admin, bool service_
     d.use_service = false;  // 非 TUN → Sidecar
     return d;
   }
-  if (is_admin) {
-    d.use_service = false;  // 管理员自身可创建 TUN → Sidecar
-    return d;
-  }
-  // TUN + 非管理员：必须走服务
+  // TUN 模式下：服务就绪则优先走服务（对齐 Clash Mini lifecycle.rs / service.rs）
   if (service_ready) {
     d.use_service = true;
     return d;
   }
-  // 服务未就绪：明确告警（BUG-298 教训：禁止静默降级）→ Sidecar + 回退系统代理
+  // 服务未就绪：若已有管理员权限，才可作为 fallback 临时以 Sidecar 运行 TUN
+  if (is_admin) {
+    d.use_service = false;
+    return d;
+  }
+  // 服务未就绪且非管理员：明确告警（BUG-298 教训：禁止静默降级）→ Sidecar + 回退系统代理
   d.use_service = false;
   d.fallback_sysproxy = true;
   return d;

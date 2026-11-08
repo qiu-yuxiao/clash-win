@@ -1005,7 +1005,7 @@ void MainWindow::build_scene() {
                 is_admin = ar.value().get<bool>();
             }
             const bool service_ok = svc.invoke("is_service_available").is_ok();
-            if (!(is_admin || service_ok)) {
+            if (!service_ok) {
               auto inst = svc.invoke("install_service");
               if (!inst.is_ok()) {
                 nots.hide(wait_id);

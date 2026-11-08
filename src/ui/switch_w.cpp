@@ -258,11 +258,11 @@ void SwitchW::on_paint(IRenderTarget& rt) {
     const float dy = (use_hih ? sp.thumb_hover_inset_hi_dy
                               : (on_side ? sp.on_thumb_inset_hi_dy
                                          : sp.off_thumb_inset_hi_dy)) * scale;
-    const float half = std::min(t_radius, td * 0.5f);
+    const float chord_pad = td * 0.20f;
     Color4f lc = c;
-    if (scale < 0.95f) lc.a *= 0.65f;
-    rt.draw_line({tr.x + half, tr.y + dy}, {tr.right() - half, tr.y + dy},
-                 Pen{lc, std::max(0.6f, 1.0f * scale)});
+    if (scale < 0.95f) lc.a *= 0.85f;
+    rt.draw_line({tr.x + chord_pad, tr.y + dy}, {tr.right() - chord_pad, tr.y + dy},
+                 Pen{lc, std::max(0.8f, 1.0f * scale)});
   }
   const bool use_hdk = hover && sp.thumb_hover_inset_dark;
   if (use_hdk || (on_side ? sp.on_thumb_inset_dark : sp.off_thumb_inset_dark)) {
@@ -274,11 +274,12 @@ void SwitchW::on_paint(IRenderTarget& rt) {
     const float dy = (use_hdk ? sp.thumb_hover_inset_dark_dy
                               : (on_side ? sp.on_thumb_inset_dark_dy
                                          : sp.off_thumb_inset_dark_dy)) * scale;
-    const float half = std::min(t_radius, td * 0.5f);
+    const float chord_pad = td * 0.20f;
     Color4f lc = c;
-    if (scale < 0.95f) lc.a *= 0.65f;
-    rt.draw_line({tr.x + half, tr.bottom() - 1.0f + dy},
-                 {tr.right() - half, tr.bottom() - 1.0f + dy}, Pen{lc, std::max(0.6f, 1.0f * scale)});
+    if (scale < 0.95f) lc.a *= 0.85f;
+    rt.draw_line({tr.x + chord_pad, tr.bottom() - 1.0f + dy},
+                 {tr.right() - chord_pad, tr.bottom() - 1.0f + dy},
+                 Pen{lc, std::max(0.8f, 1.0f * scale)});
   }
   // ★ hover 辉光覆盖（← cyberpunk `:hover` boxShadow 0 0 10px currentColor）
   const bool use_hg = hover && sp.thumb_hover_glow;

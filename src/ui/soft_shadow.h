@@ -96,23 +96,24 @@ inline void draw_top_inset_shadow(IRenderTarget& rt, const RectF& r,
   // 渗透总深度 = dy + blur
   const float depth = dy + blur;
   if (depth <= 0.5f) return;
-  // 上下圆角处不画（避免直角凸出圆角外）
-  const float inset_x = std::min(radius, r.w * 0.5f);
+  const float R = std::min(radius, std::min(r.w * 0.5f, r.h * 0.5f));
   for (int i = 0; i < layers; ++i) {
     const float t = static_cast<float>(i) / static_cast<float>(layers);
     const float y = r.y + depth * t;
+    if (y >= r.bottom()) break;
     Color4f c = color;
     // 上缘最浓，向下线性衰减
     c.a = color.a * (1.0f - t) / static_cast<float>(layers) * 2.0f;
     if (c.a <= 0.004f) continue;
-    const float half = std::sqrt(std::max(0.0f, radius * radius -
-                                                  (radius - y + r.y) *
-                                                      (radius - y + r.y)));
-    const float x0 = r.x + std::min(inset_x, half);
-    const float x1 = r.right() - std::min(inset_x, half);
+    const float d = y - r.y;
+    float dx = R;
+    if (R > 0.0f && d < R) {
+      dx = std::sqrt(std::max(0.0f, R * R - (R - d) * (R - d)));
+    }
+    const float x0 = (r.x + R) - dx;
+    const float x1 = (r.right() - R) + dx;
     if (x1 <= x0) continue;
-    // 豁免: Mini 无对应物 — 逐行软阴影描边宽度，D2D 无 box-shadow 原语，纯实现层（出处: 无）
-    rt.draw_line({x0, y}, {x1, y}, Pen{c, 1.2f});
+    rt.draw_line({x0, y}, {x1, y}, Pen{c, 1.0f});
   }
 }
 
