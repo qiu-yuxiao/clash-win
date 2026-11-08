@@ -399,7 +399,7 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
       p.fill = is_primary ? with_alpha(primary(), 0.25f)
                        : (light ? Color4f::hex(0x000000, 0.06f)
                                 : Color4f::hex(0xFFFFFF, 0.08f));
-      p.fill_hover = is_primary ? with_alpha(primary(), 0.4f)
+      p.fill_hover = is_primary ? with_alpha(primary(), 0.40f)
                              : (light ? Color4f::hex(0x000000, 0.12f)
                                       : Color4f::hex(0xFFFFFF, 0.15f));
       p.fill_pressed = p.fill_hover;
@@ -415,7 +415,7 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
       p.has_shadow = true;
       p.shadow_color = Color4f::hex(0x000000, 0.08f);
       p.shadow_dy = 4.0f;
-      p.shadow_blur = 12.0f;
+      p.shadow_blur = 12.0f * std::max(0.25f, v);
       break;
     }
     case SkinId::Cyberpunk: {
@@ -464,7 +464,7 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
       p.text = is_primary ? (light ? Color4f::hex(0xffffff) : Color4f::hex(0x000000))
                        : (light ? Color4f::hex(0x000000) : Color4f::hex(0xffffff));
       p.border = light ? Color4f::hex(0x000000) : Color4f::hex(0xffffff);
-      p.radius = 0;               // ← :455 borderRadius '0px'
+      p.radius = 0.0f;        // src: button-styles.ts:719 borderRadius: '0px'
       p.border_w = 1.0f * v;  // ← :454 calc(1px * --vibrancy-factor)
       p.weight = 700;
       p.translate_active = 1.0f;   // transform: translateY(1px)
@@ -488,7 +488,10 @@ SegmentedPaint ThemeService::segmented_paint() const {
   const float v = vibrancy();    // --vibrancy-factor
   const float g = val1();        // --control-skin-val1
   SegmentedPaint p{};
-  p.text = text_primary();
+  // src: routing-preference-card.tsx:110-114 & theme-settings-card.tsx:194-200
+  p.text = (skin_ == SkinId::Retro3d && !light)
+               ? Color4f::hex(0x2C1F03, 0.75f)
+               : palette_.secondary_text;
   switch (skin_) {
     case SkinId::Retro3d:
       p.container_bg = light ? Color4f::hex(0xD4AF37, 0.06f)
@@ -545,10 +548,10 @@ SegmentedPaint ThemeService::segmented_paint() const {
       p.active_radius = 4.0f * g;
       break;
     case SkinId::FrostedGlass:
-      p.container_bg = Color4f::hex(0xFFFFFF, 0.04f);
-      p.container_border = Color4f::hex(0xFFFFFF, 0.10f);
-      p.active_bg = with_alpha(primary(), 0.3f);
-      p.active_border = Color4f::hex(0xFFFFFF, 0.2f);
+      p.container_bg = Color4f::hex(light ? 0x000000 : 0xFFFFFF, 0.06f);
+      p.container_border = Color4f::hex(light ? 0x000000 : 0xFFFFFF, 0.12f);
+      p.active_bg = with_alpha(primary(), 0.30f);
+      p.active_border = Color4f::hex(light ? 0x000000 : 0xFFFFFF, 0.20f);
       p.active_text = light ? Color4f::hex(0x000000, 0.85f)
                             : Color4f::hex(0xFFFFFF);
       p.active_radius = 4;
@@ -569,7 +572,9 @@ SegmentedPaint ThemeService::segmented_paint() const {
       p.container_bg = light ? Color4f::hex(0xffffff) : Color4f::hex(0x000000);
       p.active_bg = light ? Color4f::hex(0x000000) : Color4f::hex(0xffffff);
       p.active_text = light ? Color4f::hex(0xffffff) : Color4f::hex(0x000000);
-      p.active_radius = 0;
+      // src: button-styles.ts:1094 borderRadius: '0px'
+      p.active_radius = 0.0f;
+      p.container_radius = 0.0f;
       break;
   }
   return p;
@@ -644,10 +649,13 @@ InputPaint ThemeService::input_paint() const {
       break;
 
     case SkinId::FrostedGlass:
-      // :839-866：rgba(255,255,255,.05)、1px rgba(255,255,255,.1)、focus 主色
-      p.bg = Color4f::hex(0xFFFFFF, 0.05f);
-      p.border = Color4f::hex(0xFFFFFF, 0.10f);
+      // :839-866 + index.scss:186-198：半透明底随 depth/vibrancy 变化、focus 主色
+      p.bg = Color4f::hex(light ? 0x000000 : 0xFFFFFF,
+                          std::clamp(0.03f + 0.05f * d + 0.02f * v, 0.02f, 0.40f));
+      p.border = Color4f::hex(light ? 0x000000 : 0xFFFFFF,
+                              std::clamp(0.08f + 0.06f * d, 0.04f, 0.40f));
       p.border_focused = primary();
+      p.radius = 8.0f;
       break;
 
     case SkinId::Cyberpunk:
@@ -682,7 +690,7 @@ InputPaint ThemeService::input_paint() const {
       p.border_focused = p.border;
       p.border_w = 1.0f * v;
       p.border_w_focused = 2.0f * v;
-      p.radius = 4.0f;
+      p.radius = 0.0f;  // src: button-styles.ts:908 borderRadius: '0px'
       break;
   }
   return p;
@@ -770,15 +778,18 @@ PanelPaint ThemeService::panel_paint() const {
       //   ★ val1 = Opacity（玻璃不透明度）→ 消费 --depth-factor 的底色 alpha；
       //     val2 = Blur → backdrop-filter: blur(16v)，D2D 无此原语（差异登记）。
       p.border = PanelPaint::BorderKind::DoubleGlass;
-      p.border_color = light ? Color4f::hex(0x000000, 0.15f)
-                             : Color4f::hex(0xFFFFFF, 0.15f);
-      p.bg = light ? Color4f::hex(0xFFFFFF, 0.02f + 0.10f * d)
-                   : Color4f::hex(0x1E2438, 0.02f + 0.10f * d);
+      p.border_color = light ? Color4f::hex(0x000000, std::clamp(0.08f + 0.06f * d, 0.04f, 0.35f))
+                             : Color4f::hex(0xFFFFFF, std::clamp(0.10f + 0.06f * d, 0.05f, 0.40f));
+      p.bg = light ? Color4f::hex(0xFFFFFF, std::clamp(0.08f + 0.14f * d + 0.05f * v, 0.02f, 0.90f))
+                   : Color4f::hex(0x1E2438, std::clamp(0.04f + 0.12f * d + 0.05f * v, 0.02f, 0.88f));
       p.radius = 8.0f;
       p.has_shadow = true;
       p.shadow_color = Color4f::hex(0x000000, 0.06f);
       p.shadow_dy = 8.0f;
-      p.shadow_blur = 32.0f;
+      p.shadow_blur = 32.0f * std::max(0.25f, v);
+      p.has_glow = (v > 0.05f);
+      p.glow_color = Color4f::hex(0xFFFFFF, (light ? 0.12f : 0.06f) * v);
+      p.glow_blur = 12.0f * v;
       break;
 
     case SkinId::Cyberpunk:
@@ -793,6 +804,9 @@ PanelPaint ThemeService::panel_paint() const {
       p.pulse_from = Color4f::hex(0xFF0055, 0.60f);
       p.pulse_to = Color4f::hex(0xFF0055, 1.00f);
       p.pulse_period_s = 2.5f / (v + 0.001f);
+      p.has_glow = (d > 0.01f);
+      p.glow_color = Color4f::hex(0xFF0055, 0.25f * std::min(d, 2.5f));
+      p.glow_blur = 12.0f * d;
       break;
 
     case SkinId::Monochrome:
@@ -1114,8 +1128,8 @@ SliderPaint ThemeService::slider_paint() const {
       p.rail_inset = true;
       p.rail_inset_color = light ? Color4f::hex(0x000000, 0.30f)
                                  : Color4f::hex(0x000000, 0.75f);
-      p.rail_inset_dy = 3.0f;
-      p.rail_inset_blur = 5.0f;
+      p.rail_inset_dy = 3.0f * d;    // src: theme-settings-card.tsx:241
+      p.rail_inset_blur = 5.0f * d;  // src: theme-settings-card.tsx:241
       p.rail_top_hi = light ? Color4f::hex(0xFFFFFF, 0.80f)
                             : Color4f::hex(0xFFFFFF, 0.08f);
       p.track_grad = true;
@@ -1283,14 +1297,14 @@ SliderPaint ThemeService::slider_paint() const {
       p.thumb = p.track;
       p.thumb_glow = true;
       p.thumb_glow_color = with_alpha(p.track, 0.75f);
-      p.thumb_glow_blur = 5.0f;
+      p.thumb_glow_blur = 5.0f * d;  // src: theme-settings-card.tsx:303
       // ★ thumb 悬停态（← style-helpers.tsx:427-430 `&:hover, &.Mui-focusVisible`）
       //   transform scale(1.15) + boxShadow '0 0 8px <主色>'（常态 0 0 5px）
       p.thumb_hover = true;
       p.thumb_hover_scale = 1.15f;
       p.thumb_hover_glow = true;
       p.thumb_hover_glow_color = with_alpha(p.track, 0.75f);
-      p.thumb_hover_glow_blur = 8.0f;
+      p.thumb_hover_glow_blur = 8.0f * d;  // src: theme-settings-card.tsx:303
       break;
 
     case SkinId::Monochrome:
@@ -1300,7 +1314,7 @@ SliderPaint ThemeService::slider_paint() const {
       p.thumb_radius = 0.0f;
       p.rail = light ? Color4f::hex(0xFFFFFF) : Color4f::hex(0x000000);
       p.rail_border = light ? Color4f::hex(0x000000) : Color4f::hex(0xFFFFFF);
-      p.rail_bw = 1.0f;
+      p.rail_bw = 1.0f * v;  // src: index.scss:270 --vibrancy-factor
       p.rail_radius = 0.0f;
       p.track = light ? Color4f::hex(0x000000) : Color4f::hex(0xFFFFFF);
       p.track_radius = 0.0f;
@@ -1450,17 +1464,17 @@ CardPaint ThemeService::card_paint(const char* card_type) const {
       break;
 
     case SkinId::FrostedGlass:
-      // :653-669：radius 8 固定、1px 半透明白边、半透明底、固定柔光
+      // :653-669 + index.scss:186-198：radius 8 固定、1px 玻璃边、半透明底
       p.radius = 8.0f;
       p.border_w = 1.0f;
-      p.border = Color4f::hex(0xFFFFFF, 0.10f);
+      p.border = Color4f::hex(light ? 0x000000 : 0xFFFFFF, 0.10f);
       p.bg = is_primary ? with_alpha(primary(), 0.15f)
                         : Color4f::hex(0xFFFFFF, 0.06f);
       p.text_color = text_primary();
       p.has_shadow = true;
       p.shadow_color = Color4f::hex(0x000000, 0.06f);
       p.shadow_dy = 8.0f;
-      p.shadow_blur = 32.0f;
+      p.shadow_blur = (light ? 24.0f : 32.0f) * std::max(0.25f, v);
       break;
 
     case SkinId::Cyberpunk:
@@ -1485,7 +1499,7 @@ CardPaint ThemeService::card_paint(const char* card_type) const {
       break;
 
     case SkinId::Monochrome:
-      // :716-728：radius 0、边框 1px*val2 纯黑白、无阴影
+      // :716-728：radius 0px、边框 1px*val2 纯黑白、无阴影
       p.radius = 0.0f;
       p.border_w = 1.0f * v;
       p.border = light ? Color4f::hex(0x000000) : Color4f::hex(0xFFFFFF);

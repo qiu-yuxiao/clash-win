@@ -51,6 +51,8 @@ struct AutoSelectHooks {
   // 内核就绪等待（T18 转正：CoreMonitor::wait_for_clash_ready；返回
   // false = 等待超时，trigger 仍继续（原版语义：等待尽力而为不阻断））
   std::function<bool()> wait_ready;
+  // 读取指定组的全部节点名（node_names 缺省时全量测速用）
+  std::function<std::vector<std::string>(const std::string& group)> group_nodes;
 };
 
 class AutoSelect {

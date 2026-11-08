@@ -140,6 +140,18 @@ AutoSelect::Outcome AutoSelect::trigger(
   if (node_names && !node_names->empty()) {
     for (const auto& n : *node_names)
       if (!hooks_.is_dummy || !hooks_.is_dummy(n)) nodes.push_back(n);
+  } else if (hooks_.group_nodes) {
+    auto all = hooks_.group_nodes("PROXY");
+    std::string filter = hooks_.filter_text ? to_lower(hooks_.filter_text()) : "";
+    std::vector<std::string> non_dummy;
+    for (const auto& n : all) {
+      if (n.empty() || (hooks_.is_dummy && hooks_.is_dummy(n))) continue;
+      non_dummy.push_back(n);
+      if (filter.empty() || to_lower(n).find(filter) != std::string::npos) {
+        nodes.push_back(n);
+      }
+    }
+    if (nodes.empty()) nodes = std::move(non_dummy);
   }
   if (nodes.empty()) {
     out.display = {};

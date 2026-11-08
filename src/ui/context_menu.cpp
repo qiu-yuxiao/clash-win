@@ -40,6 +40,11 @@ bool MenuList::on_mouse(const MouseEvent& e) {
     return -1;
   };
   switch (e.type) {
+    case MouseEventType::Down: {
+      hover_index = hit_index(e.pos.y);
+      invalidate();
+      return true;
+    }
     case MouseEventType::Move: {
       int idx = hit_index(e.pos.y);
       if (hover_index != idx) {
@@ -51,7 +56,8 @@ bool MenuList::on_mouse(const MouseEvent& e) {
     case MouseEventType::Up: {
       int idx = hit_index(e.pos.y);
       if (idx >= 0 && !items[static_cast<size_t>(idx)].disabled) {
-        if (on_select) on_select(idx);
+        auto cb = on_select;
+        if (cb) cb(idx);
         return true;
       }
       return false;
@@ -135,6 +141,7 @@ void MenuList::on_paint(IRenderTarget& rt) {
 
 // ---------- ContextMenu ----------
 void ContextMenu::open(const std::vector<MenuItem>& items, PointF anchor) {
+  retiring_menu_.reset();
   if (menu_) remove_child(menu_);
   auto ml = std::make_unique<MenuList>();
   ml->items = items;
@@ -196,7 +203,7 @@ void ContextMenu::open(const std::vector<MenuItem>& items, PointF anchor) {
 }
 
 void ContextMenu::close() {
-  if (menu_) remove_child(menu_);  // 返回 unique_ptr 丢弃
+  if (menu_) retiring_menu_ = remove_child(menu_);  // 延后析构，防止 on_mouse 执行中销毁自身
   menu_ = nullptr;
   open_ = false;
   invalidate();

@@ -111,10 +111,14 @@ D2dRenderTarget::D2dRenderTarget(D2dContext& ctx) : ctx_(ctx) {
   set_text_engine(this);
 }
 
-D2dRenderTarget::~D2dRenderTarget() { destroy(); }
+D2dRenderTarget::~D2dRenderTarget() {
+  if (g_text_engine == this) g_text_engine = nullptr;
+  destroy();
+}
 
 // ---- HWND 后端 ----
 bool D2dRenderTarget::create_for_hwnd(HWND hwnd) {
+  set_text_engine(this);
   destroy();
   if (!ctx_.init()) return false;
   hwnd_ = hwnd;
@@ -147,6 +151,7 @@ bool D2dRenderTarget::create_for_hwnd(HWND hwnd) {
 
 // ---- WIC 离屏后端（测试/像素断言用） ----
 bool D2dRenderTarget::create_offscreen(int width_px, int height_px, float dpi) {
+  set_text_engine(this);
   destroy();
   if (!ctx_.init()) return false;
   dpi_ = dpi <= 0 ? 96.0f : dpi;

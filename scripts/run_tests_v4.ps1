@@ -21,7 +21,13 @@ if ($InPlace) {
 
 $runDir = "$env:USERPROFILE\AppData\Local\Temp\cwrun"
 New-Item -ItemType Directory -Force -Path $runDir | Out-Null
-Copy-Item (Join-Path $rel 'clashwin_test.exe') (Join-Path $runDir 'cwrun.exe') -Force
+$targetExe = Join-Path $runDir 'cwrun.exe'
+try {
+  Copy-Item (Join-Path $rel 'clashwin_test.exe') $targetExe -Force -ErrorAction Stop
+} catch {
+  $targetExe = Join-Path $runDir ("cwrun_" + (Get-Date -Format 'HHmmss') + ".exe")
+  Copy-Item (Join-Path $rel 'clashwin_test.exe') $targetExe -Force
+}
 # t08 golden live probe 需要 test core：sidecar\mini-mihomo.exe 必须跟着复制，
 #   否则 3 条用例会以 "SKIP: test core failed to start" 结束（2026-11-05）。
 Copy-Item (Join-Path $repo 'sidecar') (Join-Path $runDir 'sidecar') -Recurse -Force -ErrorAction SilentlyContinue
@@ -29,11 +35,12 @@ Copy-Item (Join-Path $rel 'locales') (Join-Path $runDir 'locales') -Recurse -For
 # t25_i18n 从仓库 assets/locales 读取 layout.json（bin/Release 下为 ../../../assets/locales）
 New-Item -ItemType Directory -Force -Path (Join-Path $runDir 'assets') | Out-Null
 Copy-Item (Join-Path $repo 'assets\locales') (Join-Path $runDir 'assets\locales') -Recurse -Force -ErrorAction SilentlyContinue
+$env:CLASHWIN_REPO_ROOT = $repo
 $env:TMP = Join-Path $runDir 'tmp'
 $env:TEMP = $env:TMP
 New-Item -ItemType Directory -Force -Path $env:TMP | Out-Null
 Get-ChildItem $env:TMP -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 Set-Location $runDir
-& '.\cwrun.exe' *> (Join-Path $logRoot 'tests_full.log')
+& $targetExe *> (Join-Path $logRoot 'tests_full.log')
 Write-Host ('EXIT=' + $LASTEXITCODE)
 exit $LASTEXITCODE

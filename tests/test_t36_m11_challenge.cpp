@@ -461,3 +461,71 @@ UT_TEST(t36_first_run_guide_input_and_step2_layout) {
   UT_CHECK(wiki_r.y >= body_bottom + 4.0f);
   UT_CHECK(wiki_r.bottom() <= star_r.bottom() - 8.0f);
 }
+
+// ---------------------------------------------------------------------------
+// 9. v0.1.2 回归：右键菜单点击捕获、分段未选中字色、皮肤双滑块响应、全量自动选点
+// ---------------------------------------------------------------------------
+UT_TEST(t36_v012_ui_and_skin_regressions) {
+  make_offscreen(271, 680, 96);
+  FirstRunGuideDialog dlg;
+  dlg.layout_tree({0, 0, 271.0f, 680.0f});
+  dlg.open();
+
+  auto* tf = dlg.url_field();
+  UT_CHECK(tf != nullptr);
+  if (!tf) return;
+  tf->set_text(L"https://example.com/sub");
+  UT_CHECK_EQ(dlg.url(), std::string("https://example.com/sub"));
+
+  // 9a) 右键菜单弹出后，点击「清空」（最后一项）必须经 route_mouse_event(Down+Up) 真正执行
+  PointF center{dlg.input_rect().x + dlg.input_rect().w * 0.5f,
+                dlg.input_rect().y + dlg.input_rect().h * 0.5f};
+  dlg.open_url_menu(center);
+  UT_CHECK(dlg.url_menu() && dlg.url_menu()->is_open());
+  if (dlg.url_menu() && dlg.url_menu()->menu()) {
+    RectF mb = dlg.url_menu()->menu()->global_bounds();
+    PointF clear_pt{mb.x + mb.w * 0.5f, mb.bottom() - 20.0f};
+    MouseEvent down_ev;
+    down_ev.type = MouseEventType::Down;
+    down_ev.pos = clear_pt;
+    down_ev.buttons = kMouseLeft;
+    route_mouse_event(&dlg, down_ev);
+
+    MouseEvent up_ev;
+    up_ev.type = MouseEventType::Up;
+    up_ev.pos = clear_pt;
+    route_mouse_event(&dlg, up_ev);
+
+    UT_CHECK(!dlg.url_menu()->is_open());
+    UT_CHECK(dlg.url().empty());
+  }
+
+  // 9b) Segmented 未选中字色：Retro3d Dark 下为深棕 #2C1F03 (alpha 0.75)，非白色
+  auto& svc = theme::ThemeService::instance();
+  svc.init(theme::SkinId::Retro3d, theme::ThemeMode::Dark);
+  auto sp_retro = svc.segmented_paint();
+  UT_CHECK(sp_retro.text.r < 0.25f);
+  UT_CHECK(near_f(sp_retro.text.a, 0.75f));
+
+  // 9c) Monochrome 皮肤 val2 (Border) 对 card/button/input 生效，radius 为 0
+  svc.init(theme::SkinId::Monochrome, theme::ThemeMode::Dark);
+  svc.set_factors(1.5f, 2.0f);
+  UT_CHECK_EQ(svc.card_paint().radius, 0.0f);
+  UT_CHECK(near_f(svc.card_paint().border_w, 2.0f));
+  UT_CHECK_EQ(svc.button_paint().radius, 0.0f);
+  UT_CHECK(near_f(svc.button_paint().border_w, 2.0f));
+  UT_CHECK_EQ(svc.input_paint().radius, 0.0f);
+  UT_CHECK_EQ(svc.segmented_paint().container_radius, 0.0f);
+
+  // 9d) FrostedGlass 皮肤 val1 (Opacity) 与 val2 (Blur) 改变面板与卡片透明度及柔和度
+  svc.init(theme::SkinId::FrostedGlass, theme::ThemeMode::Dark);
+  svc.set_factors(0.2f, 0.4f);
+  auto pp_low = svc.panel_paint();
+  auto cp_low = svc.card_paint();
+  svc.set_factors(1.8f, 1.8f);
+  auto pp_high = svc.panel_paint();
+  auto cp_high = svc.card_paint();
+  UT_CHECK(pp_high.bg.a > pp_low.bg.a);
+  UT_CHECK(pp_high.shadow_blur > pp_low.shadow_blur);
+  UT_CHECK(cp_high.shadow_blur > cp_low.shadow_blur);
+}

@@ -35,11 +35,13 @@ std::wstring system32_sc_exe() {
 }
 
 // ← service.rs:94-104：非提权走 ShellExecuteW runas（UAC），提权直接命令行
-bool shell_runas(const std::wstring& cmd) {
+bool shell_runas(const std::wstring& file, const std::wstring& params) {
   SHELLEXECUTEINFOW sei{};
   sei.cbSize = sizeof(sei);
   sei.lpVerb = L"runas";
-  sei.lpFile = cmd.c_str();
+  sei.hwnd = ::GetForegroundWindow();
+  sei.lpFile = file.c_str();
+  sei.lpParameters = params.empty() ? nullptr : params.c_str();
   sei.nShow = SW_HIDE;
   sei.fMask = SEE_MASK_NOCLOSEPROCESS;
   if (!::ShellExecuteExW(&sei)) return false;
@@ -138,19 +140,22 @@ Result<void> start_service() {
       DWORD gle = ::GetLastError();
       ::CloseServiceHandle(svc);
       ::CloseServiceHandle(scm);
-      if (ok) return Result<void>::ok();
+      if (ok || gle == ERROR_SERVICE_ALREADY_RUNNING) return Result<void>::ok();
       if (gle != ERROR_ACCESS_DENIED) {
         return Result<void>::err({2310, werr("StartServiceW", gle)});
       }
     } else {
       DWORD gle = ::GetLastError();
       ::CloseServiceHandle(scm);
-      return Result<void>::err({2311, werr("OpenServiceW", gle)});
+      if (gle != ERROR_ACCESS_DENIED) {
+        return Result<void>::err({2311, werr("OpenServiceW", gle)});
+      }
     }
   }
   // 提权回退（UAC 弹窗；F-07：System32 绝对路径）
-  std::wstring cmd = L"\"" + system32_sc_exe() + L"\" start " + std::wstring(kServiceNameW);
-  if (!shell_runas(cmd)) {
+  std::wstring params = L"start " + std::wstring(kServiceNameW);
+  if (!shell_runas(system32_sc_exe(), params)) {
+  // runas check above
     return Result<void>::err({2312, "sc.exe start (runas) failed or cancelled"});
   }
   return Result<void>::ok();

@@ -60,7 +60,10 @@ Result<void> DefaultServiceCommandRunner::run_installer(bool install) {
   SHELLEXECUTEINFOW sei{};
   sei.cbSize = sizeof(sei);
   sei.lpVerb = L"runas";  // UAC 用户确认
+  const std::wstring work_dir = std::filesystem::path(exe).parent_path().wstring();
+  sei.hwnd = ::GetForegroundWindow();
   sei.lpFile = exe.c_str();
+  sei.lpDirectory = work_dir.c_str();
   sei.nShow = SW_HIDE;
   sei.fMask = SEE_MASK_NOCLOSEPROCESS;
   if (!ShellExecuteExW(&sei)) {

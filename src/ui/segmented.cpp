@@ -88,6 +88,10 @@ int Segmented::hit_segment(const PointF& local) const {
 }
 
 bool Segmented::on_mouse(const MouseEvent& e) {
+  if (e.type == MouseEventType::Leave) {
+    if (hover_ != -1) { hover_ = -1; invalidate(); }
+    return false;
+  }
   if (e.type == MouseEventType::Move) {
     int idx = hit_segment(e.pos);
     if (hover_ != idx) {
@@ -100,6 +104,7 @@ bool Segmented::on_mouse(const MouseEvent& e) {
     int idx = hit_segment(e.pos);
     if (idx >= 0) {
       pressed_ = idx;
+      invalidate();
       return true;
     }
   } else if (e.type == MouseEventType::Up) {
@@ -175,12 +180,23 @@ void Segmented::on_paint(IRenderTarget& rt) {
                                           ? 0.35f
                                           : 0.22f);
   // 容器 inset 内凹阴影（← :934-938 retro-3d）
-  if (cont_inset)
+  rt.round_rect(r, cont_radius, {Color4f(0, 0, 0, 0), 0.0f}, &bg);
+  if (cont_inset) {
     draw_top_inset_shadow(rt, r, cont_radius, cont_inset_color, cont_inset_dy,
                           cont_inset_blur);
-  rt.round_rect(r, cont_radius, {border_c, cont_bw}, &bg);
+    // src: button-styles.ts:934-938 inset 0 3d 5d 轨道四周内凹阴影（含左/右内边界阴影）
+    draw_inner_glow(rt, r, cont_radius,
+                    Color4f{cont_inset_color.r, cont_inset_color.g,
+                            cont_inset_color.b, cont_inset_color.a * 0.65f},
+                    cont_inset_blur * 0.75f, 4);
+  }
+  rt.round_rect(r, cont_radius, {border_c, cont_bw}, nullptr);
   // 容器顶部高光线（← 0 1px 0 rgba(255,255,255,.8|.08)）
   if (cont_top_hi.a > 0.004f)
+    rt.draw_line({r.x + cont_radius, r.bottom() + 0.5f},
+                 {r.right() - cont_radius, r.bottom() + 0.5f},
+                 Pen{cont_top_hi, 1.0f});
+  if (false)
     rt.draw_line({r.x + cont_radius, r.y + 0.5f},
                  {r.right() - cont_radius, r.y + 0.5f},
                  Pen{cont_top_hi, 1.0f});
@@ -237,7 +253,15 @@ void Segmented::on_paint(IRenderTarget& rt) {
       }
     }
     TextStyle ts = style_;
-    ts.color = sel ? act_txt : txt_c;
+    // src: routing-preference-card.tsx:110-137 未选中态 hover/active 文字色
+    const bool rd = theme::ThemeService::instance().skin() == theme::SkinId::Retro3d &&
+                    !theme::ThemeService::instance().is_light();
+    Color4f seg_txt = sel ? act_txt : txt_c;
+    if (!sel && rd) {
+      if (pressed_ == i) seg_txt = Color4f::hex(0x2C1F03, 0.5f);
+      else if (hover_ == i) seg_txt = Color4f::hex(0x2C1F03);
+    }
+    ts.color = seg_txt;
     ts.weight = static_cast<int>(Weight::Bold);  // src: routing-preference-card.tsx:120
     ts.align_h = AlignH::Center;
     ts.align_v = AlignV::Center;

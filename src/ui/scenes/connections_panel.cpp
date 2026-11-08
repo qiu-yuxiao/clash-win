@@ -181,6 +181,9 @@ ConnectionsPanel::ConnectionsPanel(Widget* parent) : Widget(parent) {
   // 清空按钮（opt-in）：src: connections-panel.tsx:182 BaseSearchBox
   //   → base-search-box.tsx:121-140 endAdornment ClearRounded / resetInput tooltip
   search_->set_clear_button(true, tr("shared.placeholders.resetInput"));
+  search_->apply_theme();
+  search_->style_.size = 12;
+  search_->caret_color_ = search_->style_.color;
   search_->on_text_changed = [this](const std::wstring& text) {
     set_filter(utf::utf16_to_utf8(text));
   };
@@ -550,16 +553,21 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   float seg_h = 18.0f;
   const auto sp = theme.segmented_paint();
   const float cont_radius = sp.container_radius > 0.01f ? sp.container_radius : 4.0f;
+  if (search_) {
+    search_->apply_theme();
+    search_->style_.size = 12;
+    search_->caret_color_ = search_->style_.color;
+  }
   RectF cont_r{seg_x, 2.0f, seg_w, seg_h};
+  Brush cont_bg{sp.container_bg};
+  rt.round_rect(cont_r, cont_radius, Pen{sp.container_border, 1.0f}, &cont_bg);
   if (sp.container_inset) {
     draw_top_inset_shadow(rt, cont_r, cont_radius, sp.container_inset_color,
                           sp.container_inset_dy, sp.container_inset_blur);
   }
-  Brush cont_bg{sp.container_bg};
-  rt.round_rect(cont_r, cont_radius, Pen{sp.container_border, 1.0f}, &cont_bg);
   if (sp.container_top_hi.a > 0.004f) {
-    rt.draw_line({cont_r.x + cont_radius, cont_r.y + 0.5f},
-                 {cont_r.right() - cont_radius, cont_r.y + 0.5f},
+    rt.draw_line({cont_r.x + cont_radius, cont_r.bottom() + 0.5f},
+                 {cont_r.right() - cont_radius, cont_r.bottom() + 0.5f},
                  Pen{sp.container_top_hi, 1.0f});
   }
 

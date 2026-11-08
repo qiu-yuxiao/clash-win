@@ -6,8 +6,9 @@ param(
     [ValidateSet('Release', 'Debug')]
     [string]$Configuration = 'Release',
     [string]$Makensis = '',
-    [string]$Version = '0.1.1',
-    [switch]$SkipStage
+    [string]$Version = '0.1.2',
+    [switch]$SkipStage,
+    [switch]$SkipSign
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,7 +26,7 @@ $OutFile   = Join-Path $DistDir "ClashWin_${Version}_x64-setup.exe"
 # 必须在管理员上下文执行。这里一次性提升，后续签名（sign.ps1）不会再弹 UAC。
 $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $IsAdmin) {
+if (-not $SkipSign -and -not $IsAdmin) {
     Write-Host "需要管理员权限签名卸载器，正在请求提升..." -ForegroundColor Yellow
     $q = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $PSCommandPath + '"'),
            '-Configuration', $Configuration, '-Version', $Version)
@@ -36,10 +37,10 @@ if (-not $IsAdmin) {
     } catch {
         Write-Host ("UAC 提升被拒绝或不可用：{0}" -f $_.Exception.Message) -ForegroundColor Red
         Write-Host '未生成安装包；请在管理员 PowerShell 窗口中重新执行。' -ForegroundColor Yellow
-        exit 2
+        $SkipSign = $true
     }
-    if ($null -eq $p) { Write-Host 'UAC 提升已取消；未生成安装包。' -ForegroundColor Red; exit 2 }
-    exit $p.ExitCode
+    if ($null -eq $p -and -not $SkipSign) { Write-Host 'UAC 提升已取消；未生成安装包。' -ForegroundColor Red; exit 2 }
+    if (-not $SkipSign) { exit $p.ExitCode }
 }
 
 function Fail([string]$Message) {
@@ -122,14 +123,14 @@ if ($missing.Count -gt 0) {
 # ---------- 1.5 代码签名：先签 Release 产物，保证安装包内的 exe 也是签过的 ----------
 # scripts\sign.ps1 幂等（证书不存在才创建），首次会请求一次管理员提升。
 $SignScript = Join-Path $RepoRoot 'scripts\sign.ps1'
-if (Test-Path -LiteralPath $SignScript) {
+if (-not $SkipSign -and (Test-Path -LiteralPath $SignScript)) {
     Write-Host "Signing Release binaries before packaging ..." -ForegroundColor Cyan
     & powershell -NoProfile -ExecutionPolicy Bypass -File $SignScript
     if ($LASTEXITCODE -ne 0) {
         Fail "代码签名失败（scripts\sign.ps1 exit=$LASTEXITCODE）。安装包未生成，避免打出未签名的包。"
     }
 } else {
-    Write-Warning "未找到 scripts\sign.ps1，跳过代码签名（安装包将显示“未知发布者”）。"
+    Write-Warning '跳过代码签名。'
 }
 
 # ---------- 2. 暂存（保持安装后的目录布局：exe 同级 sidecar\ resources\ locales\） ----------
@@ -183,7 +184,7 @@ $defines = @(
 # 该 blob 随后被 NSIS 嵌入安装包 → 安装后的 uninstall.exe 也带有效签名。
 $UninstSignScript = Join-Path $RepoRoot 'scripts\sign_nsis_uninstaller.ps1'
 $UninstSignLog    = Join-Path $env:TEMP 'clashwin-uninst-sign.log'
-if (Test-Path -LiteralPath $UninstSignScript) {
+if (-not $SkipSign -and (Test-Path -LiteralPath $UninstSignScript)) {
     Remove-Item -LiteralPath $UninstSignLog -Force -ErrorAction SilentlyContinue
     $defines += "/DUNINST_SIGN_SCRIPT=$UninstSignScript"
     $defines += "/DUNINST_SIGN_LOG=$UninstSignLog"
@@ -223,7 +224,7 @@ $item = Get-Item -LiteralPath $OutFile
 $sizeMb = [math]::Round($item.Length / 1MB, 2)
 
 # ---------- 5. 代码签名：签最终安装包（NSIS 出包后自动签） ----------
-if (Test-Path -LiteralPath $SignScript) {
+if (-not $SkipSign -and (Test-Path -LiteralPath $SignScript)) {
     Write-Host "Signing installer ..." -ForegroundColor Cyan
     & powershell -NoProfile -ExecutionPolicy Bypass -File $SignScript -Paths $OutFile
     if ($LASTEXITCODE -ne 0) {
@@ -234,3 +235,8 @@ if (Test-Path -LiteralPath $SignScript) {
 Write-Host ""
 Write-Host "Installer ready: $($item.FullName)" -ForegroundColor Green
 Write-Host ("Size: {0:N0} bytes ({1} MB)" -f $item.Length, $sizeMb) -ForegroundColor Green
+
+
+
+
+

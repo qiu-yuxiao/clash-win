@@ -141,6 +141,26 @@ std::optional<std::pair<double, double>> LargeModeController::load(
 }
 
 // ---------- 创建 ----------
+MainWindow::MainWindow() = default;
+
+MainWindow::~MainWindow() {
+  if (theme_sub_) {
+    theme::ThemeService::instance().unsubscribe(theme_sub_);
+    theme_sub_ = 0;
+  }
+  if (postbox_sub_delay_) {
+    UiPostbox::instance().unsubscribe(postbox_sub_delay_);
+    postbox_sub_delay_ = 0;
+  }
+  if (postbox_sub_refresh_) {
+    UiPostbox::instance().unsubscribe(postbox_sub_refresh_);
+    postbox_sub_refresh_ = 0;
+  }
+  if (frame_clock() == &clock_) {
+    set_frame_clock(nullptr);
+  }
+}
+
 bool MainWindow::create(bool show_immediately) {
   // UI 线程标记：通知可能由后台线程 push，SnackbarW 据此决定是否转投 UI 线程
   UiPostbox::instance().mark_ui_thread();
@@ -245,6 +265,23 @@ bool MainWindow::init_window_class() {
   wc.lpfnWndProc = &MainWindow::wndproc;
   wc.hInstance = GetModuleHandleW(nullptr);
   wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+  const std::wstring ico_path = clashwin::util::dirs::app_resources_dir() + L"\\icons\\icon.ico";
+  wc.hIcon = static_cast<HICON>(LoadImageW(
+      wc.hInstance, MAKEINTRESOURCEW(1), IMAGE_ICON,
+      GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
+  if (!wc.hIcon) {
+    wc.hIcon = static_cast<HICON>(LoadImageW(
+        nullptr, ico_path.c_str(), IMAGE_ICON,
+        GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_LOADFROMFILE));
+  }
+  wc.hIconSm = static_cast<HICON>(LoadImageW(
+      wc.hInstance, MAKEINTRESOURCEW(1), IMAGE_ICON,
+      GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+  if (!wc.hIconSm) {
+    wc.hIconSm = static_cast<HICON>(LoadImageW(
+        nullptr, ico_path.c_str(), IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_LOADFROMFILE));
+  }
   wc.lpszClassName = kWndClass;
   if (!RegisterClassExW(&wc)) {
     DWORD err = GetLastError();
@@ -277,6 +314,28 @@ bool MainWindow::create_hwnd() {
       0, kWndClass, win_title.c_str(),
       WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_SYSMENU,
       x, y, w, h, nullptr, nullptr, GetModuleHandleW(nullptr), this);
+  {
+    HINSTANCE hinst = GetModuleHandleW(nullptr);
+    const std::wstring ico_path = clashwin::util::dirs::app_resources_dir() + L"\\icons\\icon.ico";
+    HICON hbig = static_cast<HICON>(LoadImageW(
+        hinst, MAKEINTRESOURCEW(1), IMAGE_ICON,
+        GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
+    if (!hbig) {
+      hbig = static_cast<HICON>(LoadImageW(
+          nullptr, ico_path.c_str(), IMAGE_ICON,
+          GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_LOADFROMFILE));
+    }
+    HICON hsm = static_cast<HICON>(LoadImageW(
+        hinst, MAKEINTRESOURCEW(1), IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+    if (!hsm) {
+      hsm = static_cast<HICON>(LoadImageW(
+          nullptr, ico_path.c_str(), IMAGE_ICON,
+          GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_LOADFROMFILE));
+    }
+    if (hwnd_ && hbig) SendMessageW(hwnd_, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(hbig));
+    if (hwnd_ && hsm) SendMessageW(hwnd_, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(hsm));
+  }
   if (!hwnd_) {
     CWLOG_ERROR(std::format("MainWindow: CreateWindowExW 失败 0x{:08X}",
                             static_cast<unsigned>(GetLastError())));
@@ -452,7 +511,67 @@ void MainWindow::reload_nodes() {
     //   （内核并行测全组，~5s），放后台线程防 UI 冻结；结果经
     //   backend-delay-results 事件回灌局部刷新。仅捕获组名，无 this 悬垂。
     static std::atomic<bool> group_probing{false};
-    if (!group_probing.exchange(true)) {
+    static std::atomic<int> probe_pending{0};
+    if (!node_data_->rows().empty()) {
+      std::vector<std::string> untested;
+      for (const auto& row : node_data_->rows()) {
+        if (node_data_->row_delay(row.name) == -1) untested.push_back(row.name);
+      }
+      if (!untested.empty()) node_data_->set_delays_batch(untested, -2);
+      probe_pending.fetch_add(1);
+      if (!group_probing.exchange(true)) {
+        std::string grp = node_data_->group();
+        std::thread([this, grp] {
+          while (probe_pending.exchange(0) > 0) {
+            std::string uid;
+            try {
+              if (auto p = config::Config::instance().profiles().latest_arc();
+                  p && p->current) {
+                uid = *p->current;
+              }
+            } catch (...) {}
+            bool auto_ok = false;
+            if (!uid.empty()) {
+              auto ar = cmd::CommandService::instance().invoke(
+                  "trigger_auto_select",
+                  nlohmann::json::object(
+                      {{"profile_uid", uid}, {"sort_type", 0}, {"select", true}}));
+              if (ar.is_ok() && ar.value().is_array() && !ar.value().empty()) {
+                auto_ok = true;
+              }
+            }
+            if (!auto_ok) {
+              auto r = cmd::mihomo();
+              if (r.is_ok()) {
+                std::string url = "https://cp.cloudflare.com/generate_204";
+                try {
+                  const auto& verge =
+                      *config::Config::instance().verge().latest_arc();
+                  url = verge.default_latency_test.value_or(url);
+                } catch (...) {}
+                auto dr = r.value()->delay_group(grp, url, 5000);
+                if (dr.is_ok()) {
+                  std::vector<std::pair<std::string, uint32_t>> vec;
+                  for (const auto& [name, ms] : dr.value())
+                    vec.emplace_back(name, ms);
+                  events::EventBus::backend_delay_results(grp, vec);
+                }
+              }
+            }
+            UiPostbox::instance().post([this] {
+              if (!node_data_ || !quick_bar_) return;
+              node_data_->load();
+              const std::string cur = node_data_->now();
+              quick_bar_->set_node_text(
+                  utf::utf8_to_utf16(cur.empty() ? "暂无激活的代理节点" : cur));
+              quick_bar_->set_badge(node_data_->row_delay(cur), !cur.empty());
+            });
+          }
+          group_probing.store(false);
+        }).detach();
+      }
+    }
+    if (false) {
       std::string grp = node_data_->group();
       std::thread([grp] {
         auto r = cmd::mihomo();
@@ -655,7 +774,7 @@ void MainWindow::build_scene() {
   reload_nodes();
 
   // 延迟结果事件：局部刷新（← backend-delay-results {group, results}）
-  UiPostbox::instance().subscribe_ui(
+  postbox_sub_delay_ = UiPostbox::instance().subscribe_ui(
       events::names::kBackendDelayResults, [this](const nlohmann::json& p) {
         node_data_->apply_delay_results(p);
         quick_bar_->set_node_text(utf::utf8_to_utf16(
@@ -664,7 +783,7 @@ void MainWindow::build_scene() {
                               !node_data_->now().empty());
       });
   // 配置/代理刷新事件：全量重载
-  UiPostbox::instance().subscribe_ui(
+  postbox_sub_refresh_ = UiPostbox::instance().subscribe_ui(
       events::names::kRefreshClash, [this](const nlohmann::json&) {
         node_retry_left_ = 8;
         reload_nodes();
@@ -835,6 +954,7 @@ void MainWindow::build_scene() {
                            tr8("layout.notices.tunServiceConfigFailed"));
               return false;
             }
+            svc.invoke("restart_core");
           }
           auto r = svc.invoke(
               "patch_verge_config",
@@ -887,13 +1007,37 @@ void MainWindow::build_scene() {
       return false;
     };
     settings_drawer_->on_import_profile =
-        [](const std::string& url, const std::string& name) {
+        [this](const std::string& url, const std::string& name) {
           nlohmann::json args = nlohmann::json::object({{"url", url}});
           if (!name.empty()) args["name"] = name;
+          bool used_proxy = false;
           auto r = cmd::CommandService::instance().invoke("import_profile", args);
+          if (!r.is_ok()) {
+            // src: _layout.tsx:853 首次导入失败尝试 Clash 代理重试
+            args["option"] = nlohmann::json::object(
+                {{"with_proxy", false}, {"self_proxy", true}});
+            r = cmd::CommandService::instance().invoke("import_profile", args);
+            used_proxy = true;
+          }
           if (r.is_ok()) {
             events::NoticeService::instance().push(
-                "success", tr8("shared.feedback.notifications.importSuccess"));
+                "success",
+                tr8(used_proxy
+                        ? "shared.feedback.notifications.importWithClashProxy"
+                        : "shared.feedback.notifications.importSuccess"));
+            std::string new_uid;
+            if (r.value().is_object()) {
+              new_uid = r.value().value("uid", std::string());
+            }
+            if (!new_uid.empty()) {
+              auto cur = config::Config::instance().profiles().latest_arc()->current;
+              if (!cur || *cur != new_uid) {
+                cmd::CommandService::instance().invoke(
+                    "patch_profiles_config",
+                    nlohmann::json::object({{"current", new_uid}}));
+              }
+            }
+            reload_nodes();
             return true;
           }
           events::NoticeService::instance().push("error", r.error().message);
@@ -1199,9 +1343,30 @@ void MainWindow::build_scene() {
       auto fr = std::make_unique<scene::FirstRunGuideDialog>();
       first_run_ = fr.get();
       fr->set_z_order(980);
-      fr->on_import = [](const std::string& url) {
+      fr->on_import = [this](const std::string& url) {
         auto r = cmd::CommandService::instance().invoke(
             "import_profile", nlohmann::json::object({{"url", url}}));
+        if (!r.is_ok()) {
+          r = cmd::CommandService::instance().invoke(
+              "import_profile",
+              nlohmann::json::object(
+                  {{"url", url},
+                   {"option", {{"with_proxy", false}, {"self_proxy", true}}}}));
+        }
+        if (r.is_ok()) {
+          if (r.value().is_object()) {
+            std::string new_uid = r.value().value("uid", std::string());
+            if (!new_uid.empty()) {
+              auto cur = config::Config::instance().profiles().latest_arc()->current;
+              if (!cur || *cur != new_uid) {
+                cmd::CommandService::instance().invoke(
+                    "patch_profiles_config",
+                    nlohmann::json::object({{"current", new_uid}}));
+              }
+            }
+          }
+          reload_nodes();
+        }
         return r.is_ok();
       };
       // src: :236-245 就绪步轮询 refreshProxy（getProxies 全量重载）

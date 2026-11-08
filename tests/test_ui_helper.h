@@ -28,6 +28,7 @@ inline D2dRenderTarget& rt() {
 
 // 建离屏 target（WIC 软件渲染，dpi 模拟 96/144）
 inline bool make_offscreen(int w = 200, int h = 100, float dpi = 96.0f) {
+  set_text_engine(&rt());
   return rt().create_offscreen(w, h, dpi);
 }
 

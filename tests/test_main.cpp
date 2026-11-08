@@ -8,6 +8,7 @@
 #include <filesystem>
 
 #include "test_util.h"
+#include "ui/widget.h"
 
 int main(int argc, char** argv) {
   // 无缓冲输出：崩溃/段错误时不丢失已完成用例的进度
@@ -37,6 +38,7 @@ int main(int argc, char** argv) {
     std::wstring case_root_w = case_root.wstring();
     _wputenv_s(L"CLASHWIN_HOME_OVERRIDE", case_root_w.c_str());
 
+    clashwin::ui::clear_input_state();
     int before = testfw::failures();
     try {
       c.fn();

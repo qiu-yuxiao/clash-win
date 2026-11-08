@@ -26,6 +26,7 @@ constexpr uint64_t kAppIconBitmapId = 0x41707049636F6E31ULL;  // "AppIcon1"
 bool register_app_icon(D2dRenderTarget& rt) {
   namespace fs = std::filesystem;
   using Microsoft::WRL::ComPtr;
+  CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
   ComPtr<IWICImagingFactory> wic;
   HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory2, nullptr,
                                 CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic));

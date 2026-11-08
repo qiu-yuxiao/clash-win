@@ -423,7 +423,7 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   search_->apply_theme();
   search_->style_.size = 11;
   search_->caret_color_ = search_->style_.color;
-  search_->radius_ = 4;  // ← MUI shape.borderRadius（get3DInputStyle 未覆盖）
+  // search_->radius_ 由 apply_theme() 按皮肤设置（4*g / 6*g / 8*g）
   search_->height_ = 26;
   // 清空按钮（opt-in）：src: base-search-box.tsx:121-140
   //   ClearRounded 18 / pr 4 / 空值 opacity .5 + disabled / Tooltip resetInput
@@ -537,7 +537,7 @@ void NodeList::restyle_theme() {
     search_->apply_theme();
     search_->style_.size = 11;
     search_->caret_color_ = search_->style_.color;
-    search_->radius_ = 4;  // ← MUI shape.borderRadius（get3DInputStyle 未覆盖）
+    // search_->radius_ 由 apply_theme() 按皮肤设置（4*g / 6*g / 8*g）
   }
   invalidate();
 }
@@ -667,6 +667,15 @@ void NodeList::on_paint(IRenderTarget& rt) {
   const bool light = svc.is_light();
   // 【UIFIX】局部坐标约定 {0,0,w,h}；底色 = list_bg（主题变量）
   const float w = bounds().w, h = bounds().h;
+  if (search_) {
+    search_->apply_theme();
+    search_->style_.size = 11;
+    search_->caret_color_ = search_->style_.color;
+  }
+  if (bolt_btn_) bolt_btn_->color_ = svc.palette().primary_text;
+  if (sort_btn_) sort_btn_->color_ = svc.palette().primary_text;
+  if (empty_icon_) empty_icon_->color_ = svc.palette().primary_text;
+  if (empty_label_) empty_label_->style.color = svc.palette().primary_text;
   rt.fill_rect({0, 0, w, h}, Brush{vars.list_bg});
   // theme-panel 外框 ← src: proxy-groups.tsx:383「className="theme-panel"」+
   //   index.scss:75「border: 4px double var(--theme-border)」/:125「4px double #B8860B」
@@ -725,6 +734,7 @@ void NodeList::on_paint(IRenderTarget& rt) {
     // 与极光层同一时间基准：进程启动毫秒数（GetTickCount64，windows.h 已引入）
     const float now_s = static_cast<float>(GetTickCount64()) / 1000.0f;
     bc = Color4f::lerp(pp.pulse_from, pp.pulse_to, svc.pulse_phase(now_s));
+    invalidate();
   }
   // 线宽取 1.34 逻辑 px ≈ 2 物理 px：CSS「4px double」的单边在 1.5× DPI 下正好是
   //   2 物理 px 满色；若按 1 逻辑 px 画，D2D 抗锯齿会把它摊成两半，观感明显偏暗。

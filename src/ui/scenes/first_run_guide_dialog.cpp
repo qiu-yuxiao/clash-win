@@ -602,7 +602,7 @@ float FirstRunGuideDialog::layout_pills(float pills_y, float inner_x, float inne
 
 void FirstRunGuideDialog::on_arrange(const RectF& area) {
   set_bounds(area);
-  if (url_menu_) url_menu_->layout_tree({0, 0, area.w, area.h});
+  if (url_menu_) url_menu_->set_bounds({0, 0, area.w, area.h});
   set_bounds(area);
   // src: :545-557 paper width 100% / maxWidth 520（窗口侧留 32px 呼吸）
   const float cw = std::min(kCardMaxW, area.w - 32.0f);
@@ -712,11 +712,11 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     banner_clip_rect_ = {inner_x, pills_y + pills_h_ + kPillMb, inner_w, kBannerH};
     input_rect_ = {inner_x, field_y, inner_w, kFieldH};
     // 订阅链接 TextField：占满输入框宽，右留 26px 给回车图标（src: endAdornment）
-    if (url_field_) {
-      url_field_->set_visible(true);
+      if (url_field_) {
+      url_field_->set_visible(open_);
       url_field_->set_bounds({input_rect_.x, field_y, inner_w, kFieldH});
     }
-    // src: :715-729 endAdornment KeyboardReturn 16px（点击即导入）
+      // src: :715-729 endAdornment KeyboardReturn 16px（点击即导入）
     btn_enter_rect_ = {input_rect_.right() - 26.0f, field_y + 12.0f, 16.0f, 16.0f};
 
     const float paste_y = field_y + kFieldH + kPasteMt;
@@ -1093,7 +1093,12 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
       }
       if (btn_paste_rect_.contains(pt.x, pt.y)) {
         std::string clip = read_clipboard_url();
-        if (!clip.empty()) set_url(clip);
+        if (!clip.empty()) {
+          set_url(clip);
+        } else if (url_field_) {
+          url_field_->clear_text();
+          url_field_->paste();
+        }
         if (url_field_) url_field_->request_focus();
         return true;
       }
@@ -1219,8 +1224,8 @@ void FirstRunGuideDialog::open_url_menu(PointF anchor) {
 
   // 5 项 + 1 分隔线：src: _layout.tsx:1886-1931（文案 zh: shared.json:27-31）
   std::vector<MenuItem> its;
-  its.push_back({L"✂️ " + tr("shared.actions.cut"), !f->can_cut(), false, L"", false});
-  its.push_back({L"📋 " + tr("shared.actions.copy"), !f->can_copy(), false, L"", false});
+  its.push_back({L"✂️ " + tr("shared.actions.cut"), !f->can_clear(), false, L"", false});
+  its.push_back({L"📋 " + tr("shared.actions.copy"), !f->can_clear(), false, L"", false});
   its.push_back({L"📥 " + tr("shared.actions.paste"), !f->can_paste(), false, L"", false});
   its.push_back({L"🔍 " + tr("shared.actions.selectAll"), !f->can_select_all(), false, L"", false});
   its.push_back({L"", false, true, L"", false});
@@ -1229,8 +1234,8 @@ void FirstRunGuideDialog::open_url_menu(PointF anchor) {
   url_menu_->style_ = st;
   url_menu_->on_select = [f](int idx) {
     switch (idx) {
-      case 0: f->cut(); break;
-      case 1: f->copy(); break;
+      case 0: if (!f->can_cut()) f->select_all(); f->cut(); break;
+      case 1: if (!f->can_copy()) f->select_all(); f->copy(); break;
       case 2: f->paste(); break;
       case 3: f->select_all(); break;
       case 5: f->clear_text(); break;

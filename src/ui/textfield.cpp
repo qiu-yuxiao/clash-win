@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 #include "soft_shadow.h"
@@ -19,6 +20,38 @@ std::function<std::wstring()>& clip_get() {
 std::function<void(const std::wstring&)>& clip_set() {
   static std::function<void(const std::wstring&)> f;
   return f;
+}
+std::wstring clip_get_str() {
+  if (clip_get()) return clip_get()();
+  if (!OpenClipboard(nullptr)) return L"";
+  std::wstring out;
+  if (HANDLE h = GetClipboardData(CF_UNICODETEXT)) {
+    if (const auto* p = static_cast<const wchar_t*>(GlobalLock(h))) {
+      out = p;
+      GlobalUnlock(h);
+    }
+  }
+  CloseClipboard();
+  return out;
+}
+void clip_set_str(const std::wstring& s) {
+  if (clip_set()) {
+    clip_set()(s);
+    return;
+  }
+  if (!OpenClipboard(nullptr)) return;
+  EmptyClipboard();
+  const size_t bytes = (s.size() + 1) * sizeof(wchar_t);
+  if (HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, bytes)) {
+    if (auto* p = static_cast<wchar_t*>(GlobalLock(h))) {
+      memcpy(p, s.c_str(), bytes);
+      GlobalUnlock(h);
+      SetClipboardData(CF_UNICODETEXT, h);
+    } else {
+      GlobalFree(h);
+    }
+  }
+  CloseClipboard();
 }
 }  // namespace
 
@@ -76,18 +109,18 @@ bool TextField::can_clear() const { return !text_.empty(); }
 
 void TextField::cut() {
   if (!has_selection()) return;
-  if (clip_set()) clip_set()(selection());
+  clip_set_str(selection());
   erase_selection();
 }
 
 void TextField::copy() {
   if (!has_selection()) return;
-  if (clip_set()) clip_set()(selection());
+  clip_set_str(selection());
 }
 
 void TextField::paste() {
-  if (!clip_get()) return;
-  std::wstring s = clip_get()();
+  std::wstring s = clip_get_str();
+  // clipboard read handled above
   s.erase(std::remove(s.begin(), s.end(), L'\r'), s.end());
   s.erase(std::remove(s.begin(), s.end(), L'\n'), s.end());
   if (!s.empty()) insert_text(s);
@@ -190,14 +223,14 @@ bool TextField::on_key(const KeyEvent& e) {
       }
       return false;
     case 'C':
-      if (e.ctrl && has_sel && clip_set()) {
-        clip_set()(selection());
+      if (e.ctrl && has_sel) {
+        clip_set_str(selection());
         return true;
       }
       return false;
     case 'V':
-      if (e.ctrl && clip_get()) {
-        std::wstring s = clip_get()();
+      if (e.ctrl) {
+        std::wstring s = clip_get_str();
         s.erase(std::remove(s.begin(), s.end(), L'\r'), s.end());
         s.erase(std::remove(s.begin(), s.end(), L'\n'), s.end());
         if (!s.empty()) insert_text(s);
@@ -205,8 +238,8 @@ bool TextField::on_key(const KeyEvent& e) {
       }
       return false;
     case 'X':
-      if (e.ctrl && has_sel && clip_set()) {
-        clip_set()(selection());
+      if (e.ctrl && has_sel) {
+        clip_set_str(selection());
         erase_selection();
         return true;
       }
@@ -267,6 +300,12 @@ bool TextField::on_mouse(const MouseEvent& e) {
     if (right_pad_ > 0) {
       bool eh = e.pos.x >= bounds().w - right_pad_;
       if (eh != enter_hover_) { enter_hover_ = eh; invalidate(); }
+    }
+    if ((e.buttons & kMouseLeft) && focused()) {
+      cursor_ = hit_index(e.pos.x);
+      clamp_scroll();
+      invalidate();
+      return true;
     }
     if (clear_button_) {
       bool h = !text_.empty() && clear_button_rect().contains(e.pos.x, e.pos.y);
@@ -421,14 +460,17 @@ void TextField::on_paint(IRenderTarget& rt) {
       sx0 = x0 - scroll_x_;
       sx1 = x1 - scroll_x_;
       Brush sel_b{selection_bg_};
-      rt.fill_rect({sx0, 3, sx1 - sx0, r.h - 6}, sel_b);
+      // src: profile-import-card.tsx:145-165 单行行高 13px * 1.4375
+      const float sel_h = std::min(r.h - 6.0f, std::round(ts.size * 1.4375f));
+      const float sel_y = multiline_ ? 4.0f : (r.h - sel_h) * 0.5f;
+      rt.fill_rect({sx0, sel_y, sx1 - sx0, sel_h}, sel_b);
     }
     // 文本 / composition 预编辑串
     const RectF text_rect{text_r.x - scroll_x_, 0, text_r.w, r.h};
     if (!composition_.empty()) {
       rt.draw_text(composition_, text_rect, ts);
     } else {
-      if (multiline_ && !focused()) {
+      if (multiline_) {
         // src: profile-import-card.tsx:140-165 multiline minRows=2, py='4px'
         TextStyle mts = ts;
         mts.wrap = true;
@@ -463,7 +505,33 @@ void TextField::on_paint(IRenderTarget& rt) {
                   scroll_x_;
       }
     }
-    rt.fill_rect({cx, 5, 1.5f, r.h - 10}, Brush{caret_color_});
+    // src: profile-import-card.tsx:145-165 单行行高 13px * 1.4375，multiline 时光标按折行落位且保持单行高度
+    const float line_h = std::min(r.h - 6.0f, std::round(ts.size * 1.4375f));
+    float cy = multiline_ ? 4.0f : std::max(3.0f, (r.h - line_h) * 0.5f);
+    if (multiline_ && composition_.empty() && text_r.w > 16.0f) {
+      if (ITextEngine* eng = text_engine()) {
+        int line_start = 0;
+        int line_idx = 0;
+        for (int i = 1; i <= cursor_; ++i) {
+          float w = eng->measure_text(
+              text_.substr(static_cast<size_t>(line_start),
+                           static_cast<size_t>(i - line_start)),
+              ts, 0).w;
+          if (w > text_r.w && i - 1 > line_start) {
+            line_start = i - 1;
+            ++line_idx;
+          }
+        }
+        const int max_line = std::max(0, static_cast<int>((r.h - 8.0f) / line_h) - 1);
+        line_idx = std::min(line_idx, max_line);
+        cy = 4.0f + static_cast<float>(line_idx) * line_h;
+        cx = 8.0f + eng->measure_text(
+                        text_.substr(static_cast<size_t>(line_start),
+                                     static_cast<size_t>(cursor_ - line_start)),
+                        ts, 0).w;
+      }
+    }
+    rt.fill_rect({cx, cy, 1.5f, line_h}, Brush{caret_color_});
   }
 
   // ✕ 清空按钮：空值 opacity .5（disabled），非空 1.0，悬停提亮

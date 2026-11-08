@@ -237,6 +237,7 @@ ProfileImportCard::ProfileImportCard(Widget* parent) : Widget(parent) {
   // 【保留】MUI OutlinedInput 缺省 radius 4：original/modern 由 apply_theme 给出
   //   8*d/6*d 更接近源码，此处不再覆盖。
   // 右键：5 项编辑命令菜单（_layout.tsx:1859-1932）
+  url_field_->on_submit = [this] { do_import(); };
   url_field_->on_context_menu = [this](PointF anchor) {
     if (on_url_context_menu) on_url_context_menu(anchor);
   };
@@ -290,7 +291,10 @@ void ProfileImportCard::do_import() {
   //   解析在命令链路（from_url → from_url_direct）完成。此处仅要求非空。
   if (url().empty()) return;
   bool ok = on_import ? on_import(url(), name()) : false;
-  if (ok) reload_profiles();
+  if (ok) {
+    if (url_field_) url_field_->clear_text();
+    reload_profiles();
+  }
 }
 
 void ProfileImportCard::set_profiles(const std::vector<config::PrfItem>& items,

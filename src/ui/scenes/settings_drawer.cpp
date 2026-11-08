@@ -692,7 +692,9 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   copyright_->style.align_h = AlignH::Center;
   copyright_->style.color =
       // src: :471 text.secondary + 页脚整体 opacity .75（:459）→ 复合 alpha .45
-      is_light() ? Color4f::hex(0x3C3C43, 0.45f) : Color4f::hex(0xEBEBF5, 0.45f);
+      (theme::ThemeService::instance().skin() == theme::SkinId::Retro3d && !is_light())
+          ? Color4f::hex(0x2C1F03, 0.75f)
+          : (is_light() ? Color4f::hex(0x3C3C43, 0.45f) : Color4f::hex(0xEBEBF5, 0.45f));
   // src: locales/zh/settings.json:203 copyright（显示内容按中文包取字面量）
   copyright_->set_i18n_text("settings.components.verge.theme.copyright");
   add_child(std::move(cp));
@@ -751,9 +753,12 @@ void ThemeCard::on_paint(IRenderTarget& rt) {
   //   divider light rgba(0,0,0,.12) / dark rgba(255,255,255,.12)（_theme.tsx:47）
   const float y = copyright_->bounds().y - 5.0f;
   if (y <= 0 || bounds().w <= 0) return;
-  Brush dash{theme::ThemeService::instance().is_light()
+  Brush dash{(theme::ThemeService::instance().skin() == theme::SkinId::Retro3d &&
+              !theme::ThemeService::instance().is_light())
+                 ? Color4f::hex(0x2C1F03, 0.25f)
+                 : (theme::ThemeService::instance().is_light()
                  ? Color4f::hex(0x000000, 0.12f)
-                 : Color4f::hex(0xFFFFFF, 0.12f)};
+                 : Color4f::hex(0xFFFFFF, 0.12f))};
   for (float x = 0; x + 3.0f < bounds().w; x += 6.0f) {
     rt.fill_rect({x, y, 3.0f, 1.0f}, dash);
   }
@@ -1039,9 +1044,9 @@ void SettingsDrawer::restyle_cards() {
     if (auto* f = profile_card_->url_field()) {
       f->apply_theme();
       f->style_.size = 13;
-      f->style_.color = ThemeService::instance().text_primary();
-      f->placeholder_color_ = ThemeService::instance().palette().secondary_text;
-      f->caret_color_ = f->style_.color;
+      // get3DInputStyle 已经按皮肤设置文字/占位符/光标颜色，不再用 text_primary 强覆盖
+      // keep placeholder_color_ from apply_theme()
+      // keep caret_color_ from apply_theme()
     }
     profile_card_->invalidate();
   }
@@ -1082,6 +1087,22 @@ void SettingsDrawer::restyle_cards() {
       theme_card_->copyright_->style.color =
           is_light() ? Color4f::hex(0x3C3C43, 0.45f)
                      : Color4f::hex(0xEBEBF5, 0.45f);
+    if (theme_card_->copyright_) {
+      // src: theme-settings-card.tsx:471 isRetro3DDark ? '#2C1F03' : 'text.secondary' + opacity .75
+      theme_card_->copyright_->style.color =
+          (theme::ThemeService::instance().skin() == theme::SkinId::Retro3d && !is_light())
+              ? Color4f::hex(0x2C1F03, 0.75f)
+              : (is_light() ? Color4f::hex(0x3C3C43, 0.45f)
+                            : Color4f::hex(0xEBEBF5, 0.45f));
+    }
+    if (theme_card_->email_) {
+      // src: theme-settings-card.tsx:486 color 'primary.main' + 页脚 opacity .75（retro 暗态 #2C1F03）
+      Color4f ec = (theme::ThemeService::instance().skin() == theme::SkinId::Retro3d && !is_light())
+                       ? Color4f::hex(0x2C1F03, 0.75f)
+                       : theme::ThemeService::instance().primary();
+      ec.a = 0.75f;
+      theme_card_->email_->style.color = ec;
+    }
     restyle_seg(theme_card_->mode_seg_);
     // 滑块：重新查表（轨厚/滑块尺寸/渐变随皮肤变）
     if (theme_card_->depth_slider_) theme_card_->depth_slider_->apply_theme();
@@ -1628,6 +1649,7 @@ void SettingsDrawer::wire_callbacks() {
                                          ? p.factors[p.skin].second
                                          : svc.vibrancy_factor());
     save_skin_prefs(p);
+    restyle_cards();
   };
   theme_card_->vibrancy_slider_->on_change = [this](float v) {
     auto& svc = ThemeService::instance();
@@ -1640,6 +1662,7 @@ void SettingsDrawer::wire_callbacks() {
                                          : svc.depth_factor(),
                       v);
     save_skin_prefs(p);
+    restyle_cards();
   };
 }
 
@@ -1656,12 +1679,13 @@ void SettingsDrawer::on_paint(IRenderTarget& rt) {
   draw_panel_bg(rt, area);
   // 左列 borderRight 1px divider（_layout.tsx:1436）
   const float div_x = kPad + kLeftW;
-  if (area.w > 285.0f) rt.fill_rect({div_x, kPad, 1.0f, area.h - kPad * 2}, Brush{divider_color()});  // src: _layout.tsx:1436
+  rt.fill_rect({div_x, kPad, 1.0f, area.h - kPad * 2}, Brush{divider_color()});  // src: _layout.tsx:1436
   // 四张渐变卡（顺序与 _layout.tsx:1440-1516 一致）；
   // 订阅卡自绘底（ProfileImportCard::on_paint，避免重复画 bevel）
   draw_card_bg(rt, combo_rect_);
   draw_card_bg(rt, basic_rect_);
   draw_card_bg(rt, theme_rect_);
+  if (ThemeService::instance().panel_paint().pulse) invalidate();
 }
 
 }  // namespace clashwin::ui::scene

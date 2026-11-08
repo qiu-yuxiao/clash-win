@@ -182,6 +182,9 @@ class ContentStack : public Stack {
 
 class MainWindow : public app::ILifecycleWindow {
  public:
+  MainWindow();
+  ~MainWindow() override;
+
   // 创建窗口（restore 几何 → 注册类 → CreateWindow → D2D → Widget 树 → 定时器）
   bool create(bool show_immediately = true);
   // 消息循环（App 转发）
@@ -271,6 +274,8 @@ class MainWindow : public app::ILifecycleWindow {
   std::unique_ptr<mihomo::WsManager> ws_;  // T14：traffic/connections WS
   uint64_t ws_sub_traffic_ = 0, ws_sub_conn_ = 0, ws_sub_logs_ = 0;
   uint64_t theme_sub_ = 0;  // ThemeService 热切换订阅（切皮肤/亮暗 → 全窗重绘）
+  uint64_t postbox_sub_delay_ = 0;
+  uint64_t postbox_sub_refresh_ = 0;
   int64_t aurora_tick_ms_ = 0;  // 极光动画自续帧节流（10fps；src: layout.scss:23）
 
   Breakpoints bp_;

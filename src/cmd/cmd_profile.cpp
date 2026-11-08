@@ -102,7 +102,10 @@ void ensure_t16_hooks() {
       const auto& verge = *config::Config::instance().verge().latest_arc();
       url = verge.default_latency_test.value_or(url);
     } catch (...) {}
-    auto r = c->delay_group(metrics_group, url, core::kNodeDelayMaxMs, 5000);
+    auto r = c->delay_group(metrics_group, url, core::kNodeDelayMaxMs);
+    if (!r.is_ok() && metrics_group != "PROXY") {
+      r = c->delay_group("PROXY", url, core::kNodeDelayMaxMs);
+    }
     if (!r.is_ok()) return std::nullopt;
     return r.value();
   };
@@ -177,6 +180,13 @@ void ensure_t16_hooks() {
   ah.node_server_map = [] {
     return std::map<std::string, std::string>{};
   };
+  ah.group_nodes = [get_client](const std::string& group) {
+    auto* c = get_client();
+    if (!c) return std::vector<std::string>{};
+    auto g = c->get_group_by_name(group);
+    if (!g.is_ok() || !g.value().all) return std::vector<std::string>{};
+    return *g.value().all;
+  };
   core::AutoSelect::instance().set_hooks(std::move(ah));
 }
 
@@ -219,12 +229,17 @@ void install_cmd_profile(CommandService& svc) {
          if (const Json* op = find_arg(args, {"option"}); op && op->is_object()) {
            option = prf_option_from_json(*op);
          }
+         std::optional<std::string> name_opt;
+         if (const Json* nm = find_arg(args, {"name"});
+             nm && nm->is_string() && !nm->get<std::string>().empty()) {
+           name_opt = nm->get<std::string>();
+         }
          auto& profiles = config::Config::instance().profiles();
          std::optional<config::PrfItem> item_opt;
          profiles.edit_draft([&](config::IProfiles& d) {
            config::profiles::set_profiles_instance(&d);
            auto item = config::PrfItem::from_url(url->get<std::string>(),
-                                                 std::nullopt, std::nullopt,
+                                                 name_opt, std::nullopt,
                                                  option);
            config::profiles::set_profiles_instance(nullptr);
            if (item.is_ok()) {
@@ -241,18 +256,15 @@ void install_cmd_profile(CommandService& svc) {
          if (!save.is_ok()) {
            return CmdResult::err({errs::kIo, "导入订阅失败: " + save.error().message});
          }
-         auto latest = profiles.latest_arc();
-         bool became_current =
-             latest->current.has_value() && item_opt->uid &&
-             *latest->current == *item_opt->uid;
          if (item_opt->uid)
            events::EventBus::notify_profile_changed(*item_opt->uid);
-         if (became_current) {
-           // ← profile.rs:132-146：首个导入自动激活
+         // ← profile.rs:132-146 + get_merged_proxies：导入新订阅后同步刷新运行时配置与节点
+         {
            auto outcome = update_config_forced();
            if (outcome.is_valid()) events::EventBus::refresh_clash();
          }
-         return CmdResult::ok(Json::object());
+         return CmdResult::ok(
+             Json{{"uid", item_opt->uid.value_or(std::string())}});
        },
        consts::kTimeoutHeavy});
 
@@ -299,9 +311,15 @@ void install_cmd_profile(CommandService& svc) {
          if (auto save = profiles.data_arc()->save_file(); !save.is_ok()) {
            return CmdResult::err({errs::kIo, save.error().message});
          }
-         if (touched_current) {
+         {
            auto outcome = update_config_forced();
-           if (!outcome.is_valid()) notify_invalid(outcome);
+           if (outcome.is_valid()) {
+             events::EventBus::refresh_clash();
+             if (item_opt->uid)
+               events::EventBus::notify_profile_changed(*item_opt->uid);
+           } else {
+             notify_invalid(outcome);
+           }
          }
          return CmdResult::ok(Json::object());
        },

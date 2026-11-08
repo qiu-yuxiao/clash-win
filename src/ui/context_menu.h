@@ -31,6 +31,7 @@ class MenuList : public Widget {
   float sep_height_ = 9;  // 分隔线高度（Mini Divider：1px + 上下 margin 8 = 17）
 
   SizeF on_measure(float max_w, float max_h) override;
+  void on_arrange(const RectF& area) override { (void)area; }
   bool on_mouse(const MouseEvent& e) override;
   void on_paint(IRenderTarget& rt) override;
 
@@ -154,6 +155,7 @@ class ContextMenu : public Widget {
   MenuList* menu() const { return menu_; }
 
   // 遮罩：菜单外点击 → close 并吞掉
+  void on_arrange(const RectF& area) override { (void)area; }
   bool on_mouse(const MouseEvent& e) override;
   void on_paint(IRenderTarget& rt) override;
   // 未打开时不参与命中
@@ -163,6 +165,7 @@ class ContextMenu : public Widget {
 
  private:
   MenuList* menu_ = nullptr;  // add_child 持有
+  std::unique_ptr<Widget> retiring_menu_;  // 延后析构，防止 on_mouse 中 close() 自毁
   bool open_ = false;
 };
 

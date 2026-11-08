@@ -658,12 +658,18 @@ void TakeoverSegmented::on_paint(IRenderTarget& rt) {
   // 容器：src: button-styles.ts:932-990（retro-3d 半透明金 + inset 暗影；
   //   original/modern/frosted/cyber/monochrome 各自底色与边框）
   const float cont_radius = sp.container_radius > 0.01f ? sp.container_radius : 4.0f;
+  Brush cont_bg_fill{sp.container_bg};
+  rt.round_rect(r, cont_radius, Pen{Color4f(0, 0, 0, 0), 0.0f}, &cont_bg_fill);
   if (sp.container_inset)
     draw_top_inset_shadow(rt, r, cont_radius, sp.container_inset_color,
                           sp.container_inset_dy, sp.container_inset_blur);
   Brush cont_bg{sp.container_bg};
-  rt.round_rect(r, cont_radius, Pen{sp.container_border, 1.0f}, &cont_bg);
+  rt.round_rect(r, cont_radius, Pen{sp.container_border, 1.0f}, nullptr);
   if (sp.container_top_hi.a > 0.004f)
+    rt.draw_line({r.x + cont_radius, r.bottom() + 0.5f},
+                 {r.right() - cont_radius, r.bottom() + 0.5f},
+                 Pen{sp.container_top_hi, 1.0f});
+  if (false && sp.container_top_hi.a > 0.004f)
     rt.draw_line({r.x + cont_radius, r.y + 0.5f},
                  {r.right() - cont_radius, r.y + 0.5f},
                  Pen{sp.container_top_hi, 1.0f});
