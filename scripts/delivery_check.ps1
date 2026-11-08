@@ -99,7 +99,13 @@ if (Test-Path $stageExe) {
   Fail "stage exe 不存在：$stageExe（交付链缺一方）"
 }
 
-$zip = Join-Path $RepoRoot 'dist\ClashWin_0.1.6_x64_portable.zip'
+$constHeader = Join-Path $RepoRoot 'include\clashwin\config\constants.h'
+$ver = '0.1.7'
+if (Test-Path $constHeader) {
+  $m = Select-String -Path $constHeader -Pattern 'kAppVersion\s*=\s*"([^"]+)"'
+  if ($m) { $ver = $m.Matches[0].Groups[1].Value }
+}
+$zip = Join-Path $RepoRoot "dist\ClashWin_${ver}_x64_portable.zip"
 if (Test-Path $zip) {
   $tmp = Join-Path $env:TEMP ("cwdc_" + [guid]::NewGuid().ToString('N'))
   try {

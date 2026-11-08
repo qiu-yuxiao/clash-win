@@ -263,12 +263,12 @@ UT_TEST(t36_a1_a2_nodelist_delay_alignment_and_async_speedtest) {
   };
   h.select_node = [](const std::string&) { return true; };
   h.test_group = [](const std::string&) { return true; };
-  h.test_and_select = [&st](const std::vector<std::string>&) {
+  h.test_and_select = [&st](const std::vector<std::string>& nodes) -> std::string {
     st.test_calls.fetch_add(1);
     // 模拟网络请求耗时 60ms
     std::this_thread::sleep_for(std::chrono::milliseconds(60));
     st.test_finished.store(true);
-    return true;
+    return nodes.empty() ? "n1" : nodes[0];
   };
   h.now_ms = [] { return 1000LL; };
 

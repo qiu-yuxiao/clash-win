@@ -427,13 +427,14 @@ bool App::init() {
         []() -> Result<bool> {
           auto latest = config::Config::instance().profiles().latest_arc();
           std::string uid = latest && latest->current ? *latest->current : "";
-          if (uid.empty()) return Result<bool>::ok(false);
+          if (uid.empty()) return Result<bool>::err(Error{1, "no active profile"});
           auto out = core::AutoSelect::instance().trigger(uid, std::nullopt,
                                                           /*sort_type=*/1,
                                                           /*select=*/true,
                                                           /*skip_wait=*/false);
           if (out.busy) return Result<bool>::ok(false);
-          return Result<bool>::ok(out.selected);
+          if (!out.selected) return Result<bool>::err(Error{2, "auto_select failed"});
+          return Result<bool>::ok(true);
         },
         /*.alert =*/
         [](const std::wstring& title, const std::wstring& text) {

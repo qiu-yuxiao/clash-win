@@ -428,6 +428,18 @@ void MainWindow::build_widget_tree() {
   // 【缺口修复】EventBus::notice_message 此前零订阅者 → 导入/校验/服务结果全静默。
   install_notice_handler();
 
+  // 订阅刷新代理配置事件（择优选点/配置刷新时触发）：自动重新同步活跃节点
+  events::EventBus::instance().subscribe(
+      events::names::kRefreshProxies,
+      [this](const events::Payload&) {
+        UiPostbox::instance().post([this] { reload_nodes(); });
+      });
+  events::EventBus::instance().subscribe(
+      events::names::kRefreshClash,
+      [this](const events::Payload&) {
+        UiPostbox::instance().post([this] { reload_nodes(); });
+      });
+
   auto tb = std::make_unique<TitleBar>(this);
   title_bar_ = tb.get();
   title_bar_->set_version(utf::utf8_to_utf16(config::consts::kAppVersion));  // 单一事实源

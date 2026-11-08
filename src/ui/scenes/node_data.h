@@ -56,7 +56,8 @@ struct DataHooks {
   //     可见节点子集 → 置 -2 testing → triggerAutoSelect(uid, visibleNames, 0, true)
   //   生产 = AutoSelect::trigger(uid, 子集, sort_type=0, select=true)
   //   nodes 为空 → 全量（与 F1 自动优选同语义）
-  std::function<bool(const std::vector<std::string>& nodes)> test_and_select;
+  //   返回择优选中的节点名（空表示未选中/繁忙）
+  std::function<std::string(const std::vector<std::string>& nodes)> test_and_select;
   std::function<int64_t()> now_ms;  // 时钟注入（TTL/测试确定性）
 };
 

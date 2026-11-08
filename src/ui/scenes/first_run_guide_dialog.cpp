@@ -663,8 +663,9 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
   set_bounds(area);
   if (url_menu_) url_menu_->set_bounds({0, 0, area.w, area.h});
   set_bounds(area);
-  // src: :545-557 paper width 100% / maxWidth 520（窗口侧留 32px 呼吸）
-  const float cw = std::min(kCardMaxW, area.w - 32.0f);
+  // 对齐 Mini（first-run-guide-dialog.tsx:545-557）：窄窗口下 m:0 铺满视口宽度（271px），
+  // 宽窗口下 maxWidth 520 并保留左右 32px 呼吸留白
+  const float cw = area.w <= 285.0f ? area.w : std::min(kCardMaxW, area.w - 32.0f);
   const bool has_banner =
       step_ == FirstRunStep::Input && detected_clipboard_url_.empty() == false &&
       url_.empty();

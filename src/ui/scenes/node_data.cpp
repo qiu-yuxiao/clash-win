@@ -140,35 +140,16 @@ bool NodeData::test_and_select(const std::vector<std::string>& nodes) {
   }
   if (need_batch) set_delays_batch(nodes, -2);
   if (!hooks_.test_and_select) return false;
-  bool ok = hooks_.test_and_select(nodes);
+  std::string fastest = hooks_.test_and_select(nodes);
+  bool ok = !fastest.empty();
 
-  // 择优切换双保险：
-  // 从本次待测的 nodes 范围中，基于最新测得的 delay 找到最快节点
-  std::string fastest;
-  int min_d = 999999;
-  for (const auto& n : nodes) {
-    int d = row_delay(n);
-    if (d >= kNodeDelayMinMs && d < kNodeDelayMaxMs && d < min_d) {
-      min_d = d;
-      fastest = n;
-    }
-  }
-  // 兜底：若 [30, 5000) 范围内无候选，放宽为任何正有效延迟 (> 0 且 < 100000)
-  if (fastest.empty()) {
-    for (const auto& n : nodes) {
-      int d = row_delay(n);
-      if (d > 0 && d < 100000 && d < min_d) {
-        min_d = d;
-        fastest = n;
-      }
-    }
-  }
-
-  if (!fastest.empty()) {
+  if (ok) {
     CWLOG_INFO("NodeData::test_and_select: 群测最优节点 = " + fastest +
-               " (" + std::to_string(min_d) + "ms)，执行切换");
-    this->select(fastest);
-  } else if (ok && hooks_.fetch_group) {
+               "，执行切换");
+    UiPostbox::instance().post([this, fastest] {
+      this->select(fastest);
+    });
+  } else if (hooks_.fetch_group) {
     std::vector<std::string> all;
     std::string now;
     if (hooks_.fetch_group(&all, &now)) {
@@ -278,13 +259,13 @@ DataHooks NodeData::production_hooks(const std::string& group) {
   //   ← Mini proxy-groups.tsx:230-275 handleCheckAll
   //     triggerAutoSelect(currentUid, visibleNames, 0, true)
   //   → cmd trigger_auto_select（cmd_profile.cpp:585）→ AutoSelect::trigger
-  h.test_and_select = [](const std::vector<std::string>& nodes) {
+  h.test_and_select = [](const std::vector<std::string>& nodes) -> std::string {
     std::string uid;
     try {
       auto latest = config::Config::instance().profiles().latest_arc();
       if (latest && latest->current) uid = *latest->current;
     } catch (...) {}
-    if (uid.empty()) return false;
+    if (uid.empty()) return "";
     // sort_type=0（head state）；select=true（择优切换）
     // nodes 为空 → 全量（与自动优选同语义）
     auto outcome = core::AutoSelect::instance().trigger(
@@ -293,10 +274,10 @@ DataHooks NodeData::production_hooks(const std::string& group) {
         /*sort_type=*/0, /*select=*/true);
     if (outcome.busy) {
       CWLOG_WARN("test_and_select: AUTO_SELECT_BUSY（互斥占用，本次不执行）");
-      return false;
+      return "";
     }
     // 结果经 backend-delay-results 事件回灌缓存（AutoSelect 内部已发）
-    return true;
+    return outcome.selected ? outcome.selected_node : "";
   };
   return h;
 }

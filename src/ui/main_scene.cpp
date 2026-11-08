@@ -77,20 +77,28 @@ void MainScene::on_arrange(const RectF& area) {
   set_bounds(area);
   float w = area.w;
   if (mini_) {
-    // 极小窗模式：上栏固定为 quickbar 高度 30px，下栏流量条占满剩余空间
+    // 极小窗模式（对齐 Clash Mini _layout.tsx:1268-1277 与 :1765-1785）：
+    // 刚手动调至最低窗口（titlebar 可见，内容区高 ~96px）时，upper_ 占位折叠为 0（隐藏），
+    // 完整流量曲线占满全高；静置标题栏自动隐藏后（内容区高 126px），upper_ 展开 30px 显示活跃节点。
+    const bool show_upper = (area.h >= 110.0f);
     if (upper_) {
-      upper_->layout_tree({0, 0, w, 30.0f});
+      upper_->set_visible(show_upper);
+      upper_->layout_tree({0, 0, w, show_upper ? 30.0f : 0.0f});
     }
     if (traffic_) {
-      traffic_->layout_tree({0, 30.0f, w, std::max(0.0f, area.h - 30.0f)});
+      traffic_->set_visible(true);
+      const float traffic_y = show_upper ? 30.0f : 0.0f;
+      traffic_->layout_tree({0, traffic_y, w, std::max(0.0f, area.h - traffic_y)});
     }
   } else {
     int traffic_h = narrow_ ? kTrafficPaneMinimal : kTrafficPaneWide;
     float upper_h = std::max(0.0f, area.h - static_cast<float>(traffic_h));
     if (upper_) {
+      upper_->set_visible(true);
       upper_->layout_tree({0, 0, w, upper_h});
     }
     if (traffic_) {
+      traffic_->set_visible(true);
       traffic_->layout_tree({0, upper_h, w, static_cast<float>(traffic_h)});
     }
   }

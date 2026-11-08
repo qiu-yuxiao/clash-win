@@ -102,6 +102,8 @@ void draw_arrow(IRenderTarget& rt, const PointF& c, bool down,
 }
 }  // namespace
 
+TrafficSeries::TrafficSeries() = default;
+
 void TrafficSeries::append(double up, double down) {
   points_.emplace_back(up, down);
   if (points_.size() > kTrafficMaxPoint + 2) points_.pop_front();  // src: traffic-graph.tsx:22,75
@@ -155,6 +157,7 @@ TrafficPane::TrafficPane(Widget* parent) : Widget(parent) {
   mk(dt_prefix_, 9, true); mk(dt_value_, 13, true); mk(dt_unit_, 8, false);
   mk(ul_prefix_, 9, true); mk(ul_value_, 13, true); mk(ul_unit_, 8, false);
   mk(ut_prefix_, 9, true); mk(ut_value_, 13, true); mk(ut_unit_, 8, false);
+  graph_->set_series(series_.up(), series_.down(), 1.0f);  // 初值底线（对齐 Mini 32 零点基线）
   refresh_labels();  // 初值即显（Mini：无流量也显示 0.00 B/s）
 }
 
@@ -190,6 +193,7 @@ bool TrafficPane::on_traffic_json(const nlohmann::json& j) {
   graph_->set_series(series_.up(), series_.down(),
                      static_cast<float>(std::max(series_.peak(), 1.0)));
   refresh_labels();
+  invalidate();  // 窗口失焦时仍持续驱动帧渲染动画（对齐 Mini）
   for (auto& [id, cb] : subs_) cb();
   return true;
 }
@@ -331,11 +335,11 @@ void TrafficPane::on_paint(IRenderTarget& rt) {
     graph_->line_ = light_mode() ? Color4f(0, 0, 0, 0.018f)
                                  : Color4f(1, 1, 1, 0.018f);
   }
-  if (graph_rect_.w <= 0) return;
-
-  // 面板底：绘制 theme_bg 保证底栏 100% 不透明，杜绝透底或透出上层溢出卡片
+  // 面板底：无论是否有有效图宽，先绘制 theme_bg 保证底栏 100% 不透明，杜绝透底
   rt.fill_rect({0, 0, bounds().w, bounds().h},
                Brush{ThemeService::instance().vars().theme_bg});
+
+  if (graph_rect_.w <= 0) return;
 
   const bool light = light_mode();
   const float pad_x = narrow_ ? kPadXNarrow : kPadXWide;

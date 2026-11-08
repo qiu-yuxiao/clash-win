@@ -1,6 +1,6 @@
 {
-  "version": "0.1.6",
-  "notes": "Clash Win v0.1.6 — switch hover glow fix, drawer clipping, traffic pane opacity, TUN mode service fallback sync.",
-  "pub_date": "2026-11-08T12:30:00Z",
+  "version": "0.1.7",
+  "notes": "Clash Win v0.1.7 — first-run guide & log modal width alignment (271px), two-line log layout, 4 switch balls solid gold gradient, unfocused traffic curve animation & baseline init, stealth mode mini-window layout auto-switching, group speed test fastest node auto-switch, failover health error propagation.",
+  "pub_date": "2026-11-08T14:00:00Z",
   "platforms": {}
 }

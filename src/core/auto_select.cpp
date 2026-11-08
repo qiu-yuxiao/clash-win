@@ -6,6 +6,7 @@
 #include <algorithm>
 
 #include "switching_lock.h"
+#include "events/event_bus.h"
 #include "events/notice.h"
 #include "ui/i18n_text.h"
 #include "util/log.h"
@@ -200,6 +201,7 @@ AutoSelect::Outcome AutoSelect::trigger(
       } else {
         CWLOG_WARN("AutoSelect: 最快节点越界 filterText 子集，不写回 selected");
       }
+      events::EventBus::refresh_proxies();
     }
   }
   return out;

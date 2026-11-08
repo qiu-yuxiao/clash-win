@@ -882,13 +882,13 @@ SwitchPaint ThemeService::switch_paint() const {
       p.thumb_d = 14.0f;
       p.thumb_radius = 7.0f;
       p.off_thumb_grad = true;
+      // 开/关两态小圆球颜色一致，对齐主题设置滑块小圆球设计（完全不透明金球）
       p.off_thumb_stops[0] = {0.00f, Color4f::hex(light ? 0xFFFDE7 : 0xFFF9C4)};
-      p.off_thumb_stops[1] = {0.60f, light ? Color4f::hex(0xD4AF37, 0.30f) : Color4f::hex(0x8A6D00, 0.30f)};  // base-switch.tsx:91-92
-      p.off_thumb_stops[2] = {1.00f, light ? Color4f::hex(0x8A6D00, 0.45f) : Color4f::hex(0x634E00, 0.55f)};  // base-switch.tsx:91-92
-      p.off_thumb_stops[3] = p.off_thumb_stops[2];
+      p.off_thumb_stops[1] = {0.45f, Color4f::hex(light ? 0xFFD54F : 0xFFC107)};
+      p.off_thumb_stops[2] = {0.80f, Color4f::hex(0xFFA000)};
+      p.off_thumb_stops[3] = {1.00f, Color4f::hex(light ? 0xB8860B : 0x8A6D00)};
       p.off_thumb_n = 4;
-      p.off_thumb_border = light ? Color4f::hex(0xB8860B, 0.85f) : Color4f::hex(0x8A6D00, 0.85f);  // src: style-helpers.tsx:261
-      // 豁免: 无 — 与 p.off_thumb_border 合并单行（出处: 无）
+      p.off_thumb_border = light ? Color4f::hex(0x8A6D00) : Color4f::hex(0x634E00);
       p.off_thumb_bw = 1.0f;
       // :88-98 旋钮内浮雕：inset 0 1d 0 rgba(255,255,255,.7|.5)
       //   + inset 0 -1d|-1.5d 0 rgba(0,0,0,.15|.45)
@@ -964,7 +964,7 @@ SwitchPaint ThemeService::switch_paint() const {
       p.on_bg = primary();
       p.on_bw = 0.0f;
       p.thumb_radius = 7.0f * g;   // ← base-switch.tsx:194 calc(7px * var(--control-skin-val1))
-      p.off_thumb = light ? Color4f::hex(0xCBD5E1) : Color4f::hex(0x475569);
+      p.off_thumb = Color4f::hex(0xFFFFFF);
       p.off_thumb_bw = 0.0f;
       p.on_thumb = Color4f::hex(0xFFFFFF);
       p.on_thumb_bw = 0.0f;
@@ -1015,10 +1015,10 @@ SwitchPaint ThemeService::switch_paint() const {
       p.thumb_d = 12.0f;
       p.thumb_margin = 1.0f;
       p.thumb_radius = 6.0f;
-      p.off_thumb = light ? Color4f::hex(0xFFFFFF, 0.8f)
-                          : Color4f::hex(0xFFFFFF, 0.3f);
-      p.off_thumb_border = light ? with_alpha(primary(), 0.3f)
-                                 : Color4f::hex(0xFFFFFF, 0.2f);
+      p.off_thumb = light ? Color4f::hex(0xFFFFFF, 0.95f)
+                          : Color4f::hex(0xFFFFFF, 0.9f);
+      p.off_thumb_border = light ? with_alpha(primary(), 0.4f)
+                                 : Color4f::hex(0xFFFFFF, 0.3f);
       p.off_thumb_bw = 1.0f;
       p.on_thumb = light ? Color4f::hex(0xFFFFFF, 0.95f)
                          : Color4f::hex(0xFFFFFF, 0.9f);

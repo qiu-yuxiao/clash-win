@@ -24,8 +24,20 @@ float count_y(float v, float h) {
 
 void CanvasGraph::set_series(std::vector<float> up, std::vector<float> down,
                              float max_value) {
-  up_ = std::move(up);
-  down_ = std::move(down);
+  if (up.size() < static_cast<size_t>(kMaxPoint + 2)) {
+    std::vector<float> pad(static_cast<size_t>(kMaxPoint + 2) - up.size(), 0.0f);
+    pad.insert(pad.end(), up.begin(), up.end());
+    up_ = std::move(pad);
+  } else {
+    up_ = std::move(up);
+  }
+  if (down.size() < static_cast<size_t>(kMaxPoint + 2)) {
+    std::vector<float> pad(static_cast<size_t>(kMaxPoint + 2) - down.size(), 0.0f);
+    pad.insert(pad.end(), down.begin(), down.end());
+    down_ = std::move(pad);
+  } else {
+    down_ = std::move(down);
+  }
   if (max_value > 0) max_value_ = max_value;
   invalidate();
 }

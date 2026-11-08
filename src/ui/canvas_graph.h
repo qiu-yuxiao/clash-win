@@ -11,7 +11,10 @@ namespace clashwin::ui {
 
 class CanvasGraph : public Widget {
  public:
-  explicit CanvasGraph(Widget* parent = nullptr) : Widget(parent) {}
+  explicit CanvasGraph(Widget* parent = nullptr) : Widget(parent) {
+    up_.assign(kMaxPoint + 2, 0.0f);
+    down_.assign(kMaxPoint + 2, 0.0f);
+  }
 
   // 数据入（调用方维护序列长度 ≤ max_point，超出自行裁剪或 T14 采样链管）
   // max_value 仅作兼容保留：Y 轴按 Mini 的 8 段固定映射，不再按峰值归一。

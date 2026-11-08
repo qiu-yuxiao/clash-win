@@ -894,6 +894,7 @@ bool CoreUpdateModal::on_key(const KeyEvent& e) {
 // ==========================================
 LogViewerModal::LogViewerModal(Widget* parent) : Widget(parent) {
   set_z_order(960);
+  line_height_ = 38.0f;
   last_flush_time_ = std::chrono::steady_clock::now();
   // src: logs.tsx:179-191 BaseStyledSelect 5 项
   //   （shared.json:135-141 ALL/DEBUG/INFO/WARN/ERROR）
@@ -1012,23 +1013,26 @@ bool LogViewerModal::matches_filter(const LogEntry& entry) const {
 
 void LogViewerModal::on_arrange(const RectF& area) {
   set_bounds(area);
-  const float cw = std::min(600.0f, area.w - 20.0f);
-  const float ch = std::min(440.0f, area.h - 20.0f);
+  // 对齐 Mini：窄窗口下宽度与最小窗口宽度一致（271px）
+  const float cw = std::min(area.w, 271.0f);
+  const float ch = std::min(480.0f, area.h - 16.0f);
   float cx = std::max(0.0f, (area.w - cw) / 2.0f);
   float cy = std::max(0.0f, (area.h - ch) / 2.0f);
   card_rect_ = {cx, cy, cw, ch};
 
-  btn_close_x_rect_ = {cx + cw - 32.0f, cy + 6.0f, 26.0f, 24.0f};
+  // 第 1 行：标题在左，按钮靠右 [▶/⏸] [▲/▼] [清除] [✕] 对齐 Mini logs.tsx:104-166
+  btn_close_x_rect_ = {cx + cw - 26.0f, cy + 6.0f, 20.0f, 22.0f};
+  btn_clear_rect_ = {btn_close_x_rect_.x - 4.0f - 40.0f, cy + 6.0f, 40.0f, 22.0f};
+  btn_order_rect_ = {btn_clear_rect_.x - 4.0f - 24.0f, cy + 6.0f, 24.0f, 22.0f};
+  btn_pause_rect_ = {btn_order_rect_.x - 4.0f - 24.0f, cy + 6.0f, 24.0f, 22.0f};
 
-  toolbar_rect_ = {cx + 14.0f, cy + 42.0f, cw - 28.0f, 32.0f};
-  btn_pause_rect_ = {toolbar_rect_.x, toolbar_rect_.y, 48.0f, 30.0f};
-  btn_order_rect_ = {toolbar_rect_.x + 52.0f, toolbar_rect_.y, 48.0f, 30.0f};
-  btn_clear_rect_ = {toolbar_rect_.x + 104.0f, toolbar_rect_.y, 54.0f, 30.0f};
-  seg_level_rect_ = {toolbar_rect_.x + 164.0f, toolbar_rect_.y, 90.0f, 30.0f};
-  search_box_rect_ = {seg_level_rect_.x + seg_level_rect_.w + 8.0f, toolbar_rect_.y,
-                      std::max(60.0f, toolbar_rect_.x + toolbar_rect_.w - (seg_level_rect_.x + seg_level_rect_.w + 8.0f)), 30.0f};
+  // 第 2 行：级别下拉选择框 + 搜索框横排填满
+  toolbar_rect_ = {cx + 10.0f, cy + 34.0f, cw - 20.0f, 28.0f};
+  seg_level_rect_ = {toolbar_rect_.x, toolbar_rect_.y, 76.0f, 28.0f};
+  search_box_rect_ = {seg_level_rect_.x + seg_level_rect_.w + 6.0f, toolbar_rect_.y,
+                      toolbar_rect_.w - (seg_level_rect_.w + 6.0f), 28.0f};
 
-  log_area_rect_ = {cx + 14.0f, cy + 82.0f, cw - 28.0f, ch - 96.0f};
+  log_area_rect_ = {cx + 10.0f, cy + 68.0f, cw - 20.0f, ch - 76.0f};
 }
 
 void LogViewerModal::on_paint(IRenderTarget& rt) {
@@ -1080,7 +1084,7 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
   title_ts.color = pal.primary_text;
   title_ts.align_v = AlignV::Center;
   // src: locales/zh/logs.json:3 「"title": "日志"」（logs.tsx:106 BasePage title）
-  rt.draw_text(tr("logs.page.title"), {card_rect_.x + 18.0f, card_rect_.y + 8.0f, 200.0f, 24.0f},
+  rt.draw_text(tr("logs.page.title"), {card_rect_.x + 12.0f, card_rect_.y + 6.0f, btn_pause_rect_.x - (card_rect_.x + 16.0f), 24.0f},
                title_ts);
 
   // 关闭 ✕（MUI IconButton：hover = action.hover）
@@ -1097,7 +1101,7 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
   x_ts.align_v = AlignV::Center;
   rt.draw_text(L"✕", btn_close_x_rect_, x_ts);
 
-  rt.fill_rect({card_rect_.x, card_rect_.y + 36.0f, card_rect_.w, 1.0f},
+  rt.fill_rect({card_rect_.x, card_rect_.y + 30.0f, card_rect_.w, 1.0f},
                Brush{vars.theme_border});
 
   // 工具栏按钮（active = warning 主色；hover = action.hover）
@@ -1195,26 +1199,42 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
     if (y + line_height_ >= log_area_rect_.y && y <= log_area_rect_.y + log_area_rect_.h) {
       const auto* e = visible_entries[i];
 
-      // src: log-item.tsx:16-35 时间=text.secondary；级别 type=error/warning/info
-      //   主色；正文 data=text.primary（逐段着色，无整行终端色）
-      const std::wstring t_time = L"[" + utf::utf8_to_utf16(e->time) + L"] ";
-      const std::wstring t_type = L"[" + utf::utf8_to_utf16(e->level) + L"] ";
+      // 对齐 Mini log-item.tsx:108-118 双行呈现：
+      // 第 1 行：时间 (text.secondary) + 级别 (error/warning/info 主色，大写加粗)
+      // 第 2 行：正文 payload (text.primary)
+      // 底部：1px divider 分隔线
+      const std::wstring t_time = utf::utf8_to_utf16(e->time);
+      std::wstring t_type = utf::utf8_to_utf16(e->level);
+      for (auto& c : t_type) c = towupper(c);
       const std::wstring t_msg = utf::utf8_to_utf16(e->message);
       Color4f type_c = (e->level == "error" || e->level == "err")
                            ? pal.error_color
                            : ((e->level == "warn" || e->level == "warning")
                                   ? pal.warning_color
                                   : pal.info_color);
-      float x = log_area_rect_.x + 8.0f;
+      float x = log_area_rect_.x + 6.0f;
+      float item_w = log_area_rect_.w - 12.0f;
+
+      // 第 1 行：time + type
+      log_ts.size = 9.5f;
+      log_ts.weight = static_cast<int>(Weight::Normal);
       log_ts.color = pal.secondary_text;
-      rt.draw_text(t_time, {x, y, log_area_rect_.w - 16.0f, line_height_}, log_ts);
-      x += text_engine()->measure_text(t_time, log_ts, 0).w;
+      rt.draw_text(t_time, {x, y + 2.0f, item_w, 14.0f}, log_ts);
+
+      float time_w = text_engine()->measure_text(t_time, log_ts, 0).w;
+      log_ts.weight = static_cast<int>(Weight::Bold);
       log_ts.color = type_c;
-      rt.draw_text(t_type, {x, y, log_area_rect_.w - 16.0f, line_height_}, log_ts);
-      x += text_engine()->measure_text(t_type, log_ts, 0).w;
+      rt.draw_text(t_type, {x + time_w + 8.0f, y + 2.0f, item_w - time_w - 8.0f, 14.0f}, log_ts);
+
+      // 第 2 行：payload 正文
+      log_ts.size = 10.0f;
+      log_ts.weight = static_cast<int>(Weight::Normal);
       log_ts.color = pal.primary_text;
-      rt.draw_text(t_msg, {x, y, log_area_rect_.x + log_area_rect_.w - x - 8.0f,
-                           line_height_}, log_ts);
+      rt.draw_text(t_msg, {x, y + 17.0f, item_w, 16.0f}, log_ts);
+
+      // 底部 1px 分隔线
+      rt.fill_rect({x, y + line_height_ - 1.0f, item_w, 1.0f},
+                   Brush{theme::ThemeService::instance().vars().theme_border});
     }
     y += line_height_;
   }

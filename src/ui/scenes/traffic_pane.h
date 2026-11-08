@@ -28,6 +28,7 @@ inline constexpr int64_t kTrafficSampleMs = 1000;     // src: traffic-graph.tsx:
 // 采样序列（滚动窗 maxPoint+2、峰值跟踪；CanvasGraph 峰值自动缩放=线性 max）
 class TrafficSeries {
  public:
+  TrafficSeries();
   void append(double up, double down);
   // 喂 CanvasGraph（倒序：最新在尾）
   std::vector<float> up() const;

@@ -56,10 +56,10 @@ NodeData make_data(MockState& st) {
   };
   h.select_node = [](const std::string&) { return true; };
   h.test_group = [](const std::string&) { return true; };
-  h.test_and_select = [&st](const std::vector<std::string>& nodes) {
+  h.test_and_select = [&st](const std::vector<std::string>& nodes) -> std::string {
     ++st.test_and_select_calls;
     st.last_subset = nodes;
-    return st.test_and_select_ok;
+    return st.test_and_select_ok ? (nodes.empty() ? "n1" : nodes[0]) : "";
   };
   h.now_ms = [&st] { return st.clock_ms; };
   return NodeData(std::move(h));

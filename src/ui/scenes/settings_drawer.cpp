@@ -1686,6 +1686,7 @@ std::wstring SettingsDrawer::fmt_factor(float v) {
 void SettingsDrawer::on_paint(IRenderTarget& rt) {
   if (!open_) return;
   const RectF area{0, 0, bounds().w, bounds().h};
+  rt.push_clip(area);
   // theme-panel 底 + 4px double 金边
   draw_panel_bg(rt, area);
   // 左列 borderRight 1px divider（_layout.tsx:1436）
@@ -1693,9 +1694,10 @@ void SettingsDrawer::on_paint(IRenderTarget& rt) {
   rt.fill_rect({div_x, kPad, 1.0f, area.h - kPad * 2}, Brush{divider_color()});  // src: _layout.tsx:1436
   // 四张渐变卡（顺序与 _layout.tsx:1440-1516 一致）；
   // 订阅卡自绘底（ProfileImportCard::on_paint，避免重复画 bevel）
-  draw_card_bg(rt, combo_rect_);
-  draw_card_bg(rt, basic_rect_);
-  draw_card_bg(rt, theme_rect_);
+  if (combo_rect_.y < area.h) draw_card_bg(rt, combo_rect_);
+  if (basic_rect_.y < area.h) draw_card_bg(rt, basic_rect_);
+  if (theme_rect_.y < area.h) draw_card_bg(rt, theme_rect_);
+  rt.pop_clip();
   if (ThemeService::instance().panel_paint().pulse) invalidate();
 }
 
