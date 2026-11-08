@@ -1,4 +1,4 @@
-﻿# ClashWin 便携版打包（1:1 对齐 Clash Mini scripts/portable.mjs）
+# ClashWin 便携版打包（1:1 对齐 Clash Mini scripts/portable.mjs）
 #
 # Mini 的做法（scripts/portable.mjs:14-55）：
 #   1) 在配置目录里写一个空的 PORTABLE 标记文件（:25-27）
@@ -80,8 +80,9 @@ if ($missing.Count -gt 0) {
     Fail ("缺少必需产物：`n  " + ($missing -join "`n  "))
 }
 
-# 进程占用会让复制/替换失败，先明确报出来（比莫名 IO 错误好定位）
-$running = Get-Process -Name 'clashwin' -ErrorAction SilentlyContinue
+# 仅当运行中的进程锁定了构建输出目录时才拦截
+$running = Get-Process -Name 'clashwin' -ErrorAction SilentlyContinue |
+           Where-Object { $_.Path -and $_.Path.StartsWith($BinDir, [System.StringComparison]::OrdinalIgnoreCase) }
 if ($running) {
     Fail ("clashwin.exe 正在运行（PID " + (($running | ForEach-Object { $_.Id }) -join ',') + "），先退出再打包。")
 }
