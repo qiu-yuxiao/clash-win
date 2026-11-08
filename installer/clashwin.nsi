@@ -53,7 +53,7 @@ ${UnStrStr}
 
 ; ---------- 可覆盖定义（构建脚本传入绝对路径） ----------
 !ifndef VERSION
-  !define VERSION "0.1.8"
+  !define VERSION "0.1.9"
 !endif
 !ifndef STAGEDIR
   !define STAGEDIR "stage"
@@ -947,4 +947,5 @@ Function un.RemoveServiceIfOurs
     Pop $0
   ${EndIf}
 FunctionEnd
+
 

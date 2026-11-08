@@ -1,6 +1,6 @@
 {
-  "version": "0.1.8",
-  "notes": "Clash Win v0.1.8 — suppress install-time service launch, clean stop of service & mihomo core upon exiting TUN mode or quitting app, and finish-page run checkbox uncheck default.",
-  "pub_date": "2026-11-08T15:30:00Z",
+  "version": "0.1.9",
+  "notes": "Clash Win v0.1.9 — fix auto speed test infinite loop on first run proxy node page, and align traffic curve 1s update cycle & smooth slide animation with Clash Mini.",
+  "pub_date": "2026-11-08T16:45:00Z",
   "platforms": {}
 }

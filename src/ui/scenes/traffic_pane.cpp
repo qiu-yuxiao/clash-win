@@ -174,15 +174,16 @@ bool TrafficPane::on_traffic_payload(const std::string& payload_text) {
 bool TrafficPane::on_traffic_json(const nlohmann::json& j) {
   if (!j.is_object() || !j.contains("up") || !j.contains("down")) return false;
 
-  // src: traffic-graph.tsx:65-79 —— 10fps 到达的 payload 只做缓存，
-  //   sampleIntervalMs=1000 采一次；零流量守卫：本次为 0 且历史全 0 时不入窗。
+  // src: traffic-graph.tsx:65-79 + use-traffic-data.ts:9-28
+  // 采样周期与 Mini 保持一致（1000ms 采样步长，放宽抖动容限至 500ms 防丢弃 995ms 合法包）
   int64_t now = now_ms_ ? now_ms_() : 0;
   double up = j.value("up", 0.0);
   double down = j.value("down", 0.0);
   down_total_ = static_cast<double>(j.value("downTotal", 0.0));
   up_total_ = static_cast<double>(j.value("upTotal", 0.0));
-  if (last_sample_ms_ >= 0 && now - last_sample_ms_ < kTrafficSampleMs)
-    return true;  // 已缓存（总量已更新），等下一个 1s 采样点
+  constexpr int64_t kMinIntervalMs = 500;
+  if (last_sample_ms_ >= 0 && now - last_sample_ms_ < kMinIntervalMs)
+    return true;  // 过滤 <500ms 重复包/突发包
   last_sample_ms_ = now;
 
   bool retained = series_.has_traffic();

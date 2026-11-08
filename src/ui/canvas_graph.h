@@ -3,6 +3,7 @@
 // src: components/layout/traffic-graph.tsx —— 无轴/浅底/双曲线（默认 bezier，:41）：
 //   down=primary.main(:123)、up=secondary.main(:122)、maxPoint 30(:6)、
 //   Y 轴 8 段分段映射(:172-184)、quadraticCurveTo(:202)、up→down 绘制顺序(:231-253)。
+#include <cstdint>
 #include <vector>
 
 #include "widget.h"
@@ -40,10 +41,11 @@ class CanvasGraph : public Widget {
 
  private:
   void draw_series(IRenderTarget& rt, const std::vector<float>& data,
-                   const Color4f& c);
+                   const Color4f& c, float offset);
 
   std::vector<float> up_, down_;
   float max_value_ = 1;
+  int64_t anim_start_ms_ = 0;
 };
 
 }  // namespace clashwin::ui

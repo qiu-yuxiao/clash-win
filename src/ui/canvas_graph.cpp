@@ -1,6 +1,8 @@
 // CanvasGraph 实现（T10）：双折线绘制。
 #include "canvas_graph.h"
 
+#include <windows.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -39,6 +41,7 @@ void CanvasGraph::set_series(std::vector<float> up, std::vector<float> down,
     down_ = std::move(down);
   }
   if (max_value > 0) max_value_ = max_value;
+  anim_start_ms_ = static_cast<int64_t>(GetTickCount64());
   invalidate();
 }
 
@@ -47,35 +50,35 @@ SizeF CanvasGraph::on_measure(float max_w, float max_h) {
 }
 
 void CanvasGraph::draw_series(IRenderTarget& rt, const std::vector<float>& data,
-                              const Color4f& c) {
+                              const Color4f& c, float offset) {
   if (data.size() < 2 || bounds().w <= 0 || bounds().h <= 0) return;
   const float w = bounds().w, h = bounds().h;
   // src: traffic-graph.tsx:167 dx = width / maxPoint（=30）
   const float dx = w / static_cast<float>(kMaxPoint);
-  // src: traffic-graph.tsx:189-199 稳态 offset=dx 时 x(i)=dx*(i-2)+3（首点 3-2dx 由裁剪丢弃）
-  auto x_at = [&](size_t i) { return dx * static_cast<float>(i) - 2.0f * dx + 3.0f; };
-  auto y_at = [&](float v) { return count_y(v, h); };
+  auto count_y_val = [&](float v) { return count_y(v, h); };
 
-  // src: traffic-graph.tsx:186-204 drawBezier：quadraticCurveTo(控制点=(x[i-1],y[i]),
-  //   终点=((x[i-1]+x[i])/2, (y[i]+y[i+1])/2))，末点终点=控制点；此处按 6 段折线扁平化。
+  // src: traffic-graph.tsx:186-204 drawBezier：quadraticCurveTo(控制点=(p1x,p1y),
+  //   终点=((p1x+p2x)/2, (p1y+p2y)/2))，末点终点=控制点；按 6 段折线扁平化。
   std::vector<PointF> pts;
   pts.reserve(data.size() * 6 + 2);
-  pts.push_back({x_at(0), y_at(data[0])});
+  const float first_x = dx * -1.0f - offset + 3.0f;
+  const float first_y = count_y_val(data[0]);
+  pts.push_back({first_x, first_y});
+
   for (size_t i = 1; i < data.size(); ++i) {
     const PointF start = pts.back();
-    const float cx = x_at(i - 1), cy = y_at(data[i]);
-    float ex, ey;
-    if (i + 1 < data.size()) {
-      ex = (x_at(i - 1) + x_at(i)) / 2.0f;
-      ey = (y_at(data[i]) + y_at(data[i + 1])) / 2.0f;
-    } else {
-      ex = cx;
-      ey = cy;
-    }
+    const float p1x = dx * static_cast<float>(i - 1) - offset + 3.0f;
+    const float p1y = count_y_val(data[i]);
+    const bool has_next = (i + 1 < data.size());
+    const float p2x = has_next ? (dx * static_cast<float>(i) - offset + 3.0f) : p1x;
+    const float p2y = has_next ? count_y_val(data[i + 1]) : p1y;
+    const float ex = (p1x + p2x) / 2.0f;
+    const float ey = (p1y + p2y) / 2.0f;
+
     for (int k = 1; k <= 6; ++k) {
       const float t = static_cast<float>(k) / 6.0f, u = 1.0f - t;
-      pts.push_back({u * u * start.x + 2.0f * u * t * cx + t * t * ex,
-                     u * u * start.y + 2.0f * u * t * cy + t * t * ey});
+      pts.push_back({u * u * start.x + 2.0f * u * t * p1x + t * t * ex,
+                     u * u * start.y + 2.0f * u * t * p1y + t * t * ey});
     }
   }
   rt.draw_polyline(pts.data(), static_cast<int>(pts.size()), {c, line_width});
@@ -89,11 +92,25 @@ void CanvasGraph::on_paint(IRenderTarget& rt) {
   const float lw = 1.0f;  // src: traffic-graph.tsx:9 refLineWidth=1
   rt.draw_line({0, dy}, {bounds().w, dy}, {line_, lw});
   rt.draw_line({0, dy * 4}, {bounds().w, dy * 4}, {line_, lw});
+
   // src: traffic-graph.tsx:231-253 —— 先画 up（alpha .8），再画 down（alpha .9，覆盖在上）
   Color4f uc = up_color_; uc.a = 0.8f;     // src: :11 upLineAlpha
   Color4f dc = down_color_; dc.a = 0.9f;   // src: :14 downLineAlpha
-  draw_series(rt, up_, uc);
-  draw_series(rt, down_, dc);
+
+  // src: traffic-graph.tsx:273-288 动画进度驱动 offset 从 0 平滑滑动到 dx
+  const float dx = bounds().w / static_cast<float>(kMaxPoint);
+  float offset = dx;
+  if (anim_start_ms_ > 0) {
+    int64_t elapsed = static_cast<int64_t>(GetTickCount64()) - anim_start_ms_;
+    if (elapsed < 1000) {
+      float progress = static_cast<float>(elapsed) / 1000.0f;
+      offset = progress * dx;
+      invalidate();  // 驱动下一帧平滑滚动动画
+    }
+  }
+
+  draw_series(rt, up_, uc, offset);
+  draw_series(rt, down_, dc, offset);
 }
 
 }  // namespace clashwin::ui
