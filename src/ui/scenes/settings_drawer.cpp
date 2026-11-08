@@ -772,6 +772,10 @@ void ThemeCard::on_paint(IRenderTarget& rt) {
 
 // ---------- SettingsDrawer ----------
 SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
+  // 对齐 Mini: _layout.tsx:1422「overflow: 'hidden'」
+  // 必须开启边界裁剪，防止窗口矮小时下部卡片超出抽屉底边溢出到下方流量条
+  set_clip_to_bounds(true);
+
   // 遮罩：源码无 backdrop（_layout.tsx:1403 条件渲染不透明面板）；保留但恒隐藏
   auto mask = std::make_unique<Widget>();
   mask_ = mask.get();
@@ -781,6 +785,7 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
   // 全窗覆盖层（theme-panel 底）
   auto panel = std::make_unique<Widget>();
   panel_ = panel.get();
+  panel_->set_clip_to_bounds(true);
   panel_->set_visible(false);  // 关闭态不绘制（open_ 为 false）
   add_child(std::move(panel));
 

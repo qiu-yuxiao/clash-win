@@ -99,7 +99,7 @@ if (Test-Path $stageExe) {
   Fail "stage exe 不存在：$stageExe（交付链缺一方）"
 }
 
-$zip = Join-Path $RepoRoot 'dist\ClashWin_0.1.5_x64_portable.zip'
+$zip = Join-Path $RepoRoot 'dist\ClashWin_0.1.6_x64_portable.zip'
 if (Test-Path $zip) {
   $tmp = Join-Path $env:TEMP ("cwdc_" + [guid]::NewGuid().ToString('N'))
   try {

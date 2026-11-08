@@ -73,6 +73,8 @@ UT_TEST(t31_switch_hover_scale_per_skin) {
   UT_CHECK(p.thumb_hover);
   UT_CHECK(almost_eq(p.thumb_hover_scale, 1.20f));
   UT_CHECK(almost_eq(p.thumb_hover_brightness, 1.15f));
+  UT_CHECK(p.on_thumb_hover_glow_color.a > 0.1f);
+  UT_CHECK(almost_eq(p.on_thumb_hover_glow_color.r, 1.0f));
 
   svc.init(SkinId::ModernFlat, ThemeMode::Light);
   p = svc.switch_paint();

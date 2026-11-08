@@ -356,18 +356,18 @@ struct SwitchPaint {
   float thumb_hover_scale = 1.0f;      // transform: scale()
   float thumb_hover_brightness = 1.0f; // filter: brightness()
   bool thumb_hover_shadow = false;      // 覆盖常态 thumb_shadow
-  Color4f thumb_hover_shadow_color;
+  Color4f thumb_hover_shadow_color = Color4f{0, 0, 0, 0};
   float thumb_hover_shadow_dy = 0;
   float thumb_hover_shadow_blur = 0;
   bool thumb_hover_glow = false;        // 覆盖常态 thumb_glow
-  Color4f thumb_hover_glow_color;       // off 态（cyberpunk 用 currentColor=#ff0055）
-  Color4f on_thumb_hover_glow_color;     // on 态（cyberpunk #00b0ff|#00f0ff）
+  Color4f thumb_hover_glow_color = Color4f{0, 0, 0, 0};       // off 态（cyberpunk 用 currentColor=#ff0055）
+  Color4f on_thumb_hover_glow_color = Color4f{0, 0, 0, 0};     // on 态（cyberpunk #00b0ff|#00f0ff）
   float thumb_hover_glow_blur = 0;
   bool thumb_hover_inset_hi = false;    // 覆盖常态 inset 顶高光
-  Color4f thumb_hover_inset_hi_color;
+  Color4f thumb_hover_inset_hi_color = Color4f{0, 0, 0, 0};
   float thumb_hover_inset_hi_dy = 0;
   bool thumb_hover_inset_dark = false;  // 覆盖常态 inset 底暗线
-  Color4f thumb_hover_inset_dark_color;
+  Color4f thumb_hover_inset_dark_color = Color4f{0, 0, 0, 0};
   float thumb_hover_inset_dark_dy = 0;
 };
 

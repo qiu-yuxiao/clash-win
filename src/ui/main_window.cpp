@@ -650,6 +650,11 @@ void MainWindow::tun_guard_tick() {
           tr8(r.is_ok()
                   ? "settings.sections.system.notifications.tunMode.autoDisabled"
                   : "settings.sections.system.notifications.tunMode.autoDisableFailed"));
+      if (r.is_ok()) {
+        UiPostbox::instance().post([this] {
+          if (settings_drawer_) settings_drawer_->sync_takeover(true, false);
+        });
+      }
       tun_guard_cool_until_ = now_ms() + 1000;
     }
     tun_guard_busy_.store(false);

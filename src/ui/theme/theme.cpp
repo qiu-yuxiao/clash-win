@@ -949,6 +949,7 @@ SwitchPaint ThemeService::switch_paint() const {
       p.thumb_hover_inset_dark_dy = (light ? -1.0f : -1.5f) * d;
       p.thumb_hover_glow = true;
       p.thumb_hover_glow_color = Color4f::hex(0xFFC107, 0.35f * v);
+      p.on_thumb_hover_glow_color = Color4f::hex(0xFFC107, 0.35f * v);
       p.thumb_hover_glow_blur = 10.0f * v;
       break;
     }

@@ -1,6 +1,6 @@
 {
-  "version": "0.1.5",
-  "notes": "Clash Win v0.1.5 — onboarding guide layout, button tactile response, basic settings switches & TUN service elevation parity.",
-  "pub_date": "2026-11-07T09:40:30Z",
+  "version": "0.1.6",
+  "notes": "Clash Win v0.1.6 — switch hover glow fix, drawer clipping, traffic pane opacity, TUN mode service fallback sync.",
+  "pub_date": "2026-11-08T12:30:00Z",
   "platforms": {}
 }

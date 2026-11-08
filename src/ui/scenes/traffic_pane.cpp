@@ -333,8 +333,9 @@ void TrafficPane::on_paint(IRenderTarget& rt) {
   }
   if (graph_rect_.w <= 0) return;
 
-  // 面板底：src: _layout.tsx:1773 background 'inherit'（无自绘渐变，
-  //   由宿主内容底色透出；此前藏青渐变系像素误读，已删）
+  // 面板底：绘制 theme_bg 保证底栏 100% 不透明，杜绝透底或透出上层溢出卡片
+  rt.fill_rect({0, 0, bounds().w, bounds().h},
+               Brush{ThemeService::instance().vars().theme_bg});
 
   const bool light = light_mode();
   const float pad_x = narrow_ ? kPadXNarrow : kPadXWide;
