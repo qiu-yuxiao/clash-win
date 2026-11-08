@@ -146,7 +146,7 @@ UT_TEST(t17_basic_card_callbacks) {
   // Mixed Port：← use-minimal-settings.ts:87-107 handleSavePort
   //   占用检查 → 双写（内核 mixed-port + verge verge_mixed_port）；Win 由此回调承接
   int saved_port = 0;
-  drawer.basic_card()->port_current_ = 10811;
+  drawer.basic_card()->port_current_ = 10801;
   drawer.on_save_port = [&](int p) {
     saved_port = p;
     return true;
@@ -162,7 +162,7 @@ UT_TEST(t17_basic_card_callbacks) {
   drawer.on_save_port = [](int) { return false; };
   drawer.basic_card()->port_field_->set_text(L"9999");
   drawer.basic_card()->save_btn_->on_click();
-  UT_CHECK(drawer.basic_card()->port_field_->text() == L"10811");
+  UT_CHECK(drawer.basic_card()->port_field_->text() == L"10801");
 }
 
 UT_TEST(t17_theme_card_skin_mode_sliders) {

@@ -250,6 +250,7 @@ class MainWindow : public app::ILifecycleWindow {
   MainScene* scene_ = nullptr;
   // T13 场景
   std::unique_ptr<scene::NodeData> node_data_;
+  uint64_t node_data_sub_ = 0;
   int node_retry_left_ = 0;  // 内核配置就绪竞态：取数重试剩余次数
   scene::QuickBar* quick_bar_ = nullptr;
   bool pinned_ = false;  // QuickBar 图钉：窗口置顶开关

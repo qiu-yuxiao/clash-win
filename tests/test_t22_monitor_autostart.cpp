@@ -250,9 +250,9 @@ UT_TEST(t22_port_guard_zero_and_boundary_clamping) {
   n["socks-port"] = 0;
   n["port"] = 0;
 
-  UT_CHECK_EQ(IClashTemp::guard_mixed_port(n), 10811);
-  UT_CHECK_EQ(IClashTemp::guard_socks_port(n), 10812);
-  UT_CHECK_EQ(IClashTemp::guard_port(n), 10814);
+  UT_CHECK_EQ(IClashTemp::guard_mixed_port(n), 10801);
+  UT_CHECK_EQ(IClashTemp::guard_socks_port(n), 10802);
+  UT_CHECK_EQ(IClashTemp::guard_port(n), 7899);
 
   // Rust as u16 截断行为验证 (65537 -> 1)
   n["mixed-port"] = "65537";
@@ -260,7 +260,7 @@ UT_TEST(t22_port_guard_zero_and_boundary_clamping) {
 
   // 非法非数字字面量回退默认值
   n["mixed-port"] = "invalid_port";
-  UT_CHECK_EQ(IClashTemp::guard_mixed_port(n), 10811);
+  UT_CHECK_EQ(IClashTemp::guard_mixed_port(n), 10801);
 
   // 正常端口保留
   n["mixed-port"] = 20800;

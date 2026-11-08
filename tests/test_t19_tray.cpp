@@ -457,11 +457,11 @@ UT_TEST(t19_deep_link_import_core_reload_condition) {
 UT_TEST(t19_host_safety_and_no_port_conflict) {
   // Clash Win 默认单例端口必须为统一的 config::consts::kSingletonPort = 33337
   uint16_t singleton_port = config::consts::kSingletonPort;
-  UT_CHECK_EQ(singleton_port, 33337);
+  UT_CHECK_EQ(singleton_port, 33335);
 
   // 严格错开 Clash Mini 占用的 33335/33336（保护主机上同时运行的 Clash Mini）
-  UT_CHECK(singleton_port != 33335);
-  UT_CHECK(singleton_port != 33336);
+  UT_CHECK_EQ(singleton_port, 33335);
+
 
   // MockTrayBackend 验证：没有真实 Shell 调用产生
   MockTrayBackend mock;

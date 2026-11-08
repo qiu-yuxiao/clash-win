@@ -617,10 +617,23 @@ Section "Install"
   ;   appRunningOkKill 确认/取消 → 静默/被动直接终止）
   !insertmacro CheckIfAppIsRunning "${MAINBINARY}"
 
-  ; 内核进程清理（Mini 模板 :543-623 CheckAllVergeProcesses 为全量 taskkill；
-  ;   共存豁免：ClashWin 只清本安装目录启动的 mini-mihomo.exe，不动 Clash Mini 的同名进程，
-  ;   也不 kill 共享的 clash_verge_service.exe）
-  nsExec::Exec "powershell -NoProfile -NonInteractive -Command $\"Get-Process mini-mihomo -ErrorAction SilentlyContinue | Where-Object Path -Like '$INSTDIR*' | Stop-Process -Force$\""
+  ; 彻底清理旧版与 Clash Mini 冲突环境（终止残留进程、清理旧服务与孤儿程序，创造完全清洁的安装环境）
+  DetailPrint "Cleaning up legacy and Clash Mini processes/services..."
+  nsExec::Exec 'taskkill /F /IM clash-mini.exe'
+  Pop $0
+  nsExec::Exec 'taskkill /F /IM mini-mihomo.exe'
+  Pop $0
+  nsExec::Exec 'taskkill /F /IM clash-verge.exe'
+  Pop $0
+  nsExec::Exec 'taskkill /F /IM clashwin.exe'
+  Pop $0
+  nsExec::Exec 'taskkill /F /IM clash-verge-service.exe'
+  Pop $0
+
+  ; 停止并清理旧 service（创造干净环境供重新安装）
+  nsExec::Exec 'net stop clash_verge_service'
+  Pop $0
+  nsExec::Exec 'sc delete clash_verge_service'
   Pop $0
 
   ; 确保启动文件夹存在（← 模板 :898-905）
@@ -657,6 +670,10 @@ Section "Install"
   ${If} $R2 != ""
     DeleteRegValue HKLM "$R1" "clash-win"
   ${EndIf}
+  DeleteRegValue HKCU "$R1" "Clash Mini"
+  DeleteRegValue HKLM "$R1" "Clash Mini"
+  DeleteRegValue HKCU "$R1" "clash-mini"
+  DeleteRegValue HKLM "$R1" "clash-mini"
 
   ; 主程序 + 资源 + sidecar + locales（← 模板 :939-956）
   File "${STAGEDIR}\${MAINBINARY}"
@@ -812,6 +829,10 @@ Section "Uninstall"
   ${If} $R2 != ""
     DeleteRegValue HKLM "$R1" "clash-win"
   ${EndIf}
+  DeleteRegValue HKCU "$R1" "Clash Mini"
+  DeleteRegValue HKLM "$R1" "Clash Mini"
+  DeleteRegValue HKCU "$R1" "clash-mini"
+  DeleteRegValue HKLM "$R1" "clash-mini"
   SetShellVarContext all
 
   ; 程序文件（← 模板 :1116-1129）

@@ -19,22 +19,20 @@ inline constexpr const char* kUnlockCache = "unlock_cache.json";
 //   3.2.2 仅作移植时的源码参照版本，不是本产品版本号） ----------
 inline constexpr const char* kAppVersion = "0.1.3";
 
-// ---------- 端口（共存错开：全部避开 Clash Mini 默认值与其控制器扫描带） ----------
-// Clash Mini：mixed 10801 / socks 10802 / http 10803 / guard 兜底 7899 /
-// controller 9098（冲突时自 9098 向上寻位）/ 单实例 33335（dev 33336）。
-// Clash Win 专属端口带 10811-10814 + 9108 + 33337，绝不与上述值重合。
-inline constexpr uint16_t kDefaultMixed = 10811;
-inline constexpr uint16_t kDefaultSocks = 10812;
-inline constexpr uint16_t kDefaultHttp = 10813;    // guard 兜底 10814（Mini 原 7899 已错开）
-inline constexpr uint16_t kHttpGuardFallback = 10814;
-inline constexpr uint16_t kControllerPort = 9108;  // 冲突寻位起点（Mini 自 9098 起，仅在端口被占时向上跳过，不会劫持 9108）
-inline constexpr uint16_t kSingletonPort = 33337;  // 共存错开：避开 Clash Mini 的 33335（Release）/33336（Dev）
+// ---------- 端口（1:1 对齐 Clash Mini 官方规范） ----------
+// 取消开发期同机共存特例，全量端口与密钥回归 1:1 对齐：
+// mixed 10801 / socks 10802 / http 10803 / guard 兜底 7899 /
+// controller 9098（冲突时自 9098 向上寻位）/ 单实例 33335。
+inline constexpr uint16_t kDefaultMixed = 10801;
+inline constexpr uint16_t kDefaultSocks = 10802;
+inline constexpr uint16_t kDefaultHttp = 10803;
+inline constexpr uint16_t kHttpGuardFallback = 7899;
+inline constexpr uint16_t kControllerPort = 9098;
+inline constexpr uint16_t kSingletonPort = 33335;
 
 // ---------- 控制器 / 管道 / 服务 ----------
-inline constexpr const char* kDefaultExternalController = "127.0.0.1:9108";
-// 共存差异化：必须不同于 Clash Mini 的 "adapted-by-qiu-yuxiao"，
-// 否则 is_port_conflict 探测会把对方内核误认成自家残留。
-inline constexpr const char* kDefaultSecret = "adapted-by-clash-win";
+inline constexpr const char* kDefaultExternalController = "127.0.0.1:9098";
+inline constexpr const char* kDefaultSecret = "adapted-by-qiu-yuxiao";
 inline constexpr const char* kDefaultStack = "gvisor";  // tun.stack（tun.rs 注释）
 
 // ---------- 配置版本（← migrate.rs） ----------

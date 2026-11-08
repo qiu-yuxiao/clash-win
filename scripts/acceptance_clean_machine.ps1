@@ -9,7 +9,7 @@
 
   本脚本的严格边界（不要放宽）：
     - **绝不自动开启 TUN / 系统代理 / 改注册表 / 改路由**（02-方法与流程.md:34,46-50 断网红线）。
-      出网验证只用显式代理 curl -x 127.0.0.1:10811，属于「使用网络」而非「设置网络」。
+      出网验证只用显式代理 curl -x 127.0.0.1:10801，属于「使用网络」而非「设置网络」。
     - **不自证干净机**：检测到 Clash Mini 安装痕迹或服务 ImagePath 指向 Mini，
       即报 NOT-CLEAN-MACHINE，不宣布 P0 通过。
     - **服务已存在即报 SERVICE-PREEXISTING**：不满足「服务从缺失到就位」口径，
@@ -157,11 +157,11 @@ if ($Urls.Count -eq 0) {
     } else {
         foreach ($u in $Urls) {
             if ($DryRun) {
-                Rec 'URL' $u "DRYRUN: curl.exe -x http://127.0.0.1:10811 --max-time $CurlTimeoutSec"
+                Rec 'URL' $u "DRYRUN: curl.exe -x http://127.0.0.1:10801 --max-time $CurlTimeoutSec"
             } else {
                 try {
-                    $code = (& curl.exe -x 'http://127.0.0.1:10811' -s -o NUL -w '%{http_code}' --max-time $CurlTimeoutSec $u 2>&1 | Out-String).Trim()
-                    Rec 'URL' $u "HTTP $code（显式代理 127.0.0.1:10811，未改系统设置）"
+                    $code = (& curl.exe -x 'http://127.0.0.1:10801' -s -o NUL -w '%{http_code}' --max-time $CurlTimeoutSec $u 2>&1 | Out-String).Trim()
+                    Rec 'URL' $u "HTTP $code（显式代理 127.0.0.1:10801，未改系统设置）"
                     if ($code -notmatch '^2\d\d$|^3\d\d$') { Flag 'URL-FAILED' }
                 } catch {
                     Rec 'URL' $u "ERROR（$($_.Exception.Message)）"

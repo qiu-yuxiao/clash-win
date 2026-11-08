@@ -1021,12 +1021,12 @@ void LogViewerModal::on_arrange(const RectF& area) {
   btn_close_x_rect_ = {cx + cw - 32.0f, cy + 6.0f, 26.0f, 24.0f};
 
   toolbar_rect_ = {cx + 14.0f, cy + 42.0f, cw - 28.0f, 32.0f};
-  btn_pause_rect_ = {toolbar_rect_.x, toolbar_rect_.y, 64.0f, 30.0f};
-  btn_order_rect_ = {toolbar_rect_.x + 68.0f, toolbar_rect_.y, 64.0f, 30.0f};
-  btn_clear_rect_ = {toolbar_rect_.x + 136.0f, toolbar_rect_.y, 64.0f, 30.0f};
-  seg_level_rect_ = {toolbar_rect_.x + 206.0f, toolbar_rect_.y, 140.0f, 30.0f};
-  search_box_rect_ = {toolbar_rect_.x + 352.0f, toolbar_rect_.y,
-                      toolbar_rect_.w - 352.0f, 30.0f};
+  btn_pause_rect_ = {toolbar_rect_.x, toolbar_rect_.y, 48.0f, 30.0f};
+  btn_order_rect_ = {toolbar_rect_.x + 52.0f, toolbar_rect_.y, 48.0f, 30.0f};
+  btn_clear_rect_ = {toolbar_rect_.x + 104.0f, toolbar_rect_.y, 54.0f, 30.0f};
+  seg_level_rect_ = {toolbar_rect_.x + 164.0f, toolbar_rect_.y, 90.0f, 30.0f};
+  search_box_rect_ = {seg_level_rect_.x + seg_level_rect_.w + 8.0f, toolbar_rect_.y,
+                      std::max(60.0f, toolbar_rect_.x + toolbar_rect_.w - (seg_level_rect_.x + seg_level_rect_.w + 8.0f)), 30.0f};
 
   log_area_rect_ = {cx + 14.0f, cy + 82.0f, cw - 28.0f, ch - 96.0f};
 }
@@ -1137,7 +1137,16 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
   else if (level_filter_ == "info") lvl_str = L"INFO";
   else if (level_filter_ == "warn") lvl_str = L"WARN";
   else lvl_str = L"ERROR";
-  rt.draw_text(lvl_str, seg_level_rect_, lvl_ts);
+  Brush lb{vars.theme_input_bg};
+  rt.round_rect(seg_level_rect_, 4.0f, {vars.theme_input_border, 1.0f}, &lb);
+  lvl_ts.color = pal.primary_text;
+  rt.draw_text(lvl_str, {seg_level_rect_.x + 8.0f, seg_level_rect_.y, seg_level_rect_.w - 22.0f, seg_level_rect_.h}, lvl_ts);
+  TextStyle arrow_ts;
+  arrow_ts.size = 8.5f;
+  arrow_ts.color = pal.secondary_text;
+  arrow_ts.align_h = AlignH::Right;
+  arrow_ts.align_v = AlignV::Center;
+  rt.draw_text(L"▼", {seg_level_rect_.x, seg_level_rect_.y, seg_level_rect_.w - 6.0f, seg_level_rect_.h}, arrow_ts);
 
   // 搜索框（走主题输入框变量 → 随皮肤/亮暗）
   Brush sb{vars.theme_input_bg};
@@ -1216,6 +1225,22 @@ bool LogViewerModal::on_mouse(const MouseEvent& e) {
   if (!open_) return false;
   PointF pt = e.pos;
 
+  if (lvl_menu_ && lvl_menu_->visible()) {
+    if (lvl_menu_->bounds().contains(pt.x, pt.y)) {
+      MouseEvent child_e = e;
+      child_e.pos.x -= lvl_menu_->bounds().x;
+      child_e.pos.y -= lvl_menu_->bounds().y;
+      return lvl_menu_->on_mouse(child_e);
+    }
+    if (e.type == MouseEventType::Up || e.type == MouseEventType::Down) {
+      if (!seg_level_rect_.contains(pt.x, pt.y)) {
+        lvl_menu_->set_visible(false);
+        invalidate();
+        return true;
+      }
+    }
+  }
+
   if (e.type == MouseEventType::Move) {
     bool hx = btn_close_x_rect_.contains(pt.x, pt.y);
     bool hp = btn_pause_rect_.contains(pt.x, pt.y);
@@ -1260,9 +1285,23 @@ bool LogViewerModal::on_mouse(const MouseEvent& e) {
       if (lvl_menu_) {
         const bool opening = !lvl_menu_->visible();
         if (opening) {
-          lvl_menu_->layout_tree({seg_level_rect_.x, seg_level_rect_.bottom() + 2.0f,
-                                 140.0f, 5.0f * lvl_menu_->item_height + 4.0f});
+          const float menu_w = 100.0f;
+          const float menu_h = 5.0f * lvl_menu_->item_height + 4.0f;
+          float menu_x = std::max(card_rect_.x + 8.0f,
+                                  std::min(seg_level_rect_.x, card_rect_.x + card_rect_.w - menu_w - 8.0f));
+          float menu_y = (seg_level_rect_.bottom() + 2.0f + menu_h <= card_rect_.y + card_rect_.h - 8.0f)
+                             ? (seg_level_rect_.bottom() + 2.0f)
+                             : (seg_level_rect_.y - menu_h - 2.0f);
+          lvl_menu_->layout_tree({menu_x, menu_y, menu_w, menu_h});
+          lvl_menu_->min_width_ = menu_w;
           lvl_menu_->set_z_order(1000);
+          MenuStyle st;
+          apply_menu_skin(st);
+          lvl_menu_->bg_ = st.bg;
+          lvl_menu_->border_ = st.border;
+          lvl_menu_->text_ = st.text;
+          lvl_menu_->hover_bg_ = st.hover_bg;
+          lvl_menu_->selected_bg_ = st.selected_bg;
         }
         lvl_menu_->set_visible(opening);
       }

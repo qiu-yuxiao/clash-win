@@ -62,14 +62,35 @@ Color4f delay_tier_color(DelayTier tier) {
 }
 
 namespace {
-// src: proxy-item.tsx:51「.replace(/\s\(\d{6}\)$/, '')」→ 名称清洗
-std::wstring strip_six_digit_suffix(const std::wstring& text) {
+// src: proxy-item.tsx:51「.replace(/\s\(\d{6}\)$/, '')」→ 名称清洗（含无括号、带括号、带空格变体）
+std::wstring strip_six_digit_suffix(std::wstring text) {
+  while (!text.empty() && (text.back() == L' ' || text.back() == L'\t')) {
+    text.pop_back();
+  }
   const size_t n = text.size();
-  if (n < 9 || text[n - 1] != L')' || text[n - 7] != L'(' || text[n - 8] != L' ')
-    return text;
-  for (size_t i = n - 6; i < n - 1; ++i)
-    if (text[i] < L'0' || text[i] > L'9') return text;
-  return text.substr(0, n - 8);
+  // 分支 1: " (123456)" 或 "(123456)"
+  if (n >= 8 && text[n - 1] == L')' && text[n - 8] == L'(') {
+    bool all_digits = true;
+    for (size_t i = n - 7; i < n - 1; ++i) {
+      if (text[i] < L'0' || text[i] > L'9') { all_digits = false; break; }
+    }
+    if (all_digits) {
+      size_t cut = n - 8;
+      if (cut > 0 && (text[cut - 1] == L' ' || text[cut - 1] == L'\t')) cut--;
+      return text.substr(0, cut);
+    }
+  }
+  // 分支 2: " 123456" 或 "-123456" 或 "_123456"
+  if (n >= 7 && (text[n - 7] == L' ' || text[n - 7] == L'\t' || text[n - 7] == L'-' || text[n - 7] == L'_')) {
+    bool all_digits = true;
+    for (size_t i = n - 6; i < n; ++i) {
+      if (text[i] < L'0' || text[i] > L'9') { all_digits = false; break; }
+    }
+    if (all_digits) {
+      return text.substr(0, n - 7);
+    }
+  }
+  return text;
 }
 // src: use-proxy-delay-state.ts:61 PRESET_PROXY_NAMES 的延迟列不渲染
 bool is_preset_proxy(const std::string& name) {

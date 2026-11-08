@@ -1,4 +1,4 @@
-﻿# run_app_test.ps1 — 一条命令完成「干净环境启动 → 四项自检 → 截图 → 收尾」
+# run_app_test.ps1 — 一条命令完成「干净环境启动 → 四项自检 → 截图 → 收尾」
 #
 # 用法（默认：复制到 %TEMP%\cwrun\app 运行，最贴近发布形态）：
 #   powershell -NoProfile -File scripts\run_app_test.ps1
@@ -290,7 +290,7 @@ $MainLog = Join-Path $AppHome 'logs\clashwin.log'
 # 以真实 home 的 verge.yaml 为底本逐字段保留，仅强制两项为 false；只写测试 home，不改产品默认值。
 $seedVerge = Join-Path $env:APPDATA 'io.github.clash-win.clash-win\verge.yaml'
 $dstVerge = Join-Path $AppHome 'verge.yaml'
-$vergeText = if (Test-Path $seedVerge) { Get-Content $seedVerge -Raw -Encoding UTF8 } else { "config_version: 3`nverge_mixed_port: 10811`n" }
+$vergeText = if (Test-Path $seedVerge) { Get-Content $seedVerge -Raw -Encoding UTF8 } else { "config_version: 3`nverge_mixed_port: 10801`n" }
 $vergeText = $vergeText -replace '(?m)^enable_system_proxy:.*$', 'enable_system_proxy: false'
 $vergeText = $vergeText -replace '(?m)^enable_tun_mode:.*$', 'enable_tun_mode: false'
 if ($vergeText -notmatch '(?m)^enable_system_proxy:') { $vergeText += "`nenable_system_proxy: false`n" }

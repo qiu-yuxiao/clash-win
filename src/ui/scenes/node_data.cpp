@@ -141,7 +141,34 @@ bool NodeData::test_and_select(const std::vector<std::string>& nodes) {
   if (need_batch) set_delays_batch(nodes, -2);
   if (!hooks_.test_and_select) return false;
   bool ok = hooks_.test_and_select(nodes);
-  if (ok && hooks_.fetch_group) {
+
+  // 择优切换双保险：
+  // 从本次待测的 nodes 范围中，基于最新测得的 delay 找到最快节点
+  std::string fastest;
+  int min_d = 999999;
+  for (const auto& n : nodes) {
+    int d = row_delay(n);
+    if (d >= kNodeDelayMinMs && d < kNodeDelayMaxMs && d < min_d) {
+      min_d = d;
+      fastest = n;
+    }
+  }
+  // 兜底：若 [30, 5000) 范围内无候选，放宽为任何正有效延迟 (> 0 且 < 100000)
+  if (fastest.empty()) {
+    for (const auto& n : nodes) {
+      int d = row_delay(n);
+      if (d > 0 && d < 100000 && d < min_d) {
+        min_d = d;
+        fastest = n;
+      }
+    }
+  }
+
+  if (!fastest.empty()) {
+    CWLOG_INFO("NodeData::test_and_select: 群测最优节点 = " + fastest +
+               " (" + std::to_string(min_d) + "ms)，执行切换");
+    this->select(fastest);
+  } else if (ok && hooks_.fetch_group) {
     std::vector<std::string> all;
     std::string now;
     if (hooks_.fetch_group(&all, &now)) {

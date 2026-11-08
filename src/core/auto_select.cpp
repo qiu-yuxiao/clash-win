@@ -184,7 +184,7 @@ AutoSelect::Outcome AutoSelect::trigger(
         out.display, hooks_.failed_servers, hooks_.node_server_map);
     if (!fastest) return out;
     auto cur = hooks_.current_uid ? hooks_.current_uid() : std::nullopt;
-    if (cur != std::optional{profile_uid}) {
+    if (cur.has_value() && !profile_uid.empty() && *cur != profile_uid) {
       // 活动配置已被更改 → 舍弃切换（← monitor.rs:1046-1056）
       CWLOG_INFO("AutoSelect: 活动配置已更改，舍弃切换");
       return out;

@@ -159,7 +159,7 @@ if ($svc -match 'RUNNING') { Pass "clash_verge_service RUNNING" } else { Fail "c
 $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
 $ip = Get-ItemProperty $key
 if ($ip.ProxyEnable -eq 1) { Pass 'ProxyEnable=1' } else { Fail 'ProxyEnable 非 1（运行态验收期望系统代理开启）' }
-if ($ip.ProxyServer -eq '127.0.0.1:10811') { Pass 'ProxyServer=127.0.0.1:10811' } else { Fail "ProxyServer=$($ip.ProxyServer)" }
+if ($ip.ProxyServer -eq '127.0.0.1:10801') { Pass 'ProxyServer=127.0.0.1:10801' } else { Fail "ProxyServer=$($ip.ProxyServer)" }
 
 ""
 "DELIVERY_PATH=$Exe"

@@ -111,7 +111,7 @@ class Sysopt {
     std::string system_proxy_bypass;     // utf8；空 = 无自定义
     std::string proxy_host = "127.0.0.1";
     uint16_t mixed_port = 0;             // ← verge_mixed_port 或 clash mixed_port
-    uint16_t pac_port = 33337;           // ← Clash Win 单实例端口（错开 Mini 33335/33336）
+    uint16_t pac_port = 33335;           // ← 单实例端口（对齐 Mini 33335）
   };
 
   // ← sysopt.rs:129-197 update_sysproxy：

@@ -144,6 +144,10 @@ std::optional<std::pair<double, double>> LargeModeController::load(
 MainWindow::MainWindow() = default;
 
 MainWindow::~MainWindow() {
+  if (node_data_ && node_data_sub_) {
+    node_data_->unsubscribe(node_data_sub_);
+    node_data_sub_ = 0;
+  }
   if (theme_sub_) {
     theme::ThemeService::instance().unsubscribe(theme_sub_);
     theme_sub_ = 0;
@@ -665,6 +669,33 @@ void MainWindow::sync_first_run_proxy() {  if (!node_data_) return;
 void MainWindow::build_scene() {
   // T13：场景装配——数据（production hooks）→ 快捷条/节点列表挂载 → 事件订阅
   node_data_ = std::make_unique<scene::NodeData>(scene::NodeData::production_hooks());
+
+  node_data_sub_ = node_data_->subscribe([this] {
+    if (!quick_bar_ || !node_data_) return;
+    const std::string now = node_data_->now();
+    quick_bar_->set_node_text(utf::utf8_to_utf16(now.empty() ? "-" : now));
+    quick_bar_->set_badge(node_data_->row_delay(now), !now.empty());
+    std::string type;
+    for (const auto& r : node_data_->rows()) {
+      if (r.name == now) {
+        type = r.type;
+        break;
+      }
+    }
+    std::wstring addr;
+    if (!now.empty()) {
+      auto r = cmd::CommandService::instance().invoke(
+          "get_proxy_addr", nlohmann::json::object({{"name", now}}));
+      if (r.is_ok() && r.value().is_object()) {
+        const std::string server = r.value().value("server", std::string());
+        const int port = r.value().value("port", 0);
+        if (!server.empty()) {
+          addr = utf::utf8_to_utf16(server + ":" + std::to_string(port));
+        }
+      }
+    }
+    quick_bar_->set_node_meta(type, addr);
+  });
 
   auto qb = std::make_unique<scene::QuickBar>();
   quick_bar_ = qb.get();
@@ -1934,7 +1965,11 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
     }
 
     case WM_SIZE: {
-      if (wp == SIZE_MINIMIZED) break;
+      if (wp == SIZE_MINIMIZED) {
+        if (traffic_pane_) traffic_pane_->set_enabled(false);
+        break;
+      }
+      if (traffic_pane_) traffic_pane_->set_enabled(true);
       const int cw = LOWORD(lp), ch = HIWORD(lp);
       // 【DPIARCH】D2D HWND target 不会自行跟帧（本 WndProc 未走 DefWindowProc）：
       // backbuffer 停在创建期 386x1000 → 406x1020 客户区被拉伸 5.2% 呈现。
@@ -1989,8 +2024,7 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       return 0;
 
     case WM_ACTIVATE:
-      // T14 卡⑤：失焦停采开关
-      if (traffic_pane_) traffic_pane_->set_enabled(LOWORD(wp) != WA_INACTIVE);
+      // 对齐 Mini traffic-graph.tsx:84-95：失焦时不暂停，仅在最小化(document.hidden)时停采
       break;
 
     // 【INPUTFIX】鼠标/键盘路由给 widget 树（此前仅 feed_activity，

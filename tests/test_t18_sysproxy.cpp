@@ -112,7 +112,7 @@ UT_TEST(t18_update_sysproxy_disabled_clears_residue) {
                          "172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;"
                          "172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;"
                          "172.28.*;172.29.*;172.30.*;172.31.*;<local>)");
-  UT_CHECK(acc.log[1] == "auto:off(http://127.0.0.1:33337/commands/pac)");
+  UT_CHECK(acc.log[1] == "auto:off(http://127.0.0.1:33335/commands/pac)");
   UT_CHECK(SysproxyGuard::instance().guard_type() == GuardType::None);
 }
 
@@ -129,7 +129,7 @@ UT_TEST(t18_update_sysproxy_pure_global_order_and_guard) {
   UT_CHECK(r.is_ok());
   // ← sysopt.rs:29-34：纯全局先 Autoproxy 清再 Sysproxy 开
   UT_CHECK_EQ(acc.log.size(), 2);
-  UT_CHECK(acc.log[0] == "auto:off(http://127.0.0.1:33337/commands/pac)");
+  UT_CHECK(acc.log[0] == "auto:off(http://127.0.0.1:33335/commands/pac)");
   UT_CHECK(acc.log[1].rfind("sys:on(127.0.0.1:10801|") == 0);
   UT_CHECK(acc.log[1].find("<local>,foo.bar") != std::string::npos);  // 追加
   // guard 开 + 纯全局 → GuardType::Sysproxy
@@ -149,7 +149,7 @@ UT_TEST(t18_update_sysproxy_pac_mode) {
   // ← sysopt.rs:160-167：sys off + auto on；[Sysproxy, Autoproxy]
   UT_CHECK_EQ(acc.log.size(), 2);
   UT_CHECK(acc.log[0].rfind("sys:off(") == 0);
-  UT_CHECK(acc.log[1] == "auto:on(http://127.0.0.1:33337/commands/pac)");
+  UT_CHECK(acc.log[1] == "auto:on(http://127.0.0.1:33335/commands/pac)");
   UT_CHECK(SysproxyGuard::instance().guard_type() == GuardType::Autoproxy);
 }
 
