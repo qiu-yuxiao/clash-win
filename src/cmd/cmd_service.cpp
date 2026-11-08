@@ -118,6 +118,21 @@ void install_cmd_service(CommandService& svc) {
       {[](const Json&) -> CmdResult { return refuse_service_mutation("repair_service"); },
        consts::kTimeoutHeavy});
 
+  // ---- stop_service ----
+  svc.register_command(
+      "stop_service",
+      {[](const Json&) -> CmdResult {
+         auto runner = system::get_service_runner();
+         if (!runner) return CmdResult::ok(Json(true));
+         auto r = runner->stop_service();
+         if (r.is_err()) {
+           CWLOG_WARN("stop_service failed: " + r.error().message);
+           return CmdResult::err(r.error());
+         }
+         return CmdResult::ok(Json(true));
+       },
+       consts::kTimeoutHeavy});
+
   // ---- is_service_available（← service.rs:34-38：管道存在 + IPC 可连）----
   svc.register_command(
       "is_service_available",

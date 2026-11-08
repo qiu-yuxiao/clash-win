@@ -15,6 +15,7 @@
 #include "system/guard_monitor.h"
 #include "system/sysproxy.h"
 #include "system/tray.h"
+#include "system/service_runner.h"
 #include "util/log.h"
 
 namespace clashwin::app {
@@ -72,6 +73,10 @@ void Lifecycle::reset_hooks() {
   };
   h.kill_cores = []() -> std::vector<uint32_t> {
     return core::kill_all_mini_cores();
+  };
+  h.stop_service = []() -> Result<void> {
+    auto r = system::get_service_runner();
+    return (r && r->is_installed()) ? r->stop_service() : Result<void>::ok();
   };
   h.save_configs = [] {
     config::Config::instance().apply_all_and_save_file();
@@ -274,6 +279,13 @@ bool Lifecycle::clean_async() {
 
     if (hooks_.kill_cores) {
       hooks_.kill_cores();
+    }
+    if (hooks_.stop_service) {
+      auto svc_res = run_with_timeout([this] { return hooks_.stop_service(); },
+                                      std::chrono::milliseconds(2000));
+      if (!svc_res.has_value()) {
+        CWLOG_WARN("Lifecycle: stop_service timed out (>2000ms)");
+      }
     }
     core_success.store(stopped);
   });

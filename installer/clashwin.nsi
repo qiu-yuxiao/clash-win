@@ -53,7 +53,7 @@ ${UnStrStr}
 
 ; ---------- 可覆盖定义（构建脚本传入绝对路径） ----------
 !ifndef VERSION
-  !define VERSION "0.1.7"
+  !define VERSION "0.1.8"
 !endif
 !ifndef STAGEDIR
   !define STAGEDIR "stage"
@@ -139,6 +139,7 @@ Page custom PageReinstall PageLeaveReinstall
 !define MUI_FINISHPAGE_SHOWREADME_TEXT "$(createDesktop)"
 !define MUI_FINISHPAGE_SHOWREADME_FUNCTION CreateOrUpdateDesktopShortcut
 !define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_NOTCHECKED
 !define MUI_FINISHPAGE_RUN_FUNCTION RunMainBinary
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
 !insertmacro MUI_PAGE_FINISH
@@ -900,15 +901,6 @@ Function InstallOrStartService
 
   ${If} $ServiceExists == 1
     DetailPrint "${SERVICE_NAME} 已存在（可能与 Clash Mini 共用），跳过安装。"
-    ; ← 模板 :630-647：已存在且未运行才启动；已运行则不动
-    nsExec::ExecToStack '$SYSDIR\sc.exe query ${SERVICE_NAME} | $SYSDIR\find.exe "RUNNING"'
-    Pop $0
-    Pop $1
-    ${If} $0 != 0
-      DetailPrint "Restart ${PRODUCTNAME} Service..."
-      nsExec::Exec '$SYSDIR\sc.exe start ${SERVICE_NAME}'
-      Pop $0
-    ${EndIf}
   ${Else}
     DetailPrint "安装 ${SERVICE_NAME} 服务..."
     ; install_service.rs 在“当前目录”查找 clash-verge-service.exe
@@ -922,9 +914,10 @@ Function InstallOrStartService
         MessageBox MB_OK|MB_ICONEXCLAMATION "$(STR_SERVICE_FAIL)"
       ${EndIf}
     ${EndIf}
-    nsExec::Exec '$SYSDIR\sc.exe start ${SERVICE_NAME}'
-    Pop $0
   ${EndIf}
+  ; 铁律：安装阶段绝不自动启动服务；非 TUN 模式无需运行，若有残留则停止
+  nsExec::Exec '$SYSDIR\sc.exe stop ${SERVICE_NAME}'
+  Pop $0
 FunctionEnd
 
 ; 仅当服务指向本安装目录时才移除，避免破坏 Clash Mini 共用的服务
@@ -954,3 +947,4 @@ Function un.RemoveServiceIfOurs
     Pop $0
   ${EndIf}
 FunctionEnd
+

@@ -56,6 +56,7 @@ bool is_service_running();
 bool is_service_binary_valid();
 // StartServiceW；ERROR_ACCESS_DENIED 时回退 runas 提权 sc.exe start（← service.rs:153-179 UAC 语义）
 Result<void> start_service();
+Result<void> stop_service();
 
 // ---------- 就绪判定 / 等待（← service.rs is_service_available + wait_for_service_ipc） ----------
 bool is_service_ready(IServiceIpc& ipc);  // 管道存在 && magic_probe 成功

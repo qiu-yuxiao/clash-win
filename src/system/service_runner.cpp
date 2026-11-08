@@ -85,6 +85,10 @@ bool DefaultServiceCommandRunner::is_installed() {
   return core::service_mode::is_service_installed();
 }
 
+Result<void> DefaultServiceCommandRunner::stop_service() {
+  return core::service_mode::stop_service();
+}
+
 Result<void> DefaultServiceCommandRunner::start_service() {
   return core::service_mode::start_service();
 }

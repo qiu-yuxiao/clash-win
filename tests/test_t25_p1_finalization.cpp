@@ -61,6 +61,7 @@ class MockServiceRunner : public system::IServiceCommandRunner {
   bool available = true;
   bool installer_fail = false;
   bool start_fail = false;
+  bool stop_fail = false;
   bool wait_ready_fail = false;
 
   std::vector<std::string> log;
@@ -83,6 +84,14 @@ class MockServiceRunner : public system::IServiceCommandRunner {
     log.push_back("start");
     if (start_fail) {
       return Result<void>::err({errs::kIo, "mock start failure"});
+    }
+    return Result<void>::ok();
+  }
+
+  Result<void> stop_service() override {
+    log.push_back("stop");
+    if (stop_fail) {
+      return Result<void>::err({errs::kIo, "mock stop failure"});
     }
     return Result<void>::ok();
   }
@@ -244,6 +253,11 @@ UT_TEST(t25_service_available_command) {
   mock->available = false;
   auto r2 = cmd::CommandService::instance().invoke("is_service_available", {});
   UT_CHECK(!r2.is_ok());
+
+  // Test stop_service command
+  auto r3 = cmd::CommandService::instance().invoke("stop_service", {});
+  UT_CHECK(r3.is_ok());
+  UT_CHECK(std::find(mock->log.begin(), mock->log.end(), "stop") != mock->log.end());
 
   system::set_service_runner(nullptr);
 }

@@ -57,6 +57,7 @@ struct QuitHooks {
   std::function<Result<void>()> patch_disable_tun = nullptr;
   std::function<Result<void>()> stop_core = nullptr;
   std::function<std::vector<uint32_t>()> kill_cores = nullptr;
+  std::function<Result<void>()> stop_service = nullptr;
   std::function<void()> save_configs = nullptr;
   std::function<void(bool immediately)> save_window_state = nullptr;
   std::function<void()> stop_server = nullptr;

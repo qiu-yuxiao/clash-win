@@ -975,6 +975,9 @@ void MainWindow::build_scene() {
             auto& nots = events::NoticeService::instance();
 
             if (mode == "MAN") {
+              if (prev_mode == "TUN") {
+                svc.invoke("stop_service");
+              }
               auto r = svc.invoke(
                   "patch_verge_config",
                   nlohmann::json::object({{"enable_system_proxy", false},
@@ -995,6 +998,9 @@ void MainWindow::build_scene() {
             }
 
             if (mode == "SYS") {
+              if (prev_mode == "TUN") {
+                svc.invoke("stop_service");
+              }
               auto r = svc.invoke(
                   "patch_verge_config",
                   nlohmann::json::object({{"enable_system_proxy", true},

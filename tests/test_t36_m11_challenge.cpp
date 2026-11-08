@@ -56,6 +56,7 @@ class ChallengeMockServiceRunner : public system::IServiceCommandRunner {
   Result<void> start_service() override {
     return Result<void>::err({2001, "mock start failure"});
   }
+  Result<void> stop_service() override { return Result<void>::ok(); }
   bool wait_for_ready(int) override { return false; }
   bool is_available() override { return available; }
 };

@@ -12,6 +12,7 @@
 #include "core/autostart.h"
 #include "core/core_manager.h"
 #include "system/sysproxy.h"
+#include "system/service_runner.h"
 #include "util/log.h"
 #include "util/dirs.h"
 #include "util/utf.h"
@@ -92,6 +93,10 @@ Result<void> process_flags(uint16_t flags, const IVerge& patch) {
       ops.stop = [] { return core::CoreManager::instance().stop(); };
       auto r = mgr.restart_with_restore(api, ops);
       if (r.is_err()) return r;
+      if (patch.enable_tun_mode.has_value() && !*patch.enable_tun_mode) {
+        auto runner = system::get_service_runner();
+        if (runner) (void)runner->stop_service();
+      }
     }
   }
   // ← feat/config.rs:182-189 注释：SYS_PROXY 必须先于 CLASH_CONFIG（TUN 切换
@@ -136,6 +141,10 @@ Result<void> process_flags(uint16_t flags, const IVerge& patch) {
       auto r = core::CoreManager::instance().apply_config(
           api, utf::utf16_to_utf8(util::dirs::clash_mini_path()), ops);
       if (r.is_err()) return r;
+      if (patch.enable_tun_mode.has_value() && !*patch.enable_tun_mode) {
+        auto runner = system::get_service_runner();
+        if (runner) (void)runner->stop_service();
+      }
     }
     events::EventBus::refresh_clash();
   }

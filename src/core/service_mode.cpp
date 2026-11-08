@@ -161,6 +161,41 @@ Result<void> start_service() {
   return Result<void>::ok();
 }
 
+Result<void> stop_service() {
+  if (!is_service_installed() || !is_service_running()) {
+    return Result<void>::ok();
+  }
+  CWLOG_INFO("stop_service: stopping clash_verge_service");
+  SC_HANDLE scm = ::OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+  if (scm) {
+    SC_HANDLE svc = ::OpenServiceW(scm, kServiceNameW, SERVICE_STOP | SERVICE_QUERY_STATUS);
+    if (svc) {
+      SERVICE_STATUS st{};
+      BOOL ok = ::ControlService(svc, SERVICE_CONTROL_STOP, &st);
+      DWORD gle = ::GetLastError();
+      ::CloseServiceHandle(svc);
+      ::CloseServiceHandle(scm);
+      if (ok || gle == ERROR_SERVICE_NOT_ACTIVE) return Result<void>::ok();
+      if (gle != ERROR_ACCESS_DENIED) {
+        return Result<void>::err({2313, werr("ControlService(STOP)", gle)});
+      }
+    } else {
+      DWORD gle = ::GetLastError();
+      ::CloseServiceHandle(scm);
+      if (gle == ERROR_SERVICE_DOES_NOT_EXIST) return Result<void>::ok();
+      if (gle != ERROR_ACCESS_DENIED) {
+        return Result<void>::err({2314, werr("OpenServiceW(STOP)", gle)});
+      }
+    }
+  }
+  // 提权回退（UAC 弹窗；F-07：System32 绝对路径）
+  std::wstring params = L"stop " + std::wstring(kServiceNameW);
+  if (!shell_runas(system32_sc_exe(), params)) {
+    return Result<void>::err({2315, "sc.exe stop (runas) failed or cancelled"});
+  }
+  return Result<void>::ok();
+}
+
 // ---------- 就绪判定 / 等待 ----------
 // ← Mini: src-tauri/src/core/service.rs:333 is_service_available()
 //   Mini 的"就绪"= IPC 路径可访问；我方同义（管道存在 + magic 握手），

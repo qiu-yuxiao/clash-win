@@ -15,6 +15,7 @@ class IServiceCommandRunner {
   virtual Result<void> run_installer(bool install) = 0;
   virtual bool is_installed() = 0;
   virtual Result<void> start_service() = 0;
+  virtual Result<void> stop_service() = 0;
   virtual bool wait_for_ready(int timeout_ms) = 0;
   virtual bool is_available() = 0;
 };
@@ -24,6 +25,7 @@ class DefaultServiceCommandRunner : public IServiceCommandRunner {
   Result<void> run_installer(bool install) override;
   bool is_installed() override;
   Result<void> start_service() override;
+  Result<void> stop_service() override;
   bool wait_for_ready(int timeout_ms) override;
   bool is_available() override;
 };
