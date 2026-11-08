@@ -233,8 +233,14 @@ bool MainWindow::create(bool show_immediately) {
     traffic_pane_->set_mini(bp_.state() == WinState::Mini);
     traffic_pane_->set_narrow(bp_.is_narrow());
   }
+  // 初始同步：WM_SIZE 首帧判定早于 subscribe（Breakpoints 同值不重发事件）
+  scene_->apply_state(WinState::Normal, bp_.state());
   stealth_.subscribe([this](bool hidden) {
     title_bar_->set_visible(!hidden);  // 隐藏时整栏不挂载（内容顶满）
+    float s = dpi_scale();
+    float lw = static_cast<float>(client_w_) / s;
+    float lh = static_cast<float>(client_h_) / s;
+    root_.layout_tree({0, 0, lw, lh});
     clock_.invalidate({0, 0, static_cast<float>(client_w_),
                        static_cast<float>(client_h_)});
   });
@@ -1690,7 +1696,7 @@ void MainWindow::on_client_resized(int cw, int ch) {
   double lh = static_cast<double>(ch) / s;
   large_.on_resized(lw, lh);
   bp_.set_large(large_.is_large());
-  bp_.set_logical_size(lw, lh);
+  bp_.set_physical_size(cw, ch, s);
   stealth_.set_mini(bp_.is_mini());
   // src: _layout.tsx:224-228「if (drawerOpen && isMiniStatus) setDrawerOpen(false)」
   if (bp_.is_mini() && settings_drawer_ && settings_drawer_->is_open())
@@ -1880,20 +1886,25 @@ int MainWindow::hit_test_nc(POINT screen_pt) {
   // 标题栏拖动区：y < 30×s 且不在四键区（【DPIARCH】pt/rc 为物理像素，
   // 旧代码用 DIP 常量 30/96 直接比较 → 150% 下按钮区/栏高错位；
   // 现按 widget DIP bounds ×s 精确判定四键热区）
-  if (pt.y < kTitleBarH * s) {
-    if (title_bar_) {
-      PointF p{static_cast<float>(pt.x) / s, static_cast<float>(pt.y) / s};
-      for (Widget* b : {static_cast<Widget*>(title_bar_->btn_minimize()),
-                        static_cast<Widget*>(title_bar_->btn_large()),
-                        static_cast<Widget*>(title_bar_->btn_close())}) {
-        if (b && b->visible() && b->global_bounds().contains(p.x, p.y))
-          return HTCLIENT;
-      }
+  if (title_bar_ && title_bar_->visible() && pt.y < kTitleBarH * s) {
+    PointF p{static_cast<float>(pt.x) / s, static_cast<float>(pt.y) / s};
+    for (Widget* b : {static_cast<Widget*>(title_bar_->btn_minimize()),
+                      static_cast<Widget*>(title_bar_->btn_large()),
+                      static_cast<Widget*>(title_bar_->btn_close())}) {
+      if (b && b->visible() && b->global_bounds().contains(p.x, p.y))
+        return HTCLIENT;
     }
     return HTCAPTION;
   }
-  // stealth 隐藏：整窗拖动（← isDecorationsHidden 时 layout 根 data-tauri-drag-region）
-  if (stealth_.hidden()) return HTCAPTION;
+  // stealth 隐藏：可交互控件走 HTCLIENT，背景走 HTCAPTION 整窗拖动
+  if (stealth_.hidden()) {
+    PointF p{static_cast<float>(pt.x) / s, static_cast<float>(pt.y) / s};
+    Widget* hit = root_.hit_test(p);
+    if (hit && hit != &root_ && hit != scene_) {
+      return HTCLIENT;
+    }
+    return HTCAPTION;
+  }
   return HTCLIENT;
 }
 

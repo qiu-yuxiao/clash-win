@@ -3,6 +3,7 @@
 
 #include "core/switching_lock.h"
 #include "core/auto_select.h"
+#include "core/monitor.h"
 #include "core/timer.h"
 #include "cmd/command_service.h"
 #include "cmd/cmd_install.h"
@@ -183,10 +184,10 @@ void ensure_t16_hooks() {
     return std::nullopt;
   };
   ah.failed_servers = [] {
-    return std::vector<std::string>{};
-  };  // T19 健康检测接入
+    return core::CoreMonitor::instance().snapshot_failed_servers();
+  };
   ah.node_server_map = [] {
-    return std::map<std::string, std::string>{};
+    return core::CoreMonitor::instance().load_node_server_map();
   };
   ah.group_nodes = [get_client](const std::string& group) {
     auto* c = get_client();

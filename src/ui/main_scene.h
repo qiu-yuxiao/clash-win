@@ -46,6 +46,7 @@ class MainScene : public Widget {
   std::unique_ptr<Widget> taken_upper_;  // 卸载期间保活（重新挂载用）
   bool upper_mounted_ = true;
   bool narrow_ = false;
+  bool mini_ = false;
 };
 
 }  // namespace clashwin::ui::win

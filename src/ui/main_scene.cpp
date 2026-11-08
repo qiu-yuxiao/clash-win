@@ -34,21 +34,17 @@ MainScene::MainScene(Widget* parent) : Widget(parent) {
 
 MainScene::~MainScene() = default;
 
-Widget* MainScene::list_slot() { return upper_mounted_ ? list_slot_ : nullptr; }
+Widget* MainScene::list_slot() { return list_slot_; }
 Widget* MainScene::traffic_slot() { return traffic_; }
-Widget* MainScene::quickbar_slot() {
-  return upper_mounted_ ? quickbar_ : nullptr;
-}
+Widget* MainScene::quickbar_slot() { return quickbar_; }
 
 void MainScene::apply_state(WinState prev, WinState cur) {
-  // ← WindowProvider applyGeometry：离开极小窗 → 恢复标题栏/挂载；
-  //   进入极小窗 → 卸载上栏（数据精简 + DOM 卸载）
-  if (cur == WinState::Mini && upper_mounted_) {
-    unmount_upper();
-  } else if (prev == WinState::Mini && cur != WinState::Mini &&
-             !upper_mounted_) {
-    mount_upper();
+  (void)prev;
+  mini_ = (cur == WinState::Mini);
+  if (list_slot_) {
+    list_slot_->set_visible(!mini_);
   }
+  invalidate();
 }
 
 void MainScene::set_narrow(bool narrow) {
@@ -78,18 +74,24 @@ void MainScene::mount_upper() {
 }
 
 void MainScene::on_arrange(const RectF& area) {
-  // content 布局：上栏撑满剩余（flex 1），下栏固定 135/100（← TRAFFIC_PANE_*）
-  // 【坐标约定】子 layout_tree 传本 widget 局部坐标（x 从 0 起）
   set_bounds(area);
-  int traffic_h = narrow_ ? kTrafficPaneMinimal : kTrafficPaneWide;
   float w = area.w;
-  for (size_t i = 0; i < child_count(); ++i) {
-    Widget* c = child(i);
-    if (c == traffic_) {
-      c->layout_tree({0, area.h - static_cast<float>(traffic_h), w,
-                      static_cast<float>(traffic_h)});
-    } else {
-      c->layout_tree({0, 0, w, area.h - static_cast<float>(traffic_h)});
+  if (mini_) {
+    // 极小窗模式：上栏固定为 quickbar 高度 30px，下栏流量条占满剩余空间
+    if (upper_) {
+      upper_->layout_tree({0, 0, w, 30.0f});
+    }
+    if (traffic_) {
+      traffic_->layout_tree({0, 30.0f, w, std::max(0.0f, area.h - 30.0f)});
+    }
+  } else {
+    int traffic_h = narrow_ ? kTrafficPaneMinimal : kTrafficPaneWide;
+    float upper_h = std::max(0.0f, area.h - static_cast<float>(traffic_h));
+    if (upper_) {
+      upper_->layout_tree({0, 0, w, upper_h});
+    }
+    if (traffic_) {
+      traffic_->layout_tree({0, upper_h, w, static_cast<float>(traffic_h)});
     }
   }
 }

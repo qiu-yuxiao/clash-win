@@ -5,6 +5,9 @@
 #include <exception>
 
 #include "util/log.h"
+#include "util/dirs.h"
+#include "yaml-cpp/yaml.h"
+#include <fstream>
 
 namespace clashwin::core {
 
@@ -82,6 +85,31 @@ void CoreMonitor::record_server_failure(const std::string& server) {
 void CoreMonitor::clear_server_failures() {
   std::lock_guard<std::mutex> lock(failed_m_);
   failed_servers_.clear();
+}
+
+std::map<std::string, std::string> CoreMonitor::load_node_server_map() {
+  std::map<std::string, std::string> server_map;
+  std::wstring path = util::dirs::clash_mini_path();
+  std::ifstream fin(path, std::ios::binary);
+  if (!fin.is_open()) return server_map;
+  std::string content((std::istreambuf_iterator<char>(fin)),
+                       std::istreambuf_iterator<char>());
+  try {
+    YAML::Node root = YAML::Load(content);
+    if (root && root["proxies"] && root["proxies"].IsSequence()) {
+      for (const auto& px : root["proxies"]) {
+        if (px.IsMap() && px["name"] && px["server"]) {
+          std::string name = px["name"].as<std::string>("");
+          std::string server = px["server"].as<std::string>("");
+          if (!name.empty() && !server.empty()) {
+            server_map[name] = server;
+          }
+        }
+      }
+    }
+  } catch (...) {
+  }
+  return server_map;
 }
 
 std::vector<std::string> CoreMonitor::snapshot_failed_servers() {
@@ -303,6 +331,18 @@ CoreMonitor::Action CoreMonitor::tick_once() {
     int fails = node_fail_count_.fetch_add(1) + 1;
     if (fails >= p.node_dead_threshold) {
       node_fail_count_.store(0);
+      std::string dead_node;
+      if (h.active_node_name) {
+        dead_node = h.active_node_name();
+      }
+      if (!dead_node.empty()) {
+        auto server_map = load_node_server_map();
+        auto it = server_map.find(dead_node);
+        if (it != server_map.end() && !it->second.empty()) {
+          record_server_failure(it->second);
+          CWLOG_INFO("CoreMonitor: 活跃节点连续判死，服务器记入冷却避让: " + it->second);
+        }
+      }
       std::string uid = h.current_uid ? h.current_uid() : std::string();
       return heal(uid);
     }

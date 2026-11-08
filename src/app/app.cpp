@@ -377,10 +377,9 @@ bool App::init() {
           auto px = client.get_proxy_by_name(active);
           if (px.is_err()) return false;
           if (!px.value().alive) return false;
-          if (!px.value().history.empty()) {
-            uint32_t delay = px.value().history.back().delay;
-            if (delay < core::kNodeDelayMinMs || delay >= core::kNodeDelayMaxMs) return false;
-          }
+          if (px.value().history.empty()) return false;
+          uint32_t delay = px.value().history.back().delay;
+          if (delay < core::kNodeDelayMinMs || delay >= core::kNodeDelayMaxMs) return false;
           return true;
         },
         /*.active_node_name =*/

@@ -114,6 +114,9 @@ class CoreMonitor {
   std::vector<std::string> snapshot_failed_servers();
   void clear_server_failures();
 
+  // 读取运行时配置构建「节点名 → 服务器地址」映射（mihomo /proxies API 不暴露 server）
+  std::map<std::string, std::string> load_node_server_map();
+
   // ---- wait_for_clash_ready（T16 留位转正） ----
   struct ReadyHooks {
     std::function<bool()> api_alive;
