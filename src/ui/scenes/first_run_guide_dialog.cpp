@@ -243,9 +243,19 @@ std::string read_clipboard_url() {
   CloseClipboard();
 
   std::string trimmed = util::trim(res);
-  if (trimmed.find('\n') == std::string::npos && trimmed.find(' ') == std::string::npos) {
-    if (trimmed.rfind("http://", 0) == 0 || trimmed.rfind("https://", 0) == 0 ||
-        trimmed.rfind("clash://", 0) == 0) {
+  if (!trimmed.empty()) {
+    std::string lower = util::to_lower(trimmed);
+    if (lower.rfind("http://", 0) == 0 || lower.rfind("https://", 0) == 0 ||
+        lower.rfind("clash://", 0) == 0 || lower.rfind("ss://", 0) == 0 ||
+        lower.rfind("ssr://", 0) == 0 || lower.rfind("vmess://", 0) == 0 ||
+        lower.rfind("vless://", 0) == 0 || lower.rfind("trojan://", 0) == 0 ||
+        lower.rfind("hysteria://", 0) == 0 || lower.rfind("hysteria2://", 0) == 0 ||
+        lower.rfind("hy2://", 0) == 0 || lower.rfind("wireguard://", 0) == 0 ||
+        lower.rfind("wg://", 0) == 0 || lower.rfind("tuic://", 0) == 0 ||
+        lower.rfind("socks5://", 0) == 0 || lower.rfind("socks://", 0) == 0) {
+      return trimmed;
+    }
+    if (lower.find("proxies:") != std::string::npos) {
       return trimmed;
     }
   }
@@ -467,17 +477,9 @@ void FirstRunGuideDialog::submit_import() {
     }
   }
 
-  // src: :374-377 errEmpty
+  // 仅要求非空：口径与设置页订阅导入框完全一致，同时支持 http(s) 订阅链接与直连节点（ss/vmess/vless/trojan/hy2/wg等十数种协议）
   if (target_url.empty()) {
-    error_message_ = "请输入或粘贴订阅链接";
-    invalidate();
-    return;
-  }
-
-  // src: :383-386 errScheme（仅 http(s)；clash:// 为本应用兼容保留）
-  if (target_url.rfind("http://", 0) != 0 && target_url.rfind("https://", 0) != 0 &&
-      target_url.rfind("clash://", 0) != 0) {
-    error_message_ = "订阅链接必须以 http:// 或 https:// 开头";
+    error_message_ = "请输入或粘贴订阅链接或节点配置";
     invalidate();
     return;
   }
@@ -490,6 +492,7 @@ void FirstRunGuideDialog::submit_import() {
   invalidate();
 
   bool success = false;
+  std::string err_msg;
   if (on_import) {
     success = on_import(target_url);
   } else {
@@ -497,6 +500,9 @@ void FirstRunGuideDialog::submit_import() {
     nlohmann::json args = {{"url", target_url}};
     auto res = cmd::CommandService::instance().invoke("import_profile", args);
     success = res.is_ok();
+    if (!success) {
+      err_msg = res.error().message;
+    }
   }
 
   if (success) {
@@ -544,7 +550,11 @@ void FirstRunGuideDialog::submit_import() {
     // src: :403 errImport
     is_importing_ = false;
     if (url_field_) url_field_->set_enabled(true);  // 留在导入步，允许重新编辑
-    error_message_ = "订阅导入失败，请检查链接是否有效后重试";
+    if (!err_msg.empty()) {
+      error_message_ = "导入失败: " + err_msg;
+    } else {
+      error_message_ = "订阅导入失败，请检查链接是否有效后重试";
+    }
     invalidate();
   }
 }
@@ -752,12 +762,14 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     float star_y = content_y + node_h + kReadyGap;
     const float pre_actions = cy + ch - kActionsH;
     if (star_y + star_h > pre_actions - 4.0f) {
-      star_y = std::max(content_y + node_h + 4.0f, pre_actions - 4.0f - star_h);  // 豁免: 极矮视口下防底栏重叠
+      const float avail = pre_actions - 4.0f - star_y;
+      if (avail < 70.0f) {
+        star_y = std::max(content_y + node_h + 2.0f, pre_actions - 4.0f - star_h);  // 豁免: 极矮视口下防底栏重叠
+      }
+      star_h = std::max(40.0f, pre_actions - 4.0f - star_y);  // 豁免: 视口受限时压缩卡片高
     }
     card_star_rect_ = {inner_x, star_y, inner_w, star_h};
-    // src: :1059-1082 Wiki 文本按钮右对齐（紧随实测 star_body_h_ 下方，杜绝重叠）
-    const float wiki_y = star_y + kCardPad + star_title_h_ + kImportedMb + star_body_h_ +
-                         kStarBtnMt;
+    // src: :1059-1082 Wiki 文本按钮右对齐
     float wiki_w = kStarBtnW;
     if (ITextEngine* te = text_engine()) {
       TextStyle wts;
@@ -767,13 +779,10 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
           L"📖 " + tr("layout.components.firstRun.openWiki") + L" ↗", wts, 0);
       wiki_w = std::min(inner_w - kCardPad * 2.0f, std::max(kStarBtnW, ws.w + 12.0f));  // src: :1071 px: 0.75 (6px*2)
     }
+    // 始终定位在 star 卡片内部底部右下角，与卡底留出 kCardPad，杜绝与上方正文或下方动作区重叠
+    const float wiki_y = card_star_rect_.bottom() - kCardPad - kStarBtnH;
     btn_wiki_rect_ = {card_star_rect_.right() - kCardPad - wiki_w, wiki_y,
                       wiki_w, kStarBtnH};
-
-    // src: :1059-1082 Wiki 文本按钮右对齐
-    const float wiki_y_unused = star_y + kCardPad + kStarTitleH + kImportedMb + kStarBodyH +
-                         kStarBtnMt;
-    (void)wiki_y_unused;
 
 
     const float actions_top = cy + ch - kActionsH;
@@ -1018,12 +1027,14 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
               {sc.x + kCardPad, sc.y + kCardPad, sc.w - kCardPad * 2.0f, star_title_h_},
               kStarTitleFont, static_cast<int>(Weight::Bold), star_accent_color(), AlignH::Left, AlignV::Top, true);
     // src: :1048-1057 正文
+    const float body_y = sc.y + kCardPad + star_title_h_ + kImportedMb;
+    const float body_max_h = std::max(12.0f, btn_wiki_rect_.y - 2.0f - body_y);
     draw_text(rt,
               tr("layout.components.firstRun.wikiHint"),
-              {sc.x + kCardPad, sc.y + kCardPad + star_title_h_ + kImportedMb,
-               sc.w - kCardPad * 2.0f, star_body_h_},
+              {sc.x + kCardPad, body_y,
+               sc.w - kCardPad * 2.0f, body_max_h},
               kStarBodyFont, static_cast<int>(Weight::Normal), secondary_text(),
-              AlignH::Left, AlignV::Top, true);
+              AlignH::Left, AlignV::Top, true, true);
     // src: :1059-1082 Wiki 文本按钮
     draw_text(rt, L"📖 " + tr("layout.components.firstRun.openWiki") + L" ↗", btn_wiki_rect_, kHintFont,
               static_cast<int>(Weight::Bold),

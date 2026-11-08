@@ -254,8 +254,7 @@ void Segmented::on_paint(IRenderTarget& rt) {
     }
     TextStyle ts = style_;
     // src: routing-preference-card.tsx:110-137 未选中态 hover/active 文字色
-    const bool rd = theme::ThemeService::instance().skin() == theme::SkinId::Retro3d &&
-                    !theme::ThemeService::instance().is_light();
+    const bool rd = theme::ThemeService::instance().skin() == theme::SkinId::Retro3d;
     Color4f seg_txt = sel ? act_txt : txt_c;
     if (!sel && rd) {
       if (pressed_ == i) seg_txt = Color4f::hex(0x2C1F03, 0.5f);

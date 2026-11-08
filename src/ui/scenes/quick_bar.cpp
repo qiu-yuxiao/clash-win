@@ -660,9 +660,12 @@ void TakeoverSegmented::on_paint(IRenderTarget& rt) {
   const float cont_radius = sp.container_radius > 0.01f ? sp.container_radius : 4.0f;
   Brush cont_bg_fill{sp.container_bg};
   rt.round_rect(r, cont_radius, Pen{Color4f(0, 0, 0, 0), 0.0f}, &cont_bg_fill);
-  if (sp.container_inset)
+  if (sp.container_inset) {
     draw_top_inset_shadow(rt, r, cont_radius, sp.container_inset_color,
                           sp.container_inset_dy, sp.container_inset_blur);
+    draw_left_inset_shadow(rt, r, cont_radius, sp.container_inset_color,
+                           sp.container_inset_dy * 0.75f, sp.container_inset_blur * 0.75f);
+  }
   Brush cont_bg{sp.container_bg};
   rt.round_rect(r, cont_radius, Pen{sp.container_border, 1.0f}, nullptr);
   if (sp.container_top_hi.a > 0.004f)
@@ -716,7 +719,7 @@ void TakeoverSegmented::on_paint(IRenderTarget& rt) {
     //   未选中 takeover-mode-card.tsx:110-115
     //     isRetro3DDark ? 'rgba(44,31,3,.75)' : 'text.secondary'
     //   hover :122-129 dark '#2C1F03'；active :130-137 dark rgba(44,31,3,.5)
-    const bool rd = retro && !light;
+    const bool rd = retro;
     Color4f color = sel ? sp.active_text
                         : (rd ? Color4f::hex(0x2C1F03, 0.75f)
                               : ThemeService::instance().palette().secondary_text);

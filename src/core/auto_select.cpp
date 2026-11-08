@@ -191,6 +191,7 @@ AutoSelect::Outcome AutoSelect::trigger(
     }
     if (hooks_.select_node && hooks_.select_node("PROXY", *fastest)) {
       out.selected = true;
+      out.selected_node = *fastest;
       // 【关键修复】回写 profile.selected（filterText 子集校验 ← :1080-1096）
       std::string filter = hooks_.filter_text ? to_lower(hooks_.filter_text())
                                               : "";

@@ -489,7 +489,7 @@ SegmentedPaint ThemeService::segmented_paint() const {
   const float g = val1();        // --control-skin-val1
   SegmentedPaint p{};
   // src: routing-preference-card.tsx:110-114 & theme-settings-card.tsx:194-200
-  p.text = (skin_ == SkinId::Retro3d && !light)
+  p.text = (skin_ == SkinId::Retro3d)
                ? Color4f::hex(0x2C1F03, 0.75f)
                : palette_.secondary_text;
   switch (skin_) {

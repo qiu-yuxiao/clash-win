@@ -7,6 +7,7 @@
 #include <ctime>
 
 #include "../card_draw.h"
+#include "../icon_w.h"
 #include "../theme/theme.h"
 #include "util/log.h"
 #include "util/parse_traffic.h"
@@ -113,21 +114,27 @@ void ProfileRowWidget::on_paint(IRenderTarget& rt) {
   const float w = bounds().w;
 
   // 动作图标：删除恒有（error.main），更新仅 remote（:274-292）
-  const float icon = 12.0f;                     // fontSize 12
-  const float del_x = w - 8.0f - icon;
-  const float upd_x = del_x - 2.0f - icon;      // gap 0.25 = 2px（:270）
-  const RectF line1{0, 6.0f, w, 18.0f};         // p 上 6、13px 行高 18
-  TextStyle action_ts;
-  action_ts.size = icon;
-  action_ts.align_h = AlignH::Center;
-  action_ts.align_v = AlignV::Center;
-  action_ts.color = pal.error_color;            // color: 'error.main'
-  rt.draw_text(L"✕", {del_x, 6.0f, icon, 18.0f}, action_ts);
+  // src: profile-import-card.tsx:275-292 IconButton sx={{ p: 0.1 }}
+  const float del_cx = w - 8.0f - 9.0f;
+  const float upd_cx = del_cx - 20.0f;
+  const float btn_cy = 15.0f;
+
   if (type_ == "remote") {
-    action_ts.color = active_ ? ThemeService::instance().primary()
-                              : pal.secondary_text;  // :280
-    rt.draw_text(L"↻", {upd_x, 6.0f, icon, 18.0f}, action_ts);
+    RectF upd_box{upd_cx - 9.0f, btn_cy - 9.0f, 18.0f, 18.0f};
+    if (hover_update_) {
+      Brush hbg{light ? Color4f::hex(0x000000, 0.06f) : Color4f::hex(0xFFFFFF, 0.08f)};
+      rt.round_rect(upd_box, 9.0f, Pen{Color4f(0, 0, 0, 0), 0}, &hbg);
+    }
+    Color4f upd_col = active_ ? ThemeService::instance().primary() : pal.secondary_text;
+    IconW::paint_at(rt, "refresh", {upd_cx - 6.0f, btn_cy - 6.0f, 12.0f, 12.0f}, upd_col);
   }
+
+  RectF del_box{del_cx - 9.0f, btn_cy - 9.0f, 18.0f, 18.0f};
+  if (hover_delete_) {
+    Brush hbg{light ? Color4f::hex(0x000000, 0.06f) : Color4f::hex(0xFFFFFF, 0.08f)};
+    rt.round_rect(del_box, 9.0f, Pen{Color4f(0, 0, 0, 0), 0}, &hbg);
+  }
+  IconW::paint_at(rt, "delete", {del_cx - 6.0f, btn_cy - 6.0f, 12.0f, 12.0f}, pal.error_color);
 
   // 名称：13px、高亮 600 / 否则 400、primary.main / text.primary、maxWidth 70%（src: :249-259）
   TextStyle name_ts;
@@ -137,7 +144,8 @@ void ProfileRowWidget::on_paint(IRenderTarget& rt) {
                                : pal.primary_text;
   name_ts.align_v = AlignV::Center;
   name_ts.ellipsis = true;
-  const float name_w = std::min(w * 0.70f, upd_x - 4.0f - x0);
+  const float max_act_left = (type_ == "remote" ? upd_cx - 9.0f : del_cx - 9.0f);
+  const float name_w = std::min(w * 0.70f, max_act_left - 4.0f - x0);
   rt.draw_text(utf::utf8_to_utf16(name_.empty() ? "未命名配置" : name_),
                {x0, 6.0f, name_w, 18.0f}, name_ts);
 
@@ -166,14 +174,21 @@ void ProfileRowWidget::on_paint(IRenderTarget& rt) {
   }
 }
 
+HCURSOR ProfileRowWidget::cursor(const PointF& local) const {
+  (void)local;
+  return LoadCursorW(nullptr, IDC_HAND);
+}
+
 bool ProfileRowWidget::on_mouse(const MouseEvent& e) {
   const float w = bounds().w;
-  const float del_x = w - 8.0f - 12.0f;
-  const float upd_x = del_x - 2.0f - 12.0f;
-  const bool over_delete = e.pos.x >= del_x - 4 && e.pos.x <= del_x + 14 &&
-                           e.pos.y >= 2 && e.pos.y <= 26;
-  const bool over_update = type_ == "remote" && e.pos.x >= upd_x - 4 &&
-                           e.pos.x <= upd_x + 14 && e.pos.y >= 2 && e.pos.y <= 26;
+  const float del_cx = w - 8.0f - 9.0f;
+  const float upd_cx = del_cx - 20.0f;
+  const float btn_cy = 15.0f;
+  const bool over_delete = (e.pos.x >= del_cx - 9.0f && e.pos.x <= del_cx + 9.0f &&
+                            e.pos.y >= btn_cy - 9.0f && e.pos.y <= btn_cy + 9.0f);
+  const bool over_update = (type_ == "remote" &&
+                            e.pos.x >= upd_cx - 9.0f && e.pos.x <= upd_cx + 9.0f &&
+                            e.pos.y >= btn_cy - 9.0f && e.pos.y <= btn_cy + 9.0f);
   if (e.type == MouseEventType::Move || e.type == MouseEventType::Enter) {
     bool changed = false;
     if (hover_row_ != true) {

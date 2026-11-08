@@ -13,6 +13,8 @@
 #include "../theme/theme.h"
 #include "../overlay_fade.h"   // OverlayFade::now_ms()（cyberpunk 呼吸相位的时间基准）
 #include "../soft_shadow.h"    // 外阴影/外发光近似（CSS box-shadow 的 D2D 替代）
+#include "config/config.h"
+#include "config/proxy_head_state.h"
 #include "util/log.h"
 #include "util/utf.h"
 #include "ui/i18n_text.h"  // F-D01
@@ -507,6 +509,21 @@ void NodeList::set_filter(const std::string& text) {
     lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
   if (filter_ == lower) return;
   filter_ = lower;
+  try {
+    std::string uid;
+    auto latest = config::Config::instance().profiles().latest_arc();
+    if (latest && latest->current) uid = *latest->current;
+    if (!uid.empty()) {
+      auto st = config::proxy_head_state::load();
+      config::proxy_head_state::GroupHeadState gs;
+      auto old_gs = config::proxy_head_state::get_group_state(st, uid, "PROXY");
+      if (old_gs) gs = *old_gs;
+      gs.filter_text = lower;
+      gs.sort_type = sort_type_;
+      auto updated = config::proxy_head_state::set_group_state(st, uid, "PROXY", gs);
+      config::proxy_head_state::save(updated);
+    }
+  } catch (...) {}
   rebuild_visible();
   sync_list();
 }
@@ -514,6 +531,21 @@ void NodeList::set_filter(const std::string& text) {
 void NodeList::toggle_sort() {
   // src: proxy-head.tsx:126-128 sortType=(sortType+1)%3
   sort_type_ = (sort_type_ + 1) % 3;
+  try {
+    std::string uid;
+    auto latest = config::Config::instance().profiles().latest_arc();
+    if (latest && latest->current) uid = *latest->current;
+    if (!uid.empty()) {
+      auto st = config::proxy_head_state::load();
+      config::proxy_head_state::GroupHeadState gs;
+      auto old_gs = config::proxy_head_state::get_group_state(st, uid, "PROXY");
+      if (old_gs) gs = *old_gs;
+      gs.filter_text = filter_;
+      gs.sort_type = sort_type_;
+      auto updated = config::proxy_head_state::set_group_state(st, uid, "PROXY", gs);
+      config::proxy_head_state::save(updated);
+    }
+  } catch (...) {}
   // 图标 3 态：SortOutlined / AccessTimeOutlined / SortByAlphaOutlined
   // src: proxy-head.tsx:131-139
   if (sort_btn_) {

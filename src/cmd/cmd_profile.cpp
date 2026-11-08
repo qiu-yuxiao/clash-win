@@ -134,8 +134,16 @@ void ensure_t16_hooks() {
     return latest->current;
   };
   ah.filter_text = [] {
+    std::string uid;
+    try {
+      auto latest = config::Config::instance().profiles().latest_arc();
+      if (latest && latest->current) uid = *latest->current;
+    } catch (...) {}
+    if (uid.empty()) return std::string();
     auto st = config::proxy_head_state::load();
-    return st.value("filter_text", std::string());
+    auto gs = config::proxy_head_state::get_group_state(st, uid, "PROXY");
+    if (gs) return gs->filter_text;
+    return std::string();
   };
   ah.is_dummy = [](const std::string& name) {
     return clashwin::util::is_dummy_node(name);

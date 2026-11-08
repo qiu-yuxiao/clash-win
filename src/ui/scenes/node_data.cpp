@@ -13,6 +13,7 @@
 #include "config/config.h"
 #include "core/auto_select.h"
 #include "events/event_bus.h"
+#include "ui/ui_postbox.h"
 #include "util/log.h"
 #include "util/node.h"
 #include "util/utf.h"
@@ -139,7 +140,18 @@ bool NodeData::test_and_select(const std::vector<std::string>& nodes) {
   }
   if (need_batch) set_delays_batch(nodes, -2);
   if (!hooks_.test_and_select) return false;
-  return hooks_.test_and_select(nodes);
+  bool ok = hooks_.test_and_select(nodes);
+  if (ok && hooks_.fetch_group) {
+    std::vector<std::string> all;
+    std::string now;
+    if (hooks_.fetch_group(&all, &now)) {
+      UiPostbox::instance().post([this, now] {
+        now_ = now;
+        notify();
+      });
+    }
+  }
+  return ok;
 }
 
 namespace {

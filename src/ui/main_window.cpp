@@ -311,7 +311,7 @@ bool MainWindow::create_hwnd() {
       L"Clash Win Ver." +
       utf::utf8_to_utf16(clashwin::config::consts::kAppVersion);
   hwnd_ = CreateWindowExW(
-      0, kWndClass, win_title.c_str(),
+      WS_EX_APPWINDOW, kWndClass, win_title.c_str(),
       WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_SYSMENU,
       x, y, w, h, nullptr, nullptr, GetModuleHandleW(nullptr), this);
   {
@@ -333,6 +333,8 @@ bool MainWindow::create_hwnd() {
           nullptr, ico_path.c_str(), IMAGE_ICON,
           GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_LOADFROMFILE));
     }
+    h_icon_big_ = hbig;
+    h_icon_sm_ = hsm;
     if (hwnd_ && hbig) SendMessageW(hwnd_, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(hbig));
     if (hwnd_ && hsm) SendMessageW(hwnd_, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(hsm));
   }
@@ -902,71 +904,101 @@ void MainWindow::build_scene() {
     //   tun：isTunModeAvailable=isAdminMode||isServiceOk，不可用先 installServiceAndRestartCore，
     //        失败 push tunServiceConfigFailed 且 return（不 patch，分段回弹）。
     settings_drawer_->on_takeover_change =
-        [](const std::string& mode) -> bool {
-          auto& svc = cmd::CommandService::instance();
+        [this](const std::string& mode) -> bool {
+          std::string prev_mode = "MAN";
+          try {
+            const auto& v = *config::Config::instance().verge().latest_arc();
+            if (v.enable_tun_mode.value_or(false)) prev_mode = "TUN";
+            else if (v.enable_system_proxy.value_or(false)) prev_mode = "SYS";
+          } catch (...) {}
+
           auto& notices = events::NoticeService::instance();
-          // 常驻 info「正在调整，请稍候…」（:1047 showNotice.info(...,0)）
           const uint64_t wait_id =
               notices.push("info", tr8("layout.notices.adjusting"), 0);
-          if (mode == "MAN") {
-            // :1054-1071 手动：清系统代理 + 清 TUN
+
+          std::thread([this, mode, prev_mode, wait_id] {
+            auto& svc = cmd::CommandService::instance();
+            auto& nots = events::NoticeService::instance();
+
+            if (mode == "MAN") {
+              auto r = svc.invoke(
+                  "patch_verge_config",
+                  nlohmann::json::object({{"enable_system_proxy", false},
+                                          {"enable_tun_mode", false}}));
+              nots.hide(wait_id);
+              if (r.is_ok()) {
+                nots.push("success", tr8("layout.notices.switchedToManualMode"));
+                UiPostbox::instance().post([this] {
+                  if (settings_drawer_) settings_drawer_->sync_takeover(false, false);
+                });
+              } else {
+                nots.push("error", r.error().message);
+                UiPostbox::instance().post([this, prev_mode] {
+                  if (settings_drawer_) settings_drawer_->sync_takeover(prev_mode == "SYS", prev_mode == "TUN");
+                });
+              }
+              return;
+            }
+
+            if (mode == "SYS") {
+              auto r = svc.invoke(
+                  "patch_verge_config",
+                  nlohmann::json::object({{"enable_system_proxy", true},
+                                          {"enable_tun_mode", false}}));
+              nots.hide(wait_id);
+              if (r.is_ok()) {
+                nots.push("success", tr8("layout.notices.systemProxyEnabled"));
+                UiPostbox::instance().post([this] {
+                  if (settings_drawer_) settings_drawer_->sync_takeover(true, false);
+                });
+              } else {
+                nots.push("error", r.error().message);
+                UiPostbox::instance().post([this, prev_mode] {
+                  if (settings_drawer_) settings_drawer_->sync_takeover(prev_mode == "SYS", prev_mode == "TUN");
+                });
+              }
+              return;
+            }
+
+            // mode == "TUN"
+            bool is_admin = false;
+            {
+              auto ar = svc.invoke("app_is_admin");
+              if (ar.is_ok() && ar.value().is_boolean())
+                is_admin = ar.value().get<bool>();
+            }
+            const bool service_ok = svc.invoke("is_service_available").is_ok();
+            if (!(is_admin || service_ok)) {
+              auto inst = svc.invoke("install_service");
+              if (!inst.is_ok()) {
+                nots.hide(wait_id);
+                nots.push("error", tr8("layout.notices.tunServiceConfigFailed"));
+                UiPostbox::instance().post([this, prev_mode] {
+                  if (settings_drawer_) settings_drawer_->sync_takeover(prev_mode == "SYS", prev_mode == "TUN");
+                });
+                return;
+              }
+              svc.invoke("restart_core");
+            }
             auto r = svc.invoke(
                 "patch_verge_config",
                 nlohmann::json::object({{"enable_system_proxy", false},
-                                        {"enable_tun_mode", false}}));
-            notices.hide(wait_id);
+                                        {"enable_tun_mode", true}}));
+            nots.hide(wait_id);
             if (r.is_ok()) {
-              notices.push("success",
-                           tr8("layout.notices.switchedToManualMode"));
-              return true;
+              nots.push("success", tr8("layout.notices.tunModeEnabled"));
+              UiPostbox::instance().post([this] {
+                if (settings_drawer_) settings_drawer_->sync_takeover(false, true);
+              });
+            } else {
+              nots.push("error", r.error().message);
+              UiPostbox::instance().post([this, prev_mode] {
+                if (settings_drawer_) settings_drawer_->sync_takeover(prev_mode == "SYS", prev_mode == "TUN");
+              });
             }
-            notices.push("error", r.error().message);
-            return false;
-          }
-          if (mode == "SYS") {
-            // :1072-1084 系统代理：开系统代理 + 清 TUN
-            auto r = svc.invoke(
-                "patch_verge_config",
-                nlohmann::json::object({{"enable_system_proxy", true},
-                                        {"enable_tun_mode", false}}));
-            notices.hide(wait_id);
-            if (r.is_ok()) {
-              notices.push("success", tr8("layout.notices.systemProxyEnabled"));
-              return true;
-            }
-            notices.push("error", r.error().message);
-            return false;
-          }
-          // :1085-1109 TUN
-          bool is_admin = false;
-          {
-            auto ar = svc.invoke("app_is_admin");
-            if (ar.is_ok() && ar.value().is_boolean())
-              is_admin = ar.value().get<bool>();
-          }
-          const bool service_ok = svc.invoke("is_service_available").is_ok();
-          if (!(is_admin || service_ok)) {
-            // 不可用 → installServiceAndRestartCore()；失败 → error + return（不 patch）
-            auto inst = svc.invoke("install_service");
-            if (!inst.is_ok()) {
-              notices.hide(wait_id);
-              notices.push("error",
-                           tr8("layout.notices.tunServiceConfigFailed"));
-              return false;
-            }
-            svc.invoke("restart_core");
-          }
-          auto r = svc.invoke(
-              "patch_verge_config",
-              nlohmann::json::object({{"enable_system_proxy", false},
-                                      {"enable_tun_mode", true}}));
-          notices.hide(wait_id);
-          if (r.is_ok()) {
-            notices.push("success", tr8("layout.notices.tunModeEnabled"));
-            return true;
-          }
-          notices.push("error", r.error().message);
-          return false;
+          }).detach();
+
+          return true;
         };
     settings_drawer_->on_patch_clash_mode = [](const std::string& mode) {
       cmd::CommandService::instance().invoke(
@@ -1963,6 +1995,32 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 
     // 【INPUTFIX】鼠标/键盘路由给 widget 树（此前仅 feed_activity，
     // route_*_event 只在 tests/ 被调 → 实机开关点击无反应）
+    case WM_GETICON: {
+      if (wp == ICON_BIG || wp == 2 /* ICON_BIG */) return reinterpret_cast<LRESULT>(h_icon_big_);
+      return reinterpret_cast<LRESULT>(h_icon_sm_);
+    }
+
+    case WM_SETCURSOR: {
+      if (LOWORD(lp) == HTCLIENT) {
+        POINT pt;
+        GetCursorPos(&pt);
+        ScreenToClient(hwnd_, &pt);
+        float s = dpi_scale();
+        PointF local_pt{static_cast<float>(pt.x) / s, static_cast<float>(pt.y) / s};
+        Widget* hit = root_.hit_test(local_pt);
+        while (hit) {
+          PointF widget_pt = hit->to_local(local_pt);
+          HCURSOR hc = hit->cursor(widget_pt);
+          if (hc) {
+            SetCursor(hc);
+            return TRUE;
+          }
+          hit = hit->parent();
+        }
+      }
+      break;
+    }
+
     case WM_NCMOUSEMOVE:
       if (tooltip_host_) tooltip_host_->leave();  // 移入非客户区 → 收起提示
       break;

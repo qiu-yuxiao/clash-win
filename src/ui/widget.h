@@ -16,6 +16,14 @@
 #include <string>
 #include <vector>
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
 #include "render_target.h"
 
 namespace clashwin::ui {
@@ -86,6 +94,7 @@ class Widget {
   void request_focus();                 // wants_key 才有意义
   void blur();
   virtual bool wants_key() const { return false; }  // 焦点候选（textfield）
+  virtual HCURSOR cursor(const PointF& local) const { (void)local; return nullptr; }
   std::function<void()> on_focus_lost;  // 焦点被其它控件接管时触发（MUI onBlur 语义）
 
   // ---- 两阶段布局 ----

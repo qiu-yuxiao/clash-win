@@ -235,6 +235,8 @@ class MainWindow : public app::ILifecycleWindow {
   LRESULT handle(UINT msg, WPARAM, LPARAM);
 
   HWND hwnd_ = nullptr;
+  HICON h_icon_big_ = nullptr;
+  HICON h_icon_sm_ = nullptr;
   D2dContext ctx_;
   D2dRenderTarget rt_{ctx_};
   FrameClock clock_;

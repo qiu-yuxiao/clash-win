@@ -65,6 +65,7 @@ class AutoSelect {
     std::vector<std::pair<std::string, uint32_t>> display;
     bool selected = false;
     bool busy = false;  // AUTO_SELECT_RUNNING 占用（返回繁忙）
+    std::string selected_node;
   };
 
   // ← trigger_backend_auto_select（含互斥/校验/择优/切换/回写全流程）

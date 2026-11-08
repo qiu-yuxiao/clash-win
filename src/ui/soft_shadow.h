@@ -68,6 +68,27 @@ inline void draw_inner_glow(IRenderTarget& rt, const RectF& r, float radius,
 //   inset 0 calc(3px*depth) calc(5px*depth) rgba(0,0,0,.7)
 // D2D 无 inset 原语，用「上缘向内若干层的横向渐变带」逼近：
 //   从上缘往下画若干条 1px 半透明横线，alpha 由强到弱衰减。
+inline void draw_left_inset_shadow(IRenderTarget& rt, const RectF& r,
+                                   float radius, const Color4f& color, float dx,
+                                   float blur, int layers = 5) {
+  if (color.a <= 0.004f) return;
+  const float depth = dx + blur;
+  if (depth <= 0.5f) return;
+  const float inset_y = std::min(radius, r.h * 0.5f);
+  for (int i = 0; i < layers; ++i) {
+    const float t = static_cast<float>(i) / static_cast<float>(layers);
+    const float x = r.x + depth * t;
+    Color4f col = color;
+    col.a = color.a * (1.0f - t) / static_cast<float>(layers) * 2.0f;
+    if (col.a <= 0.004f) continue;
+    const float y0 = r.y + inset_y * (1.0f - t);
+    const float y1 = r.bottom() - inset_y * (1.0f - t);
+    if (y1 <= y0) continue;
+    // 豁免: Mini 无对应物 — 逐列软阴影描边宽度，D2D 无 box-shadow 原语，纯实现层（出处: 无）
+    rt.draw_line({x, y0}, {x, y1}, Pen{col, 1.2f});
+  }
+}
+
 inline void draw_top_inset_shadow(IRenderTarget& rt, const RectF& r,
                                   float radius, const Color4f& color, float dy,
                                   float blur, int layers = 5) {

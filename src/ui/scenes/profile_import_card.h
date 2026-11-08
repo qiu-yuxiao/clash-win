@@ -40,6 +40,7 @@ class ProfileRowWidget : public Widget {
   void bind(const config::PrfItem& item, bool active);
   void on_paint(IRenderTarget& rt) override;
   bool on_mouse(const MouseEvent& e) override;
+  HCURSOR cursor(const PointF& local) const override;
 
   const std::string& uid() const { return uid_; }
   const std::string& display_name() const { return name_; }
