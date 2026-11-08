@@ -1,6 +1,6 @@
 {
-  "version": "0.1.9",
-  "notes": "Clash Win v0.1.9 — fix auto speed test infinite loop on first run proxy node page, and align traffic curve 1s update cycle & smooth slide animation with Clash Mini.",
+  "version": "0.1.10",
+  "notes": "Clash Win v0.1.10 — fix TUN mode switching DNS hijack and node restore fallback, prevent dual-takeover sysproxy race, and align with Clash Mini.",
   "pub_date": "2026-11-08T16:45:00Z",
   "platforms": {}
 }

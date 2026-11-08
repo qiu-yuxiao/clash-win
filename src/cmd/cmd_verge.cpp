@@ -79,6 +79,45 @@ namespace {
 // 守护）归 T18——以钩子注入，未挂时留痕不静默；LAUNCH 注册表直写；
 // LANGUAGE/ALWAYS_ON_TOP/SYSTRAY 归 T10/T17/T19 留痕。
 Result<void> process_flags(uint16_t flags, const IVerge& patch) {
+  auto apply_sysproxy = [&]() -> Result<void> {
+    uint16_t clash_port = 0;
+    {
+      auto& clash = config::Config::instance().clash();
+      auto arc = clash.latest_arc();
+      if (arc) {
+        try {
+          const auto& mapping = arc->mapping();
+          if (mapping.IsMap() && mapping["mixed-port"]) {
+            clash_port = static_cast<uint16_t>(mapping["mixed-port"].as<int>());
+          }
+        } catch (...) {
+          clash_port = 0;
+        }
+      }
+    }
+    auto view = system::make_verge_view(
+        patch, clash_port, app::current_singleton_port());
+    auto& sysopt = system::Sysopt::instance();
+    auto r = sysopt.update_sysproxy(view);
+    if (r.is_err()) return r;
+    sysopt.refresh_guard(view);
+    return Result<void>::ok();
+  };
+
+  // 1. 退场顺序（← feat/config.rs:199-209）：
+  //    当关闭 OS 系统代理（如切换至 TUN 或手动模式）时，必须先清除 OS 系统代理，
+  //    再执行内核重启/TUN 网卡拉起，消除双重流量接管冲突窗口；
+  // 2. 入场顺序：当开启 OS 系统代理（如从 TUN 切回系统代理）或变更混合端口时，
+  //    先执行 RESTART_CORE 让 Sidecar 内核就绪监听端口，再将 OS 系统代理指向该端口。
+  const bool disable_sys_proxy_first =
+      (flags & kFSysProxy) && patch.enable_system_proxy.has_value() &&
+      !*patch.enable_system_proxy;
+
+  if (disable_sys_proxy_first) {
+    auto r = apply_sysproxy();
+    if (r.is_err()) return r;
+  }
+
   if (flags & kFRestartCore) {
     // ← Config::generate + restart_core
     auto outcome = run_enhance_pipeline();
@@ -99,34 +138,10 @@ Result<void> process_flags(uint16_t flags, const IVerge& patch) {
       }
     }
   }
-  // ← feat/config.rs:182-189 注释：SYS_PROXY 必须先于 CLASH_CONFIG（TUN 切换
-  //   双重接管窗口）。T18 前为留痕桩。
-  // ← feat/config.rs:190-193：SYS_PROXY flag → update_sysproxy + refresh_guard
-  //   （T18 转正；access 未装配时 Sysopt 留痕放行——测试环境安全）
-  if (flags & kFSysProxy) {
-    uint16_t clash_port = 0;
-    {
-      auto& clash = config::Config::instance().clash();
-      auto arc = clash.latest_arc();
-      if (arc) {
-        try {
-          const auto& mapping = arc->mapping();
-          if (mapping.IsMap() && mapping["mixed-port"]) {
-            clash_port = static_cast<uint16_t>(mapping["mixed-port"].as<int>());
-          }
-        } catch (...) {
-          clash_port = 0;
-        }
-      }
-    }
-    // PAC 端口取运行时实际绑定的单实例端口（GUI 进程内即 bind 成功值；
-    // 独立 CLI 进程未启动服务器时回退到同一常量，二者不再分叉）
-    auto view = system::make_verge_view(
-        patch, clash_port, app::current_singleton_port());
-    auto& sysopt = system::Sysopt::instance();
-    auto r = sysopt.update_sysproxy(view);
+
+  if ((flags & kFSysProxy) && !disable_sys_proxy_first) {
+    auto r = apply_sysproxy();
     if (r.is_err()) return r;
-    sysopt.refresh_guard(view);
   }
   // ← feat/config.rs:221-224：RESTART_CORE 已重新生成并加载配置，
   //   跳过冗余的 CLASH_CONFIG reload（v3.1.3 BUG-305 明确要求）

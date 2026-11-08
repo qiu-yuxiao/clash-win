@@ -711,6 +711,15 @@ Result<void> CoreManager::restart_with_restore(ICoreApiClient& api, const CoreOp
   if (st.is_err()) return st;
   if (saved.has_value()) {
     restore_proxy_group_now(api, *saved, t);
+  } else {
+    // 进程冷启动 / 无历史 snapshot 时，自动在 filterText 子集内兜底选点，
+    // 避免 Selector 落回首个广告/假节点（← lifecycle.rs:354-416 兜底防线）
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(t.api_ready_budget_ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+      if (api.get_base_config().is_ok()) break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(t.api_ready_poll_ms));
+    }
+    select_fallback_in_subset(api, read_filter_text_lower());
   }
   return Result<void>::ok();
 }
@@ -798,8 +807,17 @@ Result<void> CoreManager::apply_config(ICoreApiClient& api, const std::string& c
   if (reload.is_ok()) {
     CWLOG_INFO("Configuration applied");
     if (saved.has_value()) {
-      restore_proxy_group_now(api, *saved, t);
+    restore_proxy_group_now(api, *saved, t);
+  } else {
+    // 进程冷启动 / 无历史 snapshot 时，自动在 filterText 子集内兜底选点，
+    // 避免 Selector 落回首个广告/假节点（← lifecycle.rs:354-416 兜底防线）
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(t.api_ready_budget_ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+      if (api.get_base_config().is_ok()) break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(t.api_ready_poll_ms));
     }
+    select_fallback_in_subset(api, read_filter_text_lower());
+  }
     return Result<void>::ok();
   }
   CWLOG_WARN("Failed to apply config via mihomo api (" + reload.error().message +
