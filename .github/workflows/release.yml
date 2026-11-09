@@ -234,6 +234,13 @@ jobs:
       # 门禁只断言 EXIT=0 + 0 failed + 0 assertion failures，不写死用例数。
       - name: Full regression (isolated, fail-fast)
         shell: pwsh
+        # golden 夹具固化于 UTC+8 实机（enhance.cpp:62-70 localtime_s 产出
+        # (010459) 后缀）；runner 默认 UTC 会算出 (170459)。t08_golden_fixture
+        # 已在用例内自包含固定时区，这里把 runner 环境也对齐基线作为兜底。
+        # MSVC CRT 的 TZ 采用「西正东负」写法：UTC-8 == UTC+08:00
+        #（IANA 名 Asia/Shanghai 在 UCRT 下不被识别，勿改）。
+        env:
+          TZ: 'UTC-8'
         run: |
           $ErrorActionPreference = 'Stop'
           $runDir = 'build\cwtest'

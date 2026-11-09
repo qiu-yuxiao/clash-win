@@ -4,10 +4,12 @@
 //   profiles.yaml, profiles/*} → enhance_core → 与实机 clash-win.yaml
 //   逐行 diff（按 golden 顶层键序重排消去实机 HashSet 随机序运行时差异）
 #include <algorithm>
+#include <cstdlib>
 #include <functional>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <time.h>
 #include <vector>
 
 #include "enhance/enhance.h"
@@ -215,6 +217,35 @@ UT_TEST(t08_enhance_core_empty_profile) {
 
 namespace {
 
+// 【测试环境注入】golden 夹具固化于 UTC+8 实机：expected_clash_win.yaml 里的
+// (010459) 后缀出自 enhance.cpp:62-70 format_updated_suffix() 的 localtime_s。
+// CI runner 默认 UTC，同一时间戳 1792947899 会产出 (170459)，逐行 diff 全红。
+// 原用例把「运行机器时区 = 中国标准时间」当成隐含前提；这里在本用例作用域内
+// 显式固定进程本地时区并在结束时 RAII 恢复，使基线比对不再依赖宿主机配置。
+// 仅注入环境：diffs.empty() 等关键断言保持逐行严格比对，产品代码零改动。
+class ScopedEast8Tz {
+ public:
+  ScopedEast8Tz() {
+    if (const char* prev = std::getenv("TZ")) {
+      had_prev_ = true;
+      prev_ = prev;
+    }
+    // MSVC CRT 的 TZ 用「西正东负」偏移写法：UTC-8 表示 UTC+08:00。
+    _putenv_s("TZ", "UTC-8");
+    _tzset();
+  }
+  ~ScopedEast8Tz() {
+    _putenv_s("TZ", had_prev_ ? prev_.c_str() : "");
+    _tzset();
+  }
+  ScopedEast8Tz(const ScopedEast8Tz&) = delete;
+  ScopedEast8Tz& operator=(const ScopedEast8Tz&) = delete;
+
+ private:
+  bool had_prev_ = false;
+  std::string prev_;
+};
+
 std::wstring fixtures_dir() {
   std::string f = __FILE__;  // MSVC：绝对路径
   size_t pos = f.find_last_of("\\/");
@@ -300,6 +331,8 @@ bool build_input_from_home(const std::wstring& home, EnhanceInput& input) {
 }  // namespace
 
 UT_TEST(t08_golden_fixture) {
+  // 固定为夹具生成时的 UTC+8；CI(UTC) 与本地(UTC+8) 走完全相同的比对路径。
+  ScopedEast8Tz scoped_tz;
   std::wstring home = fixtures_dir();
   UT_CHECK(enhance_test::dir_exists(home));
   if (!enhance_test::dir_exists(home)) return;

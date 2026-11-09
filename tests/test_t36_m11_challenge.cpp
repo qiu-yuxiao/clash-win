@@ -344,6 +344,21 @@ UT_TEST(t36_c10_tun_service_guard_and_notice_dispatch) {
 
   // 6c) 前端 TakeoverCard 切 TUN 模式且无服务/非管理员时拦截并回弹
   {
+    // 【测试环境注入】守卫条件是 !(is_admin || service_ok)
+    //（settings_drawer.cpp:1531-1544，对齐 Mini _layout.tsx:1085-1095）。
+    // 原用例只注入了 service runner，却隐含假设「本进程不是管理员」：CI runner
+    // 以管理员运行，app_is_admin 返回 true → 整段守卫被跳过，apply 返回 true
+    // 且不发 error 通知（CI 两处断言同时红）。这里把 admin 结果也显式注入为
+    // false，使本地与 CI 走同一条分支；!applied / s.size()>=1 / error 三条
+    // 断言一条不减。块末恢复产品真实探测，不污染后续用例。
+    auto& svc = clashwin::cmd::CommandService::instance();
+    svc.register_command(
+        "app_is_admin",
+        {[](const clashwin::cmd::Json&) -> clashwin::cmd::CmdResult {
+           return clashwin::cmd::CmdResult::ok(clashwin::cmd::Json(false));
+         },
+         clashwin::cmd::consts::kTimeoutProbe});
+
     // 注入模拟未就绪 Runner，迫使 is_service_available 返回失败且安装失败
     auto mock = std::make_shared<ChallengeMockServiceRunner>();
     system::set_service_runner(mock);
@@ -364,6 +379,14 @@ UT_TEST(t36_c10_tun_service_guard_and_notice_dispatch) {
     clear_notices();
 
     system::set_service_runner(nullptr);
+    // 恢复产品真实 admin 探测（cmd_app.cpp:48-51），后续用例不受本块注入影响
+    svc.register_command(
+        "app_is_admin",
+        {[](const clashwin::cmd::Json&) -> clashwin::cmd::CmdResult {
+           return clashwin::cmd::CmdResult::ok(
+               clashwin::cmd::Json(clashwin::cmd::is_admin()));
+         },
+         clashwin::cmd::consts::kTimeoutProbe});
   }
 }
 

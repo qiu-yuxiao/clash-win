@@ -135,8 +135,27 @@ UT_TEST(t03_ws_zero_size_and_immediate_save) {
 
 UT_TEST(t03_ws_restore_clamp_and_offscreen_center) {
   std::wstring path = temp_path("ws_restore");
-  // 正常保存
-  window_state::save_sync(path, 300.5, 700.25, 2286.66, 530.66);
+  // 【测试环境注入】原用例写死 x=2286.66（开发机多屏桌面右侧），但 restore()
+  // 会按 window_state.cpp:53-78 的 EnumDisplayMonitors 判定脱屏；CI 单屏虚拟
+  // 桌面下该坐标被产品正确判为脱屏并把 x/y 置空，令「在屏位置应完整还原」
+  // 这条断言变红。这里改为按当前显示器布局取一个确定在屏的坐标，使本地与
+  // CI 测同一件事；断言一条不削弱，另加前提校验把环境假设显式化。
+  RECT monitor_rc{0, 0, 1024, 768};
+  EnumDisplayMonitors(
+      nullptr, nullptr,
+      [](HMONITOR, HDC, LPRECT rc, LPARAM lp) -> BOOL {
+        *reinterpret_cast<RECT*>(lp) = *rc;
+        return FALSE;  // 取第一块显示器即可
+      },
+      reinterpret_cast<LPARAM>(&monitor_rc));
+  const double on_screen_x =
+      monitor_rc.left + (monitor_rc.right - monitor_rc.left) / 2.0;
+  const double on_screen_y =
+      monitor_rc.top + (monitor_rc.bottom - monitor_rc.top) / 2.0;
+  UT_CHECK(window_state::is_position_on_screen(on_screen_x, on_screen_y));
+
+  // 正常保存（在屏坐标）
+  window_state::save_sync(path, 300.5, 700.25, on_screen_x, on_screen_y);
   auto st = window_state::restore(path);
   UT_CHECK(st.has_value());
   if (st) {
