@@ -237,7 +237,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $runDir = 'build\cwtest'
-          New-Item -ItemType Directory -Force -Path $runDir, "$runDir\tmp" | Out-Null
+          # 与本地 scripts/run_tests_py.py:45 一致：先建 assets 目录再复制 locales
+          New-Item -ItemType Directory -Force -Path $runDir, "$runDir\tmp", "$runDir\assets" | Out-Null
           Copy-Item 'build\bin\Release\clashwin_test.exe' "$runDir\clashwin_test.exe" -Force
           foreach ($pair in @(
               @('sidecar', "$runDir\sidecar"),
@@ -258,7 +259,13 @@ jobs:
           $code = $LASTEXITCODE
           $summary = (Get-Content $log -Tail 5) -join "`n"
           "---- regression summary ----`n$summary`nEXIT=$code"
-          if ($code -ne 0) { throw "Regression EXIT=$code" }
+          if ($code -ne 0) {
+            # runner 是临时机，失败时不把完整测试日志打到 CI 输出就无从定位用例：
+            # run 42679845034 只留下尾部 5 行与 "3 failed" 数字。
+            "---- full regression log (failure diagnostics) ----"
+            Get-Content $log
+            throw "Regression EXIT=$code"
+          }
           # 解析数字而非子串匹配："10 failed" 也含 "0 failed" 子串
           if ($summary -match '(\d+)\s+failed') {
             if ([int]$Matches[1] -ne 0) { throw "Regression reported $($Matches[1]) failed" }
