@@ -1,6 +1,9 @@
 ﻿# env_guard.ps1 — 实测环境守卫（Pre/Post），前后一律清空自家进程
 #
-# 规则（2026-11-05 起：Mini 已获准停用，清场不再豁免 Mini 进程）：
+# 规则（2026-11-09 起：Mini 与 Win 互斥，端口 1:1；旧「Mini 占 10801 属正常」规则作废）：
+#   - 端口口径以 include\clashwin\config\constants.h 为准：
+#     10801 mixed / 10802 socks / 10803 http / 9098 controller / 33335 单实例。
+#     7899 只是 http 兜底端口，允许被无关程序占用，不进断言。
 #   - 清理对象：clashwin.exe、clashwin_test.exe（全部实例）；mini-mihomo.exe
 #     （仓库 build* / %TEMP%\cw* / C:\Program Files\Clash Mini 下）；clash-mini.exe
 #   - 服务 clash_verge_service：不再要求保留或 RUNNING。测试中可自由 stop / delete /
@@ -10,7 +13,8 @@
 #   - 每条清理可审计：PID | 进程名 | 完整路径 | 启动时间 | 结果
 #   - 清场后网络体检：默认路由必须回到 192.168.1.1；若残留 198.18.x 默认路由 /
 #     Mihomo·Wintun 适配器被拉起，一并清理（需管理员时打印提权命令）
-#   - 断言：自家存活进程数 = 0；33337、10811–10814、9108 全部空闲；否则 NOT READY / NOT CLEAN，退出码 1
+#   - 断言：自家存活进程数 = 0；10801、10802、10803、9098、33335 全部空闲；
+#     占用方区分为「自家 / Clash Mini / 其他程序」，任何一方占用都判 NOT READY / NOT CLEAN（退出码 1）
 #   - 僵尸 PID 条目（0 线程，进程已退出、句柄被启动器持有）无法 Kill，单列 WARN，不计入存活数
 #
 # 用法：
@@ -28,7 +32,7 @@ $ErrorActionPreference = 'Continue'
 $Repo = Split-Path -Parent $PSScriptRoot
 $OurNames = @('clashwin', 'clashwin_test', 'mini-mihomo', 'clash-mini')
 $ExcludedNamePatterns = @('clash_verge_service', 'clash-verge-service')
-$WatchPorts = @(33337, 10811, 10812, 10813, 10814, 9108)
+$WatchPorts = @(10801, 10802, 10803, 9098, 33335)
 
 function Write-Section([string]$text) {
   Write-Host ''
@@ -64,6 +68,16 @@ function Test-OwnedByUs([string]$name, [string]$path) {
             $lp.Contains('program files\clash mini'))
   }
   return $false
+}
+
+function Get-PortOwnerKind([string]$path) {
+  # 占用方归属：own（本仓库）/ mini（Clash Mini 一侧）/ other（无关程序）
+  if (-not $path) { return 'other' }
+  $lp = $path.ToLower()
+  $repoPrefix = $Repo.ToLower() + '\'
+  if ($lp.StartsWith($repoPrefix) -or $lp.Contains('\cwrun\')) { return 'own' }
+  if ($lp.Contains('clash mini') -or $lp.Contains('clash-mini')) { return 'mini' }
+  return 'other'
 }
 
 function Scan-Processes {
@@ -106,10 +120,11 @@ function Get-PortTable {
   foreach ($port in $WatchPorts) {
     $conns = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
     if ($conns.Count -eq 0) {
-      $rows += [pscustomobject]@{ Port = $port; State = 'FREE'; OwnerPid = $null; OwnerPath = $null }
+      $rows += [pscustomobject]@{ Port = $port; State = 'FREE'; OwnerPid = $null; OwnerPath = $null; OwnerKind = $null }
     } else {
       foreach ($c in $conns) {
-        $rows += [pscustomobject]@{ Port = $port; State = 'LISTEN'; OwnerPid = $c.OwiningProcess; OwnerPath = (Get-ProcPath $c.OwiningProcess) }
+        $op = Get-ProcPath $c.OwningProcess
+        $rows += [pscustomobject]@{ Port = $port; State = 'LISTEN'; OwnerPid = $c.OwningProcess; OwnerPath = $op; OwnerKind = (Get-PortOwnerKind $op) }
       }
     }
   }
@@ -376,7 +391,7 @@ function Invoke-NetSnapshot {
   # 残余登记：ProxyEnable=0 但 ProxyServer/ProxyOverride 仍指向本机内核端口。
   # 无法证明是系统原有值时一律“只记录、不清理”，Post 以基线为准也不会抹掉。
   if ($state.Proxy.ProxyEnable -eq 0 -and
-      $state.Proxy.ProxyServer -match '^(127\.0\.0\.1|localhost):(1081[1-4]|9108)$') {
+      $state.Proxy.ProxyServer -match '^(127\.0\.0\.1|localhost):(10801|10802|10803|9098|7899)$') {
     Write-Host ('  NET-PENDING-RESIDUE  ProxyServer=' + $state.Proxy.ProxyServer +
                 '  ProxyOverride=' + $state.Proxy.ProxyOverride +
                 '  （未启用，保留不动；归属待人工确认）') -ForegroundColor Yellow
@@ -480,7 +495,7 @@ function Invoke-Cleanup([string]$phase) {
   Write-Section '3) 端口基线'
   foreach ($r in (Get-PortTable)) {
     if ($r.State -eq 'FREE') { Write-Host ('  ' + $r.Port + ' FREE') }
-    else { Write-Host ('  ' + $r.Port + ' LISTEN pid=' + $r.OwnerPid + ' path=' + $(if ($r.OwnerPath) { $r.OwnerPath } else { '<unknown>' })) -ForegroundColor Yellow }
+    else { Write-Host ('  ' + $r.Port + ' LISTEN pid=' + $r.OwnerPid + ' [' + $r.OwnerKind + '] path=' + $(if ($r.OwnerPath) { $r.OwnerPath } else { '<unknown>' })) -ForegroundColor Yellow }
   }
 
   Write-Section '4) 清理全部自家进程（无豁免）'
@@ -500,7 +515,7 @@ function Invoke-Cleanup([string]$phase) {
   $ports = @(Get-PortTable)
   foreach ($r in $ports) {
     if ($r.State -eq 'FREE') { Write-Host ('  ' + $r.Port + ' FREE') }
-    else { Write-Host ('  ' + $r.Port + ' LISTEN pid=' + $r.OwnerPid + ' path=' + $(if ($r.OwnerPath) { $r.OwnerPath } else { '<unknown>' })) -ForegroundColor Red }
+    else { Write-Host ('  ' + $r.Port + ' LISTEN pid=' + $r.OwnerPid + ' [' + $r.OwnerKind + '] path=' + $(if ($r.OwnerPath) { $r.OwnerPath } else { '<unknown>' })) -ForegroundColor Red }
   }
 
   $netReasons = @($netRepair)
@@ -513,7 +528,10 @@ function Invoke-Cleanup([string]$phase) {
   $reasons = @($netReasons)
   if ($live.Count -gt 0) { $reasons += ('自家存活进程数=' + $live.Count + '（应为 0）') }
   foreach ($r in $ports) {
-    if ($r.State -ne 'FREE') { $reasons += ('端口 ' + $r.Port + ' 仍被 pid=' + $r.OwnerPid + ' 占用') }
+    if ($r.State -ne 'FREE') {
+      $who = switch ($r.OwnerKind) { 'own' { '自家进程' } 'mini' { 'Clash Mini' } default { '其他程序' } }
+      $reasons += ('端口 ' + $r.Port + ' 仍被' + $who + '(pid=' + $r.OwnerPid + ')占用；Mini 与 Win 互斥，需先停用占用方')
+    }
   }
 
   $verdict = if ($reasons.Count -eq 0) { if ($phase -eq 'Pre') { 'READY' } else { 'clean' } } else { if ($phase -eq 'Pre') { 'NOT READY' } else { 'NOT CLEAN' } }

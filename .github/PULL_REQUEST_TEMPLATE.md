@@ -26,12 +26,12 @@ Clash Win 是 Clash Mini v3.2.2 的 Windows 原生 1:1 移植。请勾选并填�
 - [ ] `scripts\ui_src_gate.ps1` PASS（若涉及 UI 源码）
 - [ ] `scripts\verify_sidecar.ps1` 5/5（若涉及运行态 / 打包）
 - [ ] 新增或修复的缺陷已补回归用例，并做过「临时回退 → 用例失败 → 恢复后通过」的有效性验证
-- [ ] 已在与 Clash Mini 共存的机器上验证（端口 10811-10814 / 9108 / 33337 未冲突）
+- [ ] 已在与 Clash Mini 共存的机器上验证（端口 10801 / 10802 / 10803 / 9098 / 33335 未冲突；Mini 与 Win 互斥，同一时间只启用一方）
 
 ## 交付链 / Delivery
 
 - [ ] 未把 sidecar 的 `*.exe`、`*.pdb`、`build/`、`dist/` 等产物加入提交
-- [ ] 未改动 `updater/app-update.json` 之外的更新通道配置（v0.1.0 更新为空通道，见 `docs/KNOWN_LIMITATIONS_0.1.0.md`）
+- [ ] 未改动 `updater/app-update.json` 之外的更新通道配置（更新通道现状见 `docs/KNOWN_LIMITATIONS_0.2.2.md`）
 - [ ] 若涉及品牌位，显示名为 `Clash Win`（中间有空格），未引入 `Clash Mini` 的显示名
 
 ## 关联 / Related

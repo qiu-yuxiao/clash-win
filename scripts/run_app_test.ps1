@@ -9,7 +9,7 @@
 #
 # 四项自检（任一失败即判启动失败）：
 #   1) PID 存活（线程数 > 0）
-#   2) 33337 LISTEN 且 OwnerPid == 该 PID
+#   2) 33335 LISTEN 且 OwnerPid == 该 PID
 #   3) 日志有新增（home\logs 下任一文件字节数变大或新增文件）
 #   4) EnumWindows 能枚举到该 PID 的顶层窗口，且 PrintWindow 截图非空（像素方差达标）
 #
@@ -39,7 +39,7 @@ if (-not $AppDir) {
 }
 $RunDir = if ($FromRepo) { $AppDir } else { Join-Path $WorkDir 'app' }
 $ExeName = 'clashwin.exe'
-$SingletonPort = 33337
+$SingletonPort = 33335
 
 Add-Type -TypeDefinition @'
 using System;
@@ -230,7 +230,7 @@ Write-Host ('rundir = ' + $RunDir + $(if ($FromRepo) { '  (仓库路径，不复
 if ($AllowNetworkChange) {
   Write-Host '网络策略 = 允许改动（仅限开关 TUN/系统代理的本轮验证；必须在同一命令内开→验→关，Post 会比对并强制还原）' -ForegroundColor Yellow
 } else {
-  Write-Host '网络策略 = 只读（禁止改系统代理/TUN/DNS；验证出网请用显式代理 127.0.0.1:10811 或内核 API）' -ForegroundColor DarkGray
+  Write-Host '网络策略 = 只读（禁止改系统代理/TUN/DNS；验证出网请用显式代理 127.0.0.1:10801 或内核 API）' -ForegroundColor DarkGray
 }
 $pre = & (Join-Path $PSScriptRoot 'env_guard.ps1') -Phase Pre
 $preExit = $LASTEXITCODE
@@ -352,7 +352,7 @@ for ($run = 1; $run -le $Runs; $run++) {
 
   $delta = Get-LogDelta $logBefore $AppHome
   Write-Host ('  [1] PID alive      : ' + $status.Alive + '  pid=' + $launch.Pid + ' threads=' + $(if ($proc) { $proc.Threads.Count } else { 'exited' }))
-  Write-Host ('  [2] 33337 LISTEN   : ' + $status.Port + '  owner=' + $launch.Pid)
+  Write-Host ('  [2] 33335 LISTEN   : ' + $status.Port + '  owner=' + $launch.Pid)
   Write-Host ('  [3] log new lines  : ' + $status.Log + '  ' + $delta.Detail)
   Write-Host ('  [4] window visible : ' + $status.Window + '  hwnd=' + $status.Hwnd + ' title=' + $(if ($title) { "'" + $title + "'" } else { "''" }))
   if ($status.Shot) {

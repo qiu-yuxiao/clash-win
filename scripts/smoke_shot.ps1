@@ -1,13 +1,21 @@
 # smoke_shot.ps1 — 仅启动 + 截图（不做网络体检，用于快速目视核对）
-# 用法：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke_shot.ps1 -Out ui_diag\shot.png
+# 用法：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke_shot.ps1 [-Out <目录>\shot.png]
+# 默认输出 %TEMP%\cwrun\shots\shot.png（目录不存在会自动创建）
 param(
-  [string]$Exe = "C:\Users\sun_y\Documents\AntiGravity_Projects\ClashWin\build\bin\Release\clashwin.exe",
-  [string]$Out = "C:\Users\sun_y\Documents\AntiGravity_Projects\ClashWin\ui_diag\shot.png",
+  [string]$Exe = "",
+  [string]$Out = "",
   [int]$WaitSec = 9,
   [string]$ProcName = "clashwin",   # 像素对照时传 clash-mini 抓上游窗口（只读，不干扰）
   [switch]$NoLaunch
 )
 $ErrorActionPreference = 'Continue'
+
+$Repo = Split-Path -Parent $PSScriptRoot
+if (-not $Exe) { $Exe = Join-Path $Repo 'build\bin\Release\clashwin.exe' }
+if (-not $Out) { $Out = Join-Path $env:TEMP 'cwrun\shots\shot.png' }
+$OutDir = Split-Path -Parent $Out
+if ($OutDir) { New-Item -ItemType Directory -Force -Path $OutDir | Out-Null }
+
 Add-Type -AssemblyName System.Drawing
 Add-Type @'
 using System;using System.Text;using System.Runtime.InteropServices;using System.Collections.Generic;
