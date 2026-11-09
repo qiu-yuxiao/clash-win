@@ -161,3 +161,12 @@ Write-Host ""
 Write-Host "Portable package ready: $($item.FullName)" -ForegroundColor Green
 Write-Host ("Size: {0:N0} bytes ({1} MB), {2} entries" -f $item.Length, [math]::Round($item.Length / 1MB, 2), $names.Count) -ForegroundColor Green
 Write-Host "Layout: clashwin.exe + sidecar\ + resources\ + locales\ + .config\PORTABLE + 用户必读.txt" -ForegroundColor Gray
+
+# 显式声明成功退出码：CI (release.yml "Build portable ZIP") 用
+#   if ($LASTEXITCODE -ne 0) { throw ... } 判定本脚本。
+# 本脚本全程只调用 cmdlet / .NET，不产生原生进程，若不写 exit 0，
+# $LASTEXITCODE 保持 $null，而 pwsh 下 $null -ne 0 为 True → 成功被误判为失败
+#（run 42696747950：ZIP 已产出 25.82MB/152 条目，步骤仍抛 portable.ps1 failed）。
+# 与 scripts/verify_sidecar.ps1 末尾的 exit 0 保持同一契约；失败路径由 Fail() 的
+# exit 1 提前终止，能走到这里即为成功。
+exit 0

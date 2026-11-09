@@ -236,6 +236,12 @@ Write-Host ""
 Write-Host "Installer ready: $($item.FullName)" -ForegroundColor Green
 Write-Host ("Size: {0:N0} bytes ({1} MB)" -f $item.Length, $sizeMb) -ForegroundColor Green
 
+# 显式声明成功退出码：release.yml "Build NSIS setup.exe" 用 $LASTEXITCODE -ne 0 判定。
+# 未签名 / sign.ps1 被跳过时本脚本可能全程无原生进程，$LASTEXITCODE 保持 $null，
+# 而 pwsh 下 $null -ne 0 为 True → 安装包已产出却误报失败。与 portable.ps1、
+# verify_sidecar.ps1 的 exit 0 契约一致；失败路径均由 Fail() 的 exit 1 提前终止。
+exit 0
+
 
 
 
