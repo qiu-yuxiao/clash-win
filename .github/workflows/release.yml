@@ -153,11 +153,11 @@ jobs:
           $ErrorActionPreference = 'Stop'
           if ([string]::IsNullOrWhiteSpace($env:SIDECAR_ARCHIVE_URL)) {
             throw @'
-sidecar 5 个 exe 因 .gitignore 的 *.exe 未入库，CI 全新 checkout 后不含内核。
-请在仓库变量中配置 SIDECAR_ARCHIVE_URL（受控归档，解压后为 5 个上游原版 exe），
-或改用已预置 sidecar/ 的 self-hosted runner。
-说明见 docs/05-sidecar-内核资产.md 与 docs/KNOWN_LIMITATIONS_0.1.0.md (f)。
-'@
+          sidecar 5 个 exe 因 .gitignore 的 *.exe 未入库，CI 全新 checkout 后不含内核。
+          请在仓库变量中配置 SIDECAR_ARCHIVE_URL（受控归档，解压后为 5 个上游原版 exe），
+          或改用已预置 sidecar/ 的 self-hosted runner。
+          说明见 docs/05-sidecar-内核资产.md 与 docs/KNOWN_LIMITATIONS_0.1.0.md (f)。
+          '@
           }
           New-Item -ItemType Directory -Force -Path sidecar | Out-Null
           $archive = Join-Path $env:RUNNER_TEMP 'clashwin-sidecar.zip'
