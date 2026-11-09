@@ -95,8 +95,8 @@
 
 - **N20 核验**：§1.8 引用的所有源码 `file:line`（`_layout.tsx:1086-1088`、`use-service-installer.ts:28,43`、`use-system-state.ts:65`、`cmd/service.rs:18/28/32/38`、`core/service.rs:76/193/211/333`、`lifecycle.rs:151/183`）**全部存在且行号吻合** → §1.8 不是凭空编造，与源码一致。
 - **但主理人复核发现关键限定**：`M:lib.rs:140-142` 的 `generate_handler!` **只注册了 `install_service` / `uninstall_service` / `is_service_available` 三个命令**；`cmd/service.rs:28,32` 定义的 `reinstall_service` / `repair_service` **从未注册**，`src/` 前端零调用点。即这两个命令在 Mini 里是**前端不可达的死命令**。
-- **Win 现状**：`W:cmd/cmd_service.cpp:50-101` `install_service` 已实现 §1.8 要求的完整链路（缺失 → 用户可见提示 → UAC 安装 → 重新查询 → 启动 → 30s 就绪等待）；`:103-119` 三个禁用命令返回 `refuse_service_mutation()`（共存保护）。
-- **结论**：§1.8 的核心要求「干净机自举 / 禁止假设服务存在 / 禁止静默失败」**Win 已满足**；「修复」能力在 Mini 自身也不可达。原差异清单 B-D34 的裁决（禁用不影响用户可见行为）成立，**无需改码**。
+- **Win 现状**：`W:cmd/cmd_service.cpp:50-101` `install_service` 已实现 §1.8 要求的完整链路（缺失 → 用户可见提示 → UAC 安装 → 重新查询 → 启动 → 30s 就绪等待）；`:103-119` 三个禁用命令返回 `refuse_service_mutation()`（共存保护）。**（2026-11-09 更新：`refuse_service_mutation()` 已删除；reinstall/repair 按 D2 裁决放开，uninstall 与 Mini 一致改为「后端保留能力、UI 不暴露」。）**
+- **结论**：§1.8 的核心要求「干净机自举 / 禁止假设服务存在 / 禁止静默失败」**Win 已满足**；「修复」能力在 Mini 自身也不可达。原差异清单 B-D34 的裁决（禁用不影响用户可见行为）成立，**无需改码**。**（2026-11-09 更新：该结论已被 D2 二次裁决取代——reinstall/repair 已放开；本行保留为当时的审计记录。）**
 
 ### 4.3 我方复核推翻的两条审计结论（不作冲突计入）
 

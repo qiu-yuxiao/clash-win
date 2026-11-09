@@ -42,7 +42,7 @@
 - 自陈未接线：`cmd_app.cpp:329-330`「仅落地到临时目录；安装/重启需提权，由调用方在本轮末尾统一列清单后再接」；`main_window.cpp:758`「安装器启动（NSIS + UAC）不在本轮接线，见 K 提权清单」。
 - 裁决与完成标准：`docs/phase2/07_user_rulings.md:5` 明确「自动更新逻辑**完全模仿 Clash Mini**（GitHub Releases + 检查/下载/安装同构）」；`docs/phase2/06_task_breakdown.md:185`（T24 完成标准③）列 `check/download/install`，且「若 §10-1 裁定为仅检查则相应降级验收」——实际裁决不是仅检查，**降级条件不成立**。
 - NSIS 侧真实约束：`installer/clashwin.nsi:9-10` 定义 `/S [/KEEP] [/DIR=]`；`:117-119` 的 `RunMainBinary` 只挂 MUI finish page 复选框，`:175/:191/:425` 静默模式跳过 finish page → **`/S` 不会自动拉起新程序**；`:374-380` `KillAppProcesses` 会 `taskkill /F` 当前进程。仓库内无「先退出 → 静默装 → 自动重启」闭环。
-- 可复用能力：`Lifecycle::restart_app()` 有；提权启动有 `src/core/service_mode.cpp:37-45`、`src/system/service_runner.cpp:60-68`（`lpVerb=L"runas"`）；**服务重装被设计禁用**（`src/cmd/cmd_service.cpp:39-43` `refuse_service_mutation()` 显式拒绝 uninstall/reinstall/repair，避免破坏共用方），不是可复用函数。
+- 可复用能力：`Lifecycle::restart_app()` 有；提权启动有 `src/core/service_mode.cpp:37-45`、`src/system/service_runner.cpp:60-68`（`lpVerb=L"runas"`）；**服务重装被设计禁用**（`src/cmd/cmd_service.cpp:39-43` `refuse_service_mutation()` 显式拒绝 uninstall/reinstall/repair，避免破坏共用方），不是可复用函数。**（2026-11-09 更新：该禁令已被 D2 裁决解除——reinstall/repair 已放开；uninstall 与 Mini 一致改为「后端保留能力、UI 不暴露」，`refuse_service_mutation()` 已删除。本行保留为当时的审计记录。）**
 - 附带口径差异：`updater/app-update.json:8` 的 url 是 `local://updater/clash-win-v0.1.0-windows-x86_64.zip`、`signature` 空、无 sha256；而 `client_updater.cpp:327-328` 的 manifest URL 仍硬编码 GitHub raw 地址，且 `fetch_manifest`（`:102-117`）走 `http_get`，无法处理 `local://` scheme。
 
 **【推断】** 不属于「设计上留给人工」：裁决与 T24 完成标准都要求 install，注释措辞是「本轮范围内挂起」，`install_app_update()` 连 `/S` 都写好却零调用。属于**确实没写完，且是开发节奏上的主动暂缓**。台账 §2 D 定性「属独立功能改动，本轮未动，待优先级确认」准确。补齐属功能改动，需 1:1 对照 Mini 源码 + 提权/重启编排设计 + 重编译全量回归，**本轮不改，待用户裁决优先级**。
