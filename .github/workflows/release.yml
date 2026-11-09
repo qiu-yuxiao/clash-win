@@ -137,7 +137,11 @@ jobs:
   build:
     name: Build Windows x64 (Setup + Portable)
     needs: [validate]
-    runs-on: windows-latest
+    # 固定 windows-2022：该镜像自带 VS Enterprise 2022 (17.14) + NSIS 3.10，
+    # 与本项目 VS2022 工具链及 -G "Visual Studio 17 2022" 一致。
+    # windows-latest 已滚动到 VS 18 Enterprise，会让该 generator 报
+    # "could not find any instance of Visual Studio" 直接失败。
+    runs-on: windows-2022
     env:
       VERSION: ${{ needs.validate.outputs.version }}
     steps:
