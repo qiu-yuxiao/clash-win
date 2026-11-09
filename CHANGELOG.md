@@ -37,13 +37,9 @@ Format reference: `Changelog.md` in the Clash Mini repository (newest first, `##
 - **Installer**: the installer window stays **always on top**; the IME candidate window follows the caret; the node filter **auto-selects** on completion.
 - **Tests**: new release-readiness regression suite (`t35`) — title-bar color formula 1:1, tooltip 100 ms, `::selection` colors, update-manifest ownership (no `Clash.Mini` / no `3.2.2`, version == `kAppVersion`) and a registration-set assertion (every `UT_TEST` file must be registered in `CMakeLists.txt`).
 
-### In-flight fixes (placeholder)
-
-- Further fixes from teammates currently in flight will be recorded here before release. <!-- placeholder: 主理人稍后补全 -->
-
 ### Notes
 
-- v0.2.1 is the shipping version for this batch (`include/clashwin/config/constants.h:20 kAppVersion`).
+- v0.2.2 supersedes v0.2.1 as the current version line (`include/clashwin/config/constants.h:20 kAppVersion`).
 
 ---
 

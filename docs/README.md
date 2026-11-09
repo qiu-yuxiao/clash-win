@@ -6,7 +6,7 @@
 
 | 文件 | 导读 |
 | --- | --- |
-| [01-目的与方针.md](01-目的与方针.md) | 移植目标、与 Mini 的共存契约（端口/服务名/互斥项）、版本起点、三条决策方针 |
+| [01-目的与方针.md](01-目的与方针.md) | 移植目标、与 Mini 的 1:1 契约（端口/服务名/互斥项）、版本起点、三条决策方针 |
 | [02-方法与流程.md](02-方法与流程.md) | 读源码到写 C++ 的固定顺序、`ui_src_gate` 出处门禁、验收证据链、小步重编译纪律 |
 | [03-踩坑与避坑清单.md](03-踩坑与避坑清单.md) | 14 条已实际发生的错误：DPI 二次缩放、use-after-move 启动崩溃、抽屉吃标题栏、端口硬编码等 |
 | [04-工程技巧.md](04-工程技巧.md) | 隔离测试、DPI 探针、PrintWindow+OCR、并排对照、SEH 崩溃钩子、单实例探测、WMI 启动 |
@@ -21,8 +21,8 @@
 - 状态：代码侧已补"已注册但 ImagePath 失效 → 重新安装"、"启动失败/就绪超时 → 可见提示"，安装器在安装时已装服务（`clashwin.nsi:405-431`）。**干净机无服务 → UAC 安装 → 三项 URL 通**的实测需一次 UAC，登记在"明日一次点击清单"。
 
 **已验收**
-- 共存：Mini 与本程序可同时运行；本程序端口 `10811/10812/10813/10814`、单实例 `33337`（`include/clashwin/config/constants.h:24-29`）；控制面实际走命名管道 `\\.\pipe\mini-mihomo-win`（`src/util/dirs.cpp:210`），`9108` 仅配置值、未监听（实机 `Get-NetTCPConnection` 只见 10811/33337）；`/proxy.pac` 404 属预期（未开 PAC）。
-- TUN：`verge.yaml enable_tun_mode=false`，默认路由已回 WLAN/直连，`10811` 出网 204。
+- 互斥：v0.2.1 起 Mini 与本程序**不可同时运行**（启动任一方会终止另一方的 client/core 进程并接管 `clash_verge_service`，安装期同样互斥）；本程序端口已全量 1:1 对齐 Mini：`10801/10802/10803`、guard 兜底 `7899`、控制器 `9098`、单实例 `33335`（`include/clashwin/config/constants.h:22-31`）；控制面走命名管道 `\\.\pipe\mini-mihomo-win`（`src/util/dirs.cpp:226-228`）；`/proxy.pac` 404 属预期（未开 PAC）。
+- TUN：`verge.yaml enable_tun_mode=false`，默认路由已回 WLAN/直连，`10801` 出网 204。
 - P0-1～P0-6 均已改完并通过隔离模式全量测试（用例数按动态基线、不写死数字，结论 0 failed；以冻结重跑日志为准，详见 `docs/evidence/`）。
 - 抽屉改为挂载在标题栏下方内容区（与 Mini `src/pages/_layout.tsx:1254-1424` 同构），标题栏常驻可点；关闭钮、主题卡（标题/Depth/Vibrancy）、日志入口 `LogViewerModal` 已实机验证。卡片/面板渐变已按源码 `button-styles.ts:538-539`（4 停靠）与 `index.scss:126/147`（3 停靠）重写（`src/ui/scenes/settings_drawer.cpp:133-173`），135° 单渐变，无竖向条纹；不再以单点采样判色。
 - quickbar 胶囊：名称可收缩省略、延迟固定宽完整显示、gap 12px、字号 12/11 DIP；实测 CJK 字高 16～18 物理像素（≈12 DIP，与 Mini 同高 17 物理像素一致）。

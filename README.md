@@ -6,13 +6,13 @@
 [![Language: C++20](https://img.shields.io/badge/Language-C%2B%2B20-00599C?style=flat-square&logo=c%2B%2B)](https://isocpp.org)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-0078D6?style=flat-square&logo=windows)](https://github.com/qiu-yuxiao/clash-win)
 
-> **Clash Win v0.1.0** — the pure Windows native C++ rewrite of Clash Mini.
+> **Clash Win v0.2.2** — the pure Windows native C++ rewrite of Clash Mini.
 > Zero web engine. Zero JavaScript runtime. Built with Win32 API, Direct2D/DirectWrite, and modern C++20.
 
-Clash Win keeps everything you love about Clash Mini — the minimalist zero-config workflow, the 3D skeuomorphic visuals, the auto node switching and rule updates — but replaces the Tauri/WebView layer with hand-written native rendering. The result: **~15–25 MB runtime memory**, **sub-150 ms cold startup**, and a **120 fps Direct2D** interface, with behavior aligned 1:1 to the source it ports (see [Known Limitations](docs/KNOWN_LIMITATIONS_0.1.0.md) for the differences registered in v0.1.0).
+Clash Win keeps everything you love about Clash Mini — the minimalist zero-config workflow, the 3D skeuomorphic visuals, the auto node switching and rule updates — but replaces the Tauri/WebView layer with hand-written native rendering. The result: **~15–25 MB runtime memory**, **sub-150 ms cold startup**, and a **120 fps Direct2D** interface, with behavior aligned 1:1 to the source it ports (see [Known Limitations](docs/KNOWN_LIMITATIONS_0.2.2.md) for the differences registered in v0.2.2).
 
 > [!NOTE]
-> **v0.1.0 is a first release with explicitly registered gaps** — frosted-glass Blur, hover interpolation, an in-app update channel, code signing (the release assets are unsigned, no Authenticode signature), and clean-machine acceptance are documented in [KNOWN_LIMITATIONS_0.1.0.md](docs/KNOWN_LIMITATIONS_0.1.0.md). It is not claimed to be a perfect 1:1 copy.
+> **v0.2.2 still carries explicitly registered gaps** — frosted-glass Blur, hover interpolation, an in-app update channel, code signing (the release assets are unsigned, no Authenticode signature), and clean-machine acceptance are documented in [KNOWN_LIMITATIONS_0.2.2.md](docs/KNOWN_LIMITATIONS_0.2.2.md). It is not claimed to be a perfect 1:1 copy.
 
 ---
 
@@ -25,7 +25,7 @@ Click the [Gear] button in the upper right corner of Clash Win, paste your subsc
 
 ### Client Configuration
 * **Browsers**: You can start browsing the web directly after importing the nodes (system proxy is set automatically).
-* **Other Client Apps**: Most apps can access the internet directly. For the few that cannot, manually set their proxy address to `127.0.0.1` with port `10812` (SOCKS) or `10813` (HTTP).
+* **Other Client Apps**: Most apps can access the internet directly. For the few that cannot, manually set their proxy address to `127.0.0.1` with port `10802` (SOCKS) or `10803` (HTTP).
 * **Global Proxy**: If an app has no manual proxy option, enable Clash Win's **TUN Mode**.
 
 > [!NOTE]
@@ -51,7 +51,7 @@ Click the [Gear] button in the upper right corner of Clash Win, paste your subsc
 
 ### 客户端配置
 * **浏览器**：导入节点后即可直接浏览网页（自动设置系统代理）。
-* **其他客户端应用**：大多数应用可直接上网。少数无法直接上网的应用，可手动设置代理地址为 `127.0.0.1`，端口为 `10812`（SOCKS）或 `10813`（HTTP）。
+* **其他客户端应用**：大多数应用可直接上网。少数无法直接上网的应用，可手动设置代理地址为 `127.0.0.1`，端口为 `10802`（SOCKS）或 `10803`（HTTP）。
 * **全局代理**：如果软件没有手动代理配置选项，请启用 Clash Win 的 **TUN 模式**。
 
 ### 核心功能
@@ -76,15 +76,15 @@ Get the artifacts from the [Releases page](https://github.com/qiu-yuxiao/clash-w
 1. Download either artifact from [Releases](https://github.com/qiu-yuxiao/clash-win/releases) and verify its SHA256 against `SHA256SUMS.txt` before running.
 2. **Installer**: double-click, accept the UAC prompt, follow the wizard (Simplified Chinese / English / Русский start language).
 3. **Portable**: extract to any folder and run `clashwin.exe`.
-4. Import a subscription and you are done. See [Release notes](docs/RELEASE_NOTES_0.1.0.md) for the full v0.1.0 scope.
+4. Import a subscription and you are done. See [Release notes](docs/RELEASE_NOTES_0.2.2.md) for the full v0.2.2 scope.
 
 ```powershell
-Get-FileHash .\ClashWin_0.1.0_x64-setup.exe -Algorithm SHA256
-Get-FileHash .\ClashWin_0.1.0_x64_portable.zip -Algorithm SHA256
+Get-FileHash .\ClashWin_0.2.2_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\ClashWin_0.2.2_x64_portable.zip -Algorithm SHA256
 ```
 
 > [!WARNING]
-> **v0.1.0 release assets are unsigned — no Authenticode signature.** The signing step needs an elevated (UAC) session that was unavailable in the non-interactive release environment, so the signature status is recorded but does not block the release. Windows will show "**Unknown publisher**" and SmartScreen may warn on every machine. **Always verify the download against `SHA256SUMS.txt`** — the checksum is the only trust anchor. This matches Clash Mini v3.2.2 installers, which likewise carry no Authenticode signature. See [Known Limitations (d)](docs/KNOWN_LIMITATIONS_0.1.0.md) and [SECURITY.md](SECURITY.md).
+> **v0.2.2 release assets are unsigned — no Authenticode signature.** The signing step needs an elevated (UAC) session that was unavailable in the non-interactive release environment, so the signature status is recorded but does not block the release. Windows will show "**Unknown publisher**" and SmartScreen may warn on every machine. **Always verify the download against `SHA256SUMS.txt`** — the checksum is the only trust anchor. This matches Clash Mini v3.2.2 installers, which likewise carry no Authenticode signature. See [Known Limitations (d)](docs/KNOWN_LIMITATIONS_0.2.2.md) and [SECURITY.md](SECURITY.md).
 
 ---
 
@@ -167,10 +167,10 @@ The repository ships a large unit-test suite (offscreen pixel assertions include
 | :--- | :--- |
 | Where do I download / 在哪下载 | [Releases](https://github.com/qiu-yuxiao/clash-win/releases) |
 | Usage, config, subscription import / 使用与配置 | [Wiki](https://github.com/qiu-yuxiao/clash-win/wiki) |
-| "Unknown publisher" / SmartScreen warning / 未知发布者 | [Known Limitations (d)](docs/KNOWN_LIMITATIONS_0.1.0.md) · [SECURITY.md](SECURITY.md) |
-| Why does a source-only build not run / 源码编译后无法运行 | [Known Limitations (f)](docs/KNOWN_LIMITATIONS_0.1.0.md) |
-| "Check for updates" does nothing / 检查更新无反应 | [Known Limitations (c)](docs/KNOWN_LIMITATIONS_0.1.0.md) |
-| Ports, coexistence, service conflicts / 端口与双开共存 | [Relationship with Clash Mini](#relationship-with-clash-mini-与-clash-mini-的关系) |
+| "Unknown publisher" / SmartScreen warning / 未知发布者 | [Known Limitations (d)](docs/KNOWN_LIMITATIONS_0.2.2.md) · [SECURITY.md](SECURITY.md) |
+| Why does a source-only build not run / 源码编译后无法运行 | [Known Limitations (f)](docs/KNOWN_LIMITATIONS_0.2.2.md) |
+| "Check for updates" does nothing / 检查更新无反应 | [Known Limitations (c)](docs/KNOWN_LIMITATIONS_0.2.2.md) |
+| Ports, service conflicts / 端口与服务冲突 | [Relationship with Clash Mini](#relationship-with-clash-mini-与-clash-mini-的关系) |
 | Something else is broken / 其他问题 | [Issues](https://github.com/qiu-yuxiao/clash-win/issues) (please use the templates) · [Discussions](https://github.com/qiu-yuxiao/clash-win/discussions) |
 | Report a vulnerability / 报告安全漏洞 | [SECURITY.md](SECURITY.md) — **privately**, not via a public issue |
 
@@ -184,25 +184,24 @@ The repository ships a large unit-test suite (offscreen pixel assertions include
 | :--- | :--- | :--- |
 | UI layer | Tauri + WebView2 + Rust | Pure Win32 + Direct2D + C++20 |
 | Web engine | Yes (Chromium/WebView2) | **None** |
-| Feature set | Baseline | **Aligned 1:1 in scope** (pixel-parity layout, same workflows) — with [registered v0.1.0 gaps](docs/KNOWN_LIMITATIONS_0.1.0.md) |
+| Feature set | Baseline | **Aligned 1:1 in scope** (pixel-parity layout, same workflows) — with [registered v0.2.2 gaps](docs/KNOWN_LIMITATIONS_0.2.2.md) |
 | Version line | 3.x | **Independent, starting from 0.1.0** |
 
 Key facts:
 
 * **Feature-aligned, implementation-independent.** Clash Win reproduces Clash Mini's user-visible behavior (layout, skins, workflows, rule engine pipeline) with a completely separate C++ codebase — no shared Tauri/Rust/TypeScript code.
 * **Not an official replacement and not an upstream fork.** Clash Win is a sibling project by the same author. Clash Mini is a separate project with its own release track; this repository's links intentionally stay within `qiu-yuxiao/clash-win`.
-* **Designed to coexist with Clash Mini on the same machine.** All network ports are deliberately staggered:
+* **Mutually exclusive with Clash Mini on the same machine.** Since v0.2.1 the two clients exclude each other instead of running side by side: launching one terminates the other's client/core processes and takes over the shared `clash_verge_service`, and the installer applies the same rule. Ports, controller secret and single-instance identifiers are therefore aligned 1:1 with Clash Mini's official scheme:
 
-  | Port | Clash Win | Clash Mini |
+  | Resource | Clash Win | Clash Mini |
   | :--- | :--- | :--- |
-  | Mixed | `10811` | `10801` |
-  | SOCKS | `10812` | `10802` |
-  | HTTP | `10813` | `10803` |
-  | HTTP guard | `10814` | — |
-  | External controller | `9108` | `9098` |
-  | Single-instance / PAC | `33337` | `33335` (Release) / `33336` (Dev) |
+  | Mixed / SOCKS / HTTP | `10801` / `10802` / `10803` | `10801` / `10802` / `10803` |
+  | HTTP guard fallback | `7899` | `7899` |
+  | External controller | `9098` (next free above on conflict) | `9098` (next free above on conflict) |
+  | Single-instance / PAC | `33335` (Dev `33336`) | `33335` (Dev `33336`) |
+  | Controller secret | `adapted-by-qiu-yuxiao` | `adapted-by-qiu-yuxiao` |
 
-  Both clients share the same `clash_verge_service` Windows service (the `clash-verge-service` name refers only to its binary/installer file). The one rule: **do not enable TUN mode or system proxy on both clients at the same time** — enable exactly one active proxy path.
+  Both clients share the same `clash_verge_service` Windows service (the `clash-verge-service` name refers only to its binary/installer file). Only one client may run at a time.
 * **Independent versioning.** Clash Win versions from **0.1.0** and does not track Clash Mini's 3.x release numbers; `3.2.2` is only the source-reference anchor used when citing ported code.
 
 ---
@@ -229,7 +228,7 @@ Clash Win is distributed under the **GNU General Public License v3.0 only (GPL-3
 * Clash Win is an **independent native rewrite**, not an official release, fork, or endorsement of Clash Verge Rev or Clash Mini. All project links in this repository point to `qiu-yuxiao/clash-win`.
 * This software **does not provide any subscription, node, or proxy server**, and does not contain preconfigured third-party endpoints. Users are solely responsible for the sources they import and for complying with applicable laws and the terms of their network/service providers.
 * It is provided **without warranty of any kind**, to the extent permitted by GPL-3.0. Use it at your own risk; the authors are not responsible for misuse, data loss, or network-configuration side effects.
-* Enabling TUN mode or system proxy modifies machine network settings. On a machine also running Clash Mini, enable exactly one active proxy path. See [SECURITY.md](SECURITY.md) for the security-relevant properties of v0.1.0.
+* Enabling TUN mode or system proxy modifies machine network settings. Clash Win and Clash Mini are mutually exclusive: only one may run at a time. See [SECURITY.md](SECURITY.md) for the security-relevant properties of v0.2.2.
 
 ---
 
@@ -237,8 +236,8 @@ Clash Win is distributed under the **GNU General Public License v3.0 only (GPL-3
 
 * [CONTRIBUTING.md](CONTRIBUTING.md) — environment setup, 1:1 parity discipline, tests, packaging, PR checklist.
 * [CHANGELOG.md](CHANGELOG.md) — version history (newest first).
-* [docs/RELEASE_NOTES_0.1.0.md](docs/RELEASE_NOTES_0.1.0.md) — v0.1.0 release scope and artifacts.
-* [docs/KNOWN_LIMITATIONS_0.1.0.md](docs/KNOWN_LIMITATIONS_0.1.0.md) — registered gaps in v0.1.0.
+* [docs/RELEASE_NOTES_0.2.2.md](docs/RELEASE_NOTES_0.2.2.md) — v0.2.2 release scope and artifacts.
+* [docs/KNOWN_LIMITATIONS_0.2.2.md](docs/KNOWN_LIMITATIONS_0.2.2.md) — registered gaps in v0.2.2.
 * [移植基本准则.md](移植基本准则.md) — the project constitution (parity rules, version line, evidence discipline).
 * Design documents: [`docs/phase1`](docs/phase1) (frontend/backend census, PRD) and [`docs/phase2`](docs/phase2) (C++20 architecture, task breakdown, user rulings).
 * [SECURITY.md](SECURITY.md) — supported versions and private vulnerability reporting.
