@@ -8,7 +8,7 @@ import sys
 import shutil
 import subprocess
 
-REPO = r"C:\Users\sun_y\Documents\AntiGravity_Projects\ClashWin"
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REL = os.path.join(REPO, "build", "bin", "Release")
 RUNDIR = os.path.join(REPO, "build", "cwtest")
 TMPDIR = os.path.join(RUNDIR, "tmp")
