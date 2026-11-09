@@ -60,6 +60,7 @@ class MockServiceRunner : public system::IServiceCommandRunner {
   bool installed = false;
   bool available = true;
   bool installer_fail = false;
+  bool uninstaller_fail = false;
   bool start_fail = false;
   bool stop_fail = false;
   bool wait_ready_fail = false;
@@ -68,8 +69,11 @@ class MockServiceRunner : public system::IServiceCommandRunner {
 
   Result<void> run_installer(bool install) override {
     log.push_back(install ? "install" : "uninstall");
-    if (installer_fail) {
+    if (install && installer_fail) {
       return Result<void>::err({errs::kIo, "mock installer failure"});
+    }
+    if (!install && uninstaller_fail) {
+      return Result<void>::err({errs::kIo, "mock uninstaller failure"});
     }
     installed = install;
     return Result<void>::ok();
@@ -155,29 +159,55 @@ struct ScopedTempDir {
 
 }  // namespace
 
-// 1. t25_service_mock_reinstall（共存：重装被禁用，不触碰 runner）
+// 1. t25_service_mock_reinstall
+//    用户 2026-11-09 二次裁决（D2 = 选 B）：Mini 可以那么 Win 应该也可以。
+//    旧期望（拒绝且 runner 零调用）对应该裁决之前的"接受无自愈路径"方案；
+//    现行语义 ← Mini: src-tauri/src/core/service.rs:193-217：卸载 → 安装 → 就绪确认。
 UT_TEST(t25_service_mock_reinstall) {
   auto mock = std::make_shared<MockServiceRunner>();
   system::set_service_runner(mock);
 
   auto res = cmd::CommandService::instance().invoke("reinstall_service", {});
-  UT_CHECK(!res.is_ok());
+  UT_CHECK(res.is_ok());
+  std::vector<std::string> exp = {"uninstall", "install", "is_installed", "is_available"};
+  UT_CHECK_EQ(mock->log, exp);
+  UT_CHECK(mock->installed);
 
-  // 绝不执行 uninstall -> install 覆盖序列：runner 零调用
-  UT_CHECK(mock->log.empty());
-
-  // Restore default runner
   system::set_service_runner(nullptr);
 }
 
-// 2. t25_service_mock_repair（共存：修复/强制重装被禁用）
+// 2. t25_service_mock_repair
+//    同上裁决；repair 与 reinstall 走同一序列（Mini: force_reinstall_service 复用重装路径）。
 UT_TEST(t25_service_mock_repair) {
   auto mock = std::make_shared<MockServiceRunner>();
   system::set_service_runner(mock);
 
   auto res = cmd::CommandService::instance().invoke("repair_service", {});
-  UT_CHECK(!res.is_ok());
-  UT_CHECK(mock->log.empty());
+  UT_CHECK(res.is_ok());
+  std::vector<std::string> exp = {"uninstall", "install", "is_installed", "is_available"};
+  UT_CHECK_EQ(mock->log, exp);
+  UT_CHECK(mock->installed);
+
+  system::set_service_runner(nullptr);
+}
+
+// 2b. t25_service_reinstall_uninstall_step_tolerated
+//     ← Mini: src-tauri/src/core/service.rs:196-199：卸载失败只告警、不阻断重装；
+//     但安装失败必须报错（:201-207），不得静默成功。
+UT_TEST(t25_service_reinstall_uninstall_step_tolerated) {
+  auto mock = std::make_shared<MockServiceRunner>();
+  system::set_service_runner(mock);
+
+  mock->uninstaller_fail = true;
+  auto res = cmd::CommandService::instance().invoke("reinstall_service", {});
+  UT_CHECK(res.is_ok());
+  std::vector<std::string> exp = {"uninstall", "install", "is_installed", "is_available"};
+  UT_CHECK_EQ(mock->log, exp);
+
+  mock->log.clear();
+  mock->installer_fail = true;
+  auto bad = cmd::CommandService::instance().invoke("reinstall_service", {});
+  UT_CHECK(!bad.is_ok());
 
   system::set_service_runner(nullptr);
 }

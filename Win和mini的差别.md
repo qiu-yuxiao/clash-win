@@ -91,7 +91,7 @@
 |---|---|---|---|---|
 | △1 | §1.1 端口 33335 被无关程序占用 | `lib.rs:196-202` 弹「Startup Error」拒绝启动 | `app.cpp:125-141` probe≠200 仅 WARN 继续启动 | 极端场景 Mini 不启动、Win 启动。**2026-11-09 已裁决**：被**对方（Mini）**占用 → 杀对方后继续启动（互斥方针）；被无关程序占用仍需用户裁决 |
 | △2 | §1.3 TUN+服务失败 | `lifecycle.rs:233-239` 自动回退系统代理+警告（网络保住） | `core_manager.cpp:538-541` 报错+开关回弹（处于手动态） | 失败后终态不同 |
-| △3 | §1.8 服务 reinstall/repair | `service.rs:193-215` 可重装修复 | `cmd_service.cpp:109-119` 一律拒绝并提示走 Mini | 极端损坏场景 Win 无自愈路径。**2026-11-09 已裁决**：refuse_service_mutation 设计随互斥共存方针作废，Win 获得服务安装/接管/修复完整权限（仅受「不删对方磁盘文件」约束）→ 待实施 |
+| △3 | §1.8 服务 reinstall/repair | `service.rs:193-217`：reinstall = 卸载（失败仅告警，:196-199）→ 安装（失败即报错，:201-207）；repair 复用同一序列。后端另有 uninstall（:44-74），但其 UI 无调用入口 | `cmd_service.cpp` `service_reinstall()`：同"卸载 → 安装"序列，安装后校验注册、按需启动，失败均给 notice_message；`service_runner.cpp` `run_uninstaller()` 提供卸载能力；独立 `uninstall_service` 仍拒绝 | 极端损坏场景 Win 已有自愈路径。**2026-11-09 二次裁决（D2=选 B）→ ✅ 已实施**，落点 `cmd_service.cpp` `service_reinstall()` / `service_runner.cpp` `run_uninstaller()` |
 | △4 | §2.8 过滤防抖自动择优 | 700ms 防抖 + 无失焦触发 | `node_list.cpp:458/461` **800ms** + 额外失焦触发（:475-480） | 触发时机晚 100ms + 多一个触发点 |
 | △5 | §2.8 活跃节点轮换 | 基于 UI 当前过滤/排序子集 + 轮换气泡 | `main_window.cpp:738-750` 遍历全量 rows、无气泡 | 过滤激活时轮换落点可能不同 |
 | △6 | §2.10 patch 期间 UI | 异步 IPC，仅显示「正在调整」 | `command_service.cpp:81-92` UI 线程同步 wait ≤30s | patch 触发内核重启时**主窗口冻结**最长 30s |
@@ -155,7 +155,7 @@
 
 1. **BUG-313③ 安装清理 vs 服务共存** → ✅已裁决=互斥共存方针，✅已实施（commit 264624b）。
 2. **§5.3 告警阈值** → ✅已裁决=取 Mini 现行（3 次归零），✅已修复（代码已落地，待桌面复核）：`src/core/monitor.h` 删 `alert_fail_threshold=5`；`monitor.cpp::heal()` 改为「3 次失败即归零计数 → 仅当 API 不可达→重启内核→重启失败」才弹窗，API 可达仅记日志不重启不弹窗（对齐 monitor.rs:1594-1621，取消独立 5 次直接弹窗）。
-3. **§1.8 服务 reinstall/repair 全禁** → ✅已裁决=接受（维持全禁，无自愈路径），无需改码。
+3. **§1.8 服务 reinstall/repair 全禁** → ~~已裁决=接受（维持全禁，无自愈路径），无需改码。~~ **该裁决已被 2026-11-09 二次裁决取代**：用户选 D2=选 B（原话"Mini 可以那么 Win 应该也可以"），reinstall/repair 已放开，落地见 `cmd_service.cpp` `service_reinstall()`；独立 uninstall 仍未放开（Mini 后端允许，但其 UI 无调用入口，超出本次裁决范围，待单独裁决）。
 4. **D12 居中范围** → ✅已裁决=窄单列居中（已实现）；宽窗双列维持与 Mini 同构不居中，无需改码。
 5. **§2.6 1s 固定节拍** → ✅已裁决=Win 合规、设计书条文过时；勘误已入总纲 §5.2.1（Mini 侧设计书由用户自行修订）。
 
