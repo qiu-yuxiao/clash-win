@@ -296,8 +296,15 @@ jobs:
       # 若卸载器 blob 启发式定位失败，此步 fail-fast，不产出半成品安装包。
       - name: Build NSIS setup.exe
         shell: pwsh
+        # -SkipSign（installer/build_installer.ps1:11 已提供）是 v0.2.2 未签名发布口径在 CI 的落地：
+        #   不跳过会在非交互 runner 上命中 :29 管理员自提升、:126 sign.ps1 签遍 Release 产物
+        #   （含 sidecar 5 exe，违反内核字节不可改动铁律）、:214-218 卸载器签名硬校验、
+        #   :227 签最终包 —— 无 LocalMachine\My 证书时必然 exit 1，整个 build 红。
+        #   与 docs/RELEASE_NOTES_0.2.2.md:51 / KNOWN_LIMITATIONS_0.2.2.md:62-74 /
+        #   SECURITY.md 的「未签名资产、签名状态只记录不阻断」一致；
+        #   SHA256SUMS.txt / SIGNATURE_STATUS.txt / 清单 minisign 签名均在独立步骤，不受影响。
         run: |
-          & .\installer\build_installer.ps1 -Version $env:VERSION -Configuration Release
+          & .\installer\build_installer.ps1 -Version $env:VERSION -Configuration Release -SkipSign
           if ($LASTEXITCODE -ne 0) { throw "build_installer.ps1 failed" }
 
       - name: Verify release artifacts & write checksums
@@ -467,9 +474,14 @@ jobs:
             echo "::warning::MINISIGN_PRIVATE_KEY is not configured -> the manifest will ship WITHOUT a signature field. client_updater.cpp treats minisign verification as a hard gate (client_updater.cpp:96/:460), so the download-install path will refuse to install. Configure the private key whose public half is compiled in src/config/update_keys.h, then re-run."
           fi
           PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          python3 - "$VERSION" "$SHA" "$URL" "$SIG" "$PUB_DATE" <<'PY'
+          # 关键：清单只写 RUNNER_TEMP，绝不落在受跟踪的 updater/app-update.json。
+          # 否则下一步 git checkout -B main 会因「tag 树与 origin/main 版本不同 +
+          # 工作树有未提交改动」报 "would be overwritten ... Aborting"，
+          # set -e 直接让 publish 失败（ci-auditor 已在临时仓库复现 exit 1）。
+          MANIFEST_OUT="${RUNNER_TEMP}/app-update.generated.json"
+          python3 - "$VERSION" "$SHA" "$URL" "$SIG" "$PUB_DATE" "$MANIFEST_OUT" <<'PY'
           import base64, json, sys
-          version, sha, url, sig, pub_date = sys.argv[1:6]
+          version, sha, url, sig, pub_date, out_path = sys.argv[1:7]
           platform = {"url": url, "sha256": sha}
           if sig:
               platform["signature"] = base64.b64encode(sig.encode("utf-8")).decode("ascii")
@@ -484,15 +496,14 @@ jobs:
           assert manifest["version"] == version
           assert "Clash.Mini" not in text and "3.2.2" not in text
           assert platform["url"].endswith("v" + version + "/ClashWin_" + version + "_x64-setup.exe")
-          with open("updater/app-update.json", "w", encoding="utf-8") as f:
+          with open(out_path, "w", encoding="utf-8") as f:
               f.write(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
           print("OK  manifest version:", manifest["version"])
           print("OK  platforms.windows-x86_64: url + sha256" + (" + signature" if sig else ""))
           if not sig:
               print("WARN degraded: no signature field (update install path disabled until key is configured)")
           PY
-          cp updater/app-update.json "${RUNNER_TEMP}/app-update.generated.json"
-          cat updater/app-update.json
+          cat "$MANIFEST_OUT"
 
       # ---- 更新闭环 2/2：回写 main 分支（应用内更新的可达路径）----
       # endpoint = raw.githubusercontent.com/qiu-yuxiao/clash-win/main/updater/app-update.json，
@@ -505,15 +516,20 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git checkout -B main "origin/main"
+          # 显式 refspec：tag 触发的浅检出可能没有 origin/main 引用，
+          # 直接 fetch origin main 只更新 FETCH_HEAD，checkout -B origin/main 会找不到。
+          git fetch origin "+refs/heads/main:refs/remotes/origin/main"
+          # -f：即便上游残留会话改动也强制对齐，避免 "would be overwritten" 中止；
+          # 清单此刻只在 RUNNER_TEMP，checkout 不会丢失生成结果（ci-auditor 复现的两道保险之一）。
+          git checkout -f -B main "origin/main"
           cp "${RUNNER_TEMP}/app-update.generated.json" updater/app-update.json
           git add updater/app-update.json
           if git diff --cached --quiet; then
             echo "Manifest on main already matches v${VERSION}; nothing to push."
           else
             git commit -m "chore(updater): refresh app-update.json for v${VERSION} [skip ci]"
-            git pull --rebase origin main
+            # 不做 git pull --rebase：checkout -f -B 已对齐 origin/main，
+            # 浅检出下 rebase 会引入无关历史合并风险（ci-auditor 建议移除）。
             git push origin main
             echo "Manifest pushed to main — endpoint now serves v${VERSION}"
             echo "Endpoint: https://raw.githubusercontent.com/${REPO}/main/updater/app-update.json"
