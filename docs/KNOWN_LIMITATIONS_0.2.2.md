@@ -17,7 +17,12 @@
 
 ## (a) Direct2D has no CSS `backdrop-filter` primitive — frosted-glass Blur not implemented
 
-**What is missing**: Mini's `frosted-glass` skin uses a CSS `backdrop-filter: blur(...)` driven by the skin's `Blur` factor. **Direct2D has no CSS `backdrop-filter` primitive**; a real implementation would require the **D2D 1.1 migration** — the Direct2D 1.1 effect pipeline (`ID2D1Effect` / Gaussian blur over a backdrop bitmap, with the associated device-context and composition changes). **v0.2.2 has not made that D2D 1.1 migration, so the frosted-glass Blur effect is not implemented.** The skin's other factor (Opacity) and its color/geometry are reproduced; the Blur slider does not produce a real blur.
+**What is missing**: Mini's `frosted-glass` skin uses a CSS `backdrop-filter: blur(...)` driven by the skin's `Blur` factor. The skin's other factor (Opacity) and its color/geometry are reproduced; the Blur slider does not produce a real blur.
+
+**Why both candidate routes were rejected in v0.2.2（判断依据）**:
+1. **DWM system backdrop / acrylic**（`DwmSetWindowAttribute` + `DWMWA_SYSTEMBACKDROP_TYPE`）blurs **the desktop behind the window**. Mini's window is **opaque** (`.transparent(false)`, `src-tauri/src/utils/resolve/window.rs:122`) and its `backdrop-filter` blurs **the app's own already-painted background** (`.theme-panel` `backdrop-filter: blur(16px …)`, `src/assets/styles/index.scss:78`; crystal cards `:89`). Adopting the system backdrop would require making the whole window transparent + material-backed, adding a Windows 11 22H2+ dependency with a Win10 fallback. That is a different effect and a whole-window drawing-semantics change, not a 1:1 alignment.
+2. **Direct2D `GaussianBlur` effect**（`ID2D1Effect`）only exists on the **D2D 1.1 `ID2D1DeviceContext`**. This app renders through the **D2D 1.0 `ID2D1HwndRenderTarget`** (`src/ui/d2d_context.cpp:135`/`:237`) created from a plain `ID2D1Factory` (`src/ui/d2d_context.h:49`) with no D3D11 device/swap chain. Enabling the effect chain means migrating the whole render backend (window + offscreen test targets), i.e. a rendering-pipeline rewrite.
+3. **CPU blur fallback** would need to read the already-drawn window area back into a bitmap and blur it per frame. The current `IRenderTarget` has no window-target readback, and a 16 px Gaussian over large panels every frame is an unacceptable CPU cost.
 
 **Consequence**: with the `frosted-glass` skin, the Blur/val2 slider has no visible blur effect. This is a rendering-pipeline gap, **not** a mapped-to-something-else fake: the project does not pretend the slider works by substituting an unrelated visible property (constitution §六.7).
 
