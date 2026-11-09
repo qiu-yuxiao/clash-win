@@ -7,7 +7,7 @@
 | # | Area | Status | Evidence |
 | :--- | :--- | :--- | :--- |
 | (a) | frosted-glass Blur | Not implemented | `docs/04-工程技巧.md`; constitution §六.7 |
-| (b) | Global hover transition | Not implemented | `src/ui/` widget rendering |
+| (b) | Hover 0.15 s transition | Implemented for `Button`; other hover surfaces discrete | `src/ui/button.cpp` (`advance_hover`), §(b) below |
 | (c) | In-app auto-update | Wired, signature pending | `updater/app-update.json`, `src/config/update_keys.h`, `.github/workflows/release.yml` |
 | (d) | Release asset signing | **Unsigned (no Authenticode)** | `scripts/delivery_check.ps1`, Release assets |
 | (e) | Clean-machine / UAC visual checks | Not verified | `docs/06-验收状态台账.md` |
@@ -23,11 +23,13 @@
 
 ---
 
-## (b) Global hover 0.15 s transition not implemented
+## (b) Hover 0.15 s transition — implemented for the `Button` family, not "global"
 
-**What is missing**: Mini applies a global ~0.15 s hover color/opacity transition (CSS transition on interactive elements). The native widget system renders discrete hover states; the **0.15 s interpolation is not implemented** in v0.2.2. Hover states themselves (normal/hover/pressed/focused) are present and pixel-verified; only the animated interpolation is absent.
+**What is implemented**: `Button`（对应 MUI ButtonBase 的原生控件，含设置抽屉底部皮肤格 `SkinCell`）在 Enter/Leave 时按 **150 ms** 插值悬停底色：主题渐变按六个色停逐停插值、单色皮肤在两个颜色之间插值；曲线用 smoothstep 近似 CSS `ease`（← `src/utils/button-styles.ts:188/258/313/399/464`）。动画只在悬停状态切换时启动，由 `on_paint` 推进；`t >= 1` 时动画起点归零、不再 `invalidate()`，**过渡结束即停帧，不引入持续重绘**（实现见 `src/ui/button.cpp` 的 `set_hover_target` / `advance_hover`）。
 
-**Consequence**: hover feedback is immediate rather than eased. No functional behavior depends on the transition.
+**What remains discrete（未动画）**: 其余自绘 hover 面保持瞬变——代理/连接列表行、侧栏导航项、右键菜单项、开关与滑块，以及若干在对话框内用局部 `hover` 布尔自绘的按钮（`quick_bar.cpp`、`utility_modals.cpp`、`add_url_dialog.cpp`、`first_run_guide_dialog.cpp`）。Mini 侧这些元素对应的过渡时长/曲线并不统一（0.1–0.3 s 不等，部分 `transition: none`），因此没有按"全局 0.15 s"统一改写；本版只对齐了按钮这一族的 0.15 s 语义。
+
+**Deviation note（retro-3d 渐变）**: CSS 不对 `linear-gradient` 做插值（retro-3d 的悬停底色是渐变图片，Mini 里会直接跳到新渐变）；Clash Win 对六个色停做 150 ms 插值，视觉更平滑，但严格说比 Mini 多了一段渐变过渡。
 
 ---
 

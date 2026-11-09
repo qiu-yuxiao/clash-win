@@ -53,13 +53,22 @@ class Button : public Widget {
   // T12 皮肤系统重写点：按钮底（3D 内阴影 ×depth×vibrancy 在此挂）
   virtual void draw_button_bg(IRenderTarget& rt, const RectF& r);
   virtual void draw_button_text(IRenderTarget& rt, const RectF& r);
-
- public:
-  Color4f debug_last_fill() const { return last_fill_; }  // 测试检查点
+  // 自绘底色的子类（如 SkinCell）按此进度插值常态/悬停两套色
+  float hover_mix() const { return hover_mix_; }
 
  private:
   State state_ = State::Normal;
   Color4f last_fill_{};
+  // ---- 悬停过渡（← button-styles.ts:188/258/313/399/464 transition: all .15s ease）----
+  // hover_mix_: 0 = 常态底，1 = 悬停底；绘制时在两种底色之间插值。
+  // 动画只在 Enter/Leave 时启动，结束即把 hover_anim_start_ms_ 归零，
+  // on_paint 不再 invalidate —— 不会引入持续重绘。
+  void set_hover_target(bool on);
+  void advance_hover();
+  float hover_mix_ = 0.0f;
+  float hover_from_ = 0.0f;
+  float hover_to_ = 0.0f;
+  double hover_anim_start_ms_ = 0.0;  // 0 = 无动画进行中
 };
 
 }  // namespace clashwin::ui

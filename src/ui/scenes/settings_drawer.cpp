@@ -73,6 +73,11 @@ constexpr float kThemeH = 161.7f;
 
 bool is_light() { return ThemeService::instance().is_light(); }
 RectF inset_rect(const RectF& r, float d);
+// 悬停底色插值（0.15s ease；进度由 Button::hover_mix() 提供）
+Color4f mix_hover(const Color4f& a, const Color4f& b, float k) {
+  return {a.r + (b.r - a.r) * k, a.g + (b.g - a.g) * k, a.b + (b.b - a.b) * k,
+          a.a + (b.a - a.a) * k};
+}
 
 // 关闭钮：primary contained 按钮 + Fluent 图标。作为抽屉最后挂载的子件绘制，
 // 保证压在订阅卡/连接面板之上（此前底图由 SettingsDrawer::on_paint 画，
@@ -114,14 +119,15 @@ class SkinCell : public Button {
  protected:
   void draw_button_bg(IRenderTarget& rt, const RectF& r) override {
     const State st = state();
+    // 悬停进度：按下沿用原语义（直接取悬停底），其余按 0.15s 过渡插值
+    const float k = st == State::Pressed ? 1.0f : hover_mix();
     if (!selected) {
       // src: _layout.tsx:1714-1716 未选中 color '#555555/#aaaaaa'、
       //   bg '#f3f3f3/#1e1e1e'、border '#d0d0d0/#404040'
       // src: _layout.tsx:1724-1726 hover bg '#e5e5e5/#2d2d2d'
-      const bool hov = st == State::Hover || st == State::Pressed;
       Color4f bg = is_light()
-                       ? (hov ? Color4f::hex(0xE5E5E5) : Color4f::hex(0xF3F3F3))
-                       : (hov ? Color4f::hex(0x2D2D2D) : Color4f::hex(0x1E1E1E));
+                       ? mix_hover(Color4f::hex(0xF3F3F3), Color4f::hex(0xE5E5E5), k)
+                       : mix_hover(Color4f::hex(0x1E1E1E), Color4f::hex(0x2D2D2D), k);
       Pen border{is_light() ? Color4f::hex(0xD0D0D0) : Color4f::hex(0x404040), 1.0f};
       Brush fill{bg};
       rt.round_rect(r, 0.0f, border, &fill);  // src: _layout.tsx:1705-1727 radius 0
@@ -129,22 +135,18 @@ class SkinCell : public Button {
     }
     if (ThemeService::instance().skin() == theme::SkinId::Retro3d) {
       // src: button-styles.ts:39 selected 135° 六停
+      static const Color4f kNormal[6] = {
+          Color4f::hex(0xFFE082), Color4f::hex(0xFFD54F), Color4f::hex(0xFFC107),
+          Color4f::hex(0xFFB300), Color4f::hex(0xD4AF37), Color4f::hex(0xB8860B)};
+      // src: button-styles.ts:105-106 primary hover 六停
+      static const Color4f kHover[6] = {
+          Color4f::hex(0xFFF59D), Color4f::hex(0xFFE082), Color4f::hex(0xFFD54F),
+          Color4f::hex(0xFFC107), Color4f::hex(0xFFB300), Color4f::hex(0xD4AF37)};
       GradientStop cs[6];
-      if (st == State::Hover) {
-        // src: button-styles.ts:105-106 primary hover 六停
-        cs[0] = {0.00f, Color4f::hex(0xFFF59D)};
-        cs[1] = {0.20f, Color4f::hex(0xFFE082)};
-        cs[2] = {0.45f, Color4f::hex(0xFFD54F)};
-        cs[3] = {0.70f, Color4f::hex(0xFFC107)};
-        cs[4] = {0.85f, Color4f::hex(0xFFB300)};
-        cs[5] = {1.00f, Color4f::hex(0xD4AF37)};
-      } else {
-        cs[0] = {0.00f, Color4f::hex(0xFFE082)};
-        cs[1] = {0.20f, Color4f::hex(0xFFD54F)};
-        cs[2] = {0.45f, Color4f::hex(0xFFC107)};
-        cs[3] = {0.70f, Color4f::hex(0xFFB300)};
-        cs[4] = {0.85f, Color4f::hex(0xD4AF37)};
-        cs[5] = {1.00f, Color4f::hex(0xB8860B)};
+      for (int i = 0; i < 6; ++i) {
+        cs[i].offset = i == 0 ? 0.00f : i == 1 ? 0.20f : i == 2 ? 0.45f
+                      : i == 3 ? 0.70f : i == 4 ? 0.85f : 1.00f;
+        cs[i].color = mix_hover(kNormal[i], kHover[i], k);
       }
       rt.fill_round_rect_gradient_angle(r, 6.0f, cs, 6, 135.0f);
       // src: button-styles.ts:36/81-82 border 2px '#8A6D00'(light)/'#634E00'(dark)
@@ -154,7 +156,7 @@ class SkinCell : public Button {
     }
     // 其余皮肤：theme.cpp 六皮肤表（get3DButtonStyle primary 离散色）
     auto p = ThemeService::instance().button_paint("primary");
-    Color4f fill = st == State::Hover ? p.fill_hover
+    Color4f fill = st == State::Hover ? mix_hover(p.fill, p.fill_hover, k)
                    : (st == State::Pressed ? p.fill_pressed : p.fill);
     Brush b{fill};
     rt.round_rect(r, p.radius, {p.border, p.border_w}, &b);
