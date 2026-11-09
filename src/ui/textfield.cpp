@@ -357,6 +357,60 @@ float TextField::cursor_x(int index) {
   return 8 + w.w;
 }
 
+PointF TextField::caret_point() const {
+  const RectF r = bounds();
+  const float right_pad = text_right_pad();
+  const RectF text_r{8, 0, std::max(0.0f, r.w - 8 - right_pad), r.h};
+  TextStyle ts = style_;
+  ts.size = (style_.size > 0) ? style_.size : 13;
+
+  float cx = const_cast<TextField*>(this)->cursor_x(cursor_) - scroll_x_;
+  if (!composition_.empty()) {
+    if (ITextEngine* eng = text_engine()) {
+      cx = 8 + eng->measure_text(
+                      composition_.substr(
+                          0, static_cast<size_t>(composition_cursor_)),
+                      ts, 0)
+                    .w -
+                scroll_x_;
+    }
+  }
+  const float line_h = std::min(r.h - 6.0f, std::round(ts.size * 1.4375f));
+  float cy = multiline_ ? 4.0f : std::max(3.0f, (r.h - line_h) * 0.5f);
+  if (multiline_ && composition_.empty() && text_r.w > 16.0f) {
+    if (ITextEngine* eng = text_engine()) {
+      int line_start = 0;
+      int line_idx = 0;
+      for (int i = 1; i <= cursor_; ++i) {
+        float w = eng->measure_text(
+            text_.substr(static_cast<size_t>(line_start),
+                         static_cast<size_t>(i - line_start)),
+            ts, 0).w;
+        if (w > text_r.w && i - 1 > line_start) {
+          line_start = i - 1;
+          ++line_idx;
+        }
+      }
+      const int max_line = std::max(0, static_cast<int>((r.h - 8.0f) / line_h) - 1);
+      line_idx = std::min(line_idx, max_line);
+      cy = 4.0f + static_cast<float>(line_idx) * line_h;
+      cx = 8.0f + eng->measure_text(
+                      text_.substr(static_cast<size_t>(line_start),
+                                   static_cast<size_t>(cursor_ - line_start)),
+                      ts, 0).w - scroll_x_;
+    }
+  }
+
+  RectF gb = global_bounds();
+  return {gb.x + cx, gb.y + cy};
+}
+
+float TextField::caret_height() const {
+  TextStyle ts = style_;
+  ts.size = (style_.size > 0) ? style_.size : 13;
+  return std::min(bounds().h - 6.0f, std::round(ts.size * 1.4375f));
+}
+
 void TextField::clamp_scroll() {
   if (bounds().w <= 0) return;
   float vis = bounds().w - 8 - text_right_pad();

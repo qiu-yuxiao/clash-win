@@ -110,6 +110,8 @@ class NodeList : public Widget {
 
   // 过滤（搜索框；name 子串大小写不敏感）
   void set_filter(const std::string& text);
+  // 对当前过滤后可见的节点子集触发多路测速与择优切换
+  void trigger_auto_select_visible();
   // 排序切换（3 态循环：原始序 / 延迟升序 / 名称 locale 升序）
   // src: proxy-head.tsx:126-128 sortType=(sortType+1)%3
   void toggle_sort();
@@ -151,6 +153,7 @@ class NodeList : public Widget {
   Label* empty_label_ = nullptr;  // src: proxy-render.tsx:76 "No Proxies"
   ScrollTopButton* scroll_top_ = nullptr;  // ← scroll-top-button.tsx（proxy-groups.tsx:330）
   std::string filter_;
+  std::atomic<uint64_t> filter_change_seq_{0};
   int sort_type_ = 1;  // src: use-head-state.ts:21 sortType 初值 1（按延迟）
   // visible_：rows_ 索引（无分组头）
   std::vector<int> visible_;

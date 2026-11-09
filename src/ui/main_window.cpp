@@ -5,6 +5,8 @@
 #include <windowsx.h>
 #include <dwmapi.h>
 #pragma comment(lib, "dwmapi.lib")
+#include <imm.h>
+#pragma comment(lib, "imm32.lib")
 #include <shellapi.h>  // ShellExecuteW（T17 打开日志目录/帮助）
 
 #include <atomic>
@@ -535,6 +537,45 @@ void MainWindow::reload_nodes() {
   } else if (node_retry_left_ > 0) {
     --node_retry_left_;
     SetTimer(hwnd_, kTimerNodeRetry, 2000, nullptr);
+  }
+}
+
+void MainWindow::update_ime_position() {
+  Widget* fw = focused_widget();
+  auto* tf = dynamic_cast<TextField*>(fw);
+  if (!tf || !hwnd_) {
+    DestroyCaret();
+    return;
+  }
+
+  float scale = dpi_scale();
+  PointF cp = tf->caret_point();
+  float ch = tf->caret_height();
+  int px = static_cast<int>(std::round(cp.x * scale));
+  int py = static_cast<int>(std::round(cp.y * scale));
+  int ph = static_cast<int>(std::round(ch * scale));
+
+  // 1. 设置系统 Caret，确保通过 GetCaretPos 感知的现代输入法候选框精确跟随
+  CreateCaret(hwnd_, NULL, 2, ph);
+  SetCaretPos(px, py);
+
+  // 2. 设置 IMM32 组合窗与候选窗位置，确保所有标准输入法候选框精准定位在光标下方
+  HIMC himc = ImmGetContext(hwnd_);
+  if (himc) {
+    COMPOSITIONFORM cf{};
+    cf.dwStyle = CFS_POINT;
+    cf.ptCurrentPos.x = px;
+    cf.ptCurrentPos.y = py;
+    ImmSetCompositionWindow(himc, &cf);
+
+    CANDIDATEFORM cdf{};
+    cdf.dwIndex = 0;
+    cdf.dwStyle = CFS_CANDIDATEPOS;
+    cdf.ptCurrentPos.x = px;
+    cdf.ptCurrentPos.y = py + ph;
+    ImmSetCandidateWindow(himc, &cdf);
+
+    ImmReleaseContext(hwnd_, himc);
   }
 }
 
@@ -2031,6 +2072,16 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       // 对齐 Mini traffic-graph.tsx:84-95：失焦时不暂停，仅在最小化(document.hidden)时停采
       break;
 
+    case WM_SETFOCUS:
+      stealth_.feed_activity(now_ms());
+      update_ime_position();
+      return 0;
+
+    case WM_KILLFOCUS:
+      stealth_.feed_activity(now_ms());
+      DestroyCaret();
+      return 0;
+
     // 【INPUTFIX】鼠标/键盘路由给 widget 树（此前仅 feed_activity，
     // route_*_event 只在 tests/ 被调 → 实机开关点击无反应）
     case WM_GETICON: {
@@ -2063,6 +2114,13 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       if (tooltip_host_) tooltip_host_->leave();  // 移入非客户区 → 收起提示
       break;
 
+    case WM_IME_SETCONTEXT:
+    case WM_IME_STARTCOMPOSITION:
+    case WM_IME_COMPOSITION: {
+      update_ime_position();
+      break;
+    }
+
     case WM_MOUSEMOVE:
     case WM_LBUTTONDOWN:
     case WM_LBUTTONUP:
@@ -2093,6 +2151,7 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       if (down) SetCapture(hwnd_);
       else if (up && GetCapture() == hwnd_) ReleaseCapture();
       Widget* hit_w = route_mouse_event(&root_, e);
+      if (down) update_ime_position();
       // 【DIAG】鼠标命中诊断（Down/Up）：打印事件坐标与命中控件的全局矩形。
       //   用途：脚本化截图/自动化点击若「点了没反应」，靠这条日志判断是
       //   消息没送达、坐标换算错、还是命中被上层控件拦截。
@@ -2173,7 +2232,9 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
           }
         }
       }
-      if (route_key_event(&root_, e)) return 0;
+      bool handled = route_key_event(&root_, e);
+      update_ime_position();
+      if (handled) return 0;
       break;  // 未处理 → DefWindowProc（助记符/系统键）
     }
 
@@ -2185,7 +2246,9 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       e.ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
       e.shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
       e.alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
-      if (route_key_event(&root_, e)) return 0;
+      bool handled = route_key_event(&root_, e);
+      update_ime_position();
+      if (handled) return 0;
       break;
     }
 

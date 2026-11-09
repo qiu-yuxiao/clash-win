@@ -76,6 +76,8 @@ class TextField : public Widget {
     invalidate();
   }
   const std::wstring& composition() const { return composition_; }
+  PointF caret_point() const;
+  float caret_height() const;
 
   bool wants_key() const override { return true; }
 

@@ -1,5 +1,6 @@
 // 节点列表实现（T13）：过滤条 + 虚拟滚动 + 行卡绘制（对照 proxy-item.tsx）。
 #include "node_list.h"
+#include "ui/ui_postbox.h"
 
 #include <windows.h>
 
@@ -453,6 +454,29 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   search_->set_clear_button(true, tr("shared.placeholders.resetInput"));  // src: locales/zh/shared.json:63
   search_->on_text_changed = [this](const std::wstring& t) {
     set_filter(clashwin::utf::utf16_to_utf8(t));
+    if (filter_.empty() || visible_.empty()) return;
+    // 输入完成后防抖 800ms 自动触发多路测速择优（使满足条件的节点自动成为当前活跃节点）
+    uint64_t seq = ++filter_change_seq_;
+    std::thread([this, seq] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(800));
+      if (filter_change_seq_.load() == seq) {
+        UiPostbox::instance().post([this, seq] {
+          if (filter_change_seq_.load() == seq && !filter_.empty()) {
+            trigger_auto_select_visible();
+          }
+        });
+      }
+    }).detach();
+  };
+  search_->on_submit = [this] {
+    ++filter_change_seq_;  // 回车确认输入完成：立即触发
+    trigger_auto_select_visible();
+  };
+  search_->on_focus_lost = [this] {
+    if (!filter_.empty() && filter_change_seq_.load() != 0) {
+      filter_change_seq_.store(0);
+      trigger_auto_select_visible();
+    }
   };
   search_wrap_->add_child(std::move(search));
 
@@ -585,6 +609,29 @@ void NodeList::toggle_sort() {
 // 皮肤/亮暗热切换：重刷控件级缓存
 // src: button-styles.ts:734-927 get3DInputStyle —— 每次 render 现取，
 //   Win 侧 apply_theme 把结果缓存进成员，切皮肤后必须重调。
+void NodeList::trigger_auto_select_visible() {
+  if (!data_ || visible_.empty()) return;
+  std::vector<std::string> names;
+  const auto& rows = data_->rows();
+  names.reserve(visible_.size());
+  for (int i : visible_) {
+    if (i >= 0 && static_cast<size_t>(i) < rows.size()) {
+      names.push_back(rows[static_cast<size_t>(i)].name);
+    }
+  }
+  if (names.empty()) return;
+
+  // 视觉占位：UI 线程立即置 -2 触发 BaseLoading 脉冲
+  data_->set_delays_batch(names, -2);
+  invalidate();
+
+  // 异步后台线程执行多路测速与择优切换
+  auto* data_ptr = data_;
+  std::thread([data_ptr, names] {
+    data_ptr->test_and_select(names);
+  }).detach();
+}
+
 void NodeList::restyle_theme() {
   if (search_) {
     search_->apply_theme();

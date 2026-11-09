@@ -53,7 +53,7 @@ ${UnStrStr}
 
 ; ---------- 可覆盖定义（构建脚本传入绝对路径） ----------
 !ifndef VERSION
-  !define VERSION "0.2.0"
+  !define VERSION "0.2.1"
 !endif
 !ifndef STAGEDIR
   !define STAGEDIR "stage"
@@ -125,13 +125,16 @@ Var ServiceExists
 !define MUI_CUSTOMFUNCTION_GUIINIT myGuiInit
 ; 1. Welcome（PRE SkipIfPassive ← 模板 :157）
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW WelcomeShow
 !insertmacro MUI_PAGE_WELCOME
 ; 2. 重安装维护页（← 模板 :172-175 Page custom PageReinstall PageLeaveReinstall）
 Page custom PageReinstall PageLeaveReinstall
 ; 3. 目录页（PRE SkipIfPassive ← 模板 :376-377）
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW DirectoryShow
 !insertmacro MUI_PAGE_DIRECTORY
 ; 4. 安装页
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW InstFilesShow
 !insertmacro MUI_PAGE_INSTFILES
 ; 5. Finish（← 模板 :394-405：NOAUTOCLOSE + SHOWREADME 借用为桌面快捷方式勾选 + 运行）
 !define MUI_FINISHPAGE_NOAUTOCLOSE
@@ -142,13 +145,16 @@ Page custom PageReinstall PageLeaveReinstall
 !define MUI_FINISHPAGE_RUN_NOTCHECKED
 !define MUI_FINISHPAGE_RUN_FUNCTION RunMainBinary
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW FinishShow
 !insertmacro MUI_PAGE_FINISH
 
 ; ---------- 卸载页面（← 模板 :411-454：标准确认页注入 deleteAppData 复选框） ----------
+!define MUI_CUSTOMFUNCTION_UNGUIINIT un.myGuiInit
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW un.ConfirmShow
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE un.ConfirmLeave
 !define MUI_PAGE_CUSTOMFUNCTION_PRE un.SkipIfPassive
 !insertmacro MUI_UNPAGE_CONFIRM
+!define MUI_UNPAGE_CUSTOMFUNCTION_SHOW un.InstFilesShow
 !insertmacro MUI_UNPAGE_INSTFILES
 
 ; ---------- 语言（← tauri.windows.conf.json:17 languages 三语 + :15 选择器） ----------
@@ -405,9 +411,51 @@ Function .onInit
   SetRegView 64
 FunctionEnd
 
-; 窗口置顶（← 模板 :465-468 myGuiInit：防杀软拦截提示被遮挡忽略）
+; 窗口置顶：在整个安装/卸载过程中强制保持最顶层，不被任何其他窗口掩盖
+Function KeepTopMost
+  System::Call "user32::GetWindowLong(i $HWNDPARENT, i -20) i .r0"
+  IntOp $0 $0 | 8  ; WS_EX_TOPMOST (0x00000008)
+  System::Call "user32::SetWindowLong(i $HWNDPARENT, i -20, i r0)"
+  System::Call "user32::SetWindowPos(i $HWNDPARENT, i -1, i 0, i 0, i 0, i 0, i 0x0043)" ; SWP_SHOWWINDOW(0x40)|SWP_NOMOVE(2)|SWP_NOSIZE(1)
+  System::Call "user32::SetForegroundWindow(i $HWNDPARENT)"
+  System::Call "user32::BringWindowToTop(i $HWNDPARENT)"
+FunctionEnd
+
 Function myGuiInit
-  System::Call "user32::SetWindowPos(i $HWNDPARENT, i -1, i 0, i 0, i 0, i 0, i 3)"
+  Call KeepTopMost
+FunctionEnd
+
+Function WelcomeShow
+  Call KeepTopMost
+FunctionEnd
+
+Function DirectoryShow
+  Call KeepTopMost
+FunctionEnd
+
+Function InstFilesShow
+  Call KeepTopMost
+FunctionEnd
+
+Function FinishShow
+  Call KeepTopMost
+FunctionEnd
+
+Function un.KeepTopMost
+  System::Call "user32::GetWindowLong(i $HWNDPARENT, i -20) i .r0"
+  IntOp $0 $0 | 8  ; WS_EX_TOPMOST (0x00000008)
+  System::Call "user32::SetWindowLong(i $HWNDPARENT, i -20, i r0)"
+  System::Call "user32::SetWindowPos(i $HWNDPARENT, i -1, i 0, i 0, i 0, i 0, i 0x0043)"
+  System::Call "user32::SetForegroundWindow(i $HWNDPARENT)"
+  System::Call "user32::BringWindowToTop(i $HWNDPARENT)"
+FunctionEnd
+
+Function un.myGuiInit
+  Call un.KeepTopMost
+FunctionEnd
+
+Function un.InstFilesShow
+  Call un.KeepTopMost
 FunctionEnd
 
 Function RunMainBinary
@@ -473,6 +521,7 @@ Function PageReinstall
   ${If} $PassiveMode = 1
     Call PageLeaveReinstall
   ${Else}
+    Call KeepTopMost
     nsDialogs::Create 1018
     Pop $R4
     ${NSD_CreateLabel} 0 0 100% 24u $R2
@@ -607,6 +656,7 @@ FunctionEnd
 
 ; ---------- 安装（← 模板 :886-1038 Section Install） ----------
 Section "Install"
+  Call KeepTopMost
   SetRegView 64
   SetOutPath $INSTDIR
 
@@ -772,6 +822,7 @@ FunctionEnd
 ; deleteAppData 复选框注入标准确认页（← 模板 :416-449 un.ConfirmShow，DPI 缩放；
 ;   ClashWin 三语言无 RTL → RTL 分支省略）
 Function un.ConfirmShow
+  Call un.KeepTopMost
   FindWindow $1 "#32770" "" $HWNDPARENT
   System::Call "user32::GetDpiForWindow(p r1) i .r2"
   IntOp $5 100 * $2

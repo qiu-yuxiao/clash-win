@@ -1,6 +1,6 @@
 {
-  "version": "0.2.0",
-  "notes": "Clash Win v0.2.0 — complete auto-select trigger chains, 1:1 tray icon states, and shortcuts.",
+  "version": "0.2.1",
+  "notes": "Clash Win v0.2.1 — installer window always topmost, IME cursor follow, auto-select on filter completion.",
   "pub_date": "2026-11-08T16:45:00Z",
   "platforms": {}
 }

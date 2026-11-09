@@ -225,9 +225,9 @@ UT_TEST(t35_update_manifest_is_clash_win_not_mini) {
 UT_TEST(t35_version_single_source_of_truth) {
   // src: include/clashwin/config/constants.h:20 kAppVersion = "0.1.0"
   // 自家 Release 版本线从 0.1.0 独立递增，不与 Mini 3.2.2 绑死（总纲 §5.3）。
-  UT_CHECK(std::string(config::consts::kAppVersion) == "0.2.0");
-  UT_CHECK(update::ClientUpdater::is_version_newer("0.2.0", "0.1.2"));
-  UT_CHECK(!update::ClientUpdater::is_version_newer("0.2.0", "0.2.0"));
+  UT_CHECK(std::string(config::consts::kAppVersion) == "0.2.1");
+  UT_CHECK(update::ClientUpdater::is_version_newer("0.2.1", "0.1.2"));
+  UT_CHECK(!update::ClientUpdater::is_version_newer("0.2.1", "0.2.1"));
   if (false) UT_CHECK(std::string(config::consts::kAppVersion) == "0.1.0");
   // 这条断言记录「为什么不能照抄 Mini 清单」：3.2.2 会被判成 0.1.0 的新版本。
   UT_CHECK(update::ClientUpdater::is_version_newer("3.2.2", "0.1.0"));
