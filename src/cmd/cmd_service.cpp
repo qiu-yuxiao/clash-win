@@ -185,7 +185,9 @@ void install_cmd_service(CommandService& svc) {
        },
        consts::kTimeoutHeavy});
 
-  // ---- uninstall_service：共存禁用（卸载会破坏 Clash Mini 的 TUN 能力）----
+  // ---- uninstall_service：当前仍拒（Mini 后端 service.rs 有这个入口，但其 UI 从不调用；
+  //      D2 裁决放开了 reinstall/repair，是否放开 uninstall 待单独裁决）。
+  //      约束：任何服务操作都不删除 Clash Mini 的磁盘文件，只动共享服务 clash_verge_service。----
   svc.register_command(
       "uninstall_service",
       {[](const Json&) -> CmdResult { return refuse_service_mutation("uninstall_service"); },
