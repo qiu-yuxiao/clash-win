@@ -475,9 +475,10 @@ jobs:
           fi
           PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           # 关键：清单只写 RUNNER_TEMP，绝不落在受跟踪的 updater/app-update.json。
-          # 否则下一步 git checkout -B main 会因「tag 树与 origin/main 版本不同 +
-          # 工作树有未提交改动」报 "would be overwritten ... Aborting"，
-          # set -e 直接让 publish 失败（ci-auditor 已在临时仓库复现 exit 1）。
+          # 否则 tag → origin/main 的跨树切换叠加脏工作树时，git checkout 可能报
+          # "would be overwritten ... Aborting" 并在 set -e 下让 publish 失败。
+          # 该中止是场景依赖（是否跨到不同 tree + 该文件在两 tree 间是否不同），非必然，
+          # 但不写受跟踪文件可在任何场景下消除根因。
           MANIFEST_OUT="${RUNNER_TEMP}/app-update.generated.json"
           python3 - "$VERSION" "$SHA" "$URL" "$SIG" "$PUB_DATE" "$MANIFEST_OUT" <<'PY'
           import base64, json, sys
@@ -520,7 +521,8 @@ jobs:
           # 直接 fetch origin main 只更新 FETCH_HEAD，checkout -B origin/main 会找不到。
           git fetch origin "+refs/heads/main:refs/remotes/origin/main"
           # -f：即便上游残留会话改动也强制对齐，避免 "would be overwritten" 中止；
-          # 清单此刻只在 RUNNER_TEMP，checkout 不会丢失生成结果（ci-auditor 复现的两道保险之一）。
+          # 清单此刻只在 RUNNER_TEMP，checkout 不会丢失生成结果（与上一处共同构成双保险）。
+          # 注意：-f 会把受跟踪文件对齐到 main 旧版本，此后请勿新增读取仓库受跟踪文件的步骤。
           git checkout -f -B main "origin/main"
           cp "${RUNNER_TEMP}/app-update.generated.json" updater/app-update.json
           git add updater/app-update.json
