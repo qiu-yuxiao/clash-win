@@ -1,10 +1,12 @@
 // T09 / T25 cmd_service（← cmd/service.rs：install/uninstall/reinstall/repair/available）
 //
-// 【共存铁律】clash_verge_service 是与 Clash Mini 共用的特权服务（唯一服务名，禁止第二名称）：
-// - 已存在：只查询状态，停止则启动；绝不安装/重装/覆盖；
-// - 缺失：允许用自带 clash-verge-service-install.exe 安装同名 clash_verge_service
-//   （runas UAC 用户确认），安装后重新查询并启动；
-// - uninstall / reinstall / repair 一律拒绝，避免破坏共用方。
+// 【★ 互斥共存方针】（用户 2026-11-09 改定，最高优先级；总纲《移植基本准则.md》§5.2，
+// 取代旧「共存豁免 + refuse_service_mutation」设计）：
+// - clash_verge_service 服务名固定、两侧同名（改不了）；
+// - 服务注册指向对方路径（Clash Mini）→ install_service 时接管：停对方服务 →
+//   删注册（仅注册表，不删对方磁盘文件）→ 自家安装器重注册 → 启动；
+// - 注册指向本方 → 缺失才安装、停止则启动；
+// - uninstall / reinstall / repair 仍一律拒绝（用户 2026-11-09 裁决：接受无自愈路径）。
 // 全程用户可见反馈（notice_message），不只写日志。
 #include "cmd/cmd_install.h"
 
@@ -13,6 +15,7 @@
 #include "clashwin/core/constants.h"
 #include "core/service_mode.h"
 #include "events/event_bus.h"
+#include "system/coexist.h"
 #include "system/service_runner.h"
 #include "util/log.h"
 
@@ -38,8 +41,9 @@ Result<void> service_start(const char* label) {
 // 统一的"破坏性操作禁用"拒绝错误（用户可见文案）
 CmdResult refuse_service_mutation(const char* op) {
   return CmdResult::err({errs::kIo,
-      std::string(op) + " 被禁止：clash_verge_service 为与 Clash Mini 共用的特权服务，"
-                        "Clash Win 不会卸载/重装/修复该服务；如需变更请通过 Clash Mini 操作"});
+      std::string(op) + " 被禁止：Clash Win 不提供该服务自愈操作"
+                        "（互斥共存方针 2026-11-09：服务注册冲突由接管解决，"
+                        "如需变更请通过 Clash Mini 操作或重装 Clash Win）"});
 }
 
 }  // namespace
@@ -55,6 +59,42 @@ void install_cmd_service(CommandService& svc) {
          // ← Mini: core/service.rs:470-475 ReinstallRequired / ForceReinstallRequired
          const bool installed =
              runner->is_installed() && core::service_mode::is_service_binary_valid();
+         // ★ 互斥共存方针接管分支：服务已注册但 ImagePath 指向 Clash Mini 路径
+         //   → 停对方服务 → 删注册（不动对方磁盘文件）→ 自家安装器重注册 → 启动
+         if (installed && !system::coexist::service_image_is_own()) {
+           events::EventBus::notice_message(
+               "install_service::info",
+               std::string("检测到 ") + core::service_mode::kServiceName +
+                   " 注册指向 Clash Mini 路径：Clash Win 将停止对方服务并接管注册"
+                   "（指向本方路径，需要 UAC 确认）");
+           (void)runner->stop_service();  // 停对方服务（内含 UAC 回退）
+           if (!system::coexist::delete_service_registration()) {
+             const std::string msg =
+                 "接管失败：clash_verge_service 旧注册删除被拒绝（UAC 取消或权限不足）";
+             events::EventBus::notice_message("install_service::error", msg);
+             return CmdResult::err({errs::kIo, msg});
+           }
+           auto ir = runner->run_installer(true);
+           if (ir.is_err() || !runner->is_installed()) {
+             const std::string msg = "接管失败：服务重注册未完成（" +
+                                     (ir.is_err() ? ir.error().message
+                                                  : std::string("安装器已执行但仍未注册")) +
+                                     "）";
+             events::EventBus::notice_message("install_service::error", msg);
+             return CmdResult::err({errs::kIo, msg});
+           }
+           auto tr = service_start("Takeover");
+           if (tr.is_err()) {
+             events::EventBus::notice_message(
+                 "install_service::error",
+                 "clash_verge_service 接管后启动失败：" + tr.error().message);
+             return CmdResult::err(tr.error());
+           }
+           events::EventBus::notice_message(
+               "install_service::ok",
+               "clash_verge_service 已接管并指向本方路径（互斥共存方针，TUN 模式可用）");
+           return CmdResult::ok(Json{{"message", "takeover_completed"}});
+         }
          if (!installed) {
            // 缺失：用户可见提示 → 安装同名服务（UAC）→ 重新查询 → 启动
            events::EventBus::notice_message(

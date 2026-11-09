@@ -68,6 +68,7 @@ add_library(clashwin_system STATIC
   src/system/tray.cpp
   src/system/signals.cpp
   src/system/service_runner.cpp
+  src/system/coexist.cpp
   src/system/network_info.cpp
   src/system/icon_cache.cpp
   src/system/resources.cpp
@@ -356,6 +357,7 @@ add_executable(clashwin_test
   tests/test_t34_hit_chain.cpp
   tests/test_t35_release_readiness.cpp
   tests/test_t36_m11_challenge.cpp
+  tests/test_coexist.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_app clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32 bcrypt)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)

@@ -7,7 +7,8 @@
 ; 无 License 页（tauri.conf.json bundle.license 未配置 → 模板 :161 条件不成立）。
 ; 无开始菜单文件夹页（bundler 未传 start_menu_folder → 模板 :381-386 PRE Skip，
 ;   快捷方式直接落 $SMPROGRAMS\${PRODUCTNAME}.lnk（模板 :1344-1345））。
-; 服务名固定 clash_verge_service（与 Clash Mini 共用同一特权服务，共存豁免）。
+; 服务名固定 clash_verge_service（两侧同名，改不了；互斥共存方针 2026-11-09：安装时
+;   杀对方进程/服务后把注册重建为指向本方路径，不删对方磁盘文件——总纲 §5.2）。
 ; 版本号只有一个来源：下面的 VERSION（可由 build_installer.ps1 以 /DVERSION=... 覆盖）。
 ;
 ; 用法：
@@ -668,9 +669,13 @@ Section "Install"
   ;   appRunningOkKill 确认/取消 → 静默/被动直接终止）
   !insertmacro CheckIfAppIsRunning "${MAINBINARY}"
 
-  ; 彻底清理旧版与 Clash Mini 冲突环境（终止残留进程、清理旧服务与孤儿程序，创造完全清洁的安装环境）
+  ; ★ 互斥共存方针（用户 2026-11-09，最高优先级；总纲 §5.2）：可同装不可同跑——
+  ;   安装时强杀 Clash Mini 全部进程与服务（不删对方磁盘文件），随后重建本方服务注册。
+  ;   按名杀在安装期安全：本方应用已由 CheckIfAppIsRunning 处理、本方内核/服务尚未启动。
   DetailPrint "Cleaning up legacy and Clash Mini processes/services..."
   nsExec::Exec 'taskkill /F /IM clash-mini.exe'
+  Pop $0
+  nsExec::Exec 'taskkill /F /IM "Clash Mini.exe"'
   Pop $0
   nsExec::Exec 'taskkill /F /IM mini-mihomo.exe'
   Pop $0

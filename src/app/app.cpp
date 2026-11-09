@@ -19,6 +19,7 @@
 #include "events/event_names.h"
 #include "i18n/i18n.h"
 #include "system/guard_monitor.h"
+#include "system/coexist.h"
 #include "system/sysproxy.h"
 #include "system/tray.h"
 #include "system/resources.h"
@@ -102,6 +103,20 @@ bool App::init() {
     if (p > 0 && p < 65536) port = static_cast<uint16_t>(p);
   }
   singleton_port_ = port;
+
+  // ★ 互斥共存方针（用户 2026-11-09 改定，最高优先级；总纲 §5.2）：可同装不可同跑。
+  // 启动即按 exe 安装目录路径强杀 Clash Mini 全部进程（含对方路径的服务运行实例），
+  // 不删除对方磁盘上任何东西；本方自家进程（含前代实例）永不进入候选。
+  // 放在单实例 bind 之前：Mini 在跑时必占 33335，先互斥再绑定。
+  {
+    const int killed = system::coexist::kill_other_processes();
+    const bool svc_stopped = system::coexist::stop_foreign_service_if_running();
+    if (killed > 0 || svc_stopped) {
+      CWLOG_INFO(std::format(
+          "App::init：互斥共存——终止 Clash Mini 进程 {} 个，服务停止 {}",
+          killed, svc_stopped ? "是" : "否"));
+    }
+  }
 
   singleton_server_ = std::make_unique<app::SingletonServer>();
   bool bound = singleton_server_->start(
