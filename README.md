@@ -9,7 +9,7 @@
 > **Clash Win v0.2.2** — the pure Windows native C++ rewrite of Clash Mini.
 > Zero web engine. Zero JavaScript runtime. Built with Win32 API, Direct2D/DirectWrite, and modern C++20.
 
-Clash Win keeps everything you love about Clash Mini — the minimalist zero-config workflow, the 3D skeuomorphic visuals, the auto node switching and rule updates — but replaces the Tauri/WebView layer with hand-written native rendering. The result: **~15–25 MB runtime memory**, **sub-150 ms cold startup**, and a **120 fps Direct2D** interface, with behavior aligned 1:1 to the source it ports (see [Known Limitations](docs/KNOWN_LIMITATIONS_0.2.2.md) for the differences registered in v0.2.2).
+Clash Win keeps everything you love about Clash Mini — the minimalist zero-config workflow, the 3D skeuomorphic visuals, the auto node switching and rule updates — but replaces the Tauri/WebView layer with hand-written native rendering. The result: a single native executable with no bundled browser engine and no JavaScript runtime, with behavior aligned 1:1 to the source it ports (see [Known Limitations](docs/KNOWN_LIMITATIONS_0.2.2.md) for the differences registered in v0.2.2).
 
 > [!NOTE]
 > **v0.2.2 still carries explicitly registered gaps** — frosted-glass Blur, hover interpolation, an in-app update channel, code signing (the release assets are unsigned, no Authenticode signature), and clean-machine acceptance are documented in [KNOWN_LIMITATIONS_0.2.2.md](docs/KNOWN_LIMITATIONS_0.2.2.md). It is not claimed to be a perfect 1:1 copy.
