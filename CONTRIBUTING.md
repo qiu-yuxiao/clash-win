@@ -71,13 +71,13 @@ Every new or fixed defect **must** come with a regression case, and that case mu
 ```powershell
 # Portable ZIP (layout: clashwin.exe + sidecar\ + resources\ + locales\
 #               + .config\PORTABLE + 用户必读.txt)
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\portable.ps1 -Version 0.1.0
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\portable.ps1 -Version <version>
 
 # NSIS installer (the script self-elevates and attempts a best-effort Authenticode sign)
-powershell -NoProfile -ExecutionPolicy Bypass -File installer\build_installer.ps1 -Version 0.1.0
+powershell -NoProfile -ExecutionPolicy Bypass -File installer\build_installer.ps1 -Version <version>
 ```
 
-Both write to `dist/`: `ClashWin_<version>_x64_portable.zip` and `ClashWin_<version>_x64-setup.exe`. The installer script performs an admin self-elevation and, when a certificate is available in `LocalMachine\My`, attempts an Authenticode sign of the binaries / uninstaller blob; see `docs/04-工程技巧.md` for the self-signed certificate boundary. **Signing is best-effort and is never a release gate**: in a non-interactive/elevated-unavailable session (e.g. CI) it is skipped, and **v0.1.0 ships unsigned assets** with `SHA256SUMS.txt` as the trust anchor — see [Known Limitations (d)](docs/KNOWN_LIMITATIONS_0.1.0.md). Do **not** pass `-SkipStage` when preparing a release artifact.
+Both write to `dist/`: `ClashWin_<version>_x64_portable.zip` and `ClashWin_<version>_x64-setup.exe`. The installer script performs an admin self-elevation and, when a certificate is available in `LocalMachine\My`, attempts an Authenticode sign of the binaries / uninstaller blob; see `docs/04-工程技巧.md` for the self-signed certificate boundary. **Signing is best-effort and is never a release gate**: in a non-interactive/elevated-unavailable session (e.g. CI) it is skipped, and **all releases so far ship unsigned assets** with `SHA256SUMS.txt` as the trust anchor — see [Known Limitations (d)](docs/KNOWN_LIMITATIONS_0.2.2.md). Do **not** pass `-SkipStage` when preparing a release artifact.
 
 ### Pre-submit checks
 
@@ -86,7 +86,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\ui_src_gate.ps1   # 
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\delivery_check.ps1 # delivery chain (clean tree + four-way hashes)
 ```
 
-`delivery_check.ps1` fails whenever the working tree has uncommitted changes (an exe cannot be traced to a commit), or the build exe / `installer\stage\clashwin.exe` / the exe inside the portable zip / `stamp.json` do not share one SHA256. Authenticode status is logged as INFO only and is **not** a gate (v0.1.0 ships unsigned assets). Use `-Record` only **after** a clean rebuild from a committed HEAD, never to paper over an intermediate state.
+`delivery_check.ps1` fails whenever the working tree has uncommitted changes (an exe cannot be traced to a commit), or the build exe / `installer\stage\clashwin.exe` / the exe inside the portable zip / `stamp.json` do not share one SHA256. Authenticode status is logged as INFO only and is **not** a gate (all releases so far ship unsigned assets). Use `-Record` only **after** a clean rebuild from a committed HEAD, never to paper over an intermediate state.
 
 ## Committing and submitting
 
