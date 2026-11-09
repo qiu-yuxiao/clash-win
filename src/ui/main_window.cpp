@@ -17,6 +17,7 @@
 
 #include "clashwin/config/constants.h"
 #include "config/config.h"
+#include "core/auto_select.h"
 #include "cmd/cmd_support.h"
 #include "cmd/command_service.h"
 #include "events/event_bus.h"
@@ -537,6 +538,49 @@ void MainWindow::reload_nodes() {
   }
 }
 
+void MainWindow::trigger_auto_select_and_refresh(const std::string& uid) {
+  if (uid.empty()) return;
+  std::thread([this, uid] {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (std::chrono::steady_clock::now() < deadline) {
+      if (cmd::mihomo_unchecked().get_base_config().is_ok()) break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+    cmd::CommandService::instance().invoke(
+        "trigger_auto_select",
+        nlohmann::json::object(
+            {{"profile_uid", uid}, {"sort_type", 1}, {"select", true}}));
+
+    UiPostbox::instance().post([this] {
+      reload_nodes();
+    });
+
+    // 10s 后复核兜底（profile-coordination.ts:161-195）
+    std::this_thread::sleep_for(std::chrono::seconds(10));
+    auto grp = cmd::mihomo_unchecked().get_group_by_name("PROXY");
+    if (grp.is_ok() && grp.value().now && !grp.value().now->empty()) {
+      auto px = cmd::mihomo_unchecked().get_proxy_by_name(*grp.value().now);
+      bool healthy = false;
+      if (px.is_ok() && px.value().alive && !px.value().history.empty()) {
+        uint32_t d = px.value().history.back().delay;
+        if (d >= core::kNodeDelayMinMs && d < core::kNodeDelayMaxMs) {
+          healthy = true;
+        }
+      }
+      if (!healthy) {
+        CWLOG_INFO("10s fallback: 活跃节点无健康延迟，再次触发全量并发测速与择优");
+        cmd::CommandService::instance().invoke(
+            "trigger_auto_select",
+            nlohmann::json::object(
+                {{"profile_uid", uid}, {"sort_type", 1}, {"select", true}}));
+        UiPostbox::instance().post([this] {
+          reload_nodes();
+        });
+      }
+    }
+  }).detach();
+}
+
 // TUN 自动关闭守卫 ← use-system-state.ts:99-128
 //   TUN 已开 且 当前不可用（非管理员 且 服务不可用）→
 //   patchVerge({enable_tun_mode:false, enable_system_proxy:true})，
@@ -1036,6 +1080,7 @@ void MainWindow::build_scene() {
                     "patch_profiles_config",
                     nlohmann::json::object({{"current", new_uid}}));
               }
+              trigger_auto_select_and_refresh(new_uid);
             }
             reload_nodes();
             return true;
@@ -1043,20 +1088,28 @@ void MainWindow::build_scene() {
           events::NoticeService::instance().push("error", r.error().message);
           return false;
         };
-    settings_drawer_->on_select_profile = [](const std::string& uid) {
+    settings_drawer_->on_select_profile = [this](const std::string& uid) {
       auto r = cmd::CommandService::instance().invoke(
           "patch_profiles_config", nlohmann::json::object({{"current", uid}}));
       // ← _layout.tsx:929-935：成功 profileSwitched（1000ms）/ 失败原文
-      if (r.is_ok()) events::EventBus::notice_message("profile_switched::ok", "");
-      else events::EventBus::notice_message("update_failed", r.error().message);
+      if (r.is_ok()) {
+        events::EventBus::notice_message("profile_switched::ok", "");
+        trigger_auto_select_and_refresh(uid);
+      } else {
+        events::EventBus::notice_message("update_failed", r.error().message);
+      }
     };
-    settings_drawer_->on_update_profile = [](const std::string& uid) {
+    settings_drawer_->on_update_profile = [this](const std::string& uid) {
       // ← _layout.tsx:938-952：info「正在更新订阅」→ success「订阅更新成功」/ error 原文
       events::EventBus::notice_message("update_subscription::info", "");
       auto r = cmd::CommandService::instance().invoke(
           "update_profile", nlohmann::json::object({{"index", uid}}));
-      if (r.is_ok()) events::EventBus::notice_message("update_subscription::ok", "");
-      else events::EventBus::notice_message("update_failed", r.error().message);
+      if (r.is_ok()) {
+        events::EventBus::notice_message("update_subscription::ok", "");
+        trigger_auto_select_and_refresh(uid);
+      } else {
+        events::EventBus::notice_message("update_failed", r.error().message);
+      }
     };
     settings_drawer_->on_delete_profile = [](const std::string& uid) {
       // ← _layout.tsx:954-963：success common.deleteSuccess / error 原文
@@ -1535,6 +1588,15 @@ void MainWindow::show_and_activate() {
                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
   SetForegroundWindow(hwnd_);
   stealth_.feed_activity(now_ms());
+
+  // 窗口唤醒防雪崩静默探测（5min 冷却，select=false，刷新前端延迟缓存）
+  auto cur = config::Config::instance().profiles().latest_arc()->current;
+  if (cur && !cur->empty()) {
+    std::string uid = *cur;
+    std::thread([uid] {
+      core::AutoSelect::instance().silent_test_on_wakeup(uid);
+    }).detach();
+  }
 }
 
 void MainWindow::hide() { ShowWindow(hwnd_, SW_HIDE); }
@@ -2091,6 +2153,24 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
             !first_run_->is_importing()) {
           first_run_->finish();
           return 0;
+        }
+      }
+      if (msg == WM_KEYDOWN) {
+        // F4: 当前过滤后可见子集测速 + 择优（所见即所选）
+        if (wp == VK_F4) {
+          if (node_list_ && node_list_->bolt_button() &&
+              node_list_->bolt_button()->on_click) {
+            node_list_->bolt_button()->on_click();
+            return 0;
+          }
+        }
+        // F1: 全局全量节点自动群测 + 择优
+        if (wp == VK_F1) {
+          auto cur = config::Config::instance().profiles().latest_arc()->current;
+          if (cur && !cur->empty()) {
+            trigger_auto_select_and_refresh(*cur);
+            return 0;
+          }
         }
       }
       if (route_key_event(&root_, e)) return 0;

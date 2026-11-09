@@ -1,6 +1,6 @@
 {
-  "version": "0.1.10",
-  "notes": "Clash Win v0.1.10 — fix TUN mode switching DNS hijack and node restore fallback, prevent dual-takeover sysproxy race, and align with Clash Mini.",
+  "version": "0.2.0",
+  "notes": "Clash Win v0.2.0 — complete auto-select trigger chains, 1:1 tray icon states, and shortcuts.",
   "pub_date": "2026-11-08T16:45:00Z",
   "platforms": {}
 }

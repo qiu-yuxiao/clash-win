@@ -409,7 +409,12 @@ bool App::init() {
           }
           auto r = client.delay_group("PROXY__METRICS", main_url,
                                       core::kNodeDelayMaxMs, 5000);
-          if (r.is_ok()) return true;
+          if (r.is_ok()) {
+            std::vector<std::pair<std::string, uint32_t>> vec;
+            for (const auto& [name, ms] : r.value()) vec.emplace_back(name, ms);
+            events::EventBus::backend_delay_results("PROXY", vec);
+            return true;
+          }
           CWLOG_WARN(
               "CoreMonitor: 主测速地址整体失败，改用备用地址复核: " + main_url);
           auto r2 = client.delay_group("PROXY__METRICS",
@@ -418,6 +423,9 @@ bool App::init() {
           if (r2.is_ok()) {
             CWLOG_INFO(
                 "CoreMonitor: 备用测速地址可用 → 判定为主测速地址失真，节点侧正常");
+            std::vector<std::pair<std::string, uint32_t>> vec;
+            for (const auto& [name, ms] : r2.value()) vec.emplace_back(name, ms);
+            events::EventBus::backend_delay_results("PROXY", vec);
             return true;
           }
           CWLOG_WARN("CoreMonitor: 主/备测速地址均整体失败 → 测速链路不可用");
@@ -445,6 +453,11 @@ bool App::init() {
         [] {
           auto latest = config::Config::instance().profiles().latest_arc();
           return latest && latest->current ? *latest->current : std::string();
+        },
+        /*.is_headless =*/
+        [this] {
+          return !main_window_ || !main_window_->hwnd() ||
+                 !IsWindowVisible(main_window_->hwnd());
         },
         /*.now_ms =*/[] { return static_cast<int64_t>(GetTickCount64()); },
     });

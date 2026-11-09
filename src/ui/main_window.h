@@ -223,6 +223,7 @@ class MainWindow : public app::ILifecycleWindow {
   void apply_geometry_restore();  // window_state.json 恢复（含脱屏居中）
 
   void reload_nodes();                             // NodeData 加载 + QuickBar 同步（失败 2s 重试）
+  void trigger_auto_select_and_refresh(const std::string& uid); // 1:1 对齐 Mini：全量并发测速择优+10s复核
   // 首启就绪轮询：只刷新 proxies/activeDelay，不触发组测速
   void sync_first_run_proxy();
   void on_client_resized(int cw, int ch);          // WM_SIZE

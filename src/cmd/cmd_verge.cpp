@@ -172,7 +172,7 @@ Result<void> process_flags(uint16_t flags, const IVerge& patch) {
                " (i18n pending T10)");
   }
   if (flags & kFSysTrayIcon) {
-    CWLOG_INFO("patch_verge: SYSTRAY_ICON flag (tray pending T19)");
+    events::EventBus::refresh_verge();
   }
   if (flags & kFLogLevel) {
     CWLOG_INFO("patch_verge: LOG_LEVEL flag → " + patch.app_log_level.value_or("?"));

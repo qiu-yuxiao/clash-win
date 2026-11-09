@@ -78,6 +78,8 @@ class CoreMonitor {
     std::function<void(const std::wstring& title, const std::wstring& text)> alert;
     // 当前激活 profile uid（自愈选点入参；空 = 无法自愈）
     std::function<std::string()> current_uid;
+    // 托盘/无窗口纯后台启动判定（无窗口可见时由后台执行首次初始化选点）
+    std::function<bool()> is_headless;
     // 时钟（Unix 毫秒；测试注入虚拟时钟）
     std::function<int64_t()> now_ms;
   };

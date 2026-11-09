@@ -40,7 +40,23 @@ int CoreMonitor::current_interval_secs() const {
 void CoreMonitor::start() {
   if (running_.exchange(true)) return;
   worker_ = std::thread([this] {
+    bool is_first_run = true;
     while (running_.load()) {
+      if (is_first_run) {
+        is_first_run = false;
+        // 首次启动时等待内核就绪
+        for (int i = 0; i < 50 && running_.load(); ++i) {
+          if (hooks_.api_alive && hooks_.api_alive()) break;
+          std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+        // 若无窗口可见（托盘启动），执行一次初始化自动选点
+        if (hooks_.is_headless && hooks_.is_headless()) {
+          std::string uid = hooks_.current_uid ? hooks_.current_uid() : "";
+          if (!uid.empty() && hooks_.auto_select_trigger) {
+            hooks_.auto_select_trigger();
+          }
+        }
+      }
       int interval = current_interval_secs();
       // 分片等待（stop/kick 即时退出）
       for (int waited = 0; running_.load() && waited < interval; waited += 1) {
