@@ -209,9 +209,11 @@ jobs:
       # 兼容；third_party/yaml-cpp/CMakeLists.txt:2 仍是 VERSION 3.4。按 CMake
       # 报错给出的官方开关抬高 policy 下限，不改动上游第三方源码。
       # 本地 VS2022 + CMake 3.x 的构建命令不含此参数，不受影响。
+      # 该 -D 参数必须整体加引号：run 42678800272 实证 pwsh 会把裸写的
+      # -D...=3.5 拆成 "-D...=3" 与额外路径 ".5"，CMake 收到非法值 "3"。
       - name: Configure (CMake / VS2026 x64)
         shell: pwsh
-        run: cmake -B build -G "Visual Studio 18 2026" -A x64 -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+        run: cmake -B build -G "Visual Studio 18 2026" -A x64 "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
 
       - name: Build Release
         shell: pwsh
