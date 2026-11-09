@@ -90,6 +90,9 @@ class FirstRunGuideDialog : public Widget {
   std::function<void()> on_open_wiki;
   std::function<void()> on_open_github;
   std::function<void()> on_dismiss;
+  // ★ ❌9「稍后配置」：点「稍后」完成引导后，宿主自动滑开左侧设置抽屉指引订阅卡位置
+  //   （← Mini first-run-guide-dialog.tsx:469-473 handleDismissLater 自动滑开抽屉）。
+  std::function<void()> on_dismiss_later;
 
   void submit_import();
   void finish();

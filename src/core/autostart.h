@@ -21,6 +21,11 @@ inline constexpr const wchar_t* kAutostartMigrationMarker = L".autostart_task_mi
 inline constexpr const wchar_t* kRunKeySubPath = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
 inline constexpr const wchar_t* kRunValueName = L"Clash Win";
 
+// ★ ❌6 StartupApproved\Run 键（任务管理器「禁用启动项」的真实状态位）：
+//   启用自启时同步写「已批准启用」blob，使配置覆盖任务管理器的禁用（← Mini §2.10.1）。
+inline constexpr const wchar_t* kStartupApprovedKeySubPath =
+    L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run";
+
 // 抽象接口：隔离 Windows 注册表与 schtasks 子进程操作
 class IAutostartAccess {
  public:

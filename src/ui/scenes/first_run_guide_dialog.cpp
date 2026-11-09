@@ -1230,8 +1230,9 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
         return true;
       }
       if (btn_later_rect_.contains(pt.x, pt.y)) {
-        // src: :469-473 handleDismissLater
+        // src: :469-473 handleDismissLater：完成引导后自动滑开左侧设置抽屉指引订阅卡位置
         finish();
+        if (on_dismiss_later) on_dismiss_later();  // ★ ❌9 自动滑开抽屉（Mini 同构）
         return true;
       }
     } else {

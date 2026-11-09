@@ -7,8 +7,8 @@
 //   - 活跃节点连续 2 次判死 → 自愈选点（AutoSelect::trigger）
 //   - 内核 API 连续 3 次不可达 → 自愈选点
 //   - 自愈 60s 冷却；BUSY 冲突不计失败、不惩罚冷却
-//   - 自愈连续失败 3 次：API 不可达 → restart_core；restart 失败 → 弹窗警报
-//   - 自愈连续失败 5 次 → MessageBoxW 弹窗警报（fire_self_heal_alert）
+//   - 自愈连续失败 3 次 → 归零计数 → API 不可达 → restart_core → restart 失败 → 弹窗警报
+//     （Mini 现行「3 次归零」语义，无独立 5 次弹窗；用户裁决 2026-11-09）
 //   - 失败服务器表（record_server_failure / snapshot_failed_servers，600s 冷却）
 //   - 四阶段就绪等待（wait_for_clash_ready）
 //
@@ -39,8 +39,7 @@ class CoreMonitor {
     int offline_interval_secs = 5;     // 物理网络离线 5s
     int node_dead_threshold = 2;       // 节点连续 2 次判死
     int api_fail_threshold = 3;        // API 连续 3 次不可达
-    int heal_fail_threshold = 3;       // 自愈连续失败 3 次
-    int alert_fail_threshold = 5;      // 自愈连续失败 5 次
+    int heal_fail_threshold = 3;       // 自愈连续失败 3 次（达 3 即归零，见 heal()）
     int64_t heal_cooldown_ms = 60000;  // 自愈 60s 冷却
     int64_t failed_server_cooldown_ms = 600000;  // 失败服务器 600s
     // ★ §5.1 切换宽限期（← monitor.rs:74 SWITCH_GRACE_PERIOD_SECS = 60）

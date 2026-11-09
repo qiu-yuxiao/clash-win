@@ -199,7 +199,19 @@ void Widget::paint(IRenderTarget& rt, const RectF& clip) {
   }
   const bool faded = opacity_ < 0.999f;
   if (faded) rt.push_opacity(opacity_);
-  on_paint(rt);
+  // ★ ❌8 区域级错误降级：单控件 paint 异常局部降级为占位矩形，避免整树崩溃白屏
+  //   （← Mini AreaErrorFallback 区域边界：单组件异常局部降级，严禁整页白屏）。
+  //   捕获后继续绘制子控件，并在函数末尾照常 pop origin/clip/opacity。
+  try {
+    on_paint(rt);
+  } catch (const std::exception& e) {
+    CWLOG_WARN(std::string("[WIDGET] on_paint 异常已降级为占位: ") +
+               (e.what() ? e.what() : "unknown"));
+    rt.fill_rect({0, 0, g.w, g.h}, Brush{Color4f(0.9f, 0.3f, 0.2f, 0.12f)});
+  } catch (...) {
+    CWLOG_WARN("[WIDGET] on_paint 抛出非 std::exception 异常，已降级为占位");
+    rt.fill_rect({0, 0, g.w, g.h}, Brush{Color4f(0.9f, 0.3f, 0.2f, 0.12f)});
+  }
   // 绘制顺序：z_order 升序稳定（同序按加入顺序 → 后加者在上）
   std::vector<Widget*> ordered;
   ordered.reserve(children_.size());

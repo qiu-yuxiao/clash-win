@@ -6,6 +6,7 @@
 
 #include <windows.h>
 #include <tlhelp32.h>
+#include <shellapi.h>  // ShellExecuteExW / SHELLEXECUTEINFOW / SEE_MASK_*（与项目其余源文件一致）
 
 #include <algorithm>
 #include <chrono>

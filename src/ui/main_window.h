@@ -227,6 +227,9 @@ class MainWindow : public app::ILifecycleWindow {
   void update_ime_position();                      // IME 候选窗跟随光标与 Win32 原生 Caret 同步
   // 首启就绪轮询：只刷新 proxies/activeDelay，不触发组测速
   void sync_first_run_proxy();
+  // ★ ❌5 设置开关失败回滚：patch 失败后用权威配置值回填抽屉开关（set_checked 不触发回调），
+  //   对齐 Mini use-minimal-settings.ts:77-79 patch 失败 → mutateInfo() 权威值回滚、开关弹回。
+  void resync_settings_ui();
   void on_client_resized(int cw, int ch);          // WM_SIZE
   void persist_geometry(bool immediately = false); // WM_SIZE/WM_MOVE
   void pump_frame();                               // 33ms 帧泵

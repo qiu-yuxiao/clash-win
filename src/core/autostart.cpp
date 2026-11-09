@@ -38,6 +38,8 @@ class WindowsAutostartAccess : public IAutostartAccess {
     if (rc != ERROR_SUCCESS) {
       return Result<void>::err({static_cast<int>(rc), "RegSetValueExW failed"});
     }
+    // ★ ❌6：同步写 StartupApproved\Run=启用，覆盖任务管理器禁用
+    reconcile_startup_approved(true);
     return Result<void>::ok();
   }
 
@@ -49,6 +51,8 @@ class WindowsAutostartAccess : public IAutostartAccess {
     }
     ::RegDeleteValueW(key, kRunValueName);
     ::RegCloseKey(key);
+    // ★ ❌6：自启关闭时一并清除 StartupApproved 批准位，保持与 Run 键一致
+    reconcile_startup_approved(false);
     return Result<void>::ok();
   }
 
@@ -76,6 +80,25 @@ class WindowsAutostartAccess : public IAutostartAccess {
       return std::wstring(buf, len);
     }
     return util::dirs::exe_dir() + L"\\clashwin.exe";
+  }
+
+  // ★ ❌6 StartupApproved\Run\<name>：REG_BINARY，首字节 0x02=批准启用 / 0x03=禁用，
+  //   余 11 字节为变更时间戳（置 0）。启用自启时写「批准启用」，使配置在任务管理器
+  //   禁用后胜出重新启用；关闭自启时删除该批准位，保持与 Run 键一致。
+  //   ← Mini §2.10.1（enable 时同步写 StartupApproved\Run=启用）。
+  void reconcile_startup_approved(bool enabled) {
+    HKEY key = nullptr;
+    LONG rc = ::RegCreateKeyExW(HKEY_CURRENT_USER, kStartupApprovedKeySubPath, 0,
+                                nullptr, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE,
+                                nullptr, &key, nullptr);
+    if (rc != ERROR_SUCCESS) return;
+    if (enabled) {
+      BYTE blob[12] = {0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+      ::RegSetValueExW(key, kRunValueName, 0, REG_BINARY, blob, sizeof(blob));
+    } else {
+      ::RegDeleteValueW(key, kRunValueName);
+    }
+    ::RegCloseKey(key);
   }
 };
 

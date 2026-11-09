@@ -53,6 +53,7 @@ bool NodeData::load() {
     proxy_history_.clear();
     for (const auto& [name, item] : items) {
       ProxyHistory h;
+      h.alive = item.alive;  // ★ 保留内核 alive 真源（← delay.ts:279-281 alive===false → 0）
       if (!item.history.empty()) {
         h.delay = static_cast<int>(item.history.back().delay);
         h.time = item.history.back().time;
@@ -180,14 +181,18 @@ int NodeData::row_delay(const std::string& name) const {
   auto it = delay_cache_.find(name);
   if (it != delay_cache_.end() && now - it->second.second <= kDelayCacheTtlMs)
     return it->second.first;
-  // src: delay.ts:284-295 缓存过期 → 内核 history 最后一条；过旧(>10min)按 0 判死
+  // src: delay.ts:279-295 alive===false → 一律 0（Timeout），禁止陈旧 history 冒充当前延迟；
+  //   否则回落内核 history 最后一条，过旧(>10min)按 0 判死
   auto h = proxy_history_.find(name);
-  if (h != proxy_history_.end() && h->second.delay >= 0) {
-    int64_t rec = 0;
-    if (parse_iso_time_ms(h->second.time, &rec)) {
-      if (now - rec > kHistoryFallbackMaxAgeMs) return 0;
+  if (h != proxy_history_.end()) {
+    if (!h->second.alive) return 0;  // ★ 内核已判死 → 一律按 Timeout(0) 呈现（❌2）
+    if (h->second.delay >= 0) {
+      int64_t rec = 0;
+      if (parse_iso_time_ms(h->second.time, &rec)) {
+        if (now - rec > kHistoryFallbackMaxAgeMs) return 0;
+      }
+      return h->second.delay;
     }
-    return h->second.delay;
   }
   return -1;
 }

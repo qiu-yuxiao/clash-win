@@ -40,6 +40,9 @@
 #include <thread>
 #include <atomic>
 #include <format>
+#include <ctime>
+#include <sstream>
+#include <iomanip>
 
 #pragma comment(lib, "iphlpapi.lib")
 
@@ -413,9 +416,40 @@ bool App::init() {
         },
         /*.probe_metrics_with_fallback =*/
         []() -> bool {
+          // ★ §5.1 按需拨测门控（← Mini monitor.rs:673-683 evaluate_failover）
+          //   活跃节点健康且数据新鲜(<60s) → 不拨测；已判死且 10s 内刚复核 → 不重复拨测；
+          //   其余才真正拨测，复现 Mini 修复的「探测自激误报」（monitor.rs:62-63 注释）。
+          auto& client = cmd::mihomo_unchecked();
+          auto grp = client.get_group_by_name("PROXY");
+          if (grp.is_ok() && grp.value().now && !grp.value().now->empty()) {
+            const std::string& active = *grp.value().now;
+            if (active != "DIRECT" && active != "REJECT") {
+              auto px = client.get_proxy_by_name(active);
+              if (px.is_ok()) {
+                const auto& p = px.value();
+                int64_t rec_sec = -1;
+                if (!p.history.empty()) {
+                  // RFC3339 → epoch sec（与 node_data.cpp parse_iso_time_ms 同口径）
+                  const std::string& t = p.history.back().time;
+                  if (t.size() >= 19) {
+                    std::tm tm{};
+                    std::istringstream iss(t.substr(0, 19));
+                    iss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
+                    if (!iss.fail())
+                      rec_sec = static_cast<int64_t>(_mkgmtime(&tm));
+                  }
+                }
+                int64_t now_sec = static_cast<int64_t>(std::time(nullptr));
+                if (p.alive && rec_sec >= 0 && (now_sec - rec_sec) < 60)
+                  return true;  // 健康且数据新鲜(<60s) → 免拨测
+                if (!p.alive && rec_sec >= 0 && (now_sec - rec_sec) < 10)
+                  return true;  // 死判定且 10s 内刚复核 → 免重复拨测
+              }
+            }
+          }
+
           // ★ §5.8 测速失真复核（← Mini monitor.rs:188-223 probe_metrics_group）
           //   主测速地址整体失败 → 备用地址复核；主备双双整体失败 → 链路不可用。
-          auto& client = cmd::mihomo_unchecked();
           std::string main_url = "https://cp.cloudflare.com/generate_204";
           try {
             const auto& verge = *config::Config::instance().verge().latest_arc();

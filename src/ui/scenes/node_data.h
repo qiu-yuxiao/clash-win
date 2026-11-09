@@ -116,6 +116,7 @@ class NodeData {
   std::map<std::string, std::pair<int, int64_t>> delay_cache_;
   // src: services/delay.ts:268-298 getDelayFix：缓存过期后回落内核 history
   struct ProxyHistory {
+    bool alive = true;    // ★ 内核 alive 真源（← delay.ts:279-281）；false → 一律 Timeout(0)
     int delay = -1;       // 最后一条 history.delay；-1 = 无记录
     std::string time;     // history.time（RFC3339）
   };

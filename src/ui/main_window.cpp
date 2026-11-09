@@ -20,6 +20,7 @@
 #include "clashwin/config/constants.h"
 #include "config/config.h"
 #include "core/auto_select.h"
+#include "core/autostart.h"
 #include "cmd/cmd_support.h"
 #include "cmd/command_service.h"
 #include "events/event_bus.h"
@@ -916,6 +917,7 @@ void MainWindow::build_scene() {
               events::NoticeService::instance().push("success", tr8("settings.mini.updated"));
             } else {
               events::NoticeService::instance().push("error", r.error().message);
+              resync_settings_ui();  // ★ ❌5 patch 失败回滚开关到权威值（Mini mutateInfo）
             }
             return;
           }
@@ -932,6 +934,7 @@ void MainWindow::build_scene() {
               events::NoticeService::instance().push("success", tr8("settings.mini.updated"));
             } else {
               events::NoticeService::instance().push("error", r.error().message);
+              resync_settings_ui();  // ★ ❌5 patch 失败回滚开关到权威值（Mini mutateInfo）
             }
             return;
           }
@@ -944,6 +947,7 @@ void MainWindow::build_scene() {
             events::NoticeService::instance().push("success", tr8("settings.mini.updated"));
           } else {
             events::NoticeService::instance().push("error", r.error().message);
+            resync_settings_ui();  // ★ ❌5 patch 失败回滚开关到权威值（Mini mutateInfo）
           }
           // 豁免: 无 — 与上一行合并（出处: 无）
         };
@@ -1488,6 +1492,10 @@ void MainWindow::build_scene() {
       fr->on_dismiss = [] {
         scene::FirstRunGuideDialog::set_first_run_completed(true);
       };
+      // ★ ❌9 点「稍后」完成引导后自动滑开左侧设置抽屉，指引订阅卡位置（Mini 同构）
+      fr->on_dismiss_later = [this] {
+        if (settings_drawer_) settings_drawer_->set_open(true);
+      };
       root_.add_child(std::move(fr));
     }
     // 帮助菜单已改自绘（SettingsDrawer::open_help_menu → ContextMenu），
@@ -1509,7 +1517,12 @@ void MainWindow::build_scene() {
         settings_drawer_->sync_theme_mode(utf::utf8_to_utf16(*v.theme_mode));
       settings_drawer_->sync_takeover(v.enable_system_proxy.value_or(false),
                                       v.enable_tun_mode.value_or(false));
-      settings_drawer_->sync_basic(v.enable_auto_launch.value_or(false),
+      // ★ ❌7：自启开关读真实注册表状态（Run 键）而非 verge 配置值，
+      //   避免「开关显示开、实际开机不自启」错位（← Mini autostart.rs:65 真实状态优先）。
+      bool real_auto_launch = v.enable_auto_launch.value_or(false);
+      auto launch_st = core::AutostartManager::instance().get_launch_status();
+      if (launch_st.is_ok()) real_auto_launch = launch_st.value();
+      settings_drawer_->sync_basic(real_auto_launch,
                                    v.enable_silent_start.value_or(false),
                                    false, false,
                                    static_cast<int>(v.verge_mixed_port.value_or(0)));
@@ -1526,6 +1539,36 @@ void MainWindow::build_scene() {
       !scene::FirstRunGuideDialog::has_real_profile()) {
     SetTimer(hwnd_, kTimerFirstRun, 500, nullptr);
   }
+}
+
+void MainWindow::resync_settings_ui() {
+  // ★ ❌5 设置开关失败回滚：patch 失败后用权威配置值回填抽屉开关。
+  //   sync_basic/sync_takeover 内部 set_checked(…, false) 不触发回调，故不会二次 patch；
+  //   对齐 Mini use-minimal-settings.ts:77-79 patch 失败 → mutateInfo() 权威值回滚、开关弹回。
+  if (!settings_drawer_) return;
+  try {
+    const auto& v = *config::Config::instance().verge().latest_arc();
+    if (v.theme_mode.has_value())
+      settings_drawer_->sync_theme_mode(utf::utf8_to_utf16(*v.theme_mode));
+    settings_drawer_->sync_takeover(v.enable_system_proxy.value_or(false),
+                                    v.enable_tun_mode.value_or(false));
+    // ★ ❌7：自启开关读真实注册表状态（Run 键），非 verge 配置值
+    bool real_auto_launch = v.enable_auto_launch.value_or(false);
+    auto launch_st = core::AutostartManager::instance().get_launch_status();
+    if (launch_st.is_ok()) real_auto_launch = launch_st.value();
+    // clash 侧 Allow LAN / IPv6 权威值（IClashTemp 存于 YAML mapping_，经 get_client_info 读取）
+    bool allow_lan = false, ipv6 = false;
+    auto cl = config::Config::instance().clash().latest_arc();
+    if (cl) {
+      auto info = cl->get_client_info();
+      allow_lan = info.allow_lan;
+      ipv6 = info.ipv6;
+    }
+    settings_drawer_->sync_basic(real_auto_launch,
+                                 v.enable_silent_start.value_or(false),
+                                 allow_lan, ipv6,
+                                 static_cast<int>(v.verge_mixed_port.value_or(0)));
+  } catch (...) {}
 }
 
 void MainWindow::build_ws_pipes() {

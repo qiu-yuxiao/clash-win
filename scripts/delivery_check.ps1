@@ -100,7 +100,7 @@ if (Test-Path $stageExe) {
 }
 
 $constHeader = Join-Path $RepoRoot 'include\clashwin\config\constants.h'
-$ver = '0.2.1'
+$ver = '0.2.2'
 if (Test-Path $constHeader) {
   $m = Select-String -Path $constHeader -Pattern 'kAppVersion\s*=\s*"([^"]+)"'
   if ($m) { $ver = $m.Matches[0].Groups[1].Value }

@@ -169,8 +169,10 @@ void NodeRowWidget::on_paint(IRenderTarget& rt) {
   x = type_r.right();
 
   // 名称区（12px text.primary；selected bold；减 16.0f 边距居中延迟列）
-  // src: proxy-item.tsx:142
-  RectF name_r{x, r.y, r.w - 16.0f - kNodeTypeColW - kNodeDelayColW, r.h};
+  // src: proxy-item.tsx:142；窄卡片（3 列模式）下宽度下限保护，避免负宽
+  float name_w = r.w - 16.0f - kNodeTypeColW - kNodeDelayColW;
+  if (name_w < 0) name_w = 0;
+  RectF name_r{x, r.y, name_w, r.h};
   TextStyle ns;
   ns.size = 12;
   ns.weight = selected_ ? static_cast<int>(Weight::Bold)
@@ -266,6 +268,52 @@ bool NodeRowWidget::on_mouse(const MouseEvent& e) {
     return true;
   }
   return false;
+}
+
+// ---------- NodeGridRowWidget ----------
+void NodeGridRowWidget::set_cards(const std::vector<GridCardItem>& items, int cols) {
+  cols_ = cols;
+  for (const auto& it : items) {
+    auto card = std::make_unique<NodeRowWidget>();
+    card->bind(it.type, it.name, it.delay, it.selected);
+    card->index_in_group = it.index;
+    card->on_click = [this, name = it.name]() {
+      if (on_select) on_select(name);
+    };
+    NodeRowWidget* raw = card.get();
+    add_child(std::move(card));
+    cards_.push_back(raw);
+  }
+  invalidate();
+}
+
+void NodeGridRowWidget::on_arrange(const RectF& area) {
+  set_bounds(area);
+  const float card_w = (cols_ > 0) ? area.w / static_cast<float>(cols_) : area.w;
+  for (size_t i = 0; i < cards_.size(); ++i) {
+    cards_[i]->layout_tree(
+        {static_cast<float>(i) * card_w, 0.0f, card_w, area.h});
+  }
+}
+
+void NodeGridRowWidget::on_paint(IRenderTarget& rt) {
+  // 列间 5px double 竖边框（← proxy-render.tsx:44 borderRight:'5px double
+  //   var(--theme-border)'）；on_paint 先于子控件绘制，卡片透明区域透出分隔线。
+  const auto& svc = ThemeService::instance();
+  const auto pp = svc.panel_paint();
+  Color4f bc = pp.border_color;
+  if (pp.pulse) {
+    const float now_s = static_cast<float>(GetTickCount64()) / 1000.0f;
+    bc = Color4f::lerp(pp.pulse_from, pp.pulse_to, svc.pulse_phase(now_s));
+  }
+  if (cols_ <= 1) return;
+  const float w = bounds().w, h = bounds().h;
+  const float card_w = w / static_cast<float>(cols_);
+  for (int i = 0; i + 1 < cols_; ++i) {
+    const float x = (i + 1) * card_w;  // 简化为双线夹 1px 空隙近似 double
+    rt.fill_rect({x - 2.5f, 1.0f, 1.34f, h - 2.0f}, Brush{bc});
+    rt.fill_rect({x + 1.5f, 1.0f, 1.34f, h - 2.0f}, Brush{bc});
+  }
 }
 
 // ---------- ScrollTopButton ----------
@@ -685,17 +733,29 @@ void NodeList::sync_list() {
   if (!data_ || !list_) return;
   auto* nd = data_;
   auto* self = this;
+  const int cols = cols_ > 0 ? cols_ : 1;
+  // ★ ❌1 每行最多 cols 张卡片（宽窗 3 / 窄窗 1）；网格行数 = ceil(n/cols)
+  const int grid_rows =
+      (static_cast<int>(visible_.size()) + cols - 1) / cols;
   list_->set_content(
-      static_cast<int>(visible_.size()), kNodeRowH,
-      [nd, self](int index) {
-        auto row = std::make_unique<NodeRowWidget>();
-        const auto& r = nd->rows()[static_cast<size_t>(self->visible_[index])];
-        row->bind(r.type, r.name, nd->row_delay(r.name), r.name == nd->now());
-        row->index_in_group = static_cast<int>(self->visible_[index]);
-        row->on_click = [self, name = r.name]() {
+      grid_rows, kNodeRowH,
+      [nd, self, cols](int index) {
+        auto row = std::make_unique<NodeGridRowWidget>();
+        std::vector<GridCardItem> items;
+        const int base = index * cols;
+        for (int c = 0; c < cols; ++c) {
+          const int vi = base + c;
+          if (vi >= static_cast<int>(self->visible_.size())) break;
+          const int ri = self->visible_[vi];
+          const auto& r = nd->rows()[static_cast<size_t>(ri)];
+          items.push_back({r.type, r.name, nd->row_delay(r.name),
+                           r.name == nd->now(), ri});
+        }
+        row->on_select = [self](const std::string& name) {
           // 失败回弹：select 返回 false 时不更新选中（NodeData.now_ 未变）
           if (self->select_node) self->select_node(name);
         };
+        row->set_cards(items, cols);
         return row;
       },
       15);  // src: proxy-groups.tsx:105「overscan: 15」
@@ -732,6 +792,15 @@ void NodeList::on_arrange(const RectF& area) {
   const float list_top = content_top + kFilterBarH + kListTopGap;        // 43
   float list_h = content_bottom - list_top;
   if (list_h < 0) list_h = 0;
+
+  // ★ ❌1 宽窗三列判定（← use-render-list.ts:88 isMinimalWidth → col 1/3）：
+  //   内容宽 ≤285 单列，否则 3 列卡片墙；宽度/列数变化 → 重建网格
+  const int new_cols = (content_w <= kMinWidthForMultiCol) ? 1 : 3;
+  if (new_cols != cols_ || content_w != last_content_w_) {
+    cols_ = new_cols;
+    last_content_w_ = content_w;
+    sync_list();
+  }
 
   child(0)->layout_tree({inset_x, content_top, content_w, kFilterBarH});
   // 清空按钮为 TextField 内建，无需独立布局

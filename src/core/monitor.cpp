@@ -172,27 +172,17 @@ CoreMonitor::Action CoreMonitor::heal(const std::string& uid) {
   // 自愈失败计数累计
   int fails = heal_fail_count_.fetch_add(1) + 1;
 
-  // 阶梯 2：连续 5 次自愈选点失败 → 弹窗警报（fire_self_heal_alert，monitor.rs:1496-1508）
-  if (fails >= params_.alert_fail_threshold) {
-    heal_fail_count_.store(0);
-    CWLOG_WARN("CoreMonitor: 连续 5 次自愈选点失败，弹出系统警报");
-    if (hooks_.alert) {
-      hooks_.alert(L"Clash Win - 网络警报",
-                   L"后台自动优选节点连续 5 次失败，当前所有代理节点均已失效，无法正常连接网络。\n\n请检查您的网络连接或节点订阅状态。");
-      return Action::Alerted;
-    }
-    return Action::Idle;
-  }
-
-  // 阶梯 1：连续 3 次自愈选点失败 → 判断 API 存活（monitor.rs:1594-1621）
+  // ★ §5.3 自愈告警「3 次归零」（用户裁决 2026-11-09，对齐 Mini 现行 monitor.rs:1594-1621）：
+  //   连续 3 次自愈选点失败 → 归零计数 → 仅当「内核 API 不可达 → 重启内核 → 重启仍失败」
+  //   才弹窗；API 可达（节点侧问题）仅记日志、不重启、不弹窗。Mini 无独立的「5 次直接弹窗」。
   if (fails >= params_.heal_fail_threshold) {
+    heal_fail_count_.store(0);  // ★ 与 Mini 一致：达 3 即归零（monitor.rs:1595）
     bool api_ok = hooks_.api_alive ? hooks_.api_alive() : true;
     if (api_ok) {
       CWLOG_INFO("CoreMonitor: 连续 3 次自愈选点失败但内核 API 可达（节点侧问题），跳过内核重启，等待恢复");
       return Action::Idle;
     }
     CWLOG_WARN("CoreMonitor: 连续 3 次自愈选点失败且内核 API 不可达，重启内核以恢复 API 通道");
-    heal_fail_count_.store(0);
     if (hooks_.restart_core && hooks_.restart_core().is_ok()) {
       return Action::RestartedOnHealFail;
     }

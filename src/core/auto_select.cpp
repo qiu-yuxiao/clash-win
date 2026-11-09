@@ -183,7 +183,12 @@ AutoSelect::Outcome AutoSelect::trigger(
   if (select) {
     auto fastest = pick_fastest(
         out.display, hooks_.failed_servers, hooks_.node_server_map);
-    if (!fastest) return out;
+    if (!fastest) {
+      // ★ ❌3：无候选（全节点不可达）同样广播 refresh_proxies，刷新前端代理缓存，
+      //   避免 UI 延迟/存活展示停在陈旧值（← Mini monitor.rs:1131-1139 无候选/切换失败同样刷新）
+      events::EventBus::refresh_proxies();
+      return out;
+    }
     auto cur = hooks_.current_uid ? hooks_.current_uid() : std::nullopt;
     if (cur.has_value() && !profile_uid.empty() && *cur != profile_uid) {
       // 活动配置已被更改 → 舍弃切换（← monitor.rs:1046-1056）

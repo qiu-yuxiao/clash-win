@@ -37,6 +37,9 @@ inline constexpr float kPanelBorder = 4;
 inline constexpr float kListBottomGap = 8;   // src: proxy-groups.tsx:327 mb: 1 → 8
 inline constexpr float kNodeBorderW = 2;     // src: proxy-item.tsx:75 borderBottom 2px
 inline constexpr float kNodeSelectBorderW = 3;  // src: proxy-item.tsx 选中 borderLeft 3px
+// ★ ❌1 宽窗三列判定阈值（← use-render-list.ts:88 isMinimalWidth → col 1/3；
+//   审计 §一.❌1：内容宽 ≤285 单列，否则 3 列卡片墙）
+inline constexpr float kMinWidthForMultiCol = 285.0f;
 // 滚动置顶按钮几何 ← scroll-top-button.tsx:18-19 / proxy-groups.tsx:171
 inline constexpr float kScrollTopBtnSize = 40;   // IconButton padding 8×2 + icon 24
 inline constexpr float kScrollTopInset = 20;     // bottom/right 20px
@@ -60,6 +63,30 @@ class NodeRowWidget : public Widget {
   int delay_ = -1;
   bool selected_ = false;
   bool hover_ = false;
+};
+
+// 一张 3D 卡片的入参（← proxy-render.tsx:32-50 每个 ProxyItem 单元格）
+struct GridCardItem {
+  std::string type;
+  std::string name;
+  int delay = -1;
+  bool selected = false;
+  int index = 0;  // 全局行序（奇偶底色）
+};
+
+// 一行含最多 cols 张卡片（← proxy-render.tsx:81-94 display:grid repeat(col,1fr)
+//   + 列间 5px double 竖边框；col 由 isMinimalWidth 决定：≤285 单列，否则 3 列）
+// 鼠标/命中测试无需覆写：Widget::hit_test 自动递归到最深的卡片子控件。
+class NodeGridRowWidget : public Widget {
+ public:
+  void set_cards(const std::vector<GridCardItem>& items, int cols);
+  void on_paint(IRenderTarget& rt) override;
+  void on_arrange(const RectF& area) override;
+  std::function<void(const std::string&)> on_select;
+
+ private:
+  int cols_ = 1;
+  std::vector<NodeRowWidget*> cards_;
 };
 
 // 滚动置顶按钮 ← src/components/layout/scroll-top-button.tsx:10-40
@@ -155,6 +182,9 @@ class NodeList : public Widget {
   std::string filter_;
   std::atomic<uint64_t> filter_change_seq_{0};
   int sort_type_ = 1;  // src: use-head-state.ts:21 sortType 初值 1（按延迟）
+  // ★ ❌1 网格列数（宽窗 3 / 窄窗 1，由内容宽决定）与最近一次内容宽（用于判定切换）
+  int cols_ = 1;
+  float last_content_w_ = 0;
   // visible_：rows_ 索引（无分组头）
   std::vector<int> visible_;
 };
