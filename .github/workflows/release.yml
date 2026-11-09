@@ -137,17 +137,16 @@ jobs:
   build:
     name: Build Windows x64 (Setup + Portable)
     needs: [validate]
-    # 固定 windows-2025：镜像 20261101.318.1 自带
-    #   Visual Studio Enterprise 2022 17.14.37827.9
-    #   (C:\Program Files\Microsoft Visual Studio\2022\Enterprise) + CMake 3.31.6，
-    # 与本项目 VS2022 工具链及 -G "Visual Studio 17 2022" 完全一致。
-    # 不选 windows-latest：已滚动到 VS 18 / Visual Studio 2026，该 generator 报
-    #   "could not find any instance of Visual Studio"（run 42670204063 实证）。
-    # 不选 windows-2022：虽自带 VS2022 + NSIS 3.10，但该 label 在当前仓库触发
-    #   Actions 后端 "Internal server error"（run 42671321953 两个 attempt 分别复现），
-    #   build/publish job 根本不创建，整条 run 直接 failure。
-    # windows-2025 镜像的 Tools 清单不含 NSIS，故下方显式安装并把绝对路径
-    # 交给 build_installer.ps1（Find-Makensis 支持 $env:NSIS_MAKENSIS）。
+    # 固定 windows-2025：run 42677239865 的 Set up job 实证该 label 当前与
+    #   windows-latest 同调度到 windows-2025-vs2026 镜像（20261103.298.1）：
+    #   Visual Studio Enterprise 2026 18.11.12328.437 + CMake 4.4.5 + Ninja 1.13.2。
+    #   因此 Configure 必须用 "Visual Studio 18 2026"（CMake >= 4.2 提供，默认 v145）；
+    #   "Visual Studio 17 2022" 在该镜像报 could not find any instance。
+    # 不选 windows-2022：它是唯一仍带 VS2022 17.14 + NSIS 3.10 的镜像，但该 label
+    #   在当前仓库触发 Actions 后端 "Internal server error"（run 42671321953
+    #   两个 attempt 分别复现），build/publish job 根本不创建，整条 run failure。
+    # windows-2025-vs2026 镜像不含 NSIS，故下方显式安装并把绝对路径交给
+    # build_installer.ps1（Find-Makensis 支持 $env:NSIS_MAKENSIS）。
     runs-on: windows-2025
     env:
       VERSION: ${{ needs.validate.outputs.version }}
@@ -155,7 +154,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup MSBuild (VS2022)
+      - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
       - name: Install NSIS (windows-2025 image does not ship it)
@@ -204,9 +203,11 @@ jobs:
           & .\scripts\verify_sidecar.ps1
           if ($LASTEXITCODE -ne 0) { throw "sidecar baseline verification failed" }
 
-      - name: Configure (CMake / VS2022 x64)
+      # -A x64 在 VS18 generator 下照旧（CMake 官方 generator 文档明确支持），
+      # cmake --build --config Release 不因 generator 变化而改变。
+      - name: Configure (CMake / VS2026 x64)
         shell: pwsh
-        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+        run: cmake -B build -G "Visual Studio 18 2026" -A x64
 
       - name: Build Release
         shell: pwsh
