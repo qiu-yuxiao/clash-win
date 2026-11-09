@@ -103,11 +103,10 @@ void install_cmd_service(CommandService& svc) {
          auto runner = system::get_service_runner();
          // 已注册但 ImagePath 失效（Mini 卸载残壳）视同未安装：
          // ← Mini: core/service.rs:470-475 ReinstallRequired / ForceReinstallRequired
-         const bool installed =
-             runner->is_installed() && core::service_mode::is_service_binary_valid();
+         const bool installed = runner->is_installed() && runner->is_binary_valid();
          // ★ 互斥共存方针接管分支：服务已注册但 ImagePath 指向 Clash Mini 路径
          //   → 停对方服务 → 删注册（不动对方磁盘文件）→ 自家安装器重注册 → 启动
-         if (installed && !system::coexist::service_image_is_own()) {
+         if (installed && !runner->is_image_own()) {
            events::EventBus::notice_message(
                "install_service::info",
                std::string("检测到 ") + core::service_mode::kServiceName +

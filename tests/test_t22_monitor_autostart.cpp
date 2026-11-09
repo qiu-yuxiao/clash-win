@@ -415,8 +415,10 @@ UT_TEST(t22_monitor_node_dead_two_consecutive_heals) {
   UT_CHECK_EQ(heals, 1);
 }
 
-// 12. 守护升级梯子：连续 3 次自愈失败重启内核，连续 5 次自愈失败弹窗警报
-UT_TEST(t22_monitor_escalation_ladder_3restarts_5alerts) {
+// 12. 守护升级梯（v0.2.2 起现行语义 = 「3 次归零」，用户 2026-11-09 裁决对齐
+//     Mini monitor.rs:1594-1621）：连续 3 次自愈失败 → 计数归零；仅当「内核 API 不可达
+//     → 重启内核 → 重启仍失败」才弹窗。旧期望「3 次重启 / 5 次弹窗」是变更前行为，已作废。
+UT_TEST(t22_monitor_escalation_ladder_3fail_reset_then_alert) {
   MonitorGuard mg;
   auto& m = CoreMonitor::instance();
 
@@ -463,18 +465,17 @@ UT_TEST(t22_monitor_escalation_ladder_3restarts_5alerts) {
     UT_CHECK_EQ(alerts, 0);
   }
 
-  // ---------- 阶段 B：API 可达（节点侧故障），连续 5 次自愈失败 → 警报 ----------
+  // ---------- 阶段 B：API 可达（节点侧故障）→ 3 次失败仅归零，不重启不弹窗 ----------
   {
     m.reset_state();
     int restarts = 0, alerts = 0;
     int64_t clock = 1000;
-    std::wstring alert_title, alert_text;
 
     CoreMonitor::Hooks h;
     h.core_alive = [] { return true; };
     h.network_online = [] { return true; };
-    h.api_alive = [] { return true; };   // 内核 API 存活（跳过重启）
-    h.node_healthy = [] { return false; }; // 节点死
+    h.api_alive = [] { return true; };      // 内核 API 存活（节点侧问题）
+    h.node_healthy = [] { return false; };  // 节点死
     h.current_uid = [] { return "uid_1"; };
     h.auto_select_trigger = []() -> Result<bool> {
       return Result<bool>::err(Error{-1, "auto select failed"});
@@ -483,16 +484,12 @@ UT_TEST(t22_monitor_escalation_ladder_3restarts_5alerts) {
       ++restarts;
       return Result<void>::ok();
     };
-    h.alert = [&](const std::wstring& title, const std::wstring& text) {
-      ++alerts;
-      alert_title = title;
-      alert_text = text;
-    };
+    h.alert = [&](const std::wstring&, const std::wstring&) { ++alerts; };
     h.now_ms = [&] { return clock; };
     m.set_hooks(h);
 
-    // 连续推进 4 次自愈失败
-    for (int i = 1; i <= 4; ++i) {
+    // 每轮 = 2 次判死 → 1 次自愈失败；历经两轮后计数为 2
+    for (int i = 1; i <= 2; ++i) {
       clock += 70000;
       m.tick_once();
       auto a = m.tick_once();
@@ -502,14 +499,67 @@ UT_TEST(t22_monitor_escalation_ladder_3restarts_5alerts) {
       UT_CHECK_EQ(alerts, 0);
     }
 
-    // 第 5 次自愈失败：触发 alert 警报
+    // 第 3 次失败：达 3 即归零（API 可达仅记日志，不重启、不弹窗）
     clock += 70000;
     m.tick_once();
-    auto a5 = m.tick_once();
-    UT_CHECK(a5 == CoreMonitor::Action::Alerted);
-    UT_CHECK_EQ(alerts, 1);
+    auto a3 = m.tick_once();
+    UT_CHECK(a3 == CoreMonitor::Action::Idle);
+    UT_CHECK_EQ(m.heal_fail_count(), 0);
     UT_CHECK_EQ(restarts, 0);
-    UT_CHECK(alert_title.find(L"网络警报") != std::wstring::npos);
+    UT_CHECK_EQ(alerts, 0);
+
+    // 归零后可重新累计：再走两轮仍为 1、2，不发生升级
+    for (int i = 1; i <= 2; ++i) {
+      clock += 70000;
+      m.tick_once();
+      auto a = m.tick_once();
+      UT_CHECK(a == CoreMonitor::Action::Idle);
+      UT_CHECK_EQ(m.heal_fail_count(), i);
+      UT_CHECK_EQ(restarts, 0);
+      UT_CHECK_EQ(alerts, 0);
+    }
+  }
+
+  // ---------- 阶段 C：API 不可达且重启内核失败 → 第 3 次失败后弹窗 ----------
+  {
+    m.reset_state();
+    int restarts = 0, alerts = 0;
+    int64_t clock = 1000;
+
+    CoreMonitor::Hooks h;
+    h.core_alive = [] { return true; };
+    h.network_online = [] { return true; };
+    h.api_alive = [] { return false; };
+    h.current_uid = [] { return "uid_1"; };
+    h.auto_select_trigger = []() -> Result<bool> {
+      return Result<bool>::err(Error{-1, "auto select failed"});
+    };
+    h.restart_core = [&] {
+      ++restarts;
+      return Result<void>::err(Error{-1, "restart failed"});
+    };
+    h.alert = [&](const std::wstring&, const std::wstring&) { ++alerts; };
+    h.now_ms = [&] { return clock; };
+    m.set_hooks(h);
+
+    // 每轮 = 3 次 API 不可达 → 1 次自愈失败；先跑两轮把计数推到 2
+    for (int i = 1; i <= 2; ++i) {
+      clock += 70000;
+      m.tick_once();
+      m.tick_once();
+      auto a = m.tick_once();
+      UT_CHECK(a == CoreMonitor::Action::Idle);
+      UT_CHECK_EQ(alerts, 0);
+    }
+
+    clock += 70000;
+    m.tick_once();
+    m.tick_once();
+    auto a3 = m.tick_once();
+    UT_CHECK(a3 == CoreMonitor::Action::Alerted);
+    UT_CHECK_EQ(restarts, 1);
+    UT_CHECK_EQ(alerts, 1);
+    UT_CHECK_EQ(m.heal_fail_count(), 0);  // 达 3 先归零再升级
   }
 }
 

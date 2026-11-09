@@ -9,6 +9,7 @@
 
 #include "core/service_mode.h"
 #include "mihomo/service_ipc.h"
+#include "system/coexist.h"
 #include "util/dirs.h"
 #include "util/log.h"
 #include "util/utf.h"
@@ -100,6 +101,14 @@ Result<void> DefaultServiceCommandRunner::run_uninstaller() {
 
 bool DefaultServiceCommandRunner::is_installed() {
   return core::service_mode::is_service_installed();
+}
+
+bool IServiceCommandRunner::is_binary_valid() {
+  return core::service_mode::is_service_binary_valid();
+}
+
+bool IServiceCommandRunner::is_image_own() {
+  return coexist::service_image_is_own();
 }
 
 Result<void> DefaultServiceCommandRunner::stop_service() {

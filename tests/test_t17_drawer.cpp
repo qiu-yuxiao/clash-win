@@ -1,9 +1,12 @@
 // T17 测试：设置抽屉（开关/遮罩/布局像素/5 卡调用链/皮肤条/滑块/阈值/AccentColor）。
 #include <windows.h>
 
+#include <memory>
+
 #include "cmd/command_service.h"
 #include "config/config.h"
 #include "i18n/i18n.h"
+#include "system/service_runner.h"
 #include "test_ui_helper.h"
 #include "test_util.h"
 #include "ui/theme/theme.h"
@@ -17,6 +20,20 @@ using namespace clashwin::ui::theme;
 using namespace ui_test;
 
 namespace {
+// 服务就绪桩：v0.2.2 起 TUN 接管前置校验 isTunModeAvailable = is_admin || service_ok
+// （← settings_drawer.cpp:1524-1542 / Mini _layout.tsx:1085-1095）。测试进程通常既非
+// 管理员也无服务，会走 install_service 并失败回弹，导致 TUN 分支的 patch 断言不可达。
+// 本桩只回答「服务已就绪」，不触碰真实 SCM / 不弹 UAC。
+class AvailableServiceRunner : public system::IServiceCommandRunner {
+ public:
+  bool is_installed() override { return true; }
+  Result<void> run_installer(bool) override { return Result<void>::ok(); }
+  Result<void> start_service() override { return Result<void>::ok(); }
+  Result<void> stop_service() override { return Result<void>::ok(); }
+  bool wait_for_ready(int) override { return true; }
+  bool is_available() override { return true; }
+};
+
 struct PatchLog {
   std::vector<std::pair<std::string, nlohmann::json>> calls;
   void record(const std::string& k, const nlohmann::json& v) {
@@ -83,6 +100,9 @@ UT_TEST(t17_left_column_layout_pixels) {
 
 UT_TEST(t17_takeover_routing_callbacks) {
   make_offscreen(271, 680, 96);
+  // v0.2.2 起 TUN 接管先做 is_admin || service_ok 校验，未就绪会试装并可能回弹；
+  // 注入服务就绪桩使 patch 链路可观测（断言目标仍是 esp/etm 双写语义）
+  system::set_service_runner(std::make_shared<AvailableServiceRunner>());
   SettingsDrawer drawer;
   drawer.layout_tree({0, 0, 271, 680});
   PatchLog log;
@@ -119,6 +139,7 @@ UT_TEST(t17_takeover_routing_callbacks) {
   UT_CHECK(log.has("rule_fallback", "addurl"));
   UT_CHECK(log.has("clash_mode", "rule"));
   UT_CHECK(addurl_called);
+  system::set_service_runner(nullptr);  // 还原真实 Runner，避免污染后续用例
 }
 
 UT_TEST(t17_basic_card_callbacks) {

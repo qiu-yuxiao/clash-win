@@ -18,6 +18,9 @@ class IServiceCommandRunner {
   // 默认委托 run_installer(false)，Mock 无需实现即可复用既有日志语义。
   virtual Result<void> run_uninstaller() { return run_installer(false); }
   virtual bool is_installed() = 0;
+  // 服务注册细节：默认查真实 SCM / 注册表；测试可覆盖以获得确定性
+  virtual bool is_binary_valid();
+  virtual bool is_image_own();
   virtual Result<void> start_service() = 0;
   virtual Result<void> stop_service() = 0;
   virtual bool wait_for_ready(int timeout_ms) = 0;

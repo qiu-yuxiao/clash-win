@@ -50,6 +50,10 @@ NodeData make_data(MockState& st) {
       clashwin::mihomo::ProxyItem it;
       it.name = name;
       it.type = type;
+      // 夹具语义 = 存活但未测（mihomo 对未测节点返回 alive=true）。
+      // v0.2.2 ❌2 起 alive=false 会被 row_delay 判成 Timeout(0)，与本文件
+      // 「未测 = -1」的断言冲突，故显式置 true。
+      it.alive = true;
       (*items)[name] = it;
     }
     return true;

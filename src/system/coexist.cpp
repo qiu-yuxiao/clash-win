@@ -90,13 +90,18 @@ bool shell_runas(const std::wstring& file, const std::wstring& params) {
 
 bool is_own_path(const std::wstring& exe_path) {
   if (exe_path.empty()) return false;
-  const std::wstring p = lower(exe_path);
-  const std::wstring roots[] = {lower(util::dirs::exe_dir()),
-                                lower(util::dirs::app_home_dir())};
+  // Windows 路径语义：大小写不敏感、正/反斜杠等价（服务 ImagePath 可能写 /）。
+  auto norm = [](std::wstring s) {
+    std::replace(s.begin(), s.end(), L'/', L'\\');
+    return lower(std::move(s));
+  };
+  const std::wstring p = norm(exe_path);
+  const std::wstring roots[] = {norm(util::dirs::exe_dir()),
+                                norm(util::dirs::app_home_dir())};
   for (const std::wstring& raw_root : roots) {
     if (raw_root.empty()) continue;
     std::wstring root = raw_root;
-    if (root.back() != L'\\' && root.back() != L'/') root += L'\\';
+    if (root.back() != L'\\') root += L'\\';
     if (p.starts_with(root)) return true;
   }
   return false;

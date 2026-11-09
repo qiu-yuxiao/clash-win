@@ -24,6 +24,10 @@ struct MockState {
                                               {"n3", "ANYTLS"}};
   bool select_ok = true;
   bool group_fail = false;
+  // 内核 alive 真源默认 true（mihomo 未测过的节点 alive 仍为 true；
+  // 只有测速失败才会被内核判死）。v0.2.2 ❌2 起 alive=false → row_delay 一律 0，
+  // 故夹具必须显式声明存活，否则「未测」会被误读成「已判死」。
+  bool alive = true;
   int select_calls = 0;
   std::string last_selected;
   int test_calls = 0;
@@ -43,6 +47,7 @@ NodeData make_data(MockState& st) {
       clashwin::mihomo::ProxyItem it;
       it.name = name;
       it.type = type;
+      it.alive = st.alive;
       (*items)[name] = it;
     }
     return true;
@@ -102,6 +107,14 @@ UT_TEST(t13_node_data_load_merge) {
   UT_CHECK(data.now() == "n1");
   // 未测 → row_delay -1
   UT_CHECK_EQ(data.row_delay("n1"), -1);
+
+  // 内核判死（alive=false）→ 一律 0（Timeout），不得回落到陈旧 history。
+  // 对应 v0.2.2 ❌2 行为变更（← delay.ts:279-281 alive===false → 0）
+  MockState dead;
+  dead.alive = false;
+  NodeData d_dead = make_data(dead);
+  UT_CHECK(d_dead.load());
+  UT_CHECK_EQ(d_dead.row_delay("n1"), 0);
 
   // 细节失败仍展示成员（type 空）
   st.group_fail = false;

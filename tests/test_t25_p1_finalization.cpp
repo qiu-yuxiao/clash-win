@@ -59,6 +59,8 @@ class MockServiceRunner : public system::IServiceCommandRunner {
  public:
   bool installed = false;
   bool available = true;
+  bool binary_valid = true;
+  bool image_own = true;
   bool installer_fail = false;
   bool uninstaller_fail = false;
   bool start_fail = false;
@@ -83,6 +85,9 @@ class MockServiceRunner : public system::IServiceCommandRunner {
     log.push_back("is_installed");
     return installed;
   }
+
+  bool is_binary_valid() override { return binary_valid; }
+  bool is_image_own() override { return image_own; }
 
   Result<void> start_service() override {
     log.push_back("start");
@@ -214,6 +219,9 @@ UT_TEST(t25_service_reinstall_uninstall_step_tolerated) {
 
 // 3. t25_service_mock_install_uninstall（共存条件式：缺失可安装同名服务；
 //    已存在绝不触发安装；uninstall 禁用；无第二服务名）
+//    注：v0.2.2 的 install_service 增加了两项真实 SCM 判定（ImagePath 有效性 / 归属），
+//    直接打真实注册表会让本用例随机器状态漂移（有服务能过、没服务必挂）。
+//    现通过 runner seam 注入，恢复"已注册且就绪 → 只查询"的原断言意图。
 UT_TEST(t25_service_mock_install_uninstall) {
   auto mock = std::make_shared<MockServiceRunner>();
   system::set_service_runner(mock);
