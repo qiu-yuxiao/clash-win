@@ -112,9 +112,23 @@ UT_TEST(t03_guard_client_info) {
 }
 
 UT_TEST(t03_controller_conflict_finds_free_port) {
-  // 独占 9108 → load/resolve 自动寻 9109 起的空闲口
+  // 独占测试端口 39098 → find_free_controller_port 应跳过全部被占端口、
+  // 返回其后首个可 bind 的端口（← clash.cpp:264-280 的循环语义）。
+  // 断言按语义写，不写死「起点+1」：CI/本机都可能有无关进程占用紧邻端口，
+  // 旧断言 == 39099 属环境依赖型 flaky（本机 39099 曾被 editor_sdk 占用）。
   WSADATA wsa;
   WSAStartup(MAKEWORD(2, 2), &wsa);
+  auto can_bind = [](uint16_t port) -> bool {
+    SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
+    if (s == INVALID_SOCKET) return false;
+    sockaddr_in a{};
+    a.sin_family = AF_INET;
+    a.sin_port = htons(port);
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    const int r = bind(s, (sockaddr*)&a, sizeof(a));
+    closesocket(s);
+    return r == 0;
+  };
   SOCKET blocker = socket(AF_INET, SOCK_STREAM, 0);
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
@@ -123,9 +137,14 @@ UT_TEST(t03_controller_conflict_finds_free_port) {
   UT_CHECK(bind(blocker, (sockaddr*)&addr, sizeof(addr)) == 0);
   UT_CHECK(listen(blocker, 1) == 0);
 
-  // 9108 被占且探测无成功响应 → 冲突；寻位从 9108 起找到 9109
+  // 39098 被占且探测无成功响应 → 冲突；寻位结果必须是「首个可绑定端口」
   UT_CHECK(IClashTemp::is_port_conflict(39098, "x"));
-  UT_CHECK_EQ(IClashTemp::find_free_controller_port(39098), 39099);
+  const uint16_t free_port = IClashTemp::find_free_controller_port(39098);
+  UT_CHECK(free_port > 39098);
+  UT_CHECK(can_bind(free_port));
+  for (uint16_t p = 39098; p < free_port; ++p) {
+    UT_CHECK_MSG(!can_bind(p), "find_free_controller_port 跳过了可绑定端口");
+  }
 
   YAML::Node m(YAML::NodeType::Map);
   m["external-controller"] = "127.0.0.1:39098";
@@ -138,7 +157,7 @@ UT_TEST(t03_controller_conflict_finds_free_port) {
   closesocket(blocker);
   WSACleanup();
 
-  // 空闲时保持 9108
+  // 释放 blocker 后 39098 空闲 → 不改写 external-controller
   UT_CHECK(!IClashTemp::is_port_conflict(39098, "x"));
   YAML::Node m2(YAML::NodeType::Map);
   m2["external-controller"] = "127.0.0.1:39098";

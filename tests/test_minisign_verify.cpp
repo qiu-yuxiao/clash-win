@@ -52,16 +52,20 @@ UT_TEST(minisign_garbage_signature_fails) {
                                        kTestPubkeyFileB64));  // 非 4 行
 }
 
-UT_TEST(minisign_real_mini_pubkey_structure) {
-  // 真实 Mini 公钥（config 常量 ← tauri.conf.json:32）结构校验：
-  // Base64 → 两行文本；第 2 行 Base64 → 42 字节 = "Ed" + keynum + 32 字节公钥，
-  // keynum = 60B6CD84214C3410（与 manifest 签名 blob 的 keynum 一致）。
+UT_TEST(minisign_clashwin_pubkey_structure) {
+  // 编译进客户端的更新验签公钥（config::kUpdatePubkeyFileB64）结构校验：
+  // Base64 → 两行文本；第 2 行 Base64 → 42 字节 = "Ed" + keynum + 32 字节公钥。
+  // v0.2.2 起该常量已由 Mini 公钥换成 Clash Win 自有密钥对（提交 d3a27aa，
+  // 见 src/config/update_keys.h）：key id = BEFA887F30C3BAAD，
+  // keynum = ADBAC3307F88FABE（恰为 key id 的逆序字节）。轮换密钥时两处须同步。
+  // 注：下方 minisign_real_mini_manifest_signature_structure 校验的是硬编码的
+  // 历史 Mini manifest 签名向量，其 keynum 仍是 Mini 的，与当前公钥无关。
   using clashwin::util::decode_base64_robust;
   const auto pk_file =
       decode_base64_robust(clashwin::config::kUpdatePubkeyFileB64);
   UT_CHECK(pk_file.has_value());
   const std::string text(pk_file->begin(), pk_file->end());
-  UT_CHECK(text.rfind("untrusted comment: minisign public key: 10344C2184CDB660",
+  UT_CHECK(text.rfind("untrusted comment: minisign public key BEFA887F30C3BAAD",
                       0) == 0);
   const size_t p1 = text.find('\n');
   UT_CHECK(p1 != std::string::npos);
@@ -70,8 +74,9 @@ UT_TEST(minisign_real_mini_pubkey_structure) {
   UT_CHECK_EQ(bin->size(), 42u);
   UT_CHECK_EQ((*bin)[0], 0x45);  // 'E'
   UT_CHECK_EQ((*bin)[1], 0x64);  // 'd' → "Ed"（公钥算法标识）
-  const uint8_t expect_keynum[8] = {0x60, 0xB6, 0xCD, 0x84,
-                                    0x21, 0x4C, 0x34, 0x10};
+  // 当前 Clash Win 公钥 keynum（= key id BEFA887F30C3BAAD 的逆序字节）
+  const uint8_t expect_keynum[8] = {0xAD, 0xBA, 0xC3, 0x30,
+                                    0x7F, 0x88, 0xFA, 0xBE};
   UT_CHECK(std::equal(expect_keynum, expect_keynum + 8, bin->data() + 2));
 }
 

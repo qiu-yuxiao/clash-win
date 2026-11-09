@@ -8,7 +8,7 @@
 | :--- | :--- | :--- | :--- |
 | (a) | frosted-glass Blur | Not implemented | `docs/04-工程技巧.md`; constitution §六.7 |
 | (b) | Hover 0.15 s transition | Implemented for `Button`; other hover surfaces discrete | `src/ui/button.cpp` (`advance_hover`), §(b) below |
-| (c) | In-app auto-update | Wired, signature pending | `updater/app-update.json`, `src/config/update_keys.h`, `.github/workflows/release.yml` |
+| (c) | In-app auto-update | Wired; Clash Win minisign key configured | `updater/app-update.json`, `src/config/update_keys.h`, `.github/workflows/release.yml` |
 | (d) | Release asset signing | **Unsigned (no Authenticode)** | `scripts/delivery_check.ps1`, Release assets |
 | (e) | Clean-machine / UAC visual checks | Not verified | `docs/06-验收状态台账.md` |
 | (f) | sidecar binaries | Not committed (CI-restored) | `.gitignore`, `docs/05-sidecar-内核资产.md` |
@@ -38,15 +38,24 @@
 
 ---
 
-## (c) In-app auto-update is wired but the signature path is pending
+## (c) In-app auto-update — minisign path wired with a Clash Win-owned key
 
-**What changed in v0.2.2**: the empty-channel gap (❌10) is closed. `.github/workflows/release.yml` now generates a real `updater/app-update.json` manifest on publish, populating `platforms.windows-x86_64` with the setup asset URL, its SHA256, and a Base64 minisign signature. The client (`src/update/client_updater.cpp`) parses and verifies this manifest.
+**What changed in v0.2.2**: the empty-channel gap (❌10) is closed. `.github/workflows/release.yml` generates a real `updater/app-update.json` manifest on publish, populating `platforms.windows-x86_64` with the setup asset URL, its SHA256, and a Base64 minisign signature. The client (`src/update/client_updater.cpp`) parses and verifies this manifest, and minisign verification is a **hard gate** (`src/update/client_updater.cpp:96`/`:460`).
 
-**What is still pending**:
-- The minisign **signature** is only produced when the `MINISIGN_PRIVATE_KEY` repository secret is configured. Without it, the manifest is generated **without** a `signature` field and the workflow prints a `::warning::`. `client_updater.cpp` treats minisign verification as a **hard gate** (`:96`/`:460`) — with no signature field, the download-install path **refuses to install**. So the channel is wired end-to-end but **non-functional until the key is configured**.
-- The public key compiled into `src/config/update_keys.h` is still **Mini's** (`src-tauri/tauri.conf.json:32` lineage). It must be replaced with a Clash Win-owned keypair before the channel can be safely enabled; otherwise a future signed Mini asset could be mistaken for a valid Clash Win update.
+**Key material（v0.2.2 收尾已就位）**:
+- 公钥：Clash Win 自己的 minisign 公钥（key id `BEFA887F30C3BAAD`）已编译进 [`src/config/update_keys.h`](../src/config/update_keys.h)，不再是 Mini 的公钥。
+- 私钥：**不在仓库内**。本地产出后存放于仓库外 `%USERPROFILE%\.clashwin\updater-keys\clashwin-updater.key`（无密码 key，权限依赖用户目录 ACL），并以仓库 Actions Secret `MINISIGN_PRIVATE_KEY` 注入 CI（`gh secret set MINISIGN_PRIVATE_KEY`）。
+- 轮换顺序：先发一版带新公钥的客户端，再替换 CI secret；旧客户端会以「签名与更新公钥不匹配，已中止安装」明确拒绝安装（预期行为，不静默）。
 
-**Consequence**: "Check for updates" in v0.2.2 still will not offer or install anything until a Clash Win-owned minisign keypair is generated and wired into `MINISIGN_PRIVATE_KEY` + `update_keys.h`. Users update by downloading a new Release manually. Do not treat the updater as a security control in this release (see [SECURITY.md](../SECURITY.md)).
+**User-visible failure modes（均为通知，不静默）**:
+- 下载失败 → `更新失败: …`（`download_app_update` 的进度事件 + 通知）；
+- 清单缺 `signature` / 签名与公钥不匹配 / 验签失败 → `发布清单缺少有效签名，已中止安装`、`签名与更新公钥不匹配，已中止安装`、`安装包签名校验失败`；
+- 公钥缺失或格式错误 → `更新公钥未配置或格式错误，已中止安装`；
+- 检查更新请求失败 → `clientCheckFailed` 通知。
+
+**Manifest endpoint**: `https://raw.githubusercontent.com/qiu-yuxiao/clash-win/main/updater/app-update.json`（见 `src/update/client_updater.cpp:393`），指向 Clash Win 自己的仓库；`t35_update_manifest_is_clash_win_not_mini` 守住清单不含 `clash-mini`。
+
+**Residual**: 更新器签名只证明「安装包字节与发布者私钥签出的一致」，不解决 SmartScreen「未知发布者」——后者取决于 Authenticode，(d) 仍未做。Do not treat the updater as a trust anchor for the *binary's* publisher identity (see [SECURITY.md](../SECURITY.md)).
 
 ---
 
@@ -96,7 +105,7 @@ This release does **not** claim:
 
 - "perfect 1:1 parity" or "no known differences";
 - a publicly trusted code-signing chain (the v0.2.2 assets are unsigned);
-- a working in-app auto-update channel (signature/key ownership still pending);
+- an in-app auto-update **round-trip already exercised end-to-end in a real client** (the minisign channel and key material are wired, but v0.2.2 clients read the same-version manifest and see `has_update=false`; the first real download-install path can only be exercised from the next release — see (c));
 - verified clean-machine bootstrap;
 - that a source-only checkout is runnable without the sidecar binaries.
 

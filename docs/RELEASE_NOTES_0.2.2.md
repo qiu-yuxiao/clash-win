@@ -20,7 +20,7 @@
 | Coexistence (v0.2.1) | Clash Win and Clash Mini now **mutually exclude** each other (launching one terminates the other's client/core + takes over the shared `clash_verge_service`); ports / proxy-secret / identifiers return to 1:1 with Clash Mini's scheme |
 | Workflows | Subscription import (19 protocols), auto node benchmarking/switching, rule & GeoIP updates, mini traffic monitor, right-click routing, streaming-unlock detection, first-run guide, tray, autostart |
 | Localization | 13 UI languages (`locales/`); installer starts in Simplified Chinese / English / Russian |
-| Auto-update (v0.2.2) | CI now generates a real `updater/app-update.json` manifest (`platforms.windows-x86_64` url + sha256 + minisign signature) on publish — see Known Limitations (c) for the signature caveat |
+| Auto-update (v0.2.2) | CI generates a real `updater/app-update.json` manifest (`platforms.windows-x86_64` url + sha256 + minisign signature) on publish; the client verifies it against the project-owned public key in `src/config/update_keys.h` (private key only in the `MINISIGN_PRIVATE_KEY` Actions secret) |
 | Verification | Full regression passed (`EXIT=0`, `0 failed`, `0 assertion failures`) on the local build; 11 parity items are code-complete and marked 已处理, pending final desktop confirmation (用户已确认 gate) |
 
 ## Parity fixes in v0.2.2
@@ -71,8 +71,8 @@ Get-FileHash .\ClashWin_0.2.2_x64_portable.zip -Algorithm SHA256
 Full detail and evidence in [KNOWN_LIMITATIONS_0.2.2.md](KNOWN_LIMITATIONS_0.2.2.md):
 
 - (a) Direct2D has no CSS `backdrop-filter` primitive; the frosted-glass **Blur** effect is **not implemented** in v0.2.2.
-- (b) The global **0.15 s hover transition** is not implemented.
-- (c) **In-app auto-update channel is now wired**, but the minisign **signature** requires a project-owned keypair + `MINISIGN_PRIVATE_KEY` secret. Until configured, the manifest ships without a signature and the client refuses to install updates (hard gate). The embedded public key is still Mini's and must be replaced.
+- (b) The 0.15 s hover transition is implemented for the `Button` family (incl. skin cells); other self-drawn hover surfaces remain discrete.
+- (c) **In-app auto-update is wired with a project-owned minisign keypair**: the public key (key id `BEFA887F30C3BAAD`) is compiled into the client, the private key lives outside the repo and is injected as the `MINISIGN_PRIVATE_KEY` Actions secret. Missing signature / bad signature / download failure / missing public key all abort with a visible notice.
 - (d) **v0.2.2 release assets are unsigned — no Authenticode signature.**
 - (e) **Clean-machine acceptance and the manual UAC #0 / #5 visual checks were not performed** (this machine has Clash Mini installed; `NOT-CLEAN-MACHINE`).
 - (f) The **five sidecar executables are not committed** (`.gitignore` excludes `*.exe`); CI restores them from a maintainer-controlled archive (`vars.SIDECAR_ARCHIVE_URL`).

@@ -4,7 +4,7 @@
 #   validate → build → publish 分阶段骨架，但全部替换为 Clash Win 自家交付链：
 #     Mini : pnpm + Tauri + Rust / NSIS bundle / package.json 版本 / tauri signer
 #     Win  : CMake + VS2022 + C++20 / installer\clashwin.nsi / constants.h kAppVersion
-#            / Authenticode 签名 best-effort（v0.1.0 产物未签名，非发布门禁）
+#            / Authenticode 签名 best-effort（发布正文按实际签名状态生成，非发布门禁）
 # 刻意不照抄 Mini 的两处：
 #   - Authenticode（安装包代码签名）与更新签名是两套机制：不引用 TAURI_PRIVATE_KEY /
 #     TAURI_KEY_PASSWORD / pnpm tauri signer sign / .exe.sig。安装包 Authenticode 由
@@ -238,7 +238,7 @@ sidecar 5 个 exe 因 .gitignore 的 *.exe 未入库，CI 全新 checkout 后不
       # ---- NSIS 安装包 ----
       # build_installer.ps1 内部链接 sign.ps1 与 !uninstfinalize 卸载器签名钩子，
       # 均为 best-effort：能提升且有证书时做本机自签（对公网仍「未知发布者」），
-      # 不可用时产物按**未签名资产**发布。签名状态只记录、不阻断（v0.1.0 口径，
+      # 不可用时产物按**未签名资产**发布。签名状态只记录、不阻断（Known Limitation (d) 口径，
       # 见 Known Limitation (d) / SECURITY.md）；SHA256SUMS.txt 才是信任锚。
       # 若卸载器 blob 启发式定位失败，此步 fail-fast，不产出半成品安装包。
       - name: Build NSIS setup.exe
@@ -267,13 +267,19 @@ sidecar 5 个 exe 因 .gitignore 的 *.exe 未入库，CI 全新 checkout 后不
             if ($names -notcontains $n) { throw "portable.zip missing entry: $n" }
           }
           "OK  portable entries: $($names.Count)"
-          # SHA256 清单（用户可离线校验，见 docs/RELEASE_NOTES_0.1.0.md）
+          # SHA256 清单（用户可离线校验）
           $lines = foreach ($f in @($zip, $setup)) {
             $h = (Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash.ToLowerInvariant()
             "$h  $(Split-Path $f -Leaf)"
           }
           $lines | Out-File 'dist\SHA256SUMS.txt' -Encoding utf8
           Get-Content 'dist\SHA256SUMS.txt'
+          # Authenticode 实际状态（供 publish 阶段按真实状态生成 Release 正文，
+          # 不再把旧版本号/结论写死）：STATUS|Subject（无证书时 Subject 为空）
+          $auth = Get-AuthenticodeSignature -LiteralPath $setup
+          $subject = if ($auth.SignerCertificate) { $auth.SignerCertificate.Subject } else { '' }
+          "$($auth.Status)|$subject" | Out-File 'dist\SIGNATURE_STATUS.txt' -Encoding utf8
+          "Authenticode: $($auth.Status) $subject"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -283,6 +289,7 @@ sidecar 5 个 exe 因 .gitignore 的 *.exe 未入库，CI 全新 checkout 后不
             dist/ClashWin_${{ needs.validate.outputs.version }}_x64_portable.zip
             dist/ClashWin_${{ needs.validate.outputs.version }}_x64-setup.exe
             dist/SHA256SUMS.txt
+            dist/SIGNATURE_STATUS.txt
           if-no-files-found: error
           retention-days: 14
 
@@ -332,8 +339,20 @@ sidecar 5 个 exe 因 .gitignore 的 *.exe 未入库，CI 全新 checkout 后不
             printf '完整清单见 [docs/KNOWN_LIMITATIONS_%s.md](https://github.com/qiu-yuxiao/clash-win/blob/main/docs/KNOWN_LIMITATIONS_%s.md)。\n' "$VERSION" "$VERSION"
             printf '\n## 校验 / Checksums\n\n'
             printf '随 Release 提供 `SHA256SUMS.txt`（portable zip + setup.exe）。\n'
-            printf '\n> v0.1.0 产物**未做 Authenticode 签名**（发布会话无法 UAC 提升，签名状态只记录、不阻断）。\n'
-            printf '> Windows 会提示「未知发布者」/ SmartScreen 警告；请在运行前用 `SHA256SUMS.txt` 校验哈希。\n'
+            # Authenticode 状态来自 build 阶段实测（SIGNATURE_STATUS.txt），
+            # 正文不再把版本号或「未签名」结论写死。
+            AUTH_STATUS=""
+            if [ -f dist/SIGNATURE_STATUS.txt ]; then
+              AUTH_STATUS="$(cut -d'|' -f1 dist/SIGNATURE_STATUS.txt | tr -d '\r\n')"
+            fi
+            printf '\n'
+            if [ "$AUTH_STATUS" = "NotSigned" ] || [ -z "$AUTH_STATUS" ]; then
+              printf '> v%s 产物**未做 Authenticode 签名**（发布会话无法 UAC 提升，签名状态只记录、不阻断）。\n' "$VERSION"
+              printf '> Windows 会提示「未知发布者」/ SmartScreen 警告；请在运行前用 `SHA256SUMS.txt` 校验哈希。\n'
+            else
+              printf '> v%s 产物已应用本机代码签名（Authenticode 状态：`%s`），但该证书不受公网信任，Windows 仍可能提示「未知发布者」。\n' "$VERSION" "$AUTH_STATUS"
+              printf '> 请在运行前用 `SHA256SUMS.txt` 校验哈希。\n'
+            fi
             printf '> 详见 [Known Limitations (d)](https://github.com/qiu-yuxiao/clash-win/blob/main/docs/KNOWN_LIMITATIONS_%s.md)。\n' "$VERSION"
             printf '\n## 下载地址\n\n'
             printf -- '- [Windows x64 安装版](https://github.com/qiu-yuxiao/clash-win/releases/download/v%s/ClashWin_%s_x64-setup.exe)\n' "$VERSION" "$VERSION"
@@ -367,14 +386,14 @@ sidecar 5 个 exe 因 .gitignore 的 *.exe 未入库，CI 全新 checkout 后不
       #   signature = Base64( minisign .sig 文件全文 )（硬门禁：缺失/验不过 → 拒绝安装）
       #               .sig = untrusted comment / bin1(74) / trusted comment / global_sig
       #               按 update_keys.h 注释口径 1:1 对齐 tauri-plugin-updater 2.10.1。
-      # 签名私钥来自 secret MINISIGN_PRIVATE_KEY（可选密码 MINISIGN_PASSWORD），
-      # 必须与编译进客户端的公钥（src/config/update_keys.h）同密钥对；未配置则
-      # 降级为无 signature 并打 ::warning（不伪造、不引入明文密钥）。
+      # 签名私钥来自 secret MINISIGN_PRIVATE_KEY（无密码 key；minisign 无非交互
+      # 密码参数，故不消费 MINISIGN_PASSWORD），必须与编译进客户端的公钥
+      # （src/config/update_keys.h）同密钥对；未配置则降级为无 signature 并打
+      # ::warning（不伪造、不引入明文密钥）。
       - name: Generate updater manifest (app-update.json)
         shell: bash
         env:
           MINISIGN_PRIVATE_KEY: ${{ secrets.MINISIGN_PRIVATE_KEY }}
-          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
         run: |
           set -euo pipefail
           SETUP="dist/ClashWin_${VERSION}_x64-setup.exe"
