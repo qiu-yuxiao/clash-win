@@ -1,9 +1,9 @@
 # Clash Win Bug 跟踪台账（2026-11-07 起，攒批，待授权发版）
 
-> **调试第一铁律（最高优先级）**：用户指出问题 → 先核实是否与 Clash Mini v3.2.2 完全一致。
+> **调试第一铁律（最高优先级）**：用户指出问题 → 先核实是否与 Clash Mini 当前版本完全一致（锚点 2026-11-10 起为 **v3.2.3**，此前登记条目按 v3.2.2 时点核实）。
 > - 不一致 → 照 Mini 源码 `file:line` 改，不自行设计。
 > - 一致但用户仍判错 → 提出来商量，不擅自改。
-> Mini 源码只读工作区：`C:\Users\sun_y\Documents\AntiGravity_Projects\ClashVerge`（v3.2.2）。
+> Mini 源码只读工作区：`C:\Users\sun_y\Documents\AntiGravity_Projects\ClashVerge`（v3.2.3）。
 
 ## ★ Bug 状态规矩（2026-11-09 用户指定，覆盖本台账每一条）
 
