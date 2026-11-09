@@ -81,6 +81,10 @@ jobs:
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # validate job 自身没有 env: VERSION（build/publish 才有），而后续
+          # 两个校验步骤在 set -euo pipefail 下会引用 $VERSION。必须一并写入
+          # GITHUB_ENV，否则触发 "VERSION: unbound variable" 直接失败。
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "TAG_NAME=v$VERSION" >> "$GITHUB_ENV"
           echo "Resolved Clash Win version: $VERSION"
 
