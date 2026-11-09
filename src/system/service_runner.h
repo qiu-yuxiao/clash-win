@@ -14,7 +14,7 @@ class IServiceCommandRunner {
   virtual ~IServiceCommandRunner() = default;
   virtual Result<void> run_installer(bool install) = 0;
   // 卸载（← Mini: src-tauri/src/core/service.rs:44-74 uninstall_service()）
-  // 仅由 reinstall / repair 的"先卸载"步骤调用；独立的 uninstall_service 命令仍为拒绝态。
+  // 与 Mini 一致：后端能力存在、UI 不暴露；reinstall / repair 的"先卸载"也走这里。
   // 默认委托 run_installer(false)，Mock 无需实现即可复用既有日志语义。
   virtual Result<void> run_uninstaller() { return run_installer(false); }
   virtual bool is_installed() = 0;

@@ -6,7 +6,8 @@
 // - 服务注册指向对方路径（Clash Mini）→ install_service 时接管：停对方服务 →
 //   删注册（仅注册表，不删对方磁盘文件）→ 自家安装器重注册 → 启动；
 // - 注册指向本方 → 缺失才安装、停止则启动；
-// - uninstall 仍拒绝（首次裁决；Mini 后端允许但其 UI 无入口，D2/选 B 只裁定 reinstall/repair）；
+// - uninstall 与 Mini 一致：后端能力存在（← Mini: core/service.rs:44-74），UI 不暴露
+//   （t35 防误接用例守住「src/ui、src/app 不得出现 uninstall_service」）；
 // - reinstall / repair 已放开（二次裁决 2026-11-09：Mini 可以那么 Win 应该也可以，
 //   ← Mini: src-tauri/src/core/service.rs:193-217）。
 // 全程用户可见反馈（notice_message），不只写日志。
@@ -84,12 +85,29 @@ CmdResult service_reinstall(const char* op, const char* label) {
   return CmdResult::ok(Json{{"message", "reinstalled_and_started"}});
 }
 
-// 统一的"破坏性操作禁用"拒绝错误（用户可见文案）
-CmdResult refuse_service_mutation(const char* op) {
-  return CmdResult::err({errs::kIo,
-      std::string(op) + " 被禁止：Clash Win 不提供该服务自愈操作"
-                        "（互斥共存方针 2026-11-09：服务注册冲突由接管解决，"
-                        "如需变更请通过 Clash Mini 操作或重装 Clash Win）"});
+// 卸载服务（← Mini: core/service.rs:44-74 uninstall_service）
+// 与 Mini 一致：后端能力存在、UI 不暴露。失败即报错并给用户可见提示，不静默。
+CmdResult service_uninstall() {
+  CWLOG_INFO("uninstall service");
+  auto runner = system::get_service_runner();
+  if (!runner) return CmdResult::err({errs::kIo, "service runner unavailable"});
+
+  auto ur = runner->run_uninstaller();
+  if (ur.is_err()) {
+    const std::string msg = "卸载服务失败：" + ur.error().message;
+    events::EventBus::notice_message("uninstall_service::error", msg);
+    return CmdResult::err({errs::kIo, msg});
+  }
+  // ← Mini:44-74 只要求卸载器返回 0；这里额外确认注册已消失，避免"假成功"
+  if (runner->is_installed()) {
+    const std::string msg = "卸载器已执行但 clash_verge_service 仍在注册";
+    events::EventBus::notice_message("uninstall_service::error", msg);
+    return CmdResult::err({errs::kIo, msg});
+  }
+  events::EventBus::notice_message(
+      "uninstall_service::ok",
+      "clash_verge_service 已卸载（仅移除服务注册，未删除 Clash Mini 的磁盘文件）");
+  return CmdResult::ok(Json{{"message", "uninstalled"}});
 }
 
 }  // namespace
@@ -185,13 +203,12 @@ void install_cmd_service(CommandService& svc) {
        },
        consts::kTimeoutHeavy});
 
-  // ---- uninstall_service：当前仍拒（Mini 后端 service.rs 有这个入口，但其 UI 从不调用；
-  //      D2 裁决放开了 reinstall/repair，是否放开 uninstall 待单独裁决）。
-  //      约束：任何服务操作都不删除 Clash Mini 的磁盘文件，只动共享服务 clash_verge_service。----
+  // ---- uninstall_service（← Mini: cmd/service.rs:20-23 → core/service.rs:44-74）----
+  // 与 Mini 一致：后端能力存在、UI 不暴露（无界面/托盘/引导/命令面板/IPC 调用路径，
+  // 由 tests/test_t35_release_readiness.cpp 的防误接用例守住）。----
   svc.register_command(
       "uninstall_service",
-      {[](const Json&) -> CmdResult { return refuse_service_mutation("uninstall_service"); },
-       consts::kTimeoutHeavy});
+      {[](const Json&) -> CmdResult { return service_uninstall(); }, consts::kTimeoutHeavy});
 
   // ---- reinstall_service（← Mini: cmd/service.rs:28-30 → core/service.rs:470-474）----
   svc.register_command(

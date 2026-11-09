@@ -222,6 +222,34 @@ UT_TEST(t35_update_manifest_is_clash_win_not_mini) {
   }
 }
 
+UT_TEST(t35_uninstall_service_has_no_ui_path) {
+  // 与 Mini 一致（用户 2026-11-09 裁决「跟 Mini 一样」）：
+  //   Mini 后端 cmd/service.rs:20-23 注册了 uninstall_service，但 src/ 前端零调用点；
+  //   Win 同样只保留后端能力（t25_service_mock_install_uninstall 的 Case C 固定能力存在）。
+  // 防误接：src/ui、src/app 只要出现该命令字面量，就说明卸载被接到了可见路径上。
+  const fs::path root = repo_root();
+  UT_CHECK(!root.empty());
+  if (root.empty()) return;
+
+  std::vector<std::string> hits;
+  for (const char* sub : {"src/ui", "src/app"}) {
+    std::error_code ec;
+    const fs::path dir = root / sub;
+    if (!fs::exists(dir, ec)) continue;
+    for (const auto& e : fs::recursive_directory_iterator(dir, ec)) {
+      if (!e.is_regular_file()) continue;
+      const auto ext = e.path().extension();
+      if (ext != ".cpp" && ext != ".h") continue;
+      std::ifstream f(e.path());
+      if (!f.good()) continue;
+      std::ostringstream ss;
+      ss << f.rdbuf();
+      if (ss.str().find("uninstall_service") != std::string::npos) hits.push_back(e.path().string());
+    }
+  }
+  UT_CHECK_MSG(hits.empty(), hits.empty() ? "" : hits.front().c_str());
+}
+
 UT_TEST(t35_version_single_source_of_truth) {
   // src: include/clashwin/config/constants.h:20 kAppVersion = "0.1.0"
   // 自家 Release 版本线从 0.1.0 独立递增，不与 Mini 3.2.2 绑死（总纲 §5.3）。

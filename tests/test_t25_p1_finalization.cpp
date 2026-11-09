@@ -262,11 +262,23 @@ UT_TEST(t25_service_mock_install_uninstall) {
   std::vector<std::string> exp2b = {"is_installed", "is_available", "start", "wait_ready"};
   UT_CHECK_EQ(mock->log, exp2b);
 
-  // Case C: Uninstall → 共存禁用，runner 零调用
+  // Case C: Uninstall → 与 Mini 一致：后端能力存在（UI 不暴露，由 t35 防误接用例守住）
+  mock->installed = true;
   mock->log.clear();
   auto r3 = cmd::CommandService::instance().invoke("uninstall_service", {});
-  UT_CHECK(!r3.is_ok());
-  UT_CHECK(mock->log.empty());
+  UT_CHECK(r3.is_ok());
+  std::vector<std::string> exp3 = {"uninstall", "is_installed"};
+  UT_CHECK_EQ(mock->log, exp3);
+  UT_CHECK(!mock->installed);
+
+  // Case C2: 卸载器失败 → 报错且不假装成功（状态保持已安装）
+  mock->installed = true;
+  mock->uninstaller_fail = true;
+  mock->log.clear();
+  auto r3b = cmd::CommandService::instance().invoke("uninstall_service", {});
+  UT_CHECK(!r3b.is_ok());
+  UT_CHECK(mock->installed);
+  mock->uninstaller_fail = false;
 
   // 共存铁律：唯一服务名 clash_verge_service，无第二名称；
   // 真实 runner 卸载器路径恒拒绝（校验先于任何文件系统/进程操作，测试环境安全）
