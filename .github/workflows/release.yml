@@ -137,11 +137,18 @@ jobs:
   build:
     name: Build Windows x64 (Setup + Portable)
     needs: [validate]
-    # 固定 windows-2022：该镜像自带 VS Enterprise 2022 (17.14) + NSIS 3.10，
-    # 与本项目 VS2022 工具链及 -G "Visual Studio 17 2022" 一致。
-    # windows-latest 已滚动到 VS 18 Enterprise，会让该 generator 报
-    # "could not find any instance of Visual Studio" 直接失败。
-    runs-on: windows-2022
+    # 固定 windows-2025：镜像 20261101.318.1 自带
+    #   Visual Studio Enterprise 2022 17.14.37827.9
+    #   (C:\Program Files\Microsoft Visual Studio\2022\Enterprise) + CMake 3.31.6，
+    # 与本项目 VS2022 工具链及 -G "Visual Studio 17 2022" 完全一致。
+    # 不选 windows-latest：已滚动到 VS 18 / Visual Studio 2026，该 generator 报
+    #   "could not find any instance of Visual Studio"（run 42670204063 实证）。
+    # 不选 windows-2022：虽自带 VS2022 + NSIS 3.10，但该 label 在当前仓库触发
+    #   Actions 后端 "Internal server error"（run 42671321953 两个 attempt 分别复现），
+    #   build/publish job 根本不创建，整条 run 直接 failure。
+    # windows-2025 镜像的 Tools 清单不含 NSIS，故下方显式安装并把绝对路径
+    # 交给 build_installer.ps1（Find-Makensis 支持 $env:NSIS_MAKENSIS）。
+    runs-on: windows-2025
     env:
       VERSION: ${{ needs.validate.outputs.version }}
     steps:
@@ -150,6 +157,23 @@ jobs:
 
       - name: Setup MSBuild (VS2022)
         uses: microsoft/setup-msbuild@v2
+
+      - name: Install NSIS (windows-2025 image does not ship it)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install nsis -y --no-progress
+          $makensis = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
+          if (-not (Test-Path -LiteralPath $makensis)) {
+            # choco 装完当前 session 的 PATH 未必刷新，退一步用 Get-Command 兜底
+            $cmd = Get-Command makensis.exe -ErrorAction SilentlyContinue
+            if ($cmd) { $makensis = $cmd.Source }
+          }
+          if (-not (Test-Path -LiteralPath $makensis)) {
+            throw "makensis.exe not found after choco install nsis (looked at $makensis and PATH)"
+          }
+          "NSIS_MAKENSIS=$makensis" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          & $makensis /VERSION
 
       # ---- sidecar 还原：Known Limitation (f) 的 CI 落地 ----
       # 未配置归档地址时明确失败，不静默产出「可编译但不可运行」的包。
