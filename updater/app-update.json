@@ -1,6 +1,6 @@
 {
-  "version": "0.2.2",
-  "notes": "Clash Win v0.2.2 — audit-gap parity fixes: 3-column node grid, alive-probe guard, on-demand probe gating, autostart StartupApproved + real-registry read, settings switch rollback on patch failure, paint error boundary, first-run 'later' auto-opens drawer, auto-update manifest closure.",
-  "pub_date": "2026-11-08T16:45:00Z",
+  "version": "0.2.3",
+  "notes": "Clash Win v0.2.3 — kernel upgraded to official MetaCubeX mihomo v1.19.33 (renamed win-mihomo.exe), exclusive coexistence policy landed (launch/install mutual kill + service takeover, never deletes the other side's files), node-filter auto-select aligned to Mini v3.2.3 (700ms debounce, IME composing guard, same-word dedup, no focus-lost trigger), log dialog layout aligned to Mini v3.2.3 (44px header, 18px icons, word-wrap).",
+  "pub_date": "2026-11-10T08:00:00Z",
   "platforms": {}
 }
