@@ -253,7 +253,7 @@ UT_TEST(t35_uninstall_service_has_no_ui_path) {
 UT_TEST(t35_version_single_source_of_truth) {
   // src: include/clashwin/config/constants.h:20 kAppVersion = "0.1.0"
   // 自家 Release 版本线从 0.1.0 独立递增，不与 Mini 3.2.2 绑死（总纲 §5.3）。
-  UT_CHECK(std::string(config::consts::kAppVersion) == "0.2.4");
+  UT_CHECK(std::string(config::consts::kAppVersion) == "0.2.5");
   UT_CHECK(update::ClientUpdater::is_version_newer("0.2.1", "0.1.2"));
   UT_CHECK(!update::ClientUpdater::is_version_newer("0.2.1", "0.2.1"));
   if (false) UT_CHECK(std::string(config::consts::kAppVersion) == "0.1.0");
