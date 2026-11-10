@@ -16,6 +16,7 @@
 #include "../card_draw.h"
 #include "../soft_shadow.h"
 #include "../theme/theme.h"
+#include "../breakpoints.h"  // win::kMiniWidthThreshold（与 breakpoints.h:25 单一事实源对齐）
 #include "../../i18n/i18n.h"
 #include "clashwin/config/constants.h"
 #include "events/notice.h"
@@ -942,7 +943,7 @@ void SettingsDrawer::set_open(bool open) {
   mask_->set_visible(false);  // 源码无遮罩
   panel_->set_visible(open);
   if (close_btn_) close_btn_->set_visible(open);
-  if (conn_panel_) conn_panel_->set_visible(open && bounds().w > 285.0f);
+  if (conn_panel_) conn_panel_->set_visible(open && bounds().w > win::kMiniWidthThreshold);
   if (open) {
     // 先刷新订阅列表再布局：preferred_height 依赖 profiles_，顺序颠倒会让
     // 首次打开时列表高度算成 0（订阅卡只剩标题/输入/按钮，行不显示）。
@@ -1173,10 +1174,10 @@ void SettingsDrawer::on_arrange(const RectF& area) {
   // src: _layout.tsx:1593/1654 `@media (max-height:830px) { display:none }` 是对
   //   **窗口视口高度**判定；area.h 已扣掉标题栏 30 与底部流量面板 100/135，
   //   旧代码直接比 area.h 导致 831~930 的窗口也判为矮、底部行永不显示。
-  const float bottom_inset = area.w <= 285.0f ? 100.0f : 135.0f;
+  const float bottom_inset = area.w <= win::kMiniWidthThreshold ? 100.0f : 135.0f;
   const bool tall = (area.h + 30.0f + bottom_inset) > 830.0f;
   bottom_row_visible_ = tall && open_;
-  const bool side = area.w > 285.0f;
+  const bool side = area.w > win::kMiniWidthThreshold;
   // 豁免: Mini 无对应物 — 用户明确预先裁决单列模式水平居中设置卡片（出处: 无）
   const float col_x = side ? (kPad + kPanelBorder) : std::max(kPad, (area.w - kCardW) / 2.0f);
   const float col_y = kPad + kPanelBorder;
