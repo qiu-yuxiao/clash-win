@@ -323,7 +323,7 @@ jobs:
             $names = $z.Entries | ForEach-Object { $_.FullName.Replace('\', '/') }
           } finally { $z.Dispose() }
           foreach ($n in @('clashwin.exe', '.config/PORTABLE',
-                           'sidecar/mini-mihomo.exe', '用户必读.txt')) {
+                           'sidecar/win-mihomo.exe', '用户必读.txt')) {
             if ($names -notcontains $n) { throw "portable.zip missing entry: $n" }
           }
           "OK  portable entries: $($names.Count)"
