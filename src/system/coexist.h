@@ -1,15 +1,19 @@
 #pragma once
-// ★ Mini/Win 互斥共存方针（用户 2026-11-09 改定，最高优先级；总纲《移植基本准则.md》§5.2）
+// ★ Mini/Win 互斥共存方针（用户 2026-11-09 改定；总纲《移植基本准则.md》§5.2）
+// ★ 「借用与归还」裁决（用户 2026-11-10，总纲 §5.2.2）：
 //
 // - Clash Mini 与 Clash Win 可同时安装于同一台机器，但绝对避免同时运行；
-// - 一方启动/安装时，强杀另一方的所有进程（含服务），但不删除对方磁盘上的任何东西；
-// - 服务名固定 clash_verge_service（两侧同名，改不了）：各自安装时把注册指向自家路径，
-//   需要此服务时接管注册并启动自家路径下的服务；
+// - 一方启动/安装时，强杀另一方的所有进程（含服务运行实例），但不删除对方磁盘上
+//   的任何东西，也不碰对方的注册表（含自启值）；
+// - 服务名固定 clash_verge_service（两侧同名，改不了）。服务二进制继承自上游
+//   Clash Verge，是同一个组件：注册在位且二进制哈希与上游基线一致 → 共用不夺注册
+//   （零 UAC）；仅缺失/损坏/哈希不一致才重装接管；卸载时归还给仍在装的对方；
 // - 归属判定按 exe 安装目录路径，绝不按进程名（两侧内核同名 mini-mihomo.exe，按名杀
 //   会误杀自家内核）；绝不发 WM_CLOSE（Mini 收到关闭只会进轻量模式隐藏，不会退出）。
 //
-// 取代旧「共存豁免 + refuse_service_mutation」设计（审计《Win和mini的差别.md》❌11/△3）。
+// 取代旧「共存豁免 + refuse_service_mutation」设计与「安装即夺注册」细则。
 #include <string>
+#include <string_view>
 
 namespace clashwin::system::coexist {
 
@@ -20,6 +24,13 @@ bool is_own_path(const std::wstring& exe_path);
 // 已注册服务的 ImagePath 可执行文件是否指向本方目录。
 // 服务缺失 / 解析失败 → false（宁可误判为对方再走接管路径，也不误判为本方）。
 bool service_image_is_own();
+
+// 已注册服务的 ImagePath 二进制 SHA256 是否与上游基线（kServiceExeSha256）一致。
+// 总纲 §5.2.2：一致 → 同一个上游组件，共用不夺注册；服务缺失/文件不在/哈希不符 → false。
+bool service_image_matches_upstream();
+
+// 纯函数： lowercase hex SHA256 与基线比较（大小写不敏感），供单测锁定。
+bool upstream_baseline_equals(std::string_view hex_lower_or_mixed);
 
 // 启动/安装互斥：强杀所有「对方」进程（按路径归属判定），返回成功终止的进程数。
 // 分类规则：exe 路径不属本方，且文件名属于两 App 共享组件名集合

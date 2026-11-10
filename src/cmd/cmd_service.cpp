@@ -1,10 +1,12 @@
 // T09 / T25 cmd_service（← cmd/service.rs：install/uninstall/reinstall/repair/available）
 //
-// 【★ 互斥共存方针】（用户 2026-11-09 改定，最高优先级；总纲《移植基本准则.md》§5.2，
-// 取代旧「共存豁免 + refuse_service_mutation」设计）：
-// - clash_verge_service 服务名固定、两侧同名（改不了）；
-// - 服务注册指向对方路径（Clash Mini）→ install_service 时接管：停对方服务 →
-//   删注册（仅注册表，不删对方磁盘文件）→ 自家安装器重注册 → 启动；
+// 【★ 互斥共存方针 + 借用与归还】（用户 2026-11-09 改定、2026-11-10 裁决；
+// 总纲《移植基本准则.md》§5.2 / §5.2.2，取代旧「共存豁免 + refuse_service_mutation」设计）：
+// - clash_verge_service 服务名固定、两侧同名（改不了）；服务二进制继承自上游
+//   Clash Verge，是同一个组件；
+// - 服务注册指向对方路径（Clash Mini）→ 先验二进制哈希：与上游基线一致 → 共用
+//   不夺注册（零 UAC）；不一致才接管：停对方服务 → 删注册（仅注册表，不删对方
+//   磁盘文件）→ 自家安装器重注册 → 启动；
 // - 注册指向本方 → 缺失才安装、停止则启动；
 // - uninstall 与 Mini 一致：后端能力存在（← Mini: core/service.rs:44-74），UI 不暴露
 //   （t35 防误接用例守住「src/ui、src/app 不得出现 uninstall_service」）；
@@ -122,13 +124,33 @@ void install_cmd_service(CommandService& svc) {
          // 已注册但 ImagePath 失效（Mini 卸载残壳）视同未安装：
          // ← Mini: core/service.rs:470-475 ReinstallRequired / ForceReinstallRequired
          const bool installed = runner->is_installed() && runner->is_binary_valid();
-         // ★ 互斥共存方针接管分支：服务已注册但 ImagePath 指向 Clash Mini 路径
-         //   → 停对方服务 → 删注册（不动对方磁盘文件）→ 自家安装器重注册 → 启动
+         // ★ 互斥共存方针 + 「借用与归还」（总纲 §5.2.2，用户 2026-11-10 裁决）：
+         //   服务已注册但 ImagePath 指向对方路径时——
+         //   a) 二进制哈希与上游基线一致 → 同一个上游组件，共用不夺注册（零 UAC）；
+         //   b) 哈希不一致/文件缺失 → 停对方服务 → 删注册（不动对方磁盘文件）→
+         //      自家安装器重注册 → 启动。
          if (installed && !runner->is_image_own()) {
+           if (runner->is_image_upstream_baseline()) {
+             CWLOG_INFO("install_service: image matches upstream baseline, sharing registration");
+             if (runner->is_available()) {
+               return CmdResult::ok(Json{{"message", "shared_upstream_service"}});
+             }
+             auto sr = service_start("Shared");
+             if (sr.is_err()) {
+               events::EventBus::notice_message(
+                   "install_service::error",
+                   "共用 clash_verge_service 启动失败：" + sr.error().message);
+               return CmdResult::err(sr.error());
+             }
+             events::EventBus::notice_message(
+                 "install_service::ok",
+                 "clash_verge_service 二进制与上游基线一致：共用服务，未重新安装（TUN 模式可用）");
+             return CmdResult::ok(Json{{"message", "shared_upstream_service"}});
+           }
            events::EventBus::notice_message(
                "install_service::info",
                std::string("检测到 ") + core::service_mode::kServiceName +
-                   " 注册指向 Clash Mini 路径：Clash Win 将停止对方服务并接管注册"
+                   " 注册指向 Clash Mini 路径且二进制与上游基线不一致：Clash Win 将停止对方服务并接管注册"
                    "（指向本方路径，需要 UAC 确认）");
            (void)runner->stop_service();  // 停对方服务（内含 UAC 回退）
            if (!system::coexist::delete_service_registration()) {

@@ -24,6 +24,14 @@ namespace clashwin::core::service_mode {
 inline constexpr const wchar_t* kServiceNameW = L"clash_verge_service";
 inline constexpr const char* kServiceName = "clash_verge_service";
 
+// ---------- 上游服务二进制基线（总纲 §5.2.2「借用与归还」，2026-11-10 裁决） ----------
+// 服务二进制继承自上游 Clash Verge，Mini/Win 是同一个组件。注册在位且 ImagePath
+// 二进制哈希与该基线一致 → 共用不夺注册（零 UAC）；不一致（分叉/损坏）才重装接管。
+// 与 installer/clashwin.nsi 的 SERVICE_EXE_SHA256、scripts/verify_sidecar.ps1 基线同源；
+// sidecar 升级时三处同步。
+inline constexpr const char* kServiceExeSha256 =
+    "92ad792abb91bd84b89894e63a8251434a631a5803d9d043c18f7a5a7961e9d2";
+
 // ---------- IPC 门面（mock 注入点；适配 T04 ServiceIpc） ----------
 struct IServiceIpc {
   virtual ~IServiceIpc() = default;

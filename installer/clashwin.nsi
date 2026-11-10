@@ -7,8 +7,10 @@
 ; 无 License 页（tauri.conf.json bundle.license 未配置 → 模板 :161 条件不成立）。
 ; 无开始菜单文件夹页（bundler 未传 start_menu_folder → 模板 :381-386 PRE Skip，
 ;   快捷方式直接落 $SMPROGRAMS\${PRODUCTNAME}.lnk（模板 :1344-1345））。
-; 服务名固定 clash_verge_service（两侧同名，改不了；互斥共存方针 2026-11-09：安装时
-;   杀对方进程/服务后把注册重建为指向本方路径，不删对方磁盘文件——总纲 §5.2）。
+; 服务名固定 clash_verge_service（两侧同名，改不了）。服务二进制继承自上游
+;   Clash Verge，Mini/Win 是同一个组件（总纲 §5.2.2「借用与归还」裁决 2026-11-10）：
+;   注册在位且二进制哈希一致 → 共用不夺注册；卸载时归还给仍在装的对方；
+;   不删对方磁盘文件与注册表。旧「安装即重建注册指向本方」口径作废。
 ; 版本号只有一个来源：下面的 VERSION（可由 build_installer.ps1 以 /DVERSION=... 覆盖）。
 ;
 ; 用法：
@@ -73,6 +75,10 @@ ${UnStrStr}
 !define BUNDLEID "io.github.clash-win.clash-win"
 !define MAINBINARY "clashwin.exe"
 !define SERVICE_NAME "clash_verge_service"
+; 上游服务二进制 SHA256（sidecar/clash-verge-service.exe，与 Mini resources/ 同一份）。
+; 总纲 §5.2.2：注册在位且哈希一致 → 共用不夺注册；不一致（上游分叉/损坏）才删注册重装。
+; sidecar 升级时须同步本常量（scripts/verify_sidecar.ps1 基线同源）。
+!define SERVICE_EXE_SHA256 "92ad792abb91bd84b89894e63a8251434a631a5803d9d043c18f7a5a7961e9d2"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCTNAME}"
 !define MANUPRODUCTKEY "Software\${MANUFACTURER}\${PRODUCTNAME}"
 !define ALLOWDOWNGRADES "true"   ; tauri-bundler 默认 true（tauri-utils config.rs:1061-1062
@@ -155,7 +161,7 @@ Page custom PageReinstall PageLeaveReinstall
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE un.ConfirmLeave
 !define MUI_PAGE_CUSTOMFUNCTION_PRE un.SkipIfPassive
 !insertmacro MUI_UNPAGE_CONFIRM
-!define MUI_UNPAGE_CUSTOMFUNCTION_SHOW un.InstFilesShow
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW un.InstFilesShow
 !insertmacro MUI_UNPAGE_INSTFILES
 
 ; ---------- 语言（← tauri.windows.conf.json:17 languages 三语 + :15 选择器） ----------
@@ -670,27 +676,41 @@ Section "Install"
   !insertmacro CheckIfAppIsRunning "${MAINBINARY}"
 
   ; ★ 互斥共存方针（用户 2026-11-09，最高优先级；总纲 §5.2）：可同装不可同跑——
-  ;   安装时强杀 Clash Mini 全部进程与服务（不删对方磁盘文件），随后重建本方服务注册。
-  ;   按名杀在安装期安全：本方应用已由 CheckIfAppIsRunning 处理、本方内核/服务尚未启动。
+  ;   安装时强杀 Clash Mini 全部进程（不删对方磁盘文件）。
+  ;   归属判定按 exe 安装目录路径，绝不按进程名（← coexist.cpp 同一口径）：
+  ;   Clash Mini 专属二进制（clash-mini.exe / "Clash Mini.exe" / clash-verge.exe /
+  ;   clashwin.exe）按名杀安全；mini-mihomo.exe 与 clash-verge-service.exe 两侧同名，
+  ;   须按路径过滤（含 "Clash Mini"/"clash-mini" 且不属于本方 $INSTDIR），否则升级场景
+  ;   下运行中的 ClashWin 重跑安装器会误杀自家内核/服务。
   DetailPrint "Cleaning up legacy and Clash Mini processes/services..."
   nsExec::Exec 'taskkill /F /IM clash-mini.exe'
   Pop $0
   nsExec::Exec 'taskkill /F /IM "Clash Mini.exe"'
   Pop $0
-  nsExec::Exec 'taskkill /F /IM mini-mihomo.exe'
-  Pop $0
   nsExec::Exec 'taskkill /F /IM clash-verge.exe'
   Pop $0
   nsExec::Exec 'taskkill /F /IM clashwin.exe'
   Pop $0
-  nsExec::Exec 'taskkill /F /IM clash-verge-service.exe'
+  ; 同名内核/服务：仅杀对方（路径含 Clash Mini / clash-mini 且不在本方 $INSTDIR）
+  nsExec::Exec "powershell -NoProfile -NonInteractive -Command $\"Get-Process mini-mihomo -ErrorAction SilentlyContinue | Where-Object { ($_.Path -NotLike '$INSTDIR*') -and (($_.Path -Like '*Clash Mini*') -or ($_.Path -Like '*clash-mini*')) } | Stop-Process -Force$\""
+  Pop $0
+  nsExec::Exec "powershell -NoProfile -NonInteractive -Command $\"Get-Process clash-verge-service -ErrorAction SilentlyContinue | Where-Object { ($_.Path -NotLike '$INSTDIR*') -and (($_.Path -Like '*Clash Mini*') -or ($_.Path -Like '*clash-mini*')) } | Stop-Process -Force$\""
   Pop $0
 
-  ; 停止并清理旧 service（创造干净环境供重新安装）
-  nsExec::Exec 'net stop clash_verge_service'
+  ; 服务「借用与归还」（总纲 §5.2.2，2026-11-10 裁决）：服务二进制是同一个上游
+  ;   组件——注册在位且 ImagePath 二进制哈希与本方一致 → 保留注册共用，不夺不删；
+  ;   仅缺失/损坏/哈希不一致（上游分叉）才删注册，由 InstallOrStartService 重装。
+  nsExec::Exec 'net stop ${SERVICE_NAME}'
   Pop $0
-  nsExec::Exec 'sc delete clash_verge_service'
+  nsExec::ExecToStack "powershell -NoProfile -NonInteractive -Command $\"$$p=(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\${SERVICE_NAME}' -ErrorAction SilentlyContinue).ImagePath; if($$p){ $$q=[char]34; $$exe=($$p.TrimStart($$q) -split $$q)[0]; if(Test-Path $$exe){ if((Get-FileHash $$exe -Algorithm SHA256).Hash.ToLower() -eq '${SERVICE_EXE_SHA256}'){ exit 0 } } }; exit 1$\""
   Pop $0
+  Pop $1
+  ${If} $0 == 0
+    DetailPrint "${SERVICE_NAME} 注册在位且二进制与上游基线一致，共用保留（不夺注册）。"
+  ${Else}
+    nsExec::Exec 'sc delete ${SERVICE_NAME}'
+    Pop $0
+  ${EndIf}
 
   ; 确保启动文件夹存在（← 模板 :898-905）
   CreateDirectory "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"
@@ -726,10 +746,8 @@ Section "Install"
   ${If} $R2 != ""
     DeleteRegValue HKLM "$R1" "clash-win"
   ${EndIf}
-  DeleteRegValue HKCU "$R1" "Clash Mini"
-  DeleteRegValue HKLM "$R1" "Clash Mini"
-  DeleteRegValue HKCU "$R1" "clash-mini"
-  DeleteRegValue HKLM "$R1" "clash-mini"
+  ; 「借用与归还」（总纲 §5.2.2）：不碰 Clash Mini 的自启注册表值——
+  ;   旧 BUG-313③ 清洁设计的 4 行 DeleteRegValue 已按 2026-11-10 裁决删除。
 
   ; 主程序 + 资源 + sidecar + locales（← 模板 :939-956）
   File "${STAGEDIR}\${MAINBINARY}"
@@ -850,6 +868,9 @@ FunctionEnd
 
 ; ---------- 卸载（← 模板 :1073-1288 Section Uninstall） ----------
 Section "Uninstall"
+  ; G11（Mini v3.2.3 BUG-314③ / agreements §8.10）：卸载执行段置顶重申，
+  ;   不依赖先前页面设置的 WS_EX_TOPMOST 样式被动维持
+  Call un.KeepTopMost
   SetRegView 64
 
   !insertmacro un.CheckIfAppIsRunning "${MAINBINARY}"
@@ -858,8 +879,13 @@ Section "Uninstall"
   nsExec::Exec "powershell -NoProfile -NonInteractive -Command $\"Get-Process mini-mihomo -ErrorAction SilentlyContinue | Where-Object Path -Like '$INSTDIR*' | Stop-Process -Force$\""
   Pop $0
 
-  ; 服务（仅当指向本安装目录才移除，避免破坏 Clash Mini 共用服务——B-D35 裁决保留）
-  Call un.RemoveServiceIfOurs
+  ; 系统代理还原（总纲 §5.2.2 第 4 条）：ProxyServer 指向本方 mixed 端口 →
+  ;   关闭并刷新，避免卸载后到对方启动前整机断网
+  Call un.RestoreSystemProxyIfOurs
+
+  ; 服务「归还」（总纲 §5.2.2 第 3 条）：指向本方且 Mini 仍在装 → ImagePath
+  ;   改回 Mini 的服务二进制；未探测到 Mini 才移除注册
+  Call un.HandBackOrRemoveService
 
   ; 窗口状态文件（← 模板 :1083-1087）
   DetailPrint "Removing window-state files"
@@ -886,10 +912,8 @@ Section "Uninstall"
   ${If} $R2 != ""
     DeleteRegValue HKLM "$R1" "clash-win"
   ${EndIf}
-  DeleteRegValue HKCU "$R1" "Clash Mini"
-  DeleteRegValue HKLM "$R1" "Clash Mini"
-  DeleteRegValue HKCU "$R1" "clash-mini"
-  DeleteRegValue HKLM "$R1" "clash-mini"
+  ; 「借用与归还」（总纲 §5.2.2）：不碰 Clash Mini 的自启注册表值——
+  ;   旧 BUG-313③ 清洁设计的 4 行 DeleteRegValue 已按 2026-11-10 裁决删除。
   SetShellVarContext all
 
   ; 程序文件（← 模板 :1116-1129）
@@ -976,8 +1000,11 @@ Function InstallOrStartService
   Pop $0
 FunctionEnd
 
-; 仅当服务指向本安装目录时才移除，避免破坏 Clash Mini 共用的服务
-Function un.RemoveServiceIfOurs
+; 「借用与归还」（总纲 §5.2.2，2026-11-10 裁决）：
+;   服务不指向本安装目录 → 保留（对方资产）；
+;   指向本方且探测到 Clash Mini 仍在装 → ImagePath 归还 Mini 的服务二进制（零 UAC 复活）；
+;   未探测到 Mini / 归还失败 → 移除注册（本方注册，Mini 下次启动可自举重建）。
+Function un.HandBackOrRemoveService
   ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Services\${SERVICE_NAME}" "ImagePath"
   ${If} $0 == ""
     Return
@@ -996,12 +1023,79 @@ Function un.RemoveServiceIfOurs
 
   nsExec::Exec '$SYSDIR\sc.exe stop ${SERVICE_NAME}'
   Pop $0
+
+  ; 探测 Mini 安装位置：枚举卸载键找 DisplayName=Clash Mini 的 InstallLocation
+  ;   （Mini 为 Tauri currentUser 安装 → HKCU 优先，兼查 HKLM 两视图）
+  StrCpy $R5 ""
+  StrCpy $R6 "Software\Microsoft\Windows\CurrentVersion\Uninstall"
+  SetRegView 64
+  StrCpy $R7 0
+  ${Do}
+    EnumRegKey $R8 HKCU "$R6" $R7
+    ${If} $R8 == ""
+      ${ExitDo}
+    ${EndIf}
+    ReadRegStr $R9 HKCU "$R6\$R8" "DisplayName"
+    ${If} $R9 == "Clash Mini"
+      ReadRegStr $R5 HKCU "$R6\$R8" "InstallLocation"
+      ${If} $R5 != ""
+        ${ExitDo}
+      ${EndIf}
+    ${EndIf}
+    IntOp $R7 $R7 + 1
+  ${Loop}
+  ${If} $R5 == ""
+    StrCpy $R7 0
+    ${Do}
+      EnumRegKey $R8 HKLM "$R6" $R7
+      ${If} $R8 == ""
+        ${ExitDo}
+      ${EndIf}
+      ReadRegStr $R9 HKLM "$R6\$R8" "DisplayName"
+      ${If} $R9 == "Clash Mini"
+        ReadRegStr $R5 HKLM "$R6\$R8" "InstallLocation"
+        ${If} $R5 != ""
+          ${ExitDo}
+        ${EndIf}
+      ${EndIf}
+      IntOp $R7 $R7 + 1
+    ${Loop}
+  ${EndIf}
+  SetRegView 64
+
+  ${If} $R5 != ""
+    ${AndIf} ${FileExists} "$R5\resources\clash-verge-service.exe"
+    ; 归还：注册改回 Mini 路径，服务留停（Mini 启动时按需拉起）
+    nsExec::Exec '$SYSDIR\sc.exe config ${SERVICE_NAME} binPath= "$R5\resources\clash-verge-service.exe"'
+    Pop $0
+    ${If} $0 == 0
+      DetailPrint "${SERVICE_NAME} 已归还 Clash Mini（$R5），无需重装即可恢复使用。"
+      Return
+    ${EndIf}
+    DetailPrint "警告：服务归还失败（sc config 返回 $0），转为移除注册。"
+  ${EndIf}
+
   SetOutPath "$INSTDIR\resources"
   ExecWait '"$INSTDIR\resources\clash-verge-service-uninstall.exe"' $0
   ${If} $0 != 0
     nsExec::Exec '$SYSDIR\sc.exe delete ${SERVICE_NAME}'
     Pop $0
   ${EndIf}
+FunctionEnd
+
+; 系统代理还原（总纲 §5.2.2 第 4 条）：仅当 ProxyServer 指向本方 mixed 端口
+;   10801 时关闭并广播刷新；指向其它值（用户自设/对方接管）一律不碰。
+Function un.RestoreSystemProxyIfOurs
+  SetShellVarContext current
+  ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Internet Settings" "ProxyServer"
+  ${If} $0 == "127.0.0.1:10801"
+    WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Internet Settings" "ProxyEnable" 0
+    ; INTERNET_OPTION_SETTINGS_CHANGED=39 / INTERNET_OPTION_REFRESH=37
+    System::Call 'wininet\InternetSetOptionW(i 0, i 39, i 0, i 0)'
+    System::Call 'wininet\InternetSetOptionW(i 0, i 37, i 0, i 0)'
+    DetailPrint "已关闭指向 Clash Win 的系统代理，避免卸载后断网。"
+  ${EndIf}
+  SetShellVarContext all
 FunctionEnd
 
 

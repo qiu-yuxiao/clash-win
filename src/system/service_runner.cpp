@@ -111,6 +111,10 @@ bool IServiceCommandRunner::is_image_own() {
   return coexist::service_image_is_own();
 }
 
+bool IServiceCommandRunner::is_image_upstream_baseline() {
+  return coexist::service_image_matches_upstream();
+}
+
 Result<void> DefaultServiceCommandRunner::stop_service() {
   return core::service_mode::stop_service();
 }

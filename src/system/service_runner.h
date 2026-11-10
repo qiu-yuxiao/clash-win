@@ -21,6 +21,8 @@ class IServiceCommandRunner {
   // 服务注册细节：默认查真实 SCM / 注册表；测试可覆盖以获得确定性
   virtual bool is_binary_valid();
   virtual bool is_image_own();
+  // ImagePath 二进制哈希是否与上游基线一致（总纲 §5.2.2「借用与归还」）
+  virtual bool is_image_upstream_baseline();
   virtual Result<void> start_service() = 0;
   virtual Result<void> stop_service() = 0;
   virtual bool wait_for_ready(int timeout_ms) = 0;

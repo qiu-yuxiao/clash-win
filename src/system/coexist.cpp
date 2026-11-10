@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <tlhelp32.h>
 #include <shellapi.h>  // ShellExecuteExW / SHELLEXECUTEINFOW / SEE_MASK_*（与项目其余源文件一致）
+#include <bcrypt.h>    // BCrypt SHA256（← 总纲 §5.2.2 借用判定；与 core_updater.cpp 同法）
 
 #include <algorithm>
 #include <chrono>
@@ -86,6 +87,71 @@ bool shell_runas(const std::wstring& file, const std::wstring& params) {
   return true;
 }
 
+// 已注册 clash_verge_service 的 ImagePath 解析出的 exe 路径；缺失/查询失败 → 空。
+std::wstring registered_service_exe() {
+  SC_HANDLE scm = ::OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+  if (!scm) return L"";
+  SC_HANDLE svc = ::OpenServiceW(scm, core::service_mode::kServiceNameW,
+                                 SERVICE_QUERY_CONFIG);
+  if (!svc) {
+    ::CloseServiceHandle(scm);
+    return L"";
+  }
+  std::vector<BYTE> buf(8192);
+  auto cfg = reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(buf.data());
+  DWORD needed = 0;
+  const bool ok =
+      ::QueryServiceConfigW(svc, cfg, static_cast<DWORD>(buf.size()), &needed) != FALSE;
+  const std::wstring raw = ok && cfg->lpBinaryPathName ? cfg->lpBinaryPathName : L"";
+  ::CloseServiceHandle(svc);
+  ::CloseServiceHandle(scm);
+  return ok ? image_exe_path(raw) : L"";
+}
+
+// 文件 SHA256 → 小写 hex；打开/计算失败 → 空串（调用方按「不一致」处理）。
+std::string file_sha256_hex(const std::wstring& path) {
+  HANDLE file = ::CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                              nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) return {};
+  std::string hex;
+  BCRYPT_ALG_HANDLE alg = nullptr;
+  BCRYPT_HASH_HANDLE hash = nullptr;
+  do {
+    if (!BCRYPT_SUCCESS(::BCryptOpenAlgorithmProvider(
+            &alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0))) break;
+    DWORD obj_len = 0, cb = 0;
+    if (!BCRYPT_SUCCESS(::BCryptGetProperty(
+            alg, BCRYPT_OBJECT_LENGTH, reinterpret_cast<PUCHAR>(&obj_len),
+            sizeof(obj_len), &cb, 0))) break;
+    std::vector<BYTE> hash_obj(obj_len);
+    if (!BCRYPT_SUCCESS(::BCryptCreateHash(
+            alg, &hash, hash_obj.data(), obj_len, nullptr, 0, 0))) break;
+    std::vector<BYTE> buf(65536);
+    DWORD read = 0;
+    bool io_ok = true;
+    while (::ReadFile(file, buf.data(), static_cast<DWORD>(buf.size()), &read, nullptr) &&
+           read > 0) {
+      if (!BCRYPT_SUCCESS(::BCryptHashData(hash, buf.data(), read, 0))) {
+        io_ok = false;
+        break;
+      }
+    }
+    if (!io_ok) break;
+    BYTE digest[32] = {};
+    if (!BCRYPT_SUCCESS(::BCryptFinishHash(hash, digest, sizeof(digest), 0))) break;
+    static constexpr char kHex[] = "0123456789abcdef";
+    hex.resize(64);
+    for (int i = 0; i < 32; ++i) {
+      hex[static_cast<size_t>(i) * 2] = kHex[digest[i] >> 4];
+      hex[static_cast<size_t>(i) * 2 + 1] = kHex[digest[i] & 0x0F];
+    }
+  } while (false);
+  if (hash) ::BCryptDestroyHash(hash);
+  if (alg) ::BCryptCloseAlgorithmProvider(alg, 0);
+  ::CloseHandle(file);
+  return hex;
+}
+
 }  // namespace
 
 bool is_own_path(const std::wstring& exe_path) {
@@ -108,24 +174,26 @@ bool is_own_path(const std::wstring& exe_path) {
 }
 
 bool service_image_is_own() {
-  SC_HANDLE scm = ::OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
-  if (!scm) return false;
-  SC_HANDLE svc = ::OpenServiceW(scm, core::service_mode::kServiceNameW,
-                                 SERVICE_QUERY_CONFIG);
-  if (!svc) {
-    ::CloseServiceHandle(scm);
-    return false;
+  const std::wstring exe = registered_service_exe();
+  if (exe.empty()) return false;
+  return is_own_path(exe);
+}
+
+bool upstream_baseline_equals(std::string_view hex_lower_or_mixed) {
+  const std::string_view baseline(core::service_mode::kServiceExeSha256);
+  if (hex_lower_or_mixed.size() != baseline.size()) return false;
+  for (size_t i = 0; i < baseline.size(); ++i) {
+    char c = hex_lower_or_mixed[i];
+    if (c >= 'A' && c <= 'F') c = static_cast<char>(c - 'A' + 'a');
+    if (c != baseline[i]) return false;
   }
-  std::vector<BYTE> buf(8192);
-  auto cfg = reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(buf.data());
-  DWORD needed = 0;
-  const bool ok =
-      ::QueryServiceConfigW(svc, cfg, static_cast<DWORD>(buf.size()), &needed) != FALSE;
-  const std::wstring raw = ok && cfg->lpBinaryPathName ? cfg->lpBinaryPathName : L"";
-  ::CloseServiceHandle(svc);
-  ::CloseServiceHandle(scm);
-  if (!ok || raw.empty()) return false;
-  return is_own_path(image_exe_path(raw));
+  return true;
+}
+
+bool service_image_matches_upstream() {
+  const std::wstring exe = registered_service_exe();
+  if (exe.empty() || !std::filesystem::exists(exe)) return false;
+  return upstream_baseline_equals(file_sha256_hex(exe));
 }
 
 int kill_other_processes() {
