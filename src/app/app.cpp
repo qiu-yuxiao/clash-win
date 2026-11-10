@@ -137,32 +137,28 @@ bool App::init() {
         }).detach();
       });
 
-  bool port_taken_by_other = false;
+  // ★ 单实例锁（1:1 对齐 Clash Mini utils/server.rs:check_singleton）：
+  // 33335 是 Clash 专用单实例端口。bind 失败 = 端口已被占用 = 已有 Clash Win
+  // （或 Mini 残留）实例持有。此时无论探测 /commands/visible 是否返回 200，
+  // 都尽力唤醒对方并退出，绝不启动第二个实例。
+  // 原实现在「探测非 200」（首实例重负载下 500ms 内未响应 / 端口被无响应进程占用）
+  // 时误判为「其它程序占用」而继续启动，导致可双开 Clash Win 自身——与 Mini 行为相悖。
   if (!bound) {
-    // bind 失败：先探测端口上是否确实是 Clash Win 前代实例（/commands/visible
-    // 返回 200 才算），确认后才唤醒并退出；若是其它程序占用则继续启动，
-    // 绝不把别人的端口当成自己人、绝不静默退出。
-    int probe = app::SingletonClient::send_request(singleton_port_, "/commands/visible");
-    if (probe != 200) {
-      port_taken_by_other = true;
-    } else {
-      int argc = 0;
-      LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-      app::SingletonClient::notify_or_exit(singleton_port_, argc, argv, /*do_exit=*/true);
-      if (argv) LocalFree(argv);
-      return false;
-    }
+    CWLOG_WARN(std::format(
+        "App::init：单实例端口 {} 已被占用，判定存在其它实例，尝试唤醒后退出",
+        singleton_port_));
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    // notify_or_exit 在端口可达时发送唤醒并 exit(0)；不可达时仅返回 false，
+    // 故其后以 return false 兜底，确保本进程绝不成为第二个实例。
+    app::SingletonClient::notify_or_exit(singleton_port_, argc, argv, /*do_exit=*/true);
+    if (argv) LocalFree(argv);
+    return false;
   }
 
   if (!init_logger()) return false;
-  if (port_taken_by_other) {
-    CWLOG_WARN(std::format(
-        "App::init：端口 {} 被非 Clash Win 进程占用，跳过单实例服务继续启动",
-        singleton_port_));
-  } else {
-    CWLOG_INFO(std::format("App::init：单实例 bind {} 成功，首实例启动",
-                           singleton_port_));
-  }
+  CWLOG_INFO(std::format("App::init：单实例 bind {} 成功，首实例启动",
+                         singleton_port_));
 
   // T25: 预置离线资源包释放（Country.mmdb, geosite.dat, ruleset/gfwlist.yaml）
   (void)system::init_resources(util::dirs::app_home_dir(),
