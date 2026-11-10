@@ -186,7 +186,10 @@ class MainWindow : public app::ILifecycleWindow {
   ~MainWindow() override;
 
   // 创建窗口（restore 几何 → 注册类 → CreateWindow → D2D → Widget 树 → 定时器）
-  bool create(bool show_immediately = true);
+  // defer_render=true 时跳过 D2D 设备创建与定时器设置（静默启动直入轻量用：
+  // 渲染层本就不会被用到，进入轻量后 release_d2d_resources 为安全空操作，
+  // 退出轻量时由 restore_d2d_resources 补建，对齐 Mini「不为即将隐藏的窗口付渲染成本」）
+  bool create(bool show_immediately = true, bool defer_render = false);
   // 消息循环（App 转发）
   static int run();
 

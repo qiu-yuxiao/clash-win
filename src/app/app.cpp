@@ -265,7 +265,8 @@ bool App::init() {
 
   // T11：窗口壳移交 MainWindow（无框窗 + 标题栏 + 钳制 + Widget 树）
   main_window_ = new ui::win::MainWindow();
-  if (!main_window_->create(/*show_immediately=*/!should_silent)) {
+  if (!main_window_->create(/*show_immediately=*/!should_silent,
+                            /*defer_render=*/should_silent)) {
     CWLOG_ERROR("App::init：主窗口创建失败");
     return false;
   }

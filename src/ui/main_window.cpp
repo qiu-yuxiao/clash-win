@@ -169,7 +169,7 @@ MainWindow::~MainWindow() {
   }
 }
 
-bool MainWindow::create(bool show_immediately) {
+bool MainWindow::create(bool show_immediately, bool defer_render) {
   // UI 线程标记：通知可能由后台线程 push，SnackbarW 据此决定是否转投 UI 线程
   UiPostbox::instance().mark_ui_thread();
   // exe 目录（几何文件落此处；与 T03 app_home_dir 口径一致）
@@ -181,7 +181,8 @@ bool MainWindow::create(bool show_immediately) {
 
   if (!init_window_class()) return false;
   if (!create_hwnd()) return false;
-  if (!init_render()) return false;
+  // 静默启动直入轻量：跳过 D2D 设备创建（渲染层进轻量后立即释放，纯属浪费）
+  if (!defer_render && !init_render()) return false;
   build_widget_tree();
 
   // 皮肤/亮暗/主色热切换：ThemeService 六皮肤表由此接上订阅者，切皮肤即重绘。
@@ -263,9 +264,13 @@ bool MainWindow::create(bool show_immediately) {
     on_client_resized(rc2.right - rc2.left, rc2.bottom - rc2.top);
   }
 
-  SetTimer(hwnd_, kTimerFrame, FrameClock::kFrameIntervalMs, nullptr);
-  SetTimer(hwnd_, kTimerIdle, 1000, nullptr);
-  SetTimer(hwnd_, kTimerTunGuard, 5000, nullptr);
+  // 静默启动直入轻量：跳过定时器（轻量模式不跑帧/空闲扫描/TUN 守卫，
+  // 由 entry_lightweight_mode→release_d2d_resources 统一停表，退出时 restore 补设）
+  if (!defer_render) {
+    SetTimer(hwnd_, kTimerFrame, FrameClock::kFrameIntervalMs, nullptr);
+    SetTimer(hwnd_, kTimerIdle, 1000, nullptr);
+    SetTimer(hwnd_, kTimerTunGuard, 5000, nullptr);
+  }
   start_ms_ = now_ms();
   if (show_immediately) show_and_activate();
   CWLOG_INFO("MainWindow: 创建完成（无框 271x680 + 标题栏三键 + 钳制就绪）");
@@ -1687,18 +1692,26 @@ void MainWindow::hide() { ShowWindow(hwnd_, SW_HIDE); }
 
 void MainWindow::release_d2d_resources() {
   rt_.destroy();
-  if (hwnd_) KillTimer(hwnd_, kTimerFrame);
+  if (!hwnd_) return;
+  KillTimer(hwnd_, kTimerFrame);
+  // 轻量模式：停 stealth 空闲扫描（窗口已隐藏，每秒 tick 纯冗余）与 TUN 守卫。
+  // 对齐 Mini「销毁窗口 → 其所有窗口定时器一并消失」，使轻量模式真正静默：
+  // 否则隐藏窗口仍每秒/每 5 秒被 WM_TIMER 唤醒（tun_guard_tick 还会起 detached
+  // 线程做 is_admin/服务探测，必要时 patch_verge_config），与本应空闲的轻量态相悖。
+  KillTimer(hwnd_, kTimerIdle);
+  KillTimer(hwnd_, kTimerTunGuard);
 }
 
 void MainWindow::restore_d2d_resources() {
-  if (hwnd_) {
-    rt_.create_for_hwnd(hwnd_);
-    RECT rc;
-    GetClientRect(hwnd_, &rc);
-    on_client_resized(rc.right - rc.left, rc.bottom - rc.top);
-    SetTimer(hwnd_, kTimerFrame, 33, nullptr);
-    InvalidateRect(hwnd_, nullptr, FALSE);
-  }
+  if (!hwnd_) return;
+  rt_.create_for_hwnd(hwnd_);
+  RECT rc;
+  GetClientRect(hwnd_, &rc);
+  on_client_resized(rc.right - rc.left, rc.bottom - rc.top);
+  SetTimer(hwnd_, kTimerFrame, 33, nullptr);
+  SetTimer(hwnd_, kTimerIdle, 1000, nullptr);
+  SetTimer(hwnd_, kTimerTunGuard, 5000, nullptr);
+  InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
 void MainWindow::disconnect_ws() {
