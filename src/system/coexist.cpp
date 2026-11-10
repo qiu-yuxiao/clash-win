@@ -153,6 +153,58 @@ std::string file_sha256_hex(const std::wstring& path) {
   return hex;
 }
 
+// 本进程是否以管理员身份运行：用 TokenElevation 判定（比 IsUserAnAdmin 更稳，
+// 不受 shellapi.h 版本宏影响）。
+bool is_elevated() {
+  HANDLE token = nullptr;
+  if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token)) return false;
+  TOKEN_ELEVATION elev{};
+  DWORD size = 0;
+  const bool ok = ::GetTokenInformation(token, TokenElevation, &elev,
+                                       sizeof(elev), &size) != FALSE;
+  ::CloseHandle(token);
+  return ok && elev.TokenIsElevated != 0;
+}
+
+// 同步跑一段 PowerShell，返回其标准输出（用于日志/计数）；任何失败返回空串。
+std::string run_powershell_capture(const std::wstring& script) {
+  const std::wstring cmd =
+      L"powershell.exe -NoProfile -NonInteractive -Command \"" + script + L"\"";
+  SECURITY_ATTRIBUTES sa{};
+  sa.nLength = sizeof(sa);
+  sa.bInheritHandle = TRUE;
+  HANDLE hRead = nullptr, hWrite = nullptr;
+  if (!::CreatePipe(&hRead, &hWrite, &sa, 0)) return {};
+  PROCESS_INFORMATION pi{};
+  STARTUPINFOW si{};
+  si.cb = sizeof(si);
+  si.hStdOutput = hWrite;
+  si.hStdError = hWrite;
+  si.dwFlags |= STARTF_USESTDHANDLES;
+  const BOOL ok = ::CreateProcessW(nullptr, const_cast<wchar_t*>(cmd.c_str()),
+                                   nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
+                                   nullptr, nullptr, &si, &pi);
+  if (hWrite) { ::CloseHandle(hWrite); hWrite = nullptr; }
+  if (!ok) {
+    if (hRead) ::CloseHandle(hRead);
+    return {};
+  }
+  ::CloseHandle(pi.hThread);
+  std::string out;
+  char buf[1024];
+  DWORD rd = 0;
+  while (::ReadFile(hRead, buf, sizeof(buf) - 1, &rd, nullptr) && rd > 0) {
+    out.append(buf, static_cast<size_t>(rd));
+  }
+  ::CloseHandle(hRead);
+  ::WaitForSingleObject(pi.hProcess, 20000);
+  DWORD code = 1;
+  ::GetExitCodeProcess(pi.hProcess, &code);
+  ::CloseHandle(pi.hProcess);
+  (void)code;
+  return out;
+}
+
 }  // namespace
 
 bool is_own_path(const std::wstring& exe_path) {
@@ -242,6 +294,40 @@ int kill_other_processes() {
   }
   ::CloseHandle(snap);
   return killed;
+}
+
+// ★ 杀对方规则补上的收尾：清理对方遗留的 Wintun/Mihomo 虚拟网卡（孤儿网卡）。
+// 背景：对方（Clash Mini）若曾在 TUN 模式下被强杀，其 mihomo 来不及优雅拆除 TUN，
+//       会留下一张孤儿 Wintun 网卡 + 全流量路由；本方随后开 TUN 时若同名网卡已存在，
+//       内核复用脏孤儿失败 → 全流量接管断网（即 0.2.3 的回归：Mini 在 TUN 被装 Win 后切 TUN 断网）。
+// 安全边界：共存铁律保证对方已死，清理的一定是「无活进程撑着的」孤儿网卡；
+//           不碰对方任何磁盘文件，符合「不删对方磁盘文件」方针。
+// 触发时机：仅在已提权时执行（TUN 必走提权服务；启动期未提权则跳过，
+//           与「启动期禁止 UAC 弹窗」方针一致；TUN 接管路径必提权，届时自然清掉）。
+void remove_orphan_wintun_adapters() {
+  if (!is_elevated()) {
+    CWLOG_INFO(
+        "coexist: 当前未提权，跳过 Wintun 孤儿网卡清理（待 TUN/服务接管路径提权后执行）");
+    return;
+  }
+  // -IncludeHidden：孤儿 Wintun 卡常为隐藏适配器，普通 Get-NetAdapter 看不到，会漏清。
+  // 仅匹配 Wintun/Mihomo 虚拟网卡，不误伤物理网卡。
+  const std::wstring script =
+      L"(Get-NetAdapter -IncludeHidden -ErrorAction SilentlyContinue | "
+      L"Where-Object { $_.InterfaceDescription -match 'Wintun|Mihomo' } | "
+      L"ForEach-Object { $_ | Remove-NetAdapter -Confirm:$false -Force -ErrorAction SilentlyContinue; $true }).Count";
+  const std::string out = run_powershell_capture(script);
+  int n = 0;
+  try {
+    const size_t p = out.find_first_of("0123456789");
+    if (p != std::string::npos) n = std::stoi(out.substr(p));
+  } catch (...) { n = 0; }
+  if (n > 0) {
+    CWLOG_INFO(std::format(
+        "coexist: 已清理 {} 张对方遗留的 Wintun/Mihomo 孤儿网卡", n));
+  } else {
+    CWLOG_INFO("coexist: 未发现需清理的 Wintun/Mihomo 孤儿网卡");
+  }
 }
 
 bool stop_foreign_service_if_running() {

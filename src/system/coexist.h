@@ -38,6 +38,12 @@ bool upstream_baseline_equals(std::string_view hex_lower_or_mixed);
 //   或其目录片段含 "clash mini" / "clash-mini"。自身 PID 与系统 PID 永不进入候选。
 int kill_other_processes();
 
+// 杀对方后的收尾：清理对方遗留的 Wintun/Mihomo 虚拟网卡（孤儿网卡），
+// 避免本方随后开 TUN 时同名网卡冲突导致全流量接管断网（0.2.3 的 TUN 回归根因）。
+// 仅在本进程已提权时执行（TUN 必走提权服务；启动期未提权则跳过，与「启动期禁止 UAC」
+// 方针一致；TUN 接管路径必提权，届时自然清掉）。不碰对方任何磁盘文件。
+void remove_orphan_wintun_adapters();
+
 // 若服务已注册、正在运行且 ImagePath 指向对方路径 → ControlService 停止（不删注册）。
 // 无权限时静默跳过（启动期禁止 UAC 弹窗；接管留给 install_service 的 UAC 路径）。
 // 返回是否执行了停止动作。

@@ -114,6 +114,8 @@ bool App::init() {
   {
     const int killed = system::coexist::kill_other_processes();
     const bool svc_stopped = system::coexist::stop_foreign_service_if_running();
+    // ★ 杀对方收尾：清掉对方遗留的 Wintun/Mihomo 孤儿网卡，避免本方开 TUN 时同名冲突断网。
+    system::coexist::remove_orphan_wintun_adapters();
     if (killed > 0 || svc_stopped) {
       CWLOG_INFO(std::format(
           "App::init：互斥共存——终止 Clash Mini 进程 {} 个，服务停止 {}",

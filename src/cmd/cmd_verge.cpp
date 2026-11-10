@@ -13,6 +13,7 @@
 #include "core/core_manager.h"
 #include "system/sysproxy.h"
 #include "system/service_runner.h"
+#include "system/coexist.h"
 #include "util/log.h"
 #include "util/dirs.h"
 #include "util/utf.h"
@@ -120,6 +121,11 @@ Result<void> process_flags(uint16_t flags, const IVerge& patch) {
 
   if (flags & kFRestartCore) {
     // ← Config::generate + restart_core
+    // ★ 开 TUN 前先清对方遗留的 Wintun/Mihomo 孤儿网卡：此处必提权（TUN 走服务），
+    //   兜底「启动期未提权未清到」的情况，确保内核重启建 TUN 时无同名脏卡冲突。
+    if (patch.enable_tun_mode.has_value() && *patch.enable_tun_mode) {
+      system::coexist::remove_orphan_wintun_adapters();
+    }
     auto outcome = run_enhance_pipeline();
     if (!outcome.is_valid()) return Result<void>::err({errs::kIo, outcome.message});
     if (is_core_running()) {
