@@ -360,7 +360,7 @@ jobs:
   #   updater/app-update.json（Mini 指向 dev 并回写 dev），因此「回写 main」
   #   就是应用内更新的可达路径。version 与 constants.h kAppVersion 已由
   #   validate 强制一致；本地 0.2.2 客户端读 v0.2.2 清单 has_update=false，
-  #   未来 0.2.3 客户端读新清单即弹窗——闭环由此建立。
+  #   未来 0.2.4 客户端读新清单即弹窗——闭环由此建立。
   publish:
     name: Publish Release
     needs: [validate, build]

@@ -12,7 +12,7 @@ body:
 
         1. 请 **确保** 已查阅 [Clash Win Wiki](https://github.com/qiu-yuxiao/clash-win/wiki) 与 [常见问题](https://github.com/qiu-yuxiao/clash-win/wiki/FAQ)
         2. 请 **确保** [已有的问题](https://github.com/qiu-yuxiao/clash-win/issues?q=is%3Aissue) 中没有人提交过相似 issue，否则请在已有的 issue 下讨论
-        3. 请 **务必** 先查看 [已知限制](https://github.com/qiu-yuxiao/clash-win/blob/main/docs/KNOWN_LIMITATIONS_0.2.3.md)，确认不是已登记的已知限制
+        3. 请 **务必** 先查看 [已知限制](https://github.com/qiu-yuxiao/clash-win/blob/main/docs/KNOWN_LIMITATIONS_0.2.4.md)，确认不是已登记的已知限制
         4. 请 **务必** 给 issue 填写一个简洁明了的标题，以便他人快速检索
         5. 请 **务必** 使用 [最新 Release](https://github.com/qiu-yuxiao/clash-win/releases/latest) 复现后再提交
 
@@ -20,7 +20,7 @@ body:
 
         1. Please read the [Clash Win Wiki](https://github.com/qiu-yuxiao/clash-win/wiki) and [FAQ](https://github.com/qiu-yuxiao/clash-win/wiki/FAQ)
         2. Please check the [existing issues](https://github.com/qiu-yuxiao/clash-win/issues?q=is%3Aissue) for duplicates
-        3. Please check the [Known Limitations](https://github.com/qiu-yuxiao/clash-win/blob/main/docs/KNOWN_LIMITATIONS_0.2.3.md) first
+        3. Please check the [Known Limitations](https://github.com/qiu-yuxiao/clash-win/blob/main/docs/KNOWN_LIMITATIONS_0.2.4.md) first
         4. Please use a concise, searchable title
         5. Please reproduce on the [latest release](https://github.com/qiu-yuxiao/clash-win/releases/latest) before filing
 
@@ -36,7 +36,7 @@ body:
     id: version
     attributes:
       label: 软件版本 / Clash Win Version
-      description: 请提供完整版本号（如 0.2.3）及使用形态：安装版 / 便携版 / Please provide the version (e.g. 0.2.3) and form: setup.exe / portable zip
+      description: 请提供完整版本号（如 0.2.4）及使用形态：安装版 / 便携版 / Please provide the version (e.g. 0.2.4) and form: setup.exe / portable zip
     validations:
       required: true
 

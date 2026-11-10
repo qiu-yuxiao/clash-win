@@ -12,7 +12,7 @@ body:
 
         1. 请 **确保** 已查阅 [Clash Win Wiki](https://github.com/qiu-yuxiao/clash-win/wiki)，确认软件不存在类似功能
         2. 请 **确保** [已有的问题](https://github.com/qiu-yuxiao/clash-win/issues?q=is%3Aissue) 中没有相似 issue
-        3. 请 **务必** 先查看 [已知限制](https://github.com/qiu-yuxiao/clash-win/blob/main/docs/KNOWN_LIMITATIONS_0.2.3.md)：部分功能属于已登记的未实现项，不需要重复提出
+        3. 请 **务必** 先查看 [已知限制](https://github.com/qiu-yuxiao/clash-win/blob/main/docs/KNOWN_LIMITATIONS_0.2.4.md)：部分功能属于已登记的未实现项，不需要重复提出
         4. 请 **务必** 使用 [最新 Release](https://github.com/qiu-yuxiao/clash-win/releases/latest) 确认该功能尚未实现
 
         ## 关于 1:1 移植范围 / About 1:1 parity
@@ -24,7 +24,7 @@ body:
 
         1. Please read the [Clash Win Wiki](https://github.com/qiu-yuxiao/clash-win/wiki)
         2. Please check [existing issues](https://github.com/qiu-yuxiao/clash-win/issues?q=is%3Aissue)
-        3. Please check the [Known Limitations](https://github.com/qiu-yuxiao/clash-win/blob/main/docs/KNOWN_LIMITATIONS_0.2.3.md)
+        3. Please check the [Known Limitations](https://github.com/qiu-yuxiao/clash-win/blob/main/docs/KNOWN_LIMITATIONS_0.2.4.md)
         4. Please confirm on the [latest release](https://github.com/qiu-yuxiao/clash-win/releases/latest)
 
   - type: textarea

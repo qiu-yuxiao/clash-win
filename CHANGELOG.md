@@ -8,6 +8,19 @@ Format reference: `Changelog.md` in the Clash Mini repository (newest first, `##
 
 ---
 
+## v0.2.4 (2026-11-10)
+
+### Coexistence fix — TUN broke when installed over a running Clash Mini
+
+- **Kill rule now actually kills the other side's elevated core**: previously the coexister opened `PROCESS_TERMINATE` with no counterpart and silently skipped any process it could not open. When the other client's core ran elevated (e.g. Clash Mini in TUN mode) the `TerminateProcess` was denied and the other side survived — leaving two cores running and the TUN hijacked. The kill path now identifies the other side by process name up front and (on the always-elevated TUN entry path) kills the other core before (re)starting our own.
+- **Orphan Wintun/Mihomo adapter cleanup added**: after killing the other side, any leftover `Wintun`/`Mihomo` virtual adapter (and its routes) is now removed. This was the root cause of "browsers dead after switching to TUN" on a machine where Clash Mini was already in TUN mode — the orphaned adapter collided with / was reused as a stale adapter when Clash Win opened TUN.
+
+### Internal
+
+- Version literal in the release-readiness gate (`test_t35_release_readiness.cpp`) bumped to 0.2.4.
+
+---
+
 ## v0.2.3 (2026-11-10)
 
 ### Kernel & coexistence
