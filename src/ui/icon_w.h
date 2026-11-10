@@ -36,7 +36,8 @@ class IconW : public Widget {
   void set_glyph(wchar_t g);                   // 直接设码点
   // 在既有绘制目标上按绝对矩形画一颗图标（无独立控件树时用：通知条/动态列表）
   static void paint_at(IRenderTarget& rt, const std::string& mui_name,
-                       const RectF& box, const Color4f& color);
+                       const RectF& box, const Color4f& color,
+                       bool flip_y = false);
   // 当前归一化图标名（F-D11：延迟徽章按档位切换前比对用）
   const std::string& name() const { return name_; }
 
@@ -45,6 +46,9 @@ class IconW : public Widget {
   Color4f color_{0, 0, 0, 1};
   // 矢量图标旋转角（顺时针°，绕图标盒中心；Mini CSS transform: rotate(45deg)）
   float rotate_deg = 0.0f;
+  // 矢量图标垂直镜像（绕盒中心；Mini CSS transform: scaleY(-1)，logs.tsx:141
+  //   SwapVertRounded 降序态翻转）
+  bool flip_y = false;
   // 外发光（src: _layout.tsx:1359-1361 drop-shadow rgba(255,59,48,.85)；
   //   以环形偏移重绘等价改写高斯模糊）
   bool glow_ = false;

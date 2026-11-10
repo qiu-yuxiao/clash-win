@@ -483,12 +483,24 @@ const std::unordered_map<std::string, std::vector<MuiDef>>& mui_table() {
           "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2H8c-1.1 0-2 .9-2 2zM18 "
           "4h-2.5l-.71-.71c-.18-.18-.44-.29-.7-.29H9.91c-.26 0-.52.11-.7.29L8.5 "
           "4H6c-.55 0-1 .45-1 1s.45 1 1 1h12c.55 0 1-.45 1-1s-.45-1-1-1"}}},
-       {"refresh",
-        {{1.0f,
-          "M17.65 6.35c-1.63-1.63-3.94-2.57-6.48-2.31-3.67.37-6.69 3.35-7.1 7.02C3.52 15.91 "
-          "7.27 20 12 20c3.19 0 5.93-1.87 7.21-4.56.32-.67-.16-1.44-.9-1.44-.37 0-.72.2-.88.53-1.13 "
-          "2.43-3.84 3.97-6.8 3.31-2.22-.49-4.01-2.3-4.48-4.52C5.31 9.44 8.26 6 12 6c1.66 0 3.14.69 "
-          "4.22 1.78l-1.51 1.51c-.63.63-.19 1.71.7 1.71H19c.55 0 1-.45 1-1V6.41c0-.89-1.08-1.34-1.71-.71z"}}},
+      {"refresh",
+       {{1.0f,
+         "M17.65 6.35c-1.63-1.63-3.94-2.57-6.48-2.31-3.67.37-6.69 3.35-7.1 7.02C3.52 15.91 "
+         "7.27 20 12 20c3.19 0 5.93-1.87 7.21-4.56.32-.67-.16-1.44-.9-1.44-.37 0-.72.2-.88.53-1.13 "
+         "2.43-3.84 3.97-6.8 3.31-2.22-.49-4.01-2.3-4.48-4.52C5.31 9.44 8.26 6 12 6c1.66 0 3.14.69 "
+         "4.22 1.78l-1.51 1.51c-.63.63-.19 1.71.7 1.71H19c.55 0 1-.45 1-1V6.41c0-.89-1.08-1.34-1.71-.71z"}}},
+      // G9: 日志弹窗工具钮（logs.tsx:118-152 PauseCircleOutline/PlayCircleOutline/
+      //   SwapVertRounded fontSize 18）。Mini 用 Rounded 变体，此处取 Material
+      //   标准变体同形 path（18px 下视觉等价）
+      {"pausecircleoutline",
+       {{1.0f,
+         "M9 16h2V8H9v8zm4-8v8h2V8h-2zm-1-6C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"}}},
+      {"playcircleoutline",
+       {{1.0f,
+         "M10 16.5l6-4.5-6-4.5v9zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"}}},
+      {"swapvert",
+       {{1.0f,
+         "M16 17.01V10h-2v7.01h-3L15 21l4-3.99h-3zM9 7L5 11h3v6h2v-6h3L9 7z"}}},
   };
   return kTable;
 }
@@ -593,10 +605,11 @@ void IconW::set_glyph(wchar_t g) {
 // 绝对矩形绘制：借用临时 IconW 走同一绘制路径（矢量表/手绘/字形三级兜底一致），
 // 通过平移绘制原点把 {0,0,w,h} 约定映射到目标矩形。
 void IconW::paint_at(IRenderTarget& rt, const std::string& mui_name,
-                     const RectF& box, const Color4f& color) {
+                     const RectF& box, const Color4f& color, bool flip_y) {
   if (box.w <= 0 || box.h <= 0) return;
   IconW tmp;
   tmp.set_icon(mui_name);
+  tmp.flip_y = flip_y;  // Mini CSS scaleY(-1)（logs.tsx SwapVertRounded 降序态）
   tmp.size_ = box.w < box.h ? box.w : box.h;
   tmp.color_ = color;
   tmp.set_bounds({0, 0, box.w, box.h});
@@ -623,8 +636,12 @@ void IconW::on_paint(IRenderTarget& rt) {
   auto rotated = [&](const std::vector<std::vector<PointF>>& loops,
                      std::vector<std::vector<PointF>>& out) {
     out = loops;
-    if (rotate_deg == 0.0f) return;
     const float cx = w * 0.5f, cy = h * 0.5f;
+    if (flip_y) {  // 垂直镜像（绕盒中心；Mini scaleY(-1)）
+      for (auto& poly : out)
+        for (auto& p : poly) p.y = 2.0f * cy - p.y;
+    }
+    if (rotate_deg == 0.0f) return;
     const float rad = rotate_deg * 3.14159265f / 180.0f;
     const float ca = std::cos(rad), sa = std::sin(rad);
     for (auto& poly : out) {
