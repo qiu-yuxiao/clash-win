@@ -1,6 +1,12 @@
 {
   "version": "0.2.3",
-  "notes": "Clash Win v0.2.3 — kernel upgraded to official MetaCubeX mihomo v1.19.33 (renamed win-mihomo.exe), exclusive coexistence policy landed (launch/install mutual kill + service takeover, never deletes the other side's files), node-filter auto-select aligned to Mini v3.2.3 (700ms debounce, IME composing guard, same-word dedup, no focus-lost trigger), log dialog layout aligned to Mini v3.2.3 (44px header, 18px icons, word-wrap).",
-  "pub_date": "2026-11-10T08:00:00Z",
-  "platforms": {}
+  "notes": "Clash Win v0.2.3",
+  "pub_date": "2026-11-10T10:14:43Z",
+  "platforms": {
+    "windows-x86_64": {
+      "url": "https://github.com/qiu-yuxiao/clash-win/releases/download/v0.2.3/ClashWin_0.2.3_x64-setup.exe",
+      "sha256": "092afe96e6b51c1f7843d63ce73f6b747aee0963c8f0e68a175738c2b9e95502",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIG1pbmlzaWduIHNlY3JldCBrZXkKUlVTdHVzTXdmNGo2dm5RYTNLU3dmRURLUkZKRVp5OThTVjY3K2RhVVZIbGpyQmhzTFdPS3dJN0h3OTZGekVwRnRRa3RMKzMzNldrcVB1Um95RTRqdFJKNVJDTzZHUWNZeXdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MzA1NjgzCWZpbGU6Q2xhc2hXaW5fMC4yLjNfeDY0LXNldHVwLmV4ZQloYXNoZWQKNmFFQ3JnaU80S2NBaVI4elZkcTJIK2xEMllwT1JRK1VWT1l5S0NkTUZuL2YyY3lKR1lLdFp1Szg3RG9oWkN5eHAyeFovWFpBSXlNWnBPNHV5aFg5QXc9PQ=="
+    }
+  }
 }
