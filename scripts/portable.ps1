@@ -62,7 +62,7 @@ if (-not (Test-Path -LiteralPath $BinDir)) {
 
 $required = @(
     (Join-Path $BinDir 'clashwin.exe'),
-    (Join-Path $BinDir 'sidecar\mini-mihomo.exe'),
+    (Join-Path $BinDir 'sidecar\win-mihomo.exe'),
     (Join-Path $BinDir 'sidecar\clash-verge-service.exe'),
     (Join-Path $BinDir 'sidecar\clash-verge-service-install.exe'),
     (Join-Path $BinDir 'sidecar\clash-verge-service-uninstall.exe'),
@@ -135,7 +135,7 @@ finally {
 $mustHave = @(
     'clashwin.exe',
     '.config/PORTABLE',
-    'sidecar/mini-mihomo.exe',
+    'sidecar/win-mihomo.exe',
     'resources/Country.mmdb',
     'locales/zh/home.json',
     '用户必读.txt'

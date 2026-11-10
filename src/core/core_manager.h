@@ -2,7 +2,7 @@
 // T07 内核生命周期管理（← ClashVerge core/manager/{mod,state,lifecycle,config}.rs）
 //
 // - 双运行模式 RunningMode{Service, Sidecar, NotRunning} + lifecycle 锁串行化
-// - Sidecar：CreateProcessW 拉起 mini-mihomo（-d -f -ext-ctl-pipe + Go 三环境变量），
+// - Sidecar：CreateProcessW 拉起 win-mihomo（-d -f -ext-ctl-pipe + Go 三环境变量），
 //   stdout/stderr 管道重定向写 logs/sidecar/sidecar_latest.log
 // - 启停前 kill_all_mini_cores 扫杀残留（安全增强：只杀本应用作用域内的同名进程，
 //   绝不触碰用户实机 Clash Mini 内核——见 select_stale_core_pids 注释）
@@ -30,13 +30,13 @@ enum class RunningMode { Service, Sidecar, NotRunning };
 const char* to_string(RunningMode mode);
 
 // ---------- 内核定位（← state.rs:36-37 + service.rs:215-229） ----------
-// 优先 <home>\cores\mini-mihomo.exe（热升级内核），否则 <exe>\mini-mihomo.exe（sidecar）；
+// 优先 <home>\cores\win-mihomo.exe（热升级内核），否则 <exe>\win-mihomo.exe（sidecar）；
 // 都不存在返回空串。
 std::wstring locate_core_path();
 
 // ---------- Sidecar 命令行构造（纯函数；← state.rs::start_core_by_sidecar） ----------
 struct SidecarLaunch {
-  std::wstring core_path;   // mini-mihomo.exe 全路径
+  std::wstring core_path;   // win-mihomo.exe 全路径
   std::wstring config_dir;  // -d：app_home_dir
   std::wstring config_file; // -f：clash-win.yaml（运行时产物）
   std::wstring ipc_pipe;    // -ext-ctl-pipe：\\.\pipe\mini-mihomo-win
@@ -60,7 +60,7 @@ SidecarLaunch make_sidecar_launch(const std::wstring& core_path, const std::wstr
 // ---------- 残留进程扫描（← state.rs:156-183，安全增强版） ----------
 struct ProcInfo {
   uint32_t pid = 0;
-  std::wstring name;  // exe 文件名（如 mini-mihomo.exe）
+  std::wstring name;  // exe 文件名（如 win-mihomo.exe）
   std::wstring path;  // 全路径（path_ok=false 时空）
   bool path_ok = false;
 };
@@ -68,7 +68,7 @@ using ProcEnumerator = std::function<std::vector<ProcInfo>()>;
 
 // 纯函数（可测）：从枚举结果筛出待杀 PID。
 // 过滤规则（对照 state.rs:167-180 的 name.contains 语义 + 本项目铁律增强）：
-//   1. 进程名必须含 "mini-mihomo"（同名才杀）；
+//   1. 进程名必须含 "win-mihomo"（同名才杀）；
 //   2. 路径无法查询（OpenProcess/QueryFullProcessImageName 失败）→ 跳过不杀；
 //   3. 路径必须位于 scope_dirs 之一（本应用 <home>\cores 或 <exe> 同级）之下——
 //      用户实机 Clash Mini 的内核（其实例目录在本应用作用域外）绝不触碰；

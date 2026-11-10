@@ -27,7 +27,7 @@ ChainItem chain_item_load(const std::wstring& profiles_dir,
                           const std::string& file);
 
 // ← chain.rs::ChainItem::builtin：内置脚本（顺序 hy_alpn → meta_guard；
-// ChainSupport::ClashMeta 仅支持 mini-mihomo 内核）
+// ChainSupport::ClashMeta 仅支持 win-mihomo 内核）
 std::vector<ChainItem> builtin_chain_items(bool clash_meta_supported);
 
 }  // namespace clashwin::enhance

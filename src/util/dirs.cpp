@@ -186,7 +186,7 @@ std::wstring proxy_head_state_path() {
 }
 std::wstring cores_dir() { return join(app_home_dir(), L"cores"); }
 std::wstring ruleset_dir() { return join(app_home_dir(), L"ruleset"); }
-std::wstring sidecar_core_path() { return join(exe_dir(), L"mini-mihomo.exe"); }
+std::wstring sidecar_core_path() { return join(exe_dir(), L"win-mihomo.exe"); }
 
 std::wstring sidecar_log_dir() {
   std::wstring dir = join(app_logs_dir(), L"sidecar");

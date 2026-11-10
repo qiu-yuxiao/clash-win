@@ -142,7 +142,7 @@ IVerge IVerge::make_template() {
   v.config_version = consts::kCurrentVergeVersion;
   v.app_log_max_size = consts::kAppLogMaxSize;
   v.app_log_max_count = consts::kAppLogMaxCount;
-  v.clash_core = "mini-mihomo";
+  v.clash_core = "win-mihomo";
   // 首启界面语言优先级（用户指令 2026-11-07）：
   //   安装器里选的语言 → 系统语言。安装器在开头弹语言选择，用户选中文就该中文，
   //   不该被 ja/其他系统区域盖过去。取不到安装器语言时与 Mini 出厂行为一致。
@@ -608,7 +608,7 @@ std::string IVerge::get_valid_clash_core() const {
       if (s == valid) return s;
     }
   }
-  return "mini-mihomo";
+  return "win-mihomo";
 }
 
 Result<void> IVerge::save_file() const { return verge::save_verge(*this); }

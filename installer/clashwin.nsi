@@ -87,8 +87,8 @@ ${UnStrStr}
 !if ! /fileexists "${STAGEDIR}\${MAINBINARY}"
   !error "缺少 ${STAGEDIR}\${MAINBINARY}：请先运行 installer\build_installer.ps1 暂存 Release 产物。"
 !endif
-!if ! /fileexists "${STAGEDIR}\sidecar\mini-mihomo.exe"
-  !error "缺少 ${STAGEDIR}\sidecar\mini-mihomo.exe：请先运行 installer\build_installer.ps1。"
+!if ! /fileexists "${STAGEDIR}\sidecar\win-mihomo.exe"
+  !error "缺少 ${STAGEDIR}\sidecar\win-mihomo.exe：请先运行 installer\build_installer.ps1。"
 !endif
 !if ! /fileexists "${STAGEDIR}\resources\clash-verge-service-install.exe"
   !error "缺少 ${STAGEDIR}\resources\clash-verge-service-install.exe：请先运行 installer\build_installer.ps1。"
@@ -679,7 +679,8 @@ Section "Install"
   ;   安装时强杀 Clash Mini 全部进程（不删对方磁盘文件）。
   ;   归属判定按 exe 安装目录路径，绝不按进程名（← coexist.cpp 同一口径）：
   ;   Clash Mini 专属二进制（clash-mini.exe / "Clash Mini.exe" / clash-verge.exe /
-  ;   clashwin.exe）按名杀安全；mini-mihomo.exe 与 clash-verge-service.exe 两侧同名，
+  ;   clashwin.exe）按名杀安全；ClashWin 内核名 win-mihomo.exe、Clash Mini 内核名
+  ;   mini-mihomo.exe（已不再同名），clash-verge-service.exe 两侧同名，
   ;   须按路径过滤（含 "Clash Mini"/"clash-mini" 且不属于本方 $INSTDIR），否则升级场景
   ;   下运行中的 ClashWin 重跑安装器会误杀自家内核/服务。
   DetailPrint "Cleaning up legacy and Clash Mini processes/services..."
@@ -691,8 +692,10 @@ Section "Install"
   Pop $0
   nsExec::Exec 'taskkill /F /IM clashwin.exe'
   Pop $0
-  ; 同名内核/服务：仅杀对方（路径含 Clash Mini / clash-mini 且不在本方 $INSTDIR）
-  nsExec::Exec "powershell -NoProfile -NonInteractive -Command $\"Get-Process mini-mihomo -ErrorAction SilentlyContinue | Where-Object { ($_.Path -NotLike '$INSTDIR*') -and (($_.Path -Like '*Clash Mini*') -or ($_.Path -Like '*clash-mini*')) } | Stop-Process -Force$\""
+  ; 同名内核/服务：仅杀对方（路径含 Clash Mini / clash-mini 且不在本方 $INSTDIR）。
+  ; ClashWin 自身内核=win-mihomo.exe、Clash Mini 内核=mini-mihomo.exe，二者皆在名单内，
+  ; Where 过滤保证只杀异路径实例（本方 $INSTDIR 下的 win-mihomo 绝不误杀）。
+  nsExec::Exec "powershell -NoProfile -NonInteractive -Command $\"Get-Process -Name mini-mihomo,win-mihomo -ErrorAction SilentlyContinue | Where-Object { ($_.Path -NotLike '$INSTDIR*') -and (($_.Path -Like '*Clash Mini*') -or ($_.Path -Like '*clash-mini*')) } | Stop-Process -Force$\""
   Pop $0
   nsExec::Exec "powershell -NoProfile -NonInteractive -Command $\"Get-Process clash-verge-service -ErrorAction SilentlyContinue | Where-Object { ($_.Path -NotLike '$INSTDIR*') -and (($_.Path -Like '*Clash Mini*') -or ($_.Path -Like '*clash-mini*')) } | Stop-Process -Force$\""
   Pop $0
@@ -875,8 +878,8 @@ Section "Uninstall"
 
   !insertmacro un.CheckIfAppIsRunning "${MAINBINARY}"
 
-  ; 内核进程清理（同安装段：共存豁免，仅本目录）
-  nsExec::Exec "powershell -NoProfile -NonInteractive -Command $\"Get-Process mini-mihomo -ErrorAction SilentlyContinue | Where-Object Path -Like '$INSTDIR*' | Stop-Process -Force$\""
+  ; 内核进程清理（同安装段：共存豁免，仅本目录；ClashWin 内核=win-mihomo.exe）
+  nsExec::Exec "powershell -NoProfile -NonInteractive -Command $\"Get-Process win-mihomo -ErrorAction SilentlyContinue | Where-Object Path -Like '$INSTDIR*' | Stop-Process -Force$\""
   Pop $0
 
   ; 系统代理还原（总纲 §5.2.2 第 4 条）：ProxyServer 指向本方 mixed 端口 →

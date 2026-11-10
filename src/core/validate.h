@@ -1,6 +1,6 @@
 #pragma once
 // T07 配置校验（← ClashVerge core/validate.rs 全语义）
-// - mini-mihomo.exe -t -d <app_dir> -f <config> 子进程，10s 超时（超时 kill 显式回收）
+// - win-mihomo.exe -t -d <app_dir> -f <config> 子进程，10s 超时（超时 kill 显式回收）
 // - 结果四分类 Valid / Invalid{kind,message} / Skipped{reason} / Busy
 // - Busy = 已有校验进程在跑（互斥，CoreConfigValidator::try_start 语义）
 // - stdout/stderr 收集 + error_keywords（FATA/fatal/Parse config error/level=fatal）
@@ -61,7 +61,7 @@ bool contains_error_keyword(const std::string& buf);
 
 // 子进程校验（沙箱内 spawn 被拦时返回 err——live 用例据此 SKIP）
 struct ValidateOptions {
-  std::wstring core_path;  // mini-mihomo.exe 全路径（locate_core_path）
+  std::wstring core_path;  // win-mihomo.exe 全路径（locate_core_path）
   std::wstring app_dir;    // -d（app_home_dir）
   int timeout_ms = consts::kValidateControlTimeoutMs;
 };

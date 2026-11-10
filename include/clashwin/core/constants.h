@@ -20,11 +20,11 @@ inline constexpr int kServiceIpcRetryDelayMs = 250;
 inline constexpr int kServiceIpcMaxRetries = 20;
 
 // ---------- 校验（← validate.rs + constants.rs） ----------
-inline constexpr int kValidateControlTimeoutMs = 10000;  // mini-mihomo -t 超时
+inline constexpr int kValidateControlTimeoutMs = 10000;  // win-mihomo -t 超时
 
 // ---------- 内核合法性（← verge.rs VALID_CLASH_CORES / get_valid_clash_core） ----------
-inline constexpr const char* kValidClashCores[] = {"mini-mihomo"};
-inline constexpr const char* kDefaultClashCore = "mini-mihomo";
+inline constexpr const char* kValidClashCores[] = {"win-mihomo"};
+inline constexpr const char* kDefaultClashCore = "win-mihomo";
 
 // ---------- 重启恢复预算（← lifecycle.rs::restore_proxy_group_now） ----------
 inline constexpr int kApiReadyBudgetMs = 30000;     // 等 API 就绪（200ms 轮询）
@@ -41,8 +41,8 @@ inline constexpr int kSidecarStopWaitMs = 2000;  // 杀后等待端口释放上�
 inline constexpr int kPortReleasePollMs = 50;
 inline constexpr int kPortReleaseMaxWaitMs = 3000;
 
-// ---------- 残留扫描（← state.rs:170：进程名 contains "mini-mihomo"） ----------
-inline constexpr wchar_t kCoreProcessToken[] = L"mini-mihomo";
+// ---------- 残留扫描（← state.rs:170：进程名 contains "win-mihomo"） ----------
+inline constexpr wchar_t kCoreProcessToken[] = L"win-mihomo";
 
 // ---------- 服务模式日志（← logger.rs service_writer_config） ----------
 // max_log_size = app_log_max_size(KB, 默认 128) × 1024；max_log_files = app_log_max_count（默认 8，verge 模板 40）

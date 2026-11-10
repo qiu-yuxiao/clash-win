@@ -146,7 +146,7 @@ ValidationOutcome judge_validation(const std::optional<int>& exit_code,
 }
 
 namespace {
-// 子进程运行 mini-mihomo -t，收集 stdout/stderr，10s 超时显式 kill（← validate.rs:371-446
+// 子进程运行 win-mihomo -t，收集 stdout/stderr，10s 超时显式 kill（← validate.rs:371-446
 // 进程泄漏修复：手动 spawn + 收集 + 超时 kill，不用丢弃句柄的 output()）
 Result<ValidationOutcome> run_core_check(const ValidateOptions& opt,
                                          const std::string& config_path_utf8) {
@@ -178,7 +178,7 @@ Result<ValidationOutcome> run_core_check(const ValidateOptions& opt,
     ::CloseHandle(err_w);
     DWORD gle = ::GetLastError();
     CWLOG_ERROR("validate CreateProcessW failed, gle=" + std::to_string(gle));
-    return Result<ValidationOutcome>::err({2321, "CreateProcessW(mini-mihomo -t) failed, gle=" +
+    return Result<ValidationOutcome>::err({2321, "CreateProcessW(win-mihomo -t) failed, gle=" +
                                                      std::to_string(gle)});
   }
   ::CloseHandle(pi.hThread);

@@ -86,7 +86,7 @@ ChainItem chain_item_load(const std::wstring& profiles_dir,
 
 std::vector<ChainItem> builtin_chain_items(bool clash_meta_supported) {
   std::vector<ChainItem> items;
-  // ← chain.rs::builtin：ChainSupport::ClashMeta 仅支持 "mini-mihomo"；core
+  // ← chain.rs::builtin：ChainSupport::ClashMeta 仅支持 "win-mihomo"；core
   // 为 None 时 is_support = true
   if (!clash_meta_supported) return items;
   ChainItem hy;

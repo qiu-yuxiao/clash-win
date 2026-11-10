@@ -64,7 +64,7 @@ public class CwDrawer {
 
 function Stop-Cw {
   Get-Process -Name clashwin -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
-  Get-Process -Name mini-mihomo -ErrorAction SilentlyContinue |
+  Get-Process -Name win-mihomo -ErrorAction SilentlyContinue |
     Where-Object { $_.Path -like '*ClashWin*' -or $_.Path -like '*cw-*' } |
     ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
   try { Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -Name ProxyEnable -Value 0 -Type DWord } catch {}

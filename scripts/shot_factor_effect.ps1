@@ -19,7 +19,7 @@ if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir | Out
 
 function Stop-Cw {
   Get-Process -Name clashwin -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
-  Get-Process -Name mini-mihomo -ErrorAction SilentlyContinue |
+  Get-Process -Name win-mihomo -ErrorAction SilentlyContinue |
     Where-Object { $_.Path -like '*ClashWin*' } |
     ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
   try {

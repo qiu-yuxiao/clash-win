@@ -178,9 +178,9 @@ function Get-CrashCount {
 }
 
 function Stop-OurTree([int]$rootPid, [string]$runDir) {
-  # 先杀本轮 app 派生的 sidecar（cwrun 下的 mini-mihomo），再杀 app 本体
+  # 先杀本轮 app 派生的 sidecar（cwrun 下的 win-mihomo），再杀 app 本体
   $rd = $runDir.ToLower()
-  foreach ($m in (Get-Process -Name mini-mihomo -ErrorAction SilentlyContinue)) {
+  foreach ($m in (Get-Process -Name win-mihomo -ErrorAction SilentlyContinue)) {
     $mp = $null
     try { $mp = $m.Path } catch { }
     if ($mp -and $mp.ToLower().StartsWith($rd)) {

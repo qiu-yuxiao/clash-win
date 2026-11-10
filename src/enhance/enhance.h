@@ -25,7 +25,7 @@ namespace clashwin::enhance {
 
 // ← mod.rs::ConfigValues（verge 侧开关集）
 struct EnhanceVergeOptions {
-  std::string clash_core = "mini-mihomo";   // get_valid_clash_core()
+  std::string clash_core = "win-mihomo";   // get_valid_clash_core()
   bool enable_tun = false;                  // enable_tun_mode
   bool enable_builtin = true;               // enable_builtin_enhanced
   bool socks_enabled = false;               // verge_socks_enabled

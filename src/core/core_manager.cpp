@@ -142,16 +142,16 @@ const char* to_string(RunningMode mode) {
 }
 
 std::wstring locate_core_path() {
-  // ← state.rs:36-37 / service.rs:216-228：<home>\cores\mini-mihomo.exe 优先（热升级内核）
-  std::wstring custom = util::dirs::cores_dir() + L"\\mini-mihomo.exe";
+  // ← state.rs:36-37 / service.rs:216-228：<home>\cores\win-mihomo.exe 优先（热升级内核）
+  std::wstring custom = util::dirs::cores_dir() + L"\\win-mihomo.exe";
   if (fs::exists(custom)) return custom;
-  // 兜底 exe 同级 sidecar（← current_exe().with_file_name("mini-mihomo.exe")）
+  // 兜底 exe 同级 sidecar（← current_exe().with_file_name("win-mihomo.exe")）
   std::wstring sidecar = util::dirs::sidecar_core_path();
   if (fs::exists(sidecar)) return sidecar;
-  // 开发/测试布局兜底（copy_resources 落位 <exe>\sidecar\mini-mihomo.exe）
+  // 开发/测试布局兜底（copy_resources 落位 <exe>\sidecar\win-mihomo.exe）
   wchar_t self[MAX_PATH];
   if (::GetModuleFileNameW(nullptr, self, MAX_PATH) > 0) {
-    std::wstring dev = (fs::path(self).parent_path() / L"sidecar\\mini-mihomo.exe").wstring();
+    std::wstring dev = (fs::path(self).parent_path() / L"sidecar\\win-mihomo.exe").wstring();
     if (fs::exists(dev)) return dev;
   }
   return {};
@@ -274,11 +274,11 @@ std::vector<uint32_t> kill_all_mini_cores(const std::set<uint32_t>& exclude_pids
   for (uint32_t pid : targets) {
     if (terminate_pid(pid)) {
       killed.push_back(pid);
-      CWLOG_WARN("killed leftover mini-mihomo pid=" + std::to_string(pid));
+      CWLOG_WARN("killed leftover win-mihomo pid=" + std::to_string(pid));
     } else {
       taskkill_pid(pid);
       killed.push_back(pid);
-      CWLOG_WARN("taskkill fallback for mini-mihomo pid=" + std::to_string(pid));
+      CWLOG_WARN("taskkill fallback for win-mihomo pid=" + std::to_string(pid));
     }
   }
   return killed;
@@ -440,7 +440,7 @@ Result<void> CoreManager::start_sidecar_locked(const std::wstring& config_file,
 
   auto core = locate_core_path();
   if (core.empty()) {
-    return Result<void>::err({2302, "mini-mihomo core not found (cores/ and sidecar both missing)"});
+    return Result<void>::err({2302, "win-mihomo core not found (cores/ and sidecar both missing)"});
   }
 
   auto home = util::dirs::app_home_dir();
@@ -475,7 +475,7 @@ Result<void> CoreManager::start_sidecar_locked(const std::wstring& config_file,
     ::CloseHandle(out_w);
     ::CloseHandle(err_r);
     ::CloseHandle(err_w);
-    return Result<void>::err({2304, "CreateProcessW(mini-mihomo) failed, gle=" +
+    return Result<void>::err({2304, "CreateProcessW(win-mihomo) failed, gle=" +
                                         std::to_string(::GetLastError())});
   }
   ::CloseHandle(pi.hThread);
@@ -601,7 +601,7 @@ Result<void> CoreManager::start_service_locked(const std::wstring& config_file) 
 
   auto core = locate_core_path();
   if (core.empty()) {
-    return Result<void>::err({2302, "mini-mihomo core not found (cores/ and sidecar both missing)"});
+    return Result<void>::err({2302, "win-mihomo core not found (cores/ and sidecar both missing)"});
   }
   auto home = util::dirs::app_home_dir();
   auto payload = service_mode::build_clash_config_payload(

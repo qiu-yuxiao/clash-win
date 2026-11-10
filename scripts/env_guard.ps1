@@ -4,7 +4,7 @@
 #   - 端口口径以 include\clashwin\config\constants.h 为准：
 #     10801 mixed / 10802 socks / 10803 http / 9098 controller / 33335 单实例。
 #     7899 只是 http 兜底端口，允许被无关程序占用，不进断言。
-#   - 清理对象：clashwin.exe、clashwin_test.exe（全部实例）；mini-mihomo.exe
+#   - 清理对象：clashwin.exe、clashwin_test.exe（全部实例）；win-mihomo.exe
 #     （仓库 build* / %TEMP%\cw* / C:\Program Files\Clash Mini 下）；clash-mini.exe
 #   - 服务 clash_verge_service：不再要求保留或 RUNNING。测试中可自由 stop / delete /
 #     用我方 sidecar\clash-verge-service-install.exe 安装，也可用 Mini 安装器恢复。
@@ -30,7 +30,7 @@ param(
 $ErrorActionPreference = 'Continue'
 
 $Repo = Split-Path -Parent $PSScriptRoot
-$OurNames = @('clashwin', 'clashwin_test', 'mini-mihomo', 'clash-mini')
+$OurNames = @('clashwin', 'clashwin_test', 'win-mihomo', 'clash-mini')
 $ExcludedNamePatterns = @('clash_verge_service', 'clash-verge-service')
 $WatchPorts = @(10801, 10802, 10803, 9098, 33335)
 
@@ -60,7 +60,7 @@ function Test-OwnedByUs([string]$name, [string]$path) {
     if ($name -like $pat) { return $false }
   }
   if ($name -eq 'clashwin' -or $name -eq 'clashwin_test' -or $name -eq 'clash-mini') { return $true }
-  if ($name -eq 'mini-mihomo') {
+  if ($name -eq 'win-mihomo') {
     if (-not $path) { return $false }
     $lp = $path.ToLower()
     return ($lp.StartsWith($Repo.ToLower()) -or

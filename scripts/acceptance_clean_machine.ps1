@@ -113,8 +113,8 @@ try {
 
 # ---------- 4. 内核进程 SessionId ----------
 Write-Host '--- 4. 内核进程 ---'
-$cores = @(Get-Process -Name 'mini-mihomo' -ErrorAction SilentlyContinue)
-Rec 'CORE' 'mini-mihomo 进程数' $cores.Count
+$cores = @(Get-Process -Name 'win-mihomo' -ErrorAction SilentlyContinue)
+Rec 'CORE' 'win-mihomo 进程数' $cores.Count
 foreach ($c in $cores) {
     $p = '(denied)'
     try { $p = $c.Path } catch { }

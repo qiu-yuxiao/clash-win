@@ -260,10 +260,10 @@ EnhanceOutput enhance_core(const EnhanceInput& input) {
                                 verge.http_enabled,
                                 verge.enable_external_controller);
 
-  // ⑥ 内置脚本（enable_builtin；core 匹配 mini-mihomo；core 空 → 支持）
+  // ⑥ 内置脚本（enable_builtin；core 匹配 win-mihomo；core 空 → 支持）
   if (verge.enable_builtin) {
     bool meta_supported = verge.clash_core.empty() ||
-                          verge.clash_core == "mini-mihomo";
+                          verge.clash_core == "win-mihomo";
     for (const auto& item : builtin_chain_items(meta_supported)) {
       auto res = use_script(item.script, config, "");
       if (res.is_ok()) {

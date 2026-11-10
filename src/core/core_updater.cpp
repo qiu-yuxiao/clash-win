@@ -485,7 +485,7 @@ Result<void> CoreUpdater::extract_core_binary(const std::wstring& archive_path,
 
   if (found_exe.empty()) {
     std::filesystem::remove_all(temp_extract_dir, ec);
-    return Result<void>::err(make_err("在压缩包内未找到 mini-mihomo 程序二进制"));
+    return Result<void>::err(make_err("在压缩包内未找到 win-mihomo 程序二进制"));
   }
 
   // Copy/move to target exe path
@@ -532,8 +532,8 @@ Result<void> CoreUpdater::start_core_upgrade(const GithubRelease& release) {
   std::wstring cores_dir = util::dirs::cores_dir();
   std::filesystem::create_directories(cores_dir);
 
-  std::wstring temp_download_path = cores_dir + L"\\mini-mihomo.download.tmp";
-  std::wstring target_exe_path = cores_dir + L"\\mini-mihomo.exe";
+  std::wstring temp_download_path = cores_dir + L"\\win-mihomo.download.tmp";
+  std::wstring target_exe_path = cores_dir + L"\\win-mihomo.exe";
 
   emit_progress("downloading", 10, "开始下载: " + asset.name);
 

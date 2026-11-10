@@ -8,7 +8,7 @@
 // - 服务名固定 clash_verge_service（两侧同名，改不了）。服务二进制继承自上游
 //   Clash Verge，是同一个组件：注册在位且二进制哈希与上游基线一致 → 共用不夺注册
 //   （零 UAC）；仅缺失/损坏/哈希不一致才重装接管；卸载时归还给仍在装的对方；
-// - 归属判定按 exe 安装目录路径，绝不按进程名（两侧内核同名 mini-mihomo.exe，按名杀
+// - 归属判定按 exe 安装目录路径，绝不按进程名（ClashWin 内核=win-mihomo.exe、Clash Mini 内核=mini-mihomo.exe，已不再同名；按名杀
 //   会误杀自家内核）；绝不发 WM_CLOSE（Mini 收到关闭只会进轻量模式隐藏，不会退出）。
 //
 // 取代旧「共存豁免 + refuse_service_mutation」设计与「安装即夺注册」细则。
@@ -34,7 +34,7 @@ bool upstream_baseline_equals(std::string_view hex_lower_or_mixed);
 
 // 启动/安装互斥：强杀所有「对方」进程（按路径归属判定），返回成功终止的进程数。
 // 分类规则：exe 路径不属本方，且文件名属于两 App 共享组件名集合
-//   （clash-mini / mini-mihomo / clash-verge-service* / enableLoopback / clash-verge），
+//   （clash-mini / mini-mihomo / win-mihomo / clash-verge-service* / enableLoopback / clash-verge），
 //   或其目录片段含 "clash mini" / "clash-mini"。自身 PID 与系统 PID 永不进入候选。
 int kill_other_processes();
 

@@ -48,7 +48,8 @@ std::wstring image_exe_path(const std::wstring& raw) {
 bool is_shared_component_name(const std::wstring& file_lower) {
   static const wchar_t* kNames[] = {
       L"clash-mini.exe",        L"clash mini.exe",
-      L"mini-mihomo.exe",       L"clash-verge-service.exe",
+      L"mini-mihomo.exe",       L"win-mihomo.exe",
+      L"clash-verge-service.exe",
       L"clash-verge-service-install.exe",
       L"clash-verge-service-uninstall.exe",
       L"enableloopback.exe",    L"clash-verge.exe",

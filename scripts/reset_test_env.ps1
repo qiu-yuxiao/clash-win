@@ -3,7 +3,7 @@
 #
 # 用途：把本机的 Clash Win 运行态恢复到「干净首装」等价状态，避免开发期残留
 #       污染用户测试。会做四件事：
-#         1) 停止所有 clashwin.exe / 本应用内核进程（mini-mihomo 仅限本产品目录）
+#         1) 停止所有 clashwin.exe / 本应用内核进程（win-mihomo 仅限本产品目录）
 #         2) 关闭系统代理并广播刷新（防止退出异常时遗留代理黑洞）
 #         3) 备份并移走配置目录 %APPDATA%\io.github.clash-win.clash-win
 #         4) 校验：配置目录已不存在、系统代理已关、进程已清空
@@ -47,7 +47,7 @@ $resolved = @()
 foreach ($d in $instDirs) {
   try { $resolved += (Resolve-Path $d -ErrorAction Stop).Path } catch {}
 }
-foreach ($name in @('mini-mihomo')) {
+foreach ($name in @('win-mihomo')) {
   Get-Process $name -ErrorAction SilentlyContinue | ForEach-Object {
     $path = $null
     try { $path = $_.Path } catch {}
@@ -109,7 +109,7 @@ foreach ($root in $portableRoots) {
       Move-Item -Path $pdir -Destination $pbackup -Force -ErrorAction Stop
       Write-Host "便携配置已备份移走：$pbackup" -ForegroundColor Yellow
     } catch {
-      # 目录被内核占用（TUN 模式下服务以 SYSTEM 起的 mini-mihomo 锁着 cache.db，
+      # 目录被内核占用（TUN 模式下服务以 SYSTEM 起的 win-mihomo 锁着 cache.db，
       # 普通权限杀不掉）→ 退化为「只搬状态文件、留下资产/被占用文件」，
       # 效果等价干净首装：profiles/verge/window_state/skin 全清。
       Write-Host "整目录被占用，改为逐项搬移状态文件 → $pbackup" -ForegroundColor Yellow

@@ -23,7 +23,7 @@ $expected = @(
   [pscustomobject]@{ Name = 'clash-verge-service-uninstall.exe';  Bytes = 155648;   Sha256 = '1CDFCFC3CAB2F26ED4E62FBCE128BC58B6D5C2A3D435BFC8042A5051E288350F' },
   [pscustomobject]@{ Name = 'clash-verge-service.exe';            Bytes = 1778176;  Sha256 = '92AD792ABB91BD84B89894E63A8251434A631A5803D9D043C18F7A5A7961E9D2' },
   [pscustomobject]@{ Name = 'enableLoopback.exe';                  Bytes = 84040;    Sha256 = 'F0C328376BD5AE0EF3B0EB19AC1F343C24A9ABFE7BC1008D3B2F6EF3573D04D1' },
-  [pscustomobject]@{ Name = 'mini-mihomo.exe';                     Bytes = 47187456; Sha256 = '3ED26E40277655D0EE4004A1A77D4CC204057E8BDF7A6A9A63B73B15324A43C2' }
+  [pscustomobject]@{ Name = 'win-mihomo.exe';                      Bytes = 61247488; Sha256 = '1CDE41CFFFD3DE0AEDAD63C0A8515E1CE5EEA507E8133AED0F637D316C93800A' }
 )
 
 if (-not (Test-Path -LiteralPath $SidecarDir -PathType Container)) {

@@ -28,7 +28,7 @@ try {
   $targetExe = Join-Path $runDir ("cwrun_" + (Get-Date -Format 'HHmmss') + ".exe")
   Copy-Item (Join-Path $rel 'clashwin_test.exe') $targetExe -Force
 }
-# t08 golden live probe 需要 test core：sidecar\mini-mihomo.exe 必须跟着复制，
+# t08 golden live probe 需要 test core：sidecar\win-mihomo.exe 必须跟着复制，
 #   否则 3 条用例会以 "SKIP: test core failed to start" 结束（2026-11-05）。
 Copy-Item (Join-Path $repo 'sidecar') (Join-Path $runDir 'sidecar') -Recurse -Force -ErrorAction SilentlyContinue
 Copy-Item (Join-Path $rel 'locales') (Join-Path $runDir 'locales') -Recurse -Force -ErrorAction SilentlyContinue

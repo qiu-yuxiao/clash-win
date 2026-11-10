@@ -111,12 +111,12 @@ struct LiveCore {
       wchar_t self[MAX_PATH];
       GetModuleFileNameW(nullptr, self, MAX_PATH);
       std::wstring src =
-          (std::filesystem::path(self).parent_path() / L"sidecar\\mini-mihomo.exe").wstring();
+          (std::filesystem::path(self).parent_path() / L"sidecar\\win-mihomo.exe").wstring();
       if (!std::filesystem::exists(src)) {
         std::printf("  [live] sidecar not found: %ls\n", src.c_str());
         return false;
       }
-      std::filesystem::copy_file(src, home_dir + L"\\cores\\mini-mihomo.exe",
+      std::filesystem::copy_file(src, home_dir + L"\\cores\\win-mihomo.exe",
                                  std::filesystem::copy_options::overwrite_existing, ec);
       if (ec) {
         std::printf("  [live] copy sidecar failed: %s\n", ec.message().c_str());
@@ -536,11 +536,11 @@ UT_TEST(live_mihomo_pipe_diag) {
     else std::printf("  [diag] cmd output: (missing)\n");
   }
 
-  // 3) mini-mihomo -h（应立即打印帮助并退出 0）
+  // 3) win-mihomo -h（应立即打印帮助并退出 0）
   {
     wchar_t self[MAX_PATH];
     GetModuleFileNameW(nullptr, self, MAX_PATH);
-    std::wstring exe = (std::filesystem::path(self).parent_path() / L"sidecar\\mini-mihomo.exe").wstring();
+    std::wstring exe = (std::filesystem::path(self).parent_path() / L"sidecar\\win-mihomo.exe").wstring();
     std::wstring help_file = std::wstring(temp) + L"clashwin-diag-help.txt";
     SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
     HANDLE hout = CreateFileW(help_file.c_str(), GENERIC_WRITE, FILE_SHARE_READ, &sa,
@@ -554,7 +554,7 @@ UT_TEST(live_mihomo_pipe_diag) {
     std::wstring cmd = L"\"" + exe + L"\" -h";
     BOOL ok = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
                              nullptr, nullptr, &si, &pi);
-    std::printf("  [diag] create mini-mihomo -h ok=%d gle=%lu\n", ok, ok ? 0 : GetLastError());
+    std::printf("  [diag] create win-mihomo -h ok=%d gle=%lu\n", ok, ok ? 0 : GetLastError());
     if (ok) {
       DWORD w = WaitForSingleObject(pi.hProcess, 10000);
       std::printf("  [diag] -h wait result=%lu (0=exited, 258=timeout)\n", w);

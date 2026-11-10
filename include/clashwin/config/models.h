@@ -113,7 +113,7 @@ struct IVerge {
   Result<void> save_file() const;
 
   // ← verge.rs::VALID_CLASH_CORES / get_valid_clash_core
-  static constexpr const char* kValidClashCores[] = {"mini-mihomo"};
+  static constexpr const char* kValidClashCores[] = {"win-mihomo"};
   std::string get_valid_clash_core() const;
 
   YAML::Node to_yaml() const;

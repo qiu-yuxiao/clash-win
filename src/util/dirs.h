@@ -49,7 +49,7 @@ std::wstring window_state_path();      // <home>\window_state.json
 std::wstring proxy_head_state_path();  // <home>\proxy_head_state.json
 std::wstring cores_dir();              // <home>\cores（内核热升级区）
 std::wstring ruleset_dir();            // <home>\ruleset（gfwlist 等规则集，实机存在）
-std::wstring sidecar_core_path();      // <exe>\mini-mihomo.exe（sidecar 兜底）
+std::wstring sidecar_core_path();      // <exe>\win-mihomo.exe（sidecar 兜底）
 
 // 以下两个会创建目录（← dirs.rs::sidecar_log_dir/service_log_dir）
 std::wstring sidecar_log_dir();        // <home>\logs\sidecar

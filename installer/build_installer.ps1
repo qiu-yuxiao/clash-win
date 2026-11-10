@@ -89,7 +89,7 @@ $mainExe = Join-Path $BinDir 'clashwin.exe'
 if (-not (Test-Path -LiteralPath $mainExe)) { $missing += $mainExe }
 
 $sidecarNames = @(
-    'mini-mihomo.exe',
+    'win-mihomo.exe',
     'clash-verge-service.exe',
     'clash-verge-service-install.exe',
     'clash-verge-service-uninstall.exe',

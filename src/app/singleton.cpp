@@ -41,7 +41,7 @@ bool SingletonServer::start(uint16_t port,
   if (s == INVALID_SOCKET) return false;
 
   // socket() 句柄默认带 OBJ_INHERIT：拉起 sidecar 时 CreateProcessW 的 bInheritHandles=TRUE
-  // （stdout/stderr 管道必须重定向）会把它一并继承给 mini-mihomo，导致本进程退出后
+  // （stdout/stderr 管道必须重定向）会把它一并继承给 win-mihomo，导致本进程退出后
   // 33337 仍被 sidecar 持着 LISTEN。源头清除继承位，覆盖所有 CreateProcessW 调用点。
   ::SetHandleInformation(reinterpret_cast<HANDLE>(s), HANDLE_FLAG_INHERIT, 0);
 
