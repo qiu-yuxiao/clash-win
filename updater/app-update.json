@@ -1,12 +1,12 @@
 {
   "version": "0.2.4",
   "notes": "Clash Win v0.2.4",
-  "pub_date": "2026-11-10T22:00:00Z",
+  "pub_date": "2026-11-10T14:37:48Z",
   "platforms": {
     "windows-x86_64": {
-      "url": "",
-      "sha256": "",
-      "signature": ""
+      "url": "https://github.com/qiu-yuxiao/clash-win/releases/download/v0.2.4/ClashWin_0.2.4_x64-setup.exe",
+      "sha256": "0edda93c894e70fd9e09bccc0b259f06bf2f8bc74f3aad810d06dc20ba92f0c9",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIG1pbmlzaWduIHNlY3JldCBrZXkKUlVTdHVzTXdmNGo2dnVPT1IwTmV4Tnp2ZWcvNTBhYkszemxlTVZuWTRQUk4ybGozSVN5dW5pdTlIUkMwTEpVcExoWWwxM0FyQWhIeTFZbHR4MXk0WXJjWTR1VTZFTW5GUVE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MzIxNDY4CWZpbGU6Q2xhc2hXaW5fMC4yLjRfeDY0LXNldHVwLmV4ZQloYXNoZWQKcnpJWFpCS2xSRFVUS1pNZHdLeFhVWlNHblVNaml0blk4TGFIa21CeU5IS2lsVlNJQzl6Y215MWxLNEZGVVYySUtTcTNjbzJHdGRKbG5MQWNTT2gxRFE9PQ=="
     }
   }
 }
