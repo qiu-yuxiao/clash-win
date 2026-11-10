@@ -2158,11 +2158,16 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       break;
 
     case WM_IME_SETCONTEXT:
-    case WM_IME_STARTCOMPOSITION:
-    case WM_IME_COMPOSITION: {
+    case WM_IME_COMPOSITION:
       update_ime_position();
       break;
-    }
+    case WM_IME_STARTCOMPOSITION:
+      ime_composing_ = true;  // G3: 进入组词
+      update_ime_position();
+      break;
+    case WM_IME_ENDCOMPOSITION:
+      ime_composing_ = false;  // G3: 组词结束
+      break;
 
     case WM_MOUSEMOVE:
     case WM_LBUTTONDOWN:
@@ -2243,6 +2248,13 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       e.ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
       e.shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
       e.alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+      // G3: IME 组词期 Enter 由 IME 消费（← Mini base-search-box.tsx:127-135
+      //   !isComposing && keyCode!==229；Win32 组词期该键多呈 VK_PROCESSKEY=229，
+      //   直通 VK_RETURN 的输入法也在此挡住，防误触发提交/首启完成）
+      if (ime_composing_ && wp == VK_RETURN) {
+        update_ime_position();
+        return 0;
+      }
       // 首启引导弹窗：Esc 关闭、就绪步 Enter 完成（src: :533-542 / :417-446）。
       // 订阅框 TextField 已吞掉输入步的字符/Enter（on_submit），此处仅在就绪步
       // 接管 Enter，并对两步统一接管 Esc——对话框 on_key 焦点已被输入框抢占。
@@ -2283,6 +2295,8 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_CHAR: {
       stealth_.feed_activity(now_ms());
+      // G3: 组词期泄漏的 '\r'（提交候选后跟随的回车）不进 widget 树
+      if (ime_composing_ && wp == L'\r') return 0;
       KeyEvent e;
       e.type = KeyEventType::Char;
       e.ch = static_cast<wchar_t>(wp);

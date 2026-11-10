@@ -503,14 +503,19 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   search_->on_text_changed = [this](const std::wstring& t) {
     set_filter(clashwin::utf::utf16_to_utf8(t));
     if (filter_.empty() || visible_.empty()) return;
-    // 输入完成后防抖 800ms 自动触发多路测速择优（使满足条件的节点自动成为当前活跃节点）
+    // 输入完成后防抖 700ms 自动触发多路测速择优（使满足条件的节点自动成为当前活跃节点）
+    // G1: 800→700ms（← Mini proxy-head.tsx setTimeout(..., 700)，v3.2.3）
     uint64_t seq = ++filter_change_seq_;
     std::thread([this, seq] {
-      std::this_thread::sleep_for(std::chrono::milliseconds(800));
+      std::this_thread::sleep_for(std::chrono::milliseconds(700));
       if (filter_change_seq_.load() == seq) {
         UiPostbox::instance().post([this, seq] {
           if (filter_change_seq_.load() == seq && !filter_.empty()) {
-            trigger_auto_select_visible();
+            // G4: 同过滤词不重复触发（← Mini proxy-head.tsx lastTriggeredFilterRef）
+            if (filter_ != last_auto_select_filter_) {
+              last_auto_select_filter_ = filter_;
+              trigger_auto_select_visible();
+            }
           }
         });
       }
@@ -518,14 +523,14 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   };
   search_->on_submit = [this] {
     ++filter_change_seq_;  // 回车确认输入完成：立即触发
-    trigger_auto_select_visible();
-  };
-  search_->on_focus_lost = [this] {
-    if (!filter_.empty() && filter_change_seq_.load() != 0) {
-      filter_change_seq_.store(0);
+    // G4: 同过滤词不重复触发（← Mini proxy-head.tsx lastTriggeredFilterRef）
+    if (filter_ != last_auto_select_filter_) {
+      last_auto_select_filter_ = filter_;
       trigger_auto_select_visible();
     }
   };
+  // G2: 删除 Win 加戏的失焦触发通道——Mini 只 onChangeText / onEnter 两通道
+  //     （proxy-head.tsx:62-122 无 onBlur 触发），对齐铁律照删。
   search_wrap_->add_child(std::move(search));
 
   // 清空按钮由 TextField::set_clear_button 内建承载（配置见上）
@@ -602,6 +607,8 @@ void NodeList::set_filter(const std::string& text) {
     lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
   if (filter_ == lower) return;
   filter_ = lower;
+  // G4: 过滤词清空时重置去重记录，保证清空后重输同一词仍可触发
+  if (filter_.empty()) last_auto_select_filter_.clear();
   try {
     std::string uid;
     auto latest = config::Config::instance().profiles().latest_arc();

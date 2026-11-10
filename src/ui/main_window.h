@@ -307,6 +307,10 @@ class MainWindow : public app::ILifecycleWindow {
   bool in_destroy_ = false;
   std::optional<std::pair<double, double>> last_non_large_restore_;  // 盘读
   std::optional<POINT> nc_down_;  // stealth 点击恢复判定
+  // G3: IME 组词期守卫（← Mini base-search-box.tsx:127-135 !isComposing &&
+  //   keyCode!==229）：STARTCOMPOSITION 置位、ENDCOMPOSITION 清零，组词中
+  //   吞掉 Enter，防过滤框误触发自动择优提交
+  bool ime_composing_ = false;
   system::Tray* tray_ = nullptr;
   // —— TUN 自动关闭守卫（← use-system-state.ts:99-128）——
   //   TUN 已开但当前不可用（非管理员且服务不可用）→ 自动关 TUN + 回退系统代理，

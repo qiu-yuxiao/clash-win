@@ -180,6 +180,7 @@ class NodeList : public Widget {
   Label* empty_label_ = nullptr;  // src: proxy-render.tsx:76 "No Proxies"
   ScrollTopButton* scroll_top_ = nullptr;  // ← scroll-top-button.tsx（proxy-groups.tsx:330）
   std::string filter_;
+  std::string last_auto_select_filter_;  // G4: 上次已触发自动择优的过滤词（同词去重，← Mini proxy-head.tsx lastTriggeredFilterRef）
   std::atomic<uint64_t> filter_change_seq_{0};
   int sort_type_ = 1;  // src: use-head-state.ts:21 sortType 初值 1（按延迟）
   // ★ ❌1 网格列数（宽窗 3 / 窄窗 1，由内容宽决定）与最近一次内容宽（用于判定切换）
