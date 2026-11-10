@@ -113,7 +113,7 @@ UT_TEST(t03_first_launch_verge_yaml_diff_empty) {
       "proxy_host: 127.0.0.1\n"
       "theme_setting: null\n"
       "web_ui_list: null\n"
-      "clash_core: mini-mihomo\n"
+      "clash_core: win-mihomo\n"
       "enable_always_on_top: false\n"
       "home_cards: null\n"
       "auto_close_connection: false\n"

@@ -145,7 +145,7 @@ UT_TEST(dirs_fixed_paths) {
   UT_CHECK_EQ(dirs::ipc_path(), L"\\\\.\\pipe\\mini-mihomo-win");
   std::wstring res = dirs::app_resources_dir();
   UT_CHECK_EQ(dirs::service_path(), res + L"\\clash-verge-service.exe");
-  // sidecar 兜底内核：<exe>\mini-mihomo.exe
+  // sidecar 兜底内核：<exe>\win-mihomo.exe（内核改名特例，用户 2026-11-10 裁决）
   std::wstring exe_dir = dirs::exe_dir();
-  UT_CHECK_EQ(dirs::sidecar_core_path(), exe_dir + L"\\mini-mihomo.exe");
+  UT_CHECK_EQ(dirs::sidecar_core_path(), exe_dir + L"\\win-mihomo.exe");
 }
