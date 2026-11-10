@@ -121,9 +121,16 @@ Result<void> process_flags(uint16_t flags, const IVerge& patch) {
 
   if (flags & kFRestartCore) {
     // ← Config::generate + restart_core
-    // ★ 开 TUN 前先清对方遗留的 Wintun/Mihomo 孤儿网卡：此处必提权（TUN 走服务），
-    //   兜底「启动期未提权未清到」的情况，确保内核重启建 TUN 时无同名脏卡冲突。
+    // ★ 开 TUN 前先杀对方内核 + 清对方遗留的 Wintun/Mihomo 孤儿网卡。
+    //   此处必提权（TUN 走 clash_verge_service，以 SYSTEM/管理员运行），
+    //   因此 kill_other_processes() 能真正终止对方「以管理员身份运行」的内核
+    //   （修复：Mini 在 TUN 模式被装 Win 后，Win 切 TUN 时两个内核同跑、复用脏卡断网）。
+    //   顺序：先杀对方进程（避免其内核重建/把持适配器），再清孤儿网卡。
     if (patch.enable_tun_mode.has_value() && *patch.enable_tun_mode) {
+      const int killed = system::coexist::kill_other_processes();
+      if (killed > 0) {
+        CWLOG_INFO(std::format("cmd_verge: 开 TUN 前已杀掉 {} 个对方进程", killed));
+      }
       system::coexist::remove_orphan_wintun_adapters();
     }
     auto outcome = run_enhance_pipeline();

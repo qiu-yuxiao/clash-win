@@ -260,9 +260,25 @@ int kill_other_processes() {
   if (::Process32FirstW(snap, &pe)) {
     do {
       if (pe.th32ProcessID == self_pid || pe.th32ProcessID <= 4) continue;
+      // 早期按文件名粗判（szExeFile 无需先 OpenProcess 即可得）：共享组件名 ⇒ 对方进程。
+      // 用于 OpenProcess 失败（对方以管理员提权运行）时仍能识别并明确告警，避免静默漏杀。
+      const std::wstring fname_low =
+          lower(std::filesystem::path(pe.szExeFile).filename().wstring());
+      const bool fname_shared = is_shared_component_name(fname_low);
       HANDLE p = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE,
                                FALSE, pe.th32ProcessID);
-      if (!p) continue;
+      if (!p) {
+        if (fname_shared) {
+          // 关键可见性：对方在 TUN 模式下以管理员身份运行，当前（非提权）上下文无权终止，
+          // 会在提权路径（安装/TUN 接管/服务）重试。此前此处直接静默跳过，正是「两内核同跑」的根因。
+          CWLOG_WARN(std::format(
+              "coexist: 对方进程 pid={} ({}) 无法打开句柄（可能以管理员提权运行），"
+              "当前上下文无权终止；将在提权路径（安装/TUN/服务）重试",
+              static_cast<long long>(pe.th32ProcessID),
+              utf::utf16_to_utf8(pe.szExeFile)));
+        }
+        continue;
+      }
       WCHAR path[MAX_PATH * 2] = {};
       DWORD size = MAX_PATH * 2;
       if (::QueryFullProcessImageNameW(p, 0, path, &size) && size > 0) {
@@ -283,9 +299,16 @@ int kill_other_processes() {
                                    utf::utf16_to_utf8(exe)));
             ::WaitForSingleObject(p, 3000);  // 等退出，避免内核残留占用端口
           } else {
-            CWLOG_WARN(std::format("coexist: 终止对方进程失败 pid={} gle={}",
-                                   static_cast<long long>(pe.th32ProcessID),
-                                   ::GetLastError()));
+            const DWORD gle = ::GetLastError();
+            if (gle == ERROR_ACCESS_DENIED) {
+              // 目标提权运行且 TerminateProcess 被拒：在提权上下文（如 TUN 接管）会再次执行本函数并成功。
+              CWLOG_WARN(std::format(
+                  "coexist: 终止对方进程 pid={} 被拒（ERROR_ACCESS_DENIED，对方提权运行）；"
+                  "将在提权路径重试", static_cast<long long>(pe.th32ProcessID)));
+            } else {
+              CWLOG_WARN(std::format("coexist: 终止对方进程失败 pid={} gle={}",
+                                     static_cast<long long>(pe.th32ProcessID), gle));
+            }
           }
         }
       }
