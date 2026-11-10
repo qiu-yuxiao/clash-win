@@ -102,3 +102,28 @@
 - **待实施差距 12 项**：G1–G4（过滤细节）、G6–G10（日志弹窗排版）、G11–G12（安装器置顶两处）；G5 登记为实现层差异不改。
 - **冲突已裁决**：第五节 BUG-313 清洁表述 → 「借用与归还」方案（2026-11-10 用户全盘采纳，总纲 §5.2.2）。
 - 本文全部 Mini 行号为 **v3.2.3 tag** 时点；Win 行号为审计时点 HEAD `7834255`，实施时以现行源码复核。
+
+---
+
+## 七、实施状态（2026-11-10 落地，待构建验证 + 用户桌面复核）
+
+> 勘误：本文第六节「待实施差距 12 项」写于审计时点；其中 **G11 实际已在审计后落地**
+> （`installer/clashwin.nsi:873-876` `Section "Uninstall"` 首行 `Call un.KeepTopMost`，带 G11 注释），
+> 本节以现行源码为准逐项登记。
+
+| 项 | 状态 | 落点 / 判定 |
+|---|---|---|
+| G1 防抖 800→700ms | ✅ 已实施 | `src/ui/scenes/node_list.cpp` 防抖 `milliseconds(700)` |
+| G2 删失焦触发（Win 加戏） | ✅ 已实施 | `node_list.cpp` 删除 `on_focus_lost` 触发通道（Mini 仅 onChangeText/onEnter 两通道） |
+| G3 IME 组词保护 | ✅ 已实施 | `main_window.h` 新增 `ime_composing_`；`main_window.cpp` WM_IME_START/ENDCOMPOSITION 跟踪 + WM_KEYDOWN/WM_CHAR 组词期吞 Enter（对应 Mini `!isComposing && keyCode!==229`） |
+| G4 同词去重 | ✅ 已实施 | `node_list.h/.cpp` `last_auto_select_filter_`（Mini `lastTriggeredFilterRef` 语义）：防抖与回车两端同词早退；过滤词清空时重置记录 |
+| G5 60ms 延迟 | ⛔ 不改 | 实现层差异（本文第一节既定判定） |
+| G6 header 44px + 标题 15px/600 | ✅ 已实施 | `utility_modals.cpp` 标题 15px/weight600 于 44px 头内垂直居中、分隔线 cy+44、过滤行 39px、日志区起于 cy+87 |
+| G7 关闭钮 top/right 10 | ✅ 已实施 | `btn_close_x_rect_` = {cw−30, cy+10}（右/上各 10） |
+| G8 级别下拉宽 95 | ✅ 已实施 | `seg_level_rect_` 宽 76→95（行内垂直居中） |
+| G9 工具钮 18px 图标 + 清除钮 11px/24 高 | ✅ 已实施 | `icon_w.h/.cpp` 补 `pausecircleoutline`/`playcircleoutline`/`swapvert` MUI 矢量 path（Mini 用 Rounded 变体，取 Material 标准变体同形，18px 下视觉等价）+ `IconW::flip_y`（对应 Mini scaleY(-1) 降序翻转）；`utility_modals.cpp` `draw_icon_btn` 圆形 hover + 18px 图标；清除钮文字 11px、高 24 |
+| G10 日志 anywhere 折行 | ✅ 已实施 | `utility_modals.cpp` 日志条目 `wrap=true; ellipsis=false`，条目高度按实测折行行数自适应（对应 Mini VirtualList 动态高），逐条测高、过可视底界即止 |
+| G11 卸载段置顶重申 | ✅ 审计后已落地 | `clashwin.nsi:876`（本节勘误，见上） |
+| G12 EarlyChecks 置顶 | ⛔ 形态差异等效覆盖 | Mini `Section EarlyChecks`（installer.nsi:698-701）是安装阶段首个 Section；Win 无独立 EarlyChecks 段，对应首个 Section 即 `Section "Install"` 且首行已 `Call KeepTopMost`（:666），且 Welcome/Directory/InstFiles/Finish 各页 Show 均重申 → 等效覆盖且更强。`.onInit` 阶段 `$HWNDPARENT` 尚未存在，补置顶是无效调用，不补 |
+
+验证门槛：本节实施未经编译前不得视为完成；构建通过 → 本地 commit → 用户桌面复核后才可升级状态。

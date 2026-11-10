@@ -168,8 +168,7 @@ Result<void> process_flags(uint16_t flags, const IVerge& patch) {
     core::AutostartManager::instance().update_launch(patch.enable_auto_launch);
   }
   if (flags & kFLanguage) {
-    CWLOG_INFO("patch_verge: LANGUAGE flag → " + patch.language.value_or("?") +
-               " (i18n pending T10)");
+    CWLOG_INFO("patch_verge: LANGUAGE flag → " + patch.language.value_or("?"));
   }
   if (flags & kFSysTrayIcon) {
     events::EventBus::refresh_verge();
@@ -178,10 +177,10 @@ Result<void> process_flags(uint16_t flags, const IVerge& patch) {
     CWLOG_INFO("patch_verge: LOG_LEVEL flag → " + patch.app_log_level.value_or("?"));
   }
   if (flags & kFLogFile) {
-    CWLOG_INFO("patch_verge: LOG_FILE flag (logger rotation pending T25)");
+    CWLOG_INFO("patch_verge: LOG_FILE flag (logger rotation)");
   }
   if (flags & kFAlwaysOnTop) {
-    CWLOG_INFO("patch_verge: ALWAYS_ON_TOP flag (window pending T11)");
+    CWLOG_INFO("patch_verge: ALWAYS_ON_TOP flag");
   }
   return Result<void>::ok();
 }
