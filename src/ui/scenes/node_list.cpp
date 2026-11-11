@@ -37,6 +37,14 @@ int locale_name_cmp(const std::string& a, const std::string& b) {
                             static_cast<int>(wb.size()), nullptr, nullptr, 0);
   return r == CSTR_LESS_THAN ? -1 : (r == CSTR_GREATER_THAN ? 1 : 0);
 }
+
+// 三态排序按钮：图标 ← proxy-head.tsx:178-198；Tooltip ← locales/zh/proxies.json:34-36。
+// 提取为文件级常量，供恢复路径（restore_head_state）与切换路径（toggle_sort）复用，
+// ← Mini proxy-head.tsx:188 sortType=(sortType+1)%3 三态循环 / use-head-state.ts:21 初值 1。
+constexpr const char* kSortIcons[3] = {"sort", "history", "sortbyalpha"};
+constexpr const char* kSortTipKeys[3] = {"proxies.page.tooltips.sortDefault",
+                                          "proxies.page.tooltips.sortDelay",
+                                          "proxies.page.tooltips.sortName"};
 }  // namespace
 
 // 延迟档位色：全部走主题 token（深浅自动正确），口径逐行对齐源码。
@@ -592,6 +600,66 @@ void NodeList::bind(NodeData* data) {
     rebuild_visible();
     sync_list();
   });
+  // ← Mini use-head-state.ts:68-99：组件挂载即读回整份 head state；
+  //   须在重建列表前完成，否则首屏会用空过滤词/默认排序渲染。
+  restore_head_state();
+  rebuild_visible();
+  sync_list();
+}
+
+void NodeList::restore_head_state() {
+  // 一次性守卫：防重复 bind / profile 切换覆盖用户后续输入
+  // ← Mini use-head-state.ts:66-99 isLoadedRef（仅挂载加载一次）。
+  if (head_state_loaded_) return;
+
+  // 当前 profile uid（取法同 set_filter/toggle_sort；← Mini use-head-state.ts:64
+  //   profiles.current）。uid 为空（profile 尚未激活）不置 loaded，允许激活后
+  //   经 rebuild_visible() 的懒加载兜底再次尝试。
+  std::string uid;
+  auto latest = config::Config::instance().profiles().latest_arc();
+  if (latest && latest->current) uid = *latest->current;
+  if (uid.empty()) return;
+
+  // ★ 先置守卫再读档/回填：本函数末尾会调 rebuild_visible()，而 rebuild_visible()
+  //   开头有「!head_state_loaded_ → restore_head_state()」的懒加载兜底，
+  //   先置 true 可断开递归；uid 为空时上面的 return 不回调 rebuild，天然无环。
+  head_state_loaded_ = true;
+
+  auto st = config::proxy_head_state::load();
+  auto gs = config::proxy_head_state::get_group_state(st, uid, "PROXY");
+  // 无记录：保持默认（filter 空、sortType 1，← use-head-state.ts:21），
+  //   由调用方（bind / rebuild_visible 懒加载）继续重建列表。
+  if (!gs) return;
+
+  // filter_：与 set_filter() 完全相同的 trim + tolower 口径
+  // （← Mini use-filter-sort.ts:29 query.trim；大小写不敏感子串匹配）。
+  std::string trimmed = gs->filter_text;
+  trimmed.erase(0, trimmed.find_first_not_of(" \t\r\n"));
+  trimmed.erase(trimmed.find_last_not_of(" \t\r\n") + 1);
+  std::string lower;
+  lower.reserve(trimmed.size());
+  for (char c : trimmed)
+    lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  filter_ = lower;
+
+  // ← Mini proxy-head.tsx:188 sortType 三态（0/1/2）；落盘值 clamp 防越界。
+  sort_type_ = static_cast<int>(std::clamp<int64_t>(gs->sort_type, 0, 2));
+
+  // 受控回填：用原始大小写显示，且绝不触发 on_text_changed（不启动 700ms 去抖测速）
+  // ← Mini proxy-head.tsx:212 value={filterText} + base-search-box.tsx:95-97
+  //   useEffect(emitSearch)→onSearch 通道，不经 proxy-head.tsx:213 onChangeText。
+  if (search_) search_->set_text_silent(utf::utf8_to_utf16(gs->filter_text));
+  if (sort_btn_) {
+    sort_btn_->set_icon(kSortIcons[sort_type_]);
+    sort_btn_->set_tooltip_text(tr(kSortTipKeys[sort_type_]));
+  }
+
+  // 兜底：恢复出的过滤词不视为「新词」，避免后续被误判触发自动测速择优
+  // ← Mini proxy-head.tsx:63 lastTriggeredFilterRef 初值 = filterText。
+  last_auto_select_filter_ = filter_;
+
+  // 恢复路径只动 UI 内存态，绝不调 set_text()（启动去抖线程）/ set_filter()（重复落盘）
+  // ← Mini use-head-state.ts:101-110：初始加载态跳过保存。
   rebuild_visible();
   sync_list();
 }
@@ -618,7 +686,11 @@ void NodeList::set_filter(const std::string& text) {
       config::proxy_head_state::GroupHeadState gs;
       auto old_gs = config::proxy_head_state::get_group_state(st, uid, "PROXY");
       if (old_gs) gs = *old_gs;
-      gs.filter_text = lower;
+      // 落盘用户输入原文（trim 后），不落小写态 ← Mini use-head-state.ts:101-110
+      //   保存的 filterText 是受控原文（proxy-head.tsx:212 value={filterText}）；
+      //   小写态只用于内存匹配（filter_）。消费方 core::extract_filter_text
+      //   （core_manager.cpp:352-362）与 calibrate_selected 调用点自带 tolower。
+      gs.filter_text = trimmed;
       gs.sort_type = sort_type_;
       auto updated = config::proxy_head_state::set_group_state(st, uid, "PROXY", gs);
       config::proxy_head_state::save(updated);
@@ -640,7 +712,8 @@ void NodeList::toggle_sort() {
       config::proxy_head_state::GroupHeadState gs;
       auto old_gs = config::proxy_head_state::get_group_state(st, uid, "PROXY");
       if (old_gs) gs = *old_gs;
-      gs.filter_text = filter_;
+      // toggle_sort 只改排序：filter_text 保留磁盘原文不覆盖（← Mini
+      //   use-head-state.ts:101-110 按 key 局部 patch，sortType 变更不重写 filterText）。
       gs.sort_type = sort_type_;
       auto updated = config::proxy_head_state::set_group_state(st, uid, "PROXY", gs);
       config::proxy_head_state::save(updated);
@@ -649,13 +722,8 @@ void NodeList::toggle_sort() {
   // 图标 3 态：SortOutlined / AccessTimeOutlined / SortByAlphaOutlined
   // src: proxy-head.tsx:131-139
   if (sort_btn_) {
-    static const char* kIcons[3] = {"sort", "history", "sortbyalpha"};
-    sort_btn_->set_icon(kIcons[sort_type_]);
-    // src: locales/zh/proxies.json:34-36 三态 Tooltip
-    static const char* kTipKeys[3] = {"proxies.page.tooltips.sortDefault",
-                                      "proxies.page.tooltips.sortDelay",
-                                      "proxies.page.tooltips.sortName"};
-    sort_btn_->set_tooltip_text(tr(kTipKeys[sort_type_]));
+    sort_btn_->set_icon(kSortIcons[sort_type_]);
+    sort_btn_->set_tooltip_text(tr(kSortTipKeys[sort_type_]));
   }
   rebuild_visible();
   sync_list();
@@ -698,6 +766,11 @@ void NodeList::restyle_theme() {
 }
 
 void NodeList::rebuild_visible() {
+  // 懒加载兜底：bind 时若 profile 尚未激活（uid 空）会跳过读回，后续数据订阅/
+  //   宽度变化触发重建、且 uid 已就绪时在此补读一次（← Mini use-head-state.ts:68-99
+  //   挂载即 invoke 加载）。restore_head_state() 内部末尾也会回调本函数，但其进入
+  //   前已把 head_state_loaded_ 置 true，故此处不会与之形成递归。
+  if (!head_state_loaded_) restore_head_state();
   visible_.clear();
   if (!data_) return;
   const auto& rows = data_->rows();

@@ -509,7 +509,7 @@ UT_TEST(t23_command_service_exit_and_restart_wired) {
   auto r_exit = svc.invoke("exit_app");
   UT_CHECK(r_exit.is_ok());
 
-  for (int i = 0; i < 30 && !quit_invoked.load(); ++i) {
+  for (int i = 0; i < 100 && !quit_invoked.load(); ++i) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   UT_CHECK(quit_invoked.load());
@@ -532,7 +532,9 @@ UT_TEST(t23_command_service_exit_and_restart_wired) {
   auto r_restart = svc.invoke("restart_app");
   UT_CHECK(r_restart.is_ok());
 
-  for (int i = 0; i < 30 && !restart_invoked.load(); ++i) {
+  // 等待窗 1s（原 300ms）：全量 630+ 用例跑完后系统负载下 300ms 偶发不够，
+  // 导致该用例 flaky（单跑必过、全量偶 FAIL）。只放宽等待，不改被测契约。
+  for (int i = 0; i < 100 && !restart_invoked.load(); ++i) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   UT_CHECK(restart_invoked.load());

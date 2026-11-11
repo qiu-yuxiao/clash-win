@@ -724,10 +724,13 @@ Section "Install"
   DetailPrint "Ensured user startup folder exists: $0"
   SetShellVarContext all
 
-  ; 清理陈旧窗口状态文件（← 模板 :907-910；ClashWin 常量名 window_state.json
-  ;   ← constants.h:13 kWindowState，另含 Mini 两个历史文件名变体）
+  ; 清理陈旧窗口状态文件（← Mini installer.nsi:921-924 安装段）：
+  ;   只删两个历史连字符文件 window-state.json / .window-state.json。
+  ;   当前状态文件 window_state.json 在升级时必须保留（← Mini
+  ;   installer.nsi:921-924 / 1100-1104，Mini constants.rs:48 定义
+  ;   WINDOW_STATE = "window_state.json"）。旧逻辑无条件删它，用户升级/重装
+  ;   0.2.6 后重启窗口尺寸回到默认 271×680 居中、位置无记忆，是本障直接根因。
   DetailPrint "Removing window-state files"
-  Delete "$APPDATA\${BUNDLEID}\window_state.json"
   Delete "$APPDATA\${BUNDLEID}\window-state.json"
   Delete "$APPDATA\${BUNDLEID}\.window-state.json"
 
@@ -890,10 +893,11 @@ Section "Uninstall"
   ;   改回 Mini 的服务二进制；未探测到 Mini 才移除注册
   Call un.HandBackOrRemoveService
 
-  ; 窗口状态文件（← 模板 :1083-1087）
+  ; 清理陈旧窗口状态文件（← Mini installer.nsi:1100-1104 卸载段）：
+  ;   只删两个历史连字符文件；当前状态文件 window_state.json 必须保留
+  ;   （← Mini installer.nsi:921-924 / 1100-1104，Mini constants.rs:48）。
   DetailPrint "Removing window-state files"
   SetShellVarContext current
-  Delete "$APPDATA\${BUNDLEID}\window_state.json"
   Delete "$APPDATA\${BUNDLEID}\window-state.json"
   Delete "$APPDATA\${BUNDLEID}\.window-state.json"
 

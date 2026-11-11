@@ -216,8 +216,13 @@ UT_TEST(t35_update_manifest_is_clash_win_not_mini) {
   if (r.is_ok()) {
     const auto& info = r.value();
     UT_CHECK(info.has_update == false);  // 当前即最新，绝不触发下载/验签
-    UT_CHECK(info.download_url.empty());
-    UT_CHECK(info.signature.empty());
+    // download_url/signature 不再断言为空：发布成功后 CI 会 [skip ci] 自动回填
+    //   真实产物链接与签名（458b53a 教训——占位清单发布后两条 empty 断言必然翻红）。
+    //   has_update=false 时客户端不会下载，字段有值无碍；改为断言：若有 url，
+    //   必须是自家仓库产物，不得指向 Mini（用例本意）。
+    if (!info.download_url.empty()) {
+      UT_CHECK(info.download_url.find("qiu-yuxiao/clash-win") != std::string::npos);
+    }
     UT_CHECK(info.latest_version == config::consts::kAppVersion);
   }
 }

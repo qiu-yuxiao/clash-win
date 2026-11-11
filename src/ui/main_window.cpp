@@ -252,7 +252,8 @@ bool MainWindow::create(bool show_immediately, bool defer_render) {
 
   RECT rc;
   GetClientRect(hwnd_, &rc);
-  on_client_resized(rc.right - rc.left, rc.bottom - rc.top);
+  // 启动期显式重排：跳过 persist_geometry()，避免把 dpi 未换挡的中间几何写回盘
+  on_client_resized(rc.right - rc.left, rc.bottom - rc.top, false);
 
   build_scene();
   // 【LAYOUTFIX】quickbar / 节点列表是在 build_scene 里才挂上树的，晚于上面
@@ -261,7 +262,9 @@ bool MainWindow::create(bool show_immediately, bool defer_render) {
   {
     RECT rc2;
     GetClientRect(hwnd_, &rc2);
-    on_client_resized(rc2.right - rc2.left, rc2.bottom - rc2.top);
+    // 同上：启动期重排不落盘（apply_geometry_restore 已置 restore_done_=true，
+    //   原会立刻回写 window_state.json 覆盖刚恢复的值）
+    on_client_resized(rc2.right - rc2.left, rc2.bottom - rc2.top, false);
   }
 
   // 静默启动直入轻量：跳过定时器（轻量模式不跑帧/空闲扫描/TUN 守卫，
@@ -907,54 +910,68 @@ void MainWindow::build_scene() {
       update_conn_ws_state();
     };
     // patch_verge 键 → patch_verge_config；clash 键 → patch_clash_config
+    // 【点击不位移修复】← on_takeover_change（:963-1064）现成异步范式：
+    //   command_service.cpp:92 在调用线程 wait_for(kTimeoutConfig=30000) 同步等待，
+    //   旧实现把 svc.invoke 放在 UI 线程 → 阻塞消息循环，SwitchW::set_checked
+    //   （switch_w.cpp:14-21 已即时 anim_ 置位 + invalidate）的重绘排不上队，
+    //   于是「点下去没立刻位移」。Mini 是乐观更新 + 异步 await IPC，UI 线程不阻塞。
+    //   现：UI 线程做乐观/通知准备（常驻 info 的 wait_id 必须 UI 线程生成）→
+    //   std::thread 后台执行 svc.invoke → 收尾经 UiPostbox 回 UI 线程。
     settings_drawer_->on_patch_verge =
         [this](const std::string& k, const nlohmann::json& v) {
-          auto& svc = cmd::CommandService::instance();
-          // ← use-minimal-settings.ts:71-83：常驻 info「正在调整」→ success settings.mini.updated
-          //   / error 原文，finally 里 hideNotice。Allow LAN / IPv6 走 patch_clash_config。
-          if (k == "clash_allow_lan" || k == "clash_ipv6") {
-            const uint64_t wait_id = events::NoticeService::instance().push(
-                "info", tr8("layout.notices.adjusting"), 0);
-            const std::string field = (k == "clash_allow_lan") ? "allow-lan" : "ipv6";
-            auto r = svc.invoke("patch_clash_config", nlohmann::json::object({{field, v}}));
-            events::NoticeService::instance().hide(wait_id);
-            if (r.is_ok()) {
-              events::NoticeService::instance().push("success", tr8("settings.mini.updated"));
-            } else {
-              events::NoticeService::instance().push("error", r.error().message);
-              resync_settings_ui();  // ★ ❌5 patch 失败回滚开关到权威值（Mini mutateInfo）
-            }
-            return;
-          }
-          // 代理方式三段 ← _layout.tsx:398-424 handleRuleFallbackChange：
-          //   常驻 info「正在调整代理模式」→ patchVerge(rule_fallback)（无 success 通知）
-          //   → finally hideNotice；失败 showNotice.error(原文)。
-          if (k == "rule_fallback") {
-            const uint64_t wait_id = events::NoticeService::instance().push(
-                "info", tr8("layout.notices.adjustingProxyMode"), 0);
-            auto r =
-                svc.invoke("patch_verge_config", nlohmann::json::object({{k, v}}));
-            events::NoticeService::instance().hide(wait_id);
-            if (r.is_ok()) {
-              events::NoticeService::instance().push("success", tr8("settings.mini.updated"));
-            } else {
-              events::NoticeService::instance().push("error", r.error().message);
-              resync_settings_ui();  // ★ ❌5 patch 失败回滚开关到权威值（Mini mutateInfo）
-            }
-            return;
-          }
-          // 其余 verge 键（enable_auto_launch/enable_silent_start）：Mini 为裸
-          //   patchVerge 无通知（basic-settings-card.tsx:136,185）→ 保持静默。
-          auto r = svc.invoke("patch_verge_config", nlohmann::json::object({{k, v}}));
-          CWLOG_INFO(std::string("[PATCH_VERGE] ") + k + "=" + v.dump() + (r.is_ok() ? " ok" : " FAIL " + r.error().message));
-          // 豁免: 无 — 与上一行合并（出处: 无）
-          if (r.is_ok()) {
-            events::NoticeService::instance().push("success", tr8("settings.mini.updated"));
+          // ---- UI 线程：键分派 + 常驻 info 的 wait_id ----
+          // ← use-minimal-settings.ts:71-83 Allow LAN/IPv6：常驻 info「正在调整」→
+          //   patch_clash_config → 成功「已更新」→ 失败 error 原文 + 回滚，finally hide。
+          // ← _layout.tsx:398-424 代理方式三段：常驻 info「正在调整代理模式」→
+          //   patchVerge → 成功完全静默 → 失败 error 原文，finally hide。
+          // ← basic-settings-card.tsx:129-151,181-191 自启/静默启动：裸 patchVerge，
+          //   成功完全静默（use-verge.ts:47-71 乐观写缓存，仅失败 showNotice.error）。
+          const bool is_clash = (k == "clash_allow_lan" || k == "clash_ipv6");
+          const bool is_rule = (k == "rule_fallback");
+          const char* info_key =
+              is_clash ? "layout.notices.adjusting"
+                       : (is_rule ? "layout.notices.adjustingProxyMode" : nullptr);
+          const bool success_notice = is_clash;  // 仅 Allow LAN/IPv6 成功有「已更新」
+          const std::string cmd =
+              is_clash ? "patch_clash_config" : "patch_verge_config";
+          nlohmann::json args;
+          if (is_clash) {
+            const std::string field =
+                (k == "clash_allow_lan") ? "allow-lan" : "ipv6";
+            args = nlohmann::json::object({{field, v}});
           } else {
-            events::NoticeService::instance().push("error", r.error().message);
-            resync_settings_ui();  // ★ ❌5 patch 失败回滚开关到权威值（Mini mutateInfo）
+            args = nlohmann::json::object({{k, v}});
           }
-          // 豁免: 无 — 与上一行合并（出处: 无）
+          const uint64_t wait_id =
+              info_key ? events::NoticeService::instance().push(
+                             "info", tr8(info_key), 0)
+                       : 0;
+
+          // ---- 后台线程：只做阻塞式 svc.invoke（UI 线程不再被 wait_for 拖住）----
+          std::thread([this, k, cmd, args, wait_id, success_notice] {
+            auto r = cmd::CommandService::instance().invoke(cmd, args);
+            const bool ok = r.is_ok();
+            const std::string err = ok ? std::string() : r.error().message;
+            CWLOG_INFO(std::string("[PATCH_VERGE] ") + k + "=" + args.dump() +
+                       (ok ? " ok" : " FAIL " + err));
+            // ---- 收尾统一回 UI 线程（与 on_takeover_change 的 UiPostbox.post 一致，
+            //      比其把通知留后台更保守：避免 NoticeService 变更回调跨线程触碰 SnackbarW）----
+            UiPostbox::instance().post(
+                [this, wait_id, success_notice, ok, err] {
+                  auto& notices = events::NoticeService::instance();
+                  if (wait_id) notices.hide(wait_id);  // finally hideNotice
+                  if (!settings_drawer_) return;       // 同 on_takeover_change 生命周期守卫
+                  if (ok) {
+                    if (success_notice)  // use-minimal-settings.ts:80「已更新」
+                      notices.push("success", tr8("settings.mini.updated"));
+                    // 其余键成功完全静默（_layout.tsx:398-424 /
+                    //   basic-settings-card.tsx:129-151,181-191）
+                  } else {
+                    notices.push("error", err);
+                    resync_settings_ui();  // ★ ❌5 失败回滚到权威值（Mini mutateInfo）
+                  }
+                });
+          }).detach();
         };
     // 流量接管模式切换 ← _layout.tsx:1042-1114 handleTakeoverModeChange
     //   manual/system：patchVerge(enable_system_proxy/enable_tun_mode) + success/error；
@@ -1527,9 +1544,20 @@ void MainWindow::build_scene() {
       bool real_auto_launch = v.enable_auto_launch.value_or(false);
       auto launch_st = core::AutostartManager::instance().get_launch_status();
       if (launch_st.is_ok()) real_auto_launch = launch_st.value();
+      // clash 侧 Allow LAN / IPv6 权威值（IClashTemp 存于 YAML mapping_，经 get_client_info 读取）
+      //   ← Mini 挂载即由 react-query 拉真值（use-minimal-settings.ts），无硬编码关窗口。
+      //   旧实现硬编码 false,false → 开机后这两个开关恒显示关；与 resync_settings_ui
+      //   （:1564-1571）同口径回填。
+      bool allow_lan = false, ipv6 = false;
+      auto cl = config::Config::instance().clash().latest_arc();
+      if (cl) {
+        auto info = cl->get_client_info();
+        allow_lan = info.allow_lan;
+        ipv6 = info.ipv6;
+      }
       settings_drawer_->sync_basic(real_auto_launch,
                                    v.enable_silent_start.value_or(false),
-                                   false, false,
+                                   allow_lan, ipv6,
                                    static_cast<int>(v.verge_mixed_port.value_or(0)));
       // 通知位置：verge.notice_position（缺省 top-right，verge.rs:353）
       if (snackbar_)
@@ -1778,7 +1806,7 @@ void MainWindow::toggle_large() {
 }
 
 // ---------- 几何 ----------
-void MainWindow::on_client_resized(int cw, int ch) {
+void MainWindow::on_client_resized(int cw, int ch, bool persist) {
   client_w_ = cw;
   client_h_ = ch;
   float s = dpi_scale();
@@ -1800,7 +1828,12 @@ void MainWindow::on_client_resized(int cw, int ch) {
   root_.layout_tree({0, 0, static_cast<float>(lw), static_cast<float>(lh)});
   clock_.invalidate({0, 0, static_cast<float>(lw), static_cast<float>(lh)});
   update_conn_ws_state();
-  persist_geometry();
+  // persist=false：启动期显式重排（create() 两次）跳过落盘，防 0.2.6 defer_render
+  //   路径下 dpi_scale() 尚未换挡的中间几何写回 window_state.json 覆盖刚恢复的值
+  //   （← Mini 窗口构建前一次性注入几何，无「恢复后立刻回写」窗口）。
+  //   真实 WM_SIZE/WM_DPICHANGED 与运行时重排默认 true；WM_DESTROY 的
+  //   persist_geometry(true) 直接调用，不受此开关影响。
+  if (persist) persist_geometry();
 }
 
 void MainWindow::persist_geometry(bool immediately) {

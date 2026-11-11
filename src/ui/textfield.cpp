@@ -69,6 +69,17 @@ void TextField::set_text(const std::wstring& t) {
   if (on_text_changed) on_text_changed(text_);
 }
 
+void TextField::set_text_silent(const std::wstring& t) {
+  // 状态迁移与 set_text 完全一致，但刻意不触发 on_text_changed。
+  // ← Mini base-search-box.tsx:95-97（受控 value 的 useEffect(emitSearch)→onSearch
+  //   通道，不经 proxy-head.tsx:213 onChangeText）；Win 侧 on_text_changed 承载
+  //   700ms 去抖自动测速择优，程序化回填须绕开，否则重启自启会误触发测速。
+  text_ = t;
+  cursor_ = anchor_ = static_cast<int>(t.size());
+  scroll_x_ = 0;
+  invalidate();
+}
+
 std::wstring TextField::selection() const {
   int lo = std::min(cursor_, anchor_), hi = std::max(cursor_, anchor_);
   return text_.substr(static_cast<size_t>(lo), static_cast<size_t>(hi - lo));

@@ -50,6 +50,46 @@ bool geometry_valid(double w, double h) {
 }
 
 // ---------- 脱屏判定（← window_manager.rs:246-267） ----------
+// Mini window_manager.rs:254-258 把每个 monitor 的 position()/size()（物理像素）
+// 各自除以 scale_factor() 换成逻辑坐标后，再与逻辑 x/y 做容差比较。Win 落盘侧
+// x/y 是 GetWindowRect 物理值 ÷ dpi_scale()（main_window.cpp:1820-1821），
+// 所以判定侧也必须把 EnumDisplayMonitors 回调给出的物理矩形换算成逻辑坐标，
+// 否则高 DPI 下物理 rc 边界与逻辑 x/y 口径错位，容差边界失真。
+namespace {
+// 按显示器取物理→逻辑缩放系数。全部动态解析函数指针：不静态链接 shcore.lib、
+// 不依赖 SDK 宏门槛，因此不引入新的静态库依赖。
+using GetDpiForMonitorFn = HRESULT(WINAPI*)(HMONITOR, int, UINT*, UINT*);
+using GetDpiForSystemFn = UINT(WINAPI*)();
+
+// 回退链：① shcore.dll!GetDpiForMonitor(hmon, MDT_EFFECTIVE_DPI=0) → dpiX/96；
+//         ② 取不到/调用失败/dpi<=0 → user32.dll!GetDpiForSystem()/96；
+//         ③ 仍失败 → 1.0（保持旧行为，物理≈逻辑）。
+double monitor_scale(HMONITOR hmon) {
+  HMODULE shcore = GetModuleHandleW(L"shcore.dll");
+  if (shcore) {
+    auto get_dpi_for_monitor = reinterpret_cast<GetDpiForMonitorFn>(
+        GetProcAddress(shcore, "GetDpiForMonitor"));
+    if (get_dpi_for_monitor) {
+      UINT dpi_x = 0, dpi_y = 0;
+      if (SUCCEEDED(get_dpi_for_monitor(hmon, 0, &dpi_x, &dpi_y)) &&
+          dpi_x > 0) {
+        return static_cast<double>(dpi_x) / 96.0;
+      }
+    }
+  }
+  HMODULE user32 = GetModuleHandleW(L"user32.dll");
+  if (user32) {
+    auto get_dpi_for_system = reinterpret_cast<GetDpiForSystemFn>(
+        GetProcAddress(user32, "GetDpiForSystem"));
+    if (get_dpi_for_system) {
+      UINT dpi = get_dpi_for_system();
+      if (dpi > 0) return static_cast<double>(dpi) / 96.0;
+    }
+  }
+  return 1.0;
+}
+}  // namespace
+
 bool is_position_on_screen(double x, double y) {
   // 枚举全部显示器； monitors 为空 → 视为在屏
   struct Ctx {
@@ -60,12 +100,18 @@ bool is_position_on_screen(double x, double y) {
 
   EnumDisplayMonitors(
       nullptr, nullptr,
-      [](HMONITOR, HDC, LPRECT rc, LPARAM lp) -> BOOL {
+      [](HMONITOR hmon, HDC, LPRECT rc, LPARAM lp) -> BOOL {
         auto* c = reinterpret_cast<Ctx*>(lp);
         c->found_any = true;
-        // 物理矩形 → 逻辑判定容差与原版一致：x∈[mx-100, mx+mw-50]、y 同理
-        if (c->x >= rc->left - 100.0 && c->x <= rc->right - 50.0 &&
-            c->y >= rc->top - 100.0 && c->y <= rc->bottom - 50.0) {
+        // 物理矩形 → 逻辑坐标（每屏按自身 scale 换算，← window_manager.rs:254-258）
+        const double s = monitor_scale(hmon);
+        const double mx = rc->left / s;
+        const double my = rc->top / s;
+        const double mr = rc->right / s;
+        const double mb = rc->bottom / s;
+        // 容差与原版一致：x∈[mx-100, mr-50]、y∈[my-100, mb-50]
+        if (c->x >= mx - 100.0 && c->x <= mr - 50.0 &&
+            c->y >= my - 100.0 && c->y <= mb - 50.0) {
           c->on_screen = true;
           return FALSE;  // 找到即停
         }

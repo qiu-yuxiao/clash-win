@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <fstream>
 
 namespace clashwin::cmd {
@@ -560,9 +561,32 @@ void install_cmd_profile(CommandService& svc) {
              if (g.is_ok() && g.value().now.has_value() &&
                  profiles.latest_arc()->current) {
                auto st = config::proxy_head_state::load();
+               // 头部状态结构是 {uid:{PROXY:{filterText:...}}}（← Mini cmd/proxy.rs:98-116；
+               //   Win 侧 config/proxy_head_state.h:3-4 同构），顶层无 filter_text 键，
+               //   旧写法 st.value("filter_text", ...) 恒取空串 → 激活校准拿不到过滤词。
+               std::string filter_text;
+               if (auto gs = config::proxy_head_state::get_group_state(
+                       st, *profiles.latest_arc()->current, "PROXY")) {
+                 filter_text = gs->filter_text;
+               }
+               // ★ calibrate_selected 形参契约是 filter_text_lower（auto_select.cpp:78-90，
+               //   函数内部不再小写化）：落盘是用户输入原文（node_list.cpp set_filter，
+               //   ← Mini use-head-state.ts:101-110 存受控原文），传参前必须 trim+tolower，
+               //   口径同 core::extract_filter_text（core_manager.cpp:352-362 ← lifecycle.rs:437-440）。
+               {
+                 auto is_space = [](unsigned char c) {
+                   return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+                 };
+                 size_t b = 0, e = filter_text.size();
+                 while (b < e && is_space(static_cast<unsigned char>(filter_text[b]))) ++b;
+                 while (e > b && is_space(static_cast<unsigned char>(filter_text[e - 1]))) --e;
+                 filter_text = filter_text.substr(b, e - b);
+                 std::transform(filter_text.begin(), filter_text.end(), filter_text.begin(),
+                                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+               }
                core::AutoSelect::calibrate_selected(
                    *profiles.latest_arc()->current,
-                   st.value("filter_text", std::string()),
+                   filter_text,
                    *g.value().now,
                    [](const std::string& uid) -> std::optional<std::string> {
                      auto l = config::Config::instance().profiles().latest_arc();

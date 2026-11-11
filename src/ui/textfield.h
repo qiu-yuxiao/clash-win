@@ -20,6 +20,10 @@ class TextField : public Widget {
 
   const std::wstring& text() const { return text_; }
   void set_text(const std::wstring& t);
+  // 程序化受控回填：状态迁移同 set_text，但绝不触发 on_text_changed。
+  // ← Mini base-search-box.tsx:95-97（受控 value 经 useEffect(emitSearch)→onSearch
+  //   通道回填，不经 proxy-head.tsx:213 onChangeText，故不启动 700ms 去抖自动测速择优）。
+  void set_text_silent(const std::wstring& t);
   void set_placeholder(const std::wstring& p) {
     placeholder_ = p;
     invalidate();

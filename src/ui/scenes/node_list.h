@@ -135,6 +135,11 @@ class NodeList : public Widget {
 
   void bind(NodeData* data);          // 数据源（不拥有）
 
+  // 启动时从 proxy_head_state.json 读回过滤词/排序态到 UI（一次性）。
+  // ← Mini use-head-state.ts:68-99 挂载 invoke(get_proxy_head_state) →
+  //   dispatch({type:'replace'})；proxy-head.tsx:212 value={filterText} 受控回填。
+  void restore_head_state();
+
   // 过滤（搜索框；name 子串大小写不敏感）
   void set_filter(const std::string& text);
   // 对当前过滤后可见的节点子集触发多路测速与择优切换
@@ -179,6 +184,9 @@ class NodeList : public Widget {
   IconW* empty_icon_ = nullptr;   // src: proxy-render.tsx:75 InboxRounded 2.5em
   Label* empty_label_ = nullptr;  // src: proxy-render.tsx:76 "No Proxies"
   ScrollTopButton* scroll_top_ = nullptr;  // ← scroll-top-button.tsx（proxy-groups.tsx:330）
+  // 一次性守卫：仅挂载时读回一次，防重复 bind / profile 切换覆盖用户后续输入
+  // ← Mini use-head-state.ts:66-99 isLoadedRef（加载完成后才允许保存）。
+  bool head_state_loaded_ = false;
   std::string filter_;
   std::string last_auto_select_filter_;  // G4: 上次已触发自动择优的过滤词（同词去重，← Mini proxy-head.tsx lastTriggeredFilterRef）
   std::atomic<uint64_t> filter_change_seq_{0};

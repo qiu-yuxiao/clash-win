@@ -233,7 +233,10 @@ class MainWindow : public app::ILifecycleWindow {
   // ★ ❌5 设置开关失败回滚：patch 失败后用权威配置值回填抽屉开关（set_checked 不触发回调），
   //   对齐 Mini use-minimal-settings.ts:77-79 patch 失败 → mutateInfo() 权威值回滚、开关弹回。
   void resync_settings_ui();
-  void on_client_resized(int cw, int ch);          // WM_SIZE
+  // persist=false：启动期显式重排（create() 两次）跳过 persist_geometry()，
+  //   防 dpi 未换挡的中间几何回写 window_state.json 覆盖刚恢复的值；
+  //   真实 WM_SIZE/WM_DPICHANGED 及运行时重排默认 true（← Mini 窗口构建前一次注入几何）。
+  void on_client_resized(int cw, int ch, bool persist = true);  // WM_SIZE
   void persist_geometry(bool immediately = false); // WM_SIZE/WM_MOVE
   void pump_frame();                               // 33ms 帧泵
   void draw();
