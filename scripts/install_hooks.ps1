@@ -18,5 +18,5 @@ if ($current -ne $hooksDir) {
 } else {
   Write-Host "[ok] core.hooksPath 已指向 $hooksDir（无需更改）" -ForegroundColor Green
 }
-Write-Host "[说明] pre-push 钩子会在你 `git push origin vX.Y.Z` 时强制跑 release_preflight，" -ForegroundColor Cyan
-Write-Host "       预检不过则拒绝推送。发版请统一走 scripts/release.ps1。" -ForegroundColor Cyan
+Write-Host '[说明] pre-push 钩子会在你执行 git push origin vX.Y.Z 时强制跑 release_preflight，' -ForegroundColor Cyan
+Write-Host '       预检不过则拒绝推送。发版请统一走 scripts/release.ps1。' -ForegroundColor Cyan

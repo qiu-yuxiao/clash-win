@@ -162,7 +162,7 @@ Mini 侧没有任何自定义 NSIS 配置 —— `src-tauri/tauri.conf.json` 的
 ## 关键路径速查
 
 - 常量单一事实源：`include/clashwin/config/constants.h`
-- UI 门禁：`scripts/ui_src_gate.ps1`；全量测试：`scripts/run_tests_v4.ps1`
+- UI 门禁：`scripts/ui_src_gate.ps1`；全量测试：`scripts/run_tests.ps1`；发版编排：`scripts/release.ps1`
 - Mini 参照源码：`C:\Users\sun_y\Documents\AntiGravity_Projects\ClashVerge`
 
 ## 2026-11-06 校正与验收入口

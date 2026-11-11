@@ -58,11 +58,11 @@ Never commit, replace, or "fix" these binaries, and never add an `*.exe` to a PR
 ### Run the tests
 
 ```powershell
-python3 scripts/run_tests_py.py                 # full suite, isolated build/cwtest
-python3 scripts/run_tests_py.py t35            # name-substring filter
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run_tests.ps1                 # full suite, isolated temp directory
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run_tests.ps1 -Filter t35     # name-substring filter
 ```
 
-The runner copies the test executable plus `sidecar/`, `locales/`, `resources/`, `assets/locales/` into `build/cwtest`, redirects `TMP`/`TEMP` there, and writes `build/cwtest_logs/tests_full.log`. The pass criterion is **`EXIT=0` + `0 failed` + `0 assertion failures`** — the case count is not a fixed constant (the suite grows). Note that `scripts/run_tests_py.py` hardcodes the repository root path for the original development machine; adjust `REPO` locally if your checkout lives elsewhere.
+The unified PowerShell runner copies `clashwin_test.exe` plus `sidecar/`, `locales/`, `resources/`, and `assets/locales/` into an isolated run directory, sets `CLASHWIN_REPO_ROOT` and `TMP`/`TEMP`, and writes the full log to `build/cwtest_logs/tests_full.log`. The pass criterion is **`EXIT=0` + `0 failed` + `0 assertion failures`** — the case count grows as new regressions are added.
 
 Every new or fixed defect **must** come with a regression case, and that case must be validated by temporarily reverting the fix (case fails) and restoring it (case passes). New test `.cpp` files must also be registered in the `add_executable(clashwin_test ...)` source list in `CMakeLists.txt` — an unregistered file silently contributes zero executed cases.
 
@@ -73,20 +73,20 @@ Every new or fixed defect **must** come with a regression case, and that case mu
 #               + .config\PORTABLE + 用户必读.txt)
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\portable.ps1 -Version <version>
 
-# NSIS installer (the script self-elevates and attempts a best-effort Authenticode sign)
+# NSIS installer
 powershell -NoProfile -ExecutionPolicy Bypass -File installer\build_installer.ps1 -Version <version>
 ```
 
-Both write to `dist/`: `ClashWin_<version>_x64_portable.zip` and `ClashWin_<version>_x64-setup.exe`. The installer script performs an admin self-elevation and, when a certificate is available in `LocalMachine\My`, attempts an Authenticode sign of the binaries / uninstaller blob; see `docs/04-工程技巧.md` for the self-signed certificate boundary. **Signing is best-effort and is never a release gate**: in a non-interactive/elevated-unavailable session (e.g. CI) it is skipped, and **all releases so far ship unsigned assets** with `SHA256SUMS.txt` as the trust anchor — see [Known Limitations (d)](docs/KNOWN_LIMITATIONS_0.2.2.md). Do **not** pass `-SkipStage` when preparing a release artifact.
+Both write to `dist/`: `ClashWin_<version>_x64_portable.zip` and `ClashWin_<version>_x64-setup.exe`. Official releases rely on `SHA256SUMS.txt` plus Minisign Ed25519 signatures for in-app updates — see [Known Limitations](docs/KNOWN_LIMITATIONS.md). Do **not** pass `-SkipStage` when preparing a release artifact.
 
 ### Pre-submit checks
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\ui_src_gate.ps1   # UI source attribution gate
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\delivery_check.ps1 # delivery chain (clean tree + four-way hashes)
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\ui_src_gate.ps1       # UI source attribution gate
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\release_preflight.ps1 # 7-gate static & baseline preflight
 ```
 
-`delivery_check.ps1` fails whenever the working tree has uncommitted changes (an exe cannot be traced to a commit), or the build exe / `installer\stage\clashwin.exe` / the exe inside the portable zip / `stamp.json` do not share one SHA256. Authenticode status is logged as INFO only and is **not** a gate (all releases so far ship unsigned assets). Use `-Record` only **after** a clean rebuild from a committed HEAD, never to paper over an intermediate state.
+`release_preflight.ps1` verifies version single-source-of-truth parity (`constants.h` / `clashwin.rc` / `clashwin.nsi`), update-manifest safety, `CHANGELOG.md` completeness, CMake test registration, 5/5 upstream `sidecar/` SHA256 hashes, `ui_src_gate.ps1`, and script UTF-8 BOM / hook LF encoding.
 
 ## Committing and submitting
 
@@ -111,10 +111,10 @@ This project is licensed under the **GNU General Public License v3.0 (GPL-3.0-on
 
 ## Releasing（发版）
 
-Releasing follows a **mandatory, non-negotiable process**. Full rules: [`docs/RELEASE_PROCESS.md`](docs/RELEASE_PROCESS.md).
+Releasing follows a **mandatory, deterministic process**. Full runbook: [`docs/RELEASE_PROCESS.md`](docs/RELEASE_PROCESS.md).
 
-- **Single entry point**: `scripts/release.ps1`. You type the version **once**; it auto-syncs `constants.h` / `clashwin.nsi` / `app-update.json` / the release-readiness test, then runs the preflight gates and a local full regression. `-Build` compiles + regresses locally (first gate); `-Push` touches the remote.
-- **Install the hook right after cloning**: `powershell -File scripts/install_hooks.ps1`. After that, pushing a `v*` tag re-runs the preflight gates first and **rejects the push if any gate fails**.
-- **Never hand-type `git tag` + push**: CI (`release.yml`) restores `sidecar/` and re-runs every preflight gate; any failure fails the whole run and publishes nothing.
+- **Single entry point**: `scripts/release.ps1`. Run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\release.ps1 -Version <X.Y.Z>` first for a zero-remote-side-effect local rehearsal (syncs `constants.h` / `src/clashwin.rc` / `installer/clashwin.nsi`, runs all 7 preflight gates, builds Release + runs full isolated regression, and packages + verifies both `portable.zip` and `setup.exe` locally). Then run with `-SkipBuild -Push -Yes` to push `dev`/`main` + tag, watch CI, download & verify `dist/` assets, and sync `updater/app-update.json` back across branches.
+- **Install the hook right after cloning**: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install_hooks.ps1`. Pushing any `v*` tag automatically triggers `release_preflight.ps1` and **rejects the push if any gate fails**.
+- **Never hand-type `git tag` + push**: CI (`release.yml`) runs `validate` and `release_preflight.ps1` after restoring `sidecar/`; any failure aborts the workflow before publishing.
 
-> Pushing a tag, creating a Release, or uploading assets is a **release action** reserved for the maintainer per the process above — never tag or publish from a feature branch by hand. Following the process is what makes a release succeed on the first CI run.
+> Pushing a tag, creating a Release, or uploading assets is a **release action** reserved for the maintainer per [`docs/RELEASE_PROCESS.md`](docs/RELEASE_PROCESS.md) — never tag or publish from a feature branch by hand.

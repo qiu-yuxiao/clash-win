@@ -8,16 +8,16 @@
 
 > [!IMPORTANT]
 > **发版（Release）有强制流程，不允许例外。**
-> 任何发布新版本都必须严格走 [`docs/RELEASE_PROCESS.md`](docs/RELEASE_PROCESS.md)，**唯一入口是 `scripts/release.ps1`**（版本号自动同步四处、强制预检、本地回归、一步发布）。**切勿手敲 `git tag` 后直接推送**——推送会被 `pre-push` 钩子拦截并失败。
-> 克隆仓库后第一件事：跑一次 `powershell -File scripts/install_hooks.ps1` 安装强制钩子。详见文末「发版流程」。
+> 任何发布新版本都必须严格走 [`docs/RELEASE_PROCESS.md`](docs/RELEASE_PROCESS.md)，**唯一入口是 `scripts/release.ps1`**（版本号自动同步、强制预检、本地回归与本地打包演练、一步发布与自动核验）。**切勿手敲 `git tag` 后直接推送**——推送会被 `pre-push` 钩子拦截并失败。
+> 克隆仓库后第一件事：跑一次 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install_hooks.ps1` 安装强制钩子。详见文末「发版流程」。
 
-> **Clash Win v0.2.2** — the pure Windows native C++ rewrite of Clash Mini.
+> **Clash Win** — the pure Windows native C++ rewrite of Clash Mini.
 > Zero web engine. Zero JavaScript runtime. Built with Win32 API, Direct2D/DirectWrite, and modern C++20.
 
-Clash Win keeps everything you love about Clash Mini — the minimalist zero-config workflow, the 3D skeuomorphic visuals, the auto node switching and rule updates — but replaces the Tauri/WebView layer with hand-written native rendering. The result: a single native executable with no bundled browser engine and no JavaScript runtime, with behavior aligned 1:1 to the source it ports (see [Known Limitations](docs/KNOWN_LIMITATIONS_0.2.2.md) for the differences registered in v0.2.2).
+Clash Win keeps everything you love about Clash Mini — the minimalist zero-config workflow, the 3D skeuomorphic visuals, the auto node switching and rule updates — but replaces the Tauri/WebView layer with hand-written native rendering. The result: a single native executable with no bundled browser engine and no JavaScript runtime, with behavior aligned 1:1 to the source it ports (see [Known Limitations](docs/KNOWN_LIMITATIONS.md) for registered native-form differences and signing disclosures).
 
 > [!NOTE]
-> **v0.2.2 still carries explicitly registered gaps** — frosted-glass Blur, hover interpolation, an in-app update channel, code signing (the release assets are unsigned, no Authenticode signature), and clean-machine acceptance are documented in [KNOWN_LIMITATIONS_0.2.2.md](docs/KNOWN_LIMITATIONS_0.2.2.md). It is not claimed to be a perfect 1:1 copy.
+> **Registered form differences & disclosures** — Direct2D frosted-glass approximation, unsigned Authenticode release assets (verified via `SHA256SUMS.txt` and Minisign in-app update signatures), and sidecar prerequisites when building from source are documented in [KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md).
 
 ---
 
@@ -81,15 +81,15 @@ Get the artifacts from the [Releases page](https://github.com/qiu-yuxiao/clash-w
 1. Download either artifact from [Releases](https://github.com/qiu-yuxiao/clash-win/releases) and verify its SHA256 against `SHA256SUMS.txt` before running.
 2. **Installer**: double-click, accept the UAC prompt, follow the wizard (Simplified Chinese / English / Русский start language).
 3. **Portable**: extract to any folder and run `clashwin.exe`.
-4. Import a subscription and you are done. See [Release notes](docs/RELEASE_NOTES_0.2.2.md) for the full v0.2.2 scope.
+4. Import a subscription and you are done. See [CHANGELOG.md](CHANGELOG.md) for the version history and release notes.
 
 ```powershell
-Get-FileHash .\ClashWin_0.2.2_x64-setup.exe -Algorithm SHA256
-Get-FileHash .\ClashWin_0.2.2_x64_portable.zip -Algorithm SHA256
+Get-FileHash .\ClashWin_<version>_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\ClashWin_<version>_x64_portable.zip -Algorithm SHA256
 ```
 
 > [!WARNING]
-> **v0.2.2 release assets are unsigned — no Authenticode signature.** The signing step needs an elevated (UAC) session that was unavailable in the non-interactive release environment, so the signature status is recorded but does not block the release. Windows will show "**Unknown publisher**" and SmartScreen may warn on every machine. **Always verify the download against `SHA256SUMS.txt`** — the checksum is the only trust anchor. This matches Clash Mini v3.2.2 installers, which likewise carry no Authenticode signature. See [Known Limitations (d)](docs/KNOWN_LIMITATIONS_0.2.2.md) and [SECURITY.md](SECURITY.md).
+> **Release assets carry no Windows Authenticode signature.** Windows will show "**Unknown publisher**" and SmartScreen may warn on first run. **Always verify downloads against `SHA256SUMS.txt`** (in-app updates are additionally verified via Minisign Ed25519 signatures). This matches Clash Mini v3.2.2 installers, which likewise carry no Authenticode signature. See [Known Limitations](docs/KNOWN_LIMITATIONS.md) and [SECURITY.md](SECURITY.md).
 
 ---
 
@@ -162,7 +162,7 @@ cmake --build build --config Release
 .\build\bin\Release\clashwin.exe
 ```
 
-The repository ships a large unit-test suite (offscreen pixel assertions included); run `python3 scripts/run_tests_py.py` against the built test target before submitting changes. **A fresh clone compiles but cannot run**: the five `sidecar/*.exe` upstream binaries are not committed (`.gitignore` excludes `*.exe`). See [docs/05-sidecar-内核资产.md](docs/05-sidecar-内核资产.md) and `scripts/verify_sidecar.ps1`.
+The repository ships a large unit-test suite (offscreen pixel assertions included); run `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run_tests.ps1` against the built test target before submitting changes. **A fresh clone compiles but cannot run**: the five `sidecar/*.exe` upstream binaries are not committed (`.gitignore` excludes `*.exe`). See [docs/05-sidecar-内核资产.md](docs/05-sidecar-内核资产.md) and `scripts/verify_sidecar.ps1`.
 
 ---
 
@@ -172,11 +172,12 @@ The repository ships a large unit-test suite (offscreen pixel assertions include
 | :--- | :--- |
 | Where do I download / 在哪下载 | [Releases](https://github.com/qiu-yuxiao/clash-win/releases) |
 | Usage, config, subscription import / 使用与配置 | [Wiki](https://github.com/qiu-yuxiao/clash-win/wiki) |
-| "Unknown publisher" / SmartScreen warning / 未知发布者 | [Known Limitations (d)](docs/KNOWN_LIMITATIONS_0.2.2.md) · [SECURITY.md](SECURITY.md) |
-| Why does a source-only build not run / 源码编译后无法运行 | [Known Limitations (f)](docs/KNOWN_LIMITATIONS_0.2.2.md) |
-| "Check for updates" does nothing / 检查更新无反应 | [Known Limitations (c)](docs/KNOWN_LIMITATIONS_0.2.2.md) |
+| "Unknown publisher" / SmartScreen warning / 未知发布者 | [Known Limitations](docs/KNOWN_LIMITATIONS.md) · [SECURITY.md](SECURITY.md) |
+| Why does a source-only build not run / 源码编译后无法运行 | [Known Limitations](docs/KNOWN_LIMITATIONS.md) |
+| In-app update verification / 应用内自动更新验签 | [Known Limitations](docs/KNOWN_LIMITATIONS.md) |
 | Ports, service conflicts / 端口与服务冲突 | [Relationship with Clash Mini](#relationship-with-clash-mini-与-clash-mini-的关系) |
 | Something else is broken / 其他问题 | [Issues](https://github.com/qiu-yuxiao/clash-win/issues) (please use the templates) · [Discussions](https://github.com/qiu-yuxiao/clash-win/discussions) |
+| Report a vulnerability / 报告安全漏洞 | [SECURITY.md](SECURITY.md) — **privately**, not via a public issue |
 
 ---
 
@@ -186,23 +187,23 @@ The repository ships a large unit-test suite (offscreen pixel assertions include
 
 1. **克隆后第一件事 —— 安装强制钩子**
    ```powershell
-   powershell -File scripts/install_hooks.ps1
+   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install_hooks.ps1
    ```
-   它会把 `pre-push` 钩子放进 `.git/hooks/`。此后任何 `git push <remote> vX.Y.Z` 都会**先重跑发版预检，不过即拒绝推送**。
+   它会将 `core.hooksPath` 指向受版本库跟踪的 `scripts/git-hooks`。此后任何 `git push <remote> vX.Y.Z` 都会**先重跑发版预检，不过即拒绝推送**。
 
 2. **唯一发版入口 —— `scripts/release.ps1`**
    ```powershell
-   # 本地编译 + 全量回归 + 预检 + 脚手架发布材料，全部自动完成（第一道闸）
-   powershell -File scripts/release.ps1 -Version <新版本号> -Build
-   # 确认无误后再发布（推送 dev/main + 打 tag，触发 CI）
-   powershell -File scripts/release.ps1 -Version <新版本号> -Push
-   ```
-   版本号只输入一次，脚本自动同步 `constants.h` / `clashwin.nsi` / `app-update.json` / 回归测试四处；`-Build` 会先本地编译并跑全量回归，`-Push` 才碰远程。
+   # 第一步：本地完整预演（同步版本号 + 7 道门禁预检 + 编译全量回归 + 本地打包校验，零远程副作用）
+   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\release.ps1 -Version <X.Y.Z>
 
-3. **CI 兜底**：即便绕过本地钩子直接推 tag，`release.yml` 的 build job 在还原 sidecar 后仍会重跑全部预检 gate，任一失败整条 run 失败、绝不发布。
+   # 第二步：确认无误后正式发布（自动同步推送 dev/main + 打 tag + 盯梢 CI + 回拉核验 + 同步清单）
+   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\release.ps1 -Version <X.Y.Z> -SkipBuild -Push -Yes
+   ```
+   版本号只输入一次，脚本自动同步 `constants.h` / `src/clashwin.rc` / `installer/clashwin.nsi` 三处，并从 `CHANGELOG.md` 提取发版说明。
+
+3. **CI 兜底**：即便绕过本地钩子直接推 tag，`release.yml` 仍会执行 `validate` 与还原 sidecar 后的 `release_preflight.ps1`，任一失败整条流水线立即终止、绝不发布残次资产。
 
 > ⚠️ 不遵守上述流程、手敲 `git tag` + `git push --tags` 的提交，会被 `pre-push` 钩子或 CI 拦截，无法发布。按流程执行，即可一次成功发版。
-| Report a vulnerability / 报告安全漏洞 | [SECURITY.md](SECURITY.md) — **privately**, not via a public issue |
 
 ---
 
@@ -214,7 +215,7 @@ The repository ships a large unit-test suite (offscreen pixel assertions include
 | :--- | :--- | :--- |
 | UI layer | Tauri + WebView2 + Rust | Pure Win32 + Direct2D + C++20 |
 | Web engine | Yes (Chromium/WebView2) | **None** |
-| Feature set | Baseline | **Aligned 1:1 in scope** (pixel-parity layout, same workflows) — with [registered v0.2.2 gaps](docs/KNOWN_LIMITATIONS_0.2.2.md) |
+| Feature set | Baseline | **Aligned 1:1 in scope** (pixel-parity layout, same workflows) — see [Known Limitations](docs/KNOWN_LIMITATIONS.md) |
 | Version line | 3.x | **Independent, starting from 0.1.0** |
 
 Key facts:
@@ -265,9 +266,9 @@ Clash Win is distributed under the **GNU General Public License v3.0 only (GPL-3
 ## Development and Contributions
 
 * [CONTRIBUTING.md](CONTRIBUTING.md) — environment setup, 1:1 parity discipline, tests, packaging, PR checklist.
-* [CHANGELOG.md](CHANGELOG.md) — version history (newest first).
-* [docs/RELEASE_NOTES_0.2.2.md](docs/RELEASE_NOTES_0.2.2.md) — v0.2.2 release scope and artifacts.
-* [docs/KNOWN_LIMITATIONS_0.2.2.md](docs/KNOWN_LIMITATIONS_0.2.2.md) — registered gaps in v0.2.2.
+* [CHANGELOG.md](CHANGELOG.md) — version history and release notes (newest first).
+* [docs/RELEASE_PROCESS.md](docs/RELEASE_PROCESS.md) — deterministic release runbook (`scripts/release.ps1`).
+* [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) — registered native-form differences and disclosures.
 * [移植基本准则.md](移植基本准则.md) — the project constitution (parity rules, version line, evidence discipline).
 * Design documents: [`docs/phase1`](docs/phase1) (frontend/backend census, PRD) and [`docs/phase2`](docs/phase2) (C++20 architecture, task breakdown, user rulings).
 * [SECURITY.md](SECURITY.md) — supported versions and private vulnerability reporting.

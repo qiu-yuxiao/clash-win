@@ -40,14 +40,6 @@ SetCompressor /SOLID lzma
 ${StrStr}      ; 运行中进程检测（tasklist 输出按进程名匹配，语言无关）
 ${UnStrStr}
 
-; 卸载器签名：NSIS 3.11 的 !uninstfinalize 不注入输出路径/环境变量（实测），
-; 但卸载器 blob 会以 %TEMP%\nstXXXX.tmp 在编译期落盘；钩子脚本就地签名后，
-; NSIS 再把它嵌入安装包，安装后的 uninstall.exe 即带有效 Authenticode 签名。
-; 脚本由 build_installer.ps1 以管理员身份调用，未定义该宏时跳过（不影响编译）。
-!ifdef UNINST_SIGN_SCRIPT
-  !uninstfinalize 'powershell -NoProfile -ExecutionPolicy Bypass -File "${UNINST_SIGN_SCRIPT}" -LogFile "${UNINST_SIGN_LOG}"'
-!endif
-
 ; 可选：Tauri 的 nsis_tauri_utils 插件（仅用于以当前用户身份启动应用；缺失时退回 ExecShell）
 !ifdef TAURI_UTILS_PLUGIN_DIR
   !addplugindir "${TAURI_UTILS_PLUGIN_DIR}"
@@ -56,7 +48,7 @@ ${UnStrStr}
 
 ; ---------- 可覆盖定义（构建脚本传入绝对路径） ----------
 !ifndef VERSION
-  !define VERSION "0.2.6"
+  !define VERSION "0.2.7"
 !endif
 !ifndef STAGEDIR
   !define STAGEDIR "stage"

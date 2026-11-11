@@ -1,23 +1,26 @@
-# ClashWin installer build wrapper
-# Stages the Release artifacts and invokes NSIS (makensis) to produce
-# dist\ClashWin_<version>_x64-setup.exe. Fails loudly when anything is missing.
+﻿<#
+.SYNOPSIS
+  Clash Win NSIS 安装包构建脚本（暂存 Release 产物并调用 makensis 生成 dist\ClashWin_<version>_x64-setup.exe）。
+
+.DESCRIPTION
+  严格遵守上游二进制不可变原则：
+  - 仅拷贝 5 个经过基线校验的 sidecar 二进制，绝不把构建目录中的历史残留混入安装包；
+  - 绝不对 sidecar/*.exe 执行本地自签证书改写（无需 UAC 自提升，支持本地与 CI 全自动无交互构建）；
+  - 显式向 makensis 传入 /INPUTCHARSET UTF8，防止跨区域系统 ACP 编码误判。
+#>
 [CmdletBinding()]
 param(
     [ValidateSet('Release', 'Debug')]
     [string]$Configuration = 'Release',
     [string]$Makensis = '',
-    [string]$Version = '0.2.2',
+    [string]$Version = '',
     [switch]$SkipStage,
     [switch]$SkipSign
 )
 
 $ErrorActionPreference = 'Stop'
 
-# ---- 根因治理：剥离 WorkBuddy 透明代理注入的大小写重复 *_PROXY ----
-# WorkBuddy 的 sandbox-cli（透明代理，监听 127.0.0.1:2747）会向工具子进程注入
-# 同一份代理值的大小写两版（HTTPS_PROXY 与 https_proxy 并存）。MSBuild 的 CL
-# 任务用区分大小写的字典读取环境，遇到重复 key 直接 "字典关键字冲突" 崩溃。
-# 构建前强制清除所有 *_PROXY（不区分大小写），从根儿上避免该问题。
+# 剥离污染代理环境变量（防止子进程环境字典大小写键冲突）
 foreach ($_n in @('HTTP_PROXY','HTTPS_PROXY','http_proxy','https_proxy',
                   'ALL_PROXY','all_proxy','FTP_PROXY','ftp_proxy',
                   'NO_PROXY','no_proxy')) {
@@ -30,29 +33,17 @@ $StageDir  = Join-Path $PSScriptRoot 'stage'
 $DistDir   = Join-Path $RepoRoot 'dist'
 $ScriptNsi = Join-Path $PSScriptRoot 'clashwin.nsi'
 $IconFile  = Join-Path $RepoRoot 'resources\icons\icon.ico'
-$OutFile   = Join-Path $DistDir "ClashWin_${Version}_x64-setup.exe"
 
-# ---------- 0. 管理员自提升 ----------
-# !uninstfinalize 钩子要用 LocalMachine\My 证书私钥（signtool /sm）签卸载器 blob，
-# 必须在管理员上下文执行。这里一次性提升，后续签名（sign.ps1）不会再弹 UAC。
-$IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-    [Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $SkipSign -and -not $IsAdmin) {
-    Write-Host "需要管理员权限签名卸载器，正在请求提升..." -ForegroundColor Yellow
-    $q = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $PSCommandPath + '"'),
-           '-Configuration', $Configuration, '-Version', $Version)
-    if ($Makensis) { $q += @('-Makensis', ('"' + $Makensis + '"')) }
-    if ($SkipStage) { $q += '-SkipStage' }
-    try {
-        $p = Start-Process powershell -ArgumentList $q -Verb RunAs -Wait -PassThru -ErrorAction Stop
-    } catch {
-        Write-Host ("UAC 提升被拒绝或不可用：{0}" -f $_.Exception.Message) -ForegroundColor Red
-        Write-Host '未生成安装包；请在管理员 PowerShell 窗口中重新执行。' -ForegroundColor Yellow
-        $SkipSign = $true
+if (-not $Version) {
+    $consts = Join-Path $RepoRoot 'include\clashwin\config\constants.h'
+    if (Test-Path -LiteralPath $consts) {
+        $hit = Select-String -LiteralPath $consts -Pattern 'kAppVersion\s*=\s*"([^"]+)"' | Select-Object -First 1
+        if ($hit) { $Version = $hit.Matches[0].Groups[1].Value }
     }
-    if ($null -eq $p -and -not $SkipSign) { Write-Host 'UAC 提升已取消；未生成安装包。' -ForegroundColor Red; exit 2 }
-    if (-not $SkipSign) { exit $p.ExitCode }
+    if (-not $Version) { throw "未能解析版本号，请传入 -Version <X.Y.Z> 或检查 constants.h" }
 }
+
+$OutFile = Join-Path $DistDir "ClashWin_${Version}_x64-setup.exe"
 
 function Fail([string]$Message) {
     Write-Host "ERROR: $Message" -ForegroundColor Red
@@ -72,97 +63,89 @@ function Find-Makensis([string]$Explicit) {
 
     $candidates = @(
         (Join-Path $env:LOCALAPPDATA 'tauri\NSIS\makensis.exe'),
-        (Join-Path ${env:ProgramFiles} 'NSIS\makensis.exe'),
-        (Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe')
+        (Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'),
+        (Join-Path $env:ProgramFiles 'NSIS\makensis.exe')
     )
     foreach ($c in $candidates) {
-        if ($c -and (Test-Path -LiteralPath $c)) { return (Resolve-Path -LiteralPath $c).Path }
+        if ($c -and (Test-Path -LiteralPath $c)) { return $c }
     }
-    foreach ($key in @(
+
+    $regKeys = @(
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\NSIS',
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NSIS',
-        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\NSIS')) {
-        $props = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
-        if ($props -and $props.InstallLocation) {
-            $exe = Join-Path $props.InstallLocation 'makensis.exe'
-            if (Test-Path -LiteralPath $exe) { return (Resolve-Path -LiteralPath $exe).Path }
+        'HKCU:\Software\NSIS'
+    )
+    foreach ($rk in $regKeys) {
+        if (Test-Path $rk) {
+            $loc = (Get-ItemProperty $rk -ErrorAction SilentlyContinue).InstallLocation
+            if (-not $loc) { $loc = (Get-ItemProperty $rk -ErrorAction SilentlyContinue).'(default)' }
+            if ($loc) {
+                $exe = Join-Path $loc 'makensis.exe'
+                if (Test-Path -LiteralPath $exe) { return $exe }
+            }
         }
     }
     return $null
 }
 
-# ---------- 1. 校验 Release 产物 ----------
-if (-not (Test-Path -LiteralPath $BinDir)) {
-    Fail "Release output directory not found: $BinDir. Build first: cmake --build build --config $Configuration"
-}
-
-$missing = @()
-$mainExe = Join-Path $BinDir 'clashwin.exe'
-if (-not (Test-Path -LiteralPath $mainExe)) { $missing += $mainExe }
-
-$sidecarNames = @(
+# ---------- 1. 校验构建产物齐全 ----------
+$SidecarNames = @(
     'win-mihomo.exe',
     'clash-verge-service.exe',
     'clash-verge-service-install.exe',
     'clash-verge-service-uninstall.exe',
     'enableLoopback.exe'
 )
-foreach ($name in $sidecarNames) {
-    $p = Join-Path (Join-Path $BinDir 'sidecar') $name
-    if (-not (Test-Path -LiteralPath $p)) { $missing += $p }
-}
 
-foreach ($name in @('Country.mmdb', 'geosite.dat', 'gfwlist.yaml')) {
-    $p = Join-Path (Join-Path $BinDir 'resources') $name
-    if (-not (Test-Path -LiteralPath $p)) { $missing += $p }
-}
-
+$mainExe    = Join-Path $BinDir 'clashwin.exe'
 $localesDir = Join-Path $BinDir 'locales'
+$resDir     = Join-Path $BinDir 'resources'
+
+$missing = @()
+if (-not (Test-Path -LiteralPath $mainExe)) { $missing += $mainExe }
+foreach ($sc in $SidecarNames) {
+    $p = Join-Path $BinDir "sidecar\$sc"
+    if (-not (Test-Path -LiteralPath $p)) { $missing += $p }
+}
+foreach ($rf in @('Country.mmdb', 'geosite.dat', 'gfwlist.yaml', 'icons\icon.ico')) {
+    $p = Join-Path $resDir $rf
+    if (-not (Test-Path -LiteralPath $p)) { $missing += $p }
+}
 if (-not (Test-Path -LiteralPath $localesDir)) {
     $missing += $localesDir
 } elseif (-not (Get-ChildItem -LiteralPath $localesDir -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1)) {
     $missing += "$localesDir (empty)"
 }
-
 foreach ($p in @($IconFile, $ScriptNsi)) {
     if (-not (Test-Path -LiteralPath $p)) { $missing += $p }
 }
-
 if ($missing.Count -gt 0) {
     Fail ("Missing required artifact(s):`n  " + ($missing -join "`n  "))
 }
 
-# ---------- 1.5 代码签名：先签 Release 产物，保证安装包内的 exe 也是签过的 ----------
-# scripts\sign.ps1 幂等（证书不存在才创建），首次会请求一次管理员提升。
-$SignScript = Join-Path $RepoRoot 'scripts\sign.ps1'
-if (-not $SkipSign -and (Test-Path -LiteralPath $SignScript)) {
-    Write-Host "Signing Release binaries before packaging ..." -ForegroundColor Cyan
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $SignScript
-    if ($LASTEXITCODE -ne 0) {
-        Fail "代码签名失败（scripts\sign.ps1 exit=$LASTEXITCODE）。安装包未生成，避免打出未签名的包。"
-    }
-} else {
-    Write-Warning '跳过代码签名。'
-}
-
-# ---------- 2. 暂存（保持安装后的目录布局：exe 同级 sidecar\ resources\ locales\） ----------
+# ---------- 2. 干净暂存（仅拷贝白名单 5 个 sidecar，杜绝历史残留混入安装包） ----------
 if (-not $SkipStage) {
     if (Test-Path -LiteralPath $StageDir) {
         Remove-Item -LiteralPath $StageDir -Recurse -Force
     }
     New-Item -ItemType Directory -Path $StageDir | Out-Null
     Copy-Item -LiteralPath $mainExe -Destination (Join-Path $StageDir 'clashwin.exe') -Force
-    Copy-Item -LiteralPath (Join-Path $BinDir 'sidecar') -Destination (Join-Path $StageDir 'sidecar') -Recurse -Force
-    Copy-Item -LiteralPath (Join-Path $BinDir 'resources') -Destination (Join-Path $StageDir 'resources') -Recurse -Force
+
+    $stageSidecar = Join-Path $StageDir 'sidecar'
+    New-Item -ItemType Directory -Path $stageSidecar | Out-Null
+    foreach ($sc in $SidecarNames) {
+        Copy-Item -LiteralPath (Join-Path $BinDir "sidecar\$sc") -Destination (Join-Path $stageSidecar $sc) -Force
+    }
+
+    Copy-Item -LiteralPath $resDir -Destination (Join-Path $StageDir 'resources') -Recurse -Force
     Copy-Item -LiteralPath $localesDir -Destination (Join-Path $StageDir 'locales') -Recurse -Force
 
-    # 应用按 dirs::service_path() 在 <exe>\resources\clash-verge-service.exe 查找服务程序，
-    # 因此把服务三件套同时放进 resources\（安装/卸载器也直接从这里调用）。
+    # 服务三件套同步放入 resources\（dirs::service_path() 与安装/卸载器均从 <exe>\resources\ 查找）
     foreach ($name in @('clash-verge-service.exe', 'clash-verge-service-install.exe', 'clash-verge-service-uninstall.exe')) {
-        Copy-Item -LiteralPath (Join-Path (Join-Path $BinDir 'sidecar') $name) `
+        Copy-Item -LiteralPath (Join-Path $BinDir "sidecar\$name") `
                   -Destination (Join-Path (Join-Path $StageDir 'resources') $name) -Force
     }
-    Write-Host "Staged artifacts into $StageDir"
-
+    Write-Host "Staged clean artifacts into $StageDir"
 }
 
 # ---------- 3. 定位 makensis ----------
@@ -176,7 +159,7 @@ Searched: -Makensis, `$env:NSIS_MAKENSIS, PATH, %LOCALAPPDATA%\tauri\NSIS, Progr
 Write-Host "Using makensis: $makensisExe"
 & $makensisExe /VERSION
 
-# ---------- 4. 编译 ----------
+# ---------- 4. 编译 NSIS 安装包 ----------
 if (-not (Test-Path -LiteralPath $DistDir)) {
     New-Item -ItemType Directory -Path $DistDir | Out-Null
 }
@@ -190,20 +173,7 @@ $defines = @(
     "/DOUTFILE=$OutFile",
     "/DICONFILE=$IconFile"
 )
-# License 页已随 1:1 对齐移除（Mini bundle.license 未配置 → installer.nsi:161 不渲染）
-# 卸载器签名：clashwin.nsi 的 !uninstfinalize 在编译期对 %TEMP%\nst*.tmp 就地签名，
-# 该 blob 随后被 NSIS 嵌入安装包 → 安装后的 uninstall.exe 也带有效签名。
-$UninstSignScript = Join-Path $RepoRoot 'scripts\sign_nsis_uninstaller.ps1'
-$UninstSignLog    = Join-Path $env:TEMP 'clashwin-uninst-sign.log'
-if (-not $SkipSign -and (Test-Path -LiteralPath $UninstSignScript)) {
-    Remove-Item -LiteralPath $UninstSignLog -Force -ErrorAction SilentlyContinue
-    $defines += "/DUNINST_SIGN_SCRIPT=$UninstSignScript"
-    $defines += "/DUNINST_SIGN_LOG=$UninstSignLog"
-} else {
-    Write-Warning "未找到 scripts\sign_nsis_uninstaller.ps1，卸载器将不带签名。"
-}
 
-# Optional Tauri helper plugin: lets the finish page launch the app unelevated.
 $nsisRoot = Split-Path -Parent $makensisExe
 $tauriPlugin = Join-Path $nsisRoot 'Plugins\x86-unicode\additional\nsis_tauri_utils.dll'
 if (Test-Path -LiteralPath $tauriPlugin) {
@@ -211,7 +181,7 @@ if (Test-Path -LiteralPath $tauriPlugin) {
 }
 
 Write-Host "Compiling $ScriptNsi ..."
-& $makensisExe @defines $ScriptNsi
+& $makensisExe /INPUTCHARSET UTF8 @defines $ScriptNsi
 if ($LASTEXITCODE -ne 0) {
     Fail "makensis failed with exit code $LASTEXITCODE"
 }
@@ -220,40 +190,10 @@ if (-not (Test-Path -LiteralPath $OutFile)) {
     Fail "Expected installer was not produced: $OutFile"
 }
 
-# 校验卸载器签名：钩子脚本必须明确回报 RC=0 且 VERIFY=Valid，否则不出包，
-# 避免留下“主程序已签、卸载器未签”的半成品安装包。
-if ($defines -contains "/DUNINST_SIGN_SCRIPT=$UninstSignScript") {
-    $logText = if (Test-Path -LiteralPath $UninstSignLog) { Get-Content -LiteralPath $UninstSignLog -Raw } else { '' }
-    if ($logText -notmatch 'UNINST_SIGN_RC=0' -or $logText -notmatch 'UNINST_SIGN_VERIFY=Valid') {
-        Fail ("卸载器签名失败（未见成功记录：$UninstSignLog）。安装包未产出。" + "`n" + $logText)
-    }
-    $blobLine = ($logText -split "`n" | Where-Object { $_ -match '^UNINST_SIGN_BLOB=' } | Select-Object -First 1)
-    Write-Host "Uninstaller signed: $blobLine" -ForegroundColor Green
-}
-
 $item = Get-Item -LiteralPath $OutFile
 $sizeMb = [math]::Round($item.Length / 1MB, 2)
-
-# ---------- 5. 代码签名：签最终安装包（NSIS 出包后自动签） ----------
-if (-not $SkipSign -and (Test-Path -LiteralPath $SignScript)) {
-    Write-Host "Signing installer ..." -ForegroundColor Cyan
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $SignScript -Paths $OutFile
-    if ($LASTEXITCODE -ne 0) {
-        Fail "安装包签名失败（scripts\sign.ps1 exit=$LASTEXITCODE）: $OutFile"
-    }
-}
 
 Write-Host ""
 Write-Host "Installer ready: $($item.FullName)" -ForegroundColor Green
 Write-Host ("Size: {0:N0} bytes ({1} MB)" -f $item.Length, $sizeMb) -ForegroundColor Green
-
-# 显式声明成功退出码：release.yml "Build NSIS setup.exe" 用 $LASTEXITCODE -ne 0 判定。
-# 未签名 / sign.ps1 被跳过时本脚本可能全程无原生进程，$LASTEXITCODE 保持 $null，
-# 而 pwsh 下 $null -ne 0 为 True → 安装包已产出却误报失败。与 portable.ps1、
-# verify_sidecar.ps1 的 exit 0 契约一致；失败路径均由 Fail() 的 exit 1 提前终止。
 exit 0
-
-
-
-
-

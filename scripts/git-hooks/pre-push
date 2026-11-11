@@ -1,22 +1,31 @@
 #!/bin/sh
 # Clash Win 发版强制门禁（pre-push 钩子，受跟踪于 scripts/git-hooks）。
-# 作用：任何推送 v* tag 的动作都会先跑 release_preflight.ps1，不过即拒绝推送。
-# 这样"漏跑预检就推 tag"在动作发生那一刻就被拦下，不必等 CI 18 分钟。
-zero=0000000000000000000000000000000000000000
+# 推送任何 refs/tags/v* 标签前自动执行 release_preflight.ps1，兼容 pwsh 7 与 Windows PowerShell 5.1。
 
-while read local_ref local_sha remote_ref remote_sha; do
+if command -v powershell.exe >/dev/null 2>&1; then
+  PS_BIN="powershell.exe"
+elif command -v pwsh >/dev/null 2>&1; then
+  PS_BIN="pwsh"
+elif command -v powershell >/dev/null 2>&1; then
+  PS_BIN="powershell"
+else
+  echo "[release-gate] 未找到 PowerShell (powershell.exe / pwsh)，无法执行发版预检。" >&2
+  exit 1
+fi
+
+while read local_ref local_sha remote_ref remote_sha || [ -n "$local_ref" ]; do
   case "$local_ref" in
     refs/tags/v*)
       ver="${local_ref#refs/tags/v}"
-      echo "[release-gate] 检测到推送 tag $local_ref (v$ver)，强制跑 release_preflight ..."
-      pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/release_preflight.ps1 -Version "$ver"
+      echo "[release-gate] 检测到推送标签 $local_ref (v$ver)，正在执行发版预检 ($PS_BIN) ..."
+      "$PS_BIN" -NoProfile -ExecutionPolicy Bypass -File scripts/release_preflight.ps1 -Version "$ver" </dev/null
       rc=$?
       if [ "$rc" -ne 0 ]; then
-        echo "[release-gate] release_preflight 未通过，已拒绝推送 $local_ref。" >&2
-        echo "[release-gate] 请先本地修完（用 scripts/release.ps1 -Version $ver -Build），再推送。" >&2
+        echo "[release-gate] 发版预检未通过，已拦截标签推送 $local_ref。" >&2
+        echo "[release-gate] 请先运行: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -Version $ver" >&2
         exit 1
       fi
-      echo "[release-gate] preflight 通过，允许推送 $local_ref。"
+      echo "[release-gate] 预检全部通过，放行推送 $local_ref。"
       ;;
   esac
 done

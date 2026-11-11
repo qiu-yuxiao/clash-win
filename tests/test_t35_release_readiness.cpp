@@ -54,7 +54,7 @@ fs::path repo_root() {
   }
   std::vector<fs::path> starts;
   starts.push_back(fs::current_path(ec));
-  // 兜底：run_tests_py.py 会把 cwd 切到隔离目录（build/cwtest），
+  // 兜底：scripts/run_tests.ps1 会把 cwd 切到隔离目录，
   // 再退一步用 exe 自身所在目录上溯，保证任何启动方式都能定位仓库根。
   wchar_t buf[MAX_PATH]{};
   const DWORD n = ::GetModuleFileNameW(nullptr, buf, MAX_PATH);
@@ -199,7 +199,9 @@ UT_TEST(t35_selection_defaults_match_mini) {
 }
 
 UT_TEST(t35_update_manifest_is_clash_win_not_mini) {
-  // 发布阻断：自家清单必须 version == kAppVersion，且不含 Mini 仓库/产物。
+  // 发布阻断：自家清单绝不能残留 Clash Mini 仓库/产物，且不能把当前版本反向判为旧版。
+  // 注：updater/app-update.json 记录当前线上最新已发布版本（仅在 CI publish 成功后更新），
+  //     发版前不再清空或预写未发布版本号，因此 manifest.version <= kAppVersion 均为合法。
   std::ifstream in(repo_file("updater/app-update.json"));
   UT_CHECK(in.good());
   if (!in.good()) return;
@@ -209,21 +211,16 @@ UT_TEST(t35_update_manifest_is_clash_win_not_mini) {
   UT_CHECK(text.find("clash-mini") == std::string::npos);
   UT_CHECK(text.find("3.2.2") == std::string::npos);
   UT_CHECK(text.find("Clash.Mini") == std::string::npos);
-  UT_CHECK(text.find(std::string("\"") + config::consts::kAppVersion + "\"") != std::string::npos);
 
   auto r = update::ClientUpdater::parse_manifest(text, config::consts::kAppVersion);
   UT_CHECK(r.is_ok());
   if (r.is_ok()) {
     const auto& info = r.value();
-    UT_CHECK(info.has_update == false);  // 当前即最新，绝不触发下载/验签
-    // download_url/signature 不再断言为空：发布成功后 CI 会 [skip ci] 自动回填
-    //   真实产物链接与签名（458b53a 教训——占位清单发布后两条 empty 断言必然翻红）。
-    //   has_update=false 时客户端不会下载，字段有值无碍；改为断言：若有 url，
-    //   必须是自家仓库产物，不得指向 Mini（用例本意）。
+    UT_CHECK(info.has_update == false);  // 当前开发/发布版本 >= 线上已发布清单，绝不触发降级下载
+    UT_CHECK(!info.latest_version.empty());
     if (!info.download_url.empty()) {
       UT_CHECK(info.download_url.find("qiu-yuxiao/clash-win") != std::string::npos);
     }
-    UT_CHECK(info.latest_version == config::consts::kAppVersion);
   }
 }
 
@@ -256,13 +253,52 @@ UT_TEST(t35_uninstall_service_has_no_ui_path) {
 }
 
 UT_TEST(t35_version_single_source_of_truth) {
-  // src: include/clashwin/config/constants.h:20 kAppVersion = "0.1.0"
   // 自家 Release 版本线从 0.1.0 独立递增，不与 Mini 3.2.2 绑死（总纲 §5.3）。
-  UT_CHECK(std::string(config::consts::kAppVersion) == "0.2.6");
+  // 不再写死具体版本字面量，改为动态校验 SemVer 合法性 + 跨文件（constants.h / clashwin.rc / clashwin.nsi）严格一致！
+  const std::string ver = config::consts::kAppVersion;
+  UT_CHECK(!ver.empty());
+  UT_CHECK(ver != "3.2.2");
+  UT_CHECK(update::ClientUpdater::is_version_newer(ver, "0.0.9"));
+  UT_CHECK(!update::ClientUpdater::is_version_newer(ver, ver));
   UT_CHECK(update::ClientUpdater::is_version_newer("0.2.1", "0.1.2"));
   UT_CHECK(!update::ClientUpdater::is_version_newer("0.2.1", "0.2.1"));
-  if (false) UT_CHECK(std::string(config::consts::kAppVersion) == "0.1.0");
-  // 这条断言记录「为什么不能照抄 Mini 清单」：3.2.2 会被判成 0.1.0 的新版本。
   UT_CHECK(update::ClientUpdater::is_version_newer("3.2.2", "0.1.0"));
   UT_CHECK(!update::ClientUpdater::is_version_newer("0.1.0", "0.1.0"));
+
+  // 跨文件一致性守卫：clashwin.nsi 与 clashwin.rc 必须与 kAppVersion 完全同步（防漏改 .rc / .nsi）
+  const std::string base_ver = ver.substr(0, ver.find('-'));
+  std::string comma_ver = base_ver;
+  for (char& ch : comma_ver) {
+    if (ch == '.') ch = ',';
+  }
+  comma_ver += ",0";
+
+  {
+    std::ifstream nsi_in(repo_file("installer/clashwin.nsi"));
+    UT_CHECK(nsi_in.good());
+    if (nsi_in.good()) {
+      std::ostringstream nsi_ss;
+      nsi_ss << nsi_in.rdbuf();
+      const std::string nsi = nsi_ss.str();
+      UT_CHECK_MSG(nsi.find("!define VERSION \"" + ver + "\"") != std::string::npos,
+                   ("clashwin.nsi VERSION mismatch with kAppVersion=" + ver).c_str());
+    }
+  }
+  {
+    std::ifstream rc_in(repo_file("src/clashwin.rc"));
+    UT_CHECK(rc_in.good());
+    if (rc_in.good()) {
+      std::ostringstream rc_ss;
+      rc_ss << rc_in.rdbuf();
+      const std::string rc = rc_ss.str();
+      UT_CHECK_MSG(rc.find("FILEVERSION " + comma_ver) != std::string::npos,
+                   ("clashwin.rc FILEVERSION mismatch, expected " + comma_ver).c_str());
+      UT_CHECK_MSG(rc.find("PRODUCTVERSION " + comma_ver) != std::string::npos,
+                   ("clashwin.rc PRODUCTVERSION mismatch, expected " + comma_ver).c_str());
+      UT_CHECK_MSG(rc.find("\"FileVersion\", \"" + ver + "\"") != std::string::npos,
+                   ("clashwin.rc FileVersion mismatch, expected " + ver).c_str());
+      UT_CHECK_MSG(rc.find("\"ProductVersion\", \"" + ver + "\"") != std::string::npos,
+                   ("clashwin.rc ProductVersion mismatch, expected " + ver).c_str());
+    }
+  }
 }

@@ -93,7 +93,11 @@ New-Item -ItemType Directory -Path $stage | Out-Null
 
 try {
     Copy-Item -LiteralPath (Join-Path $BinDir 'clashwin.exe') -Destination (Join-Path $stage 'clashwin.exe') -Force
-    Copy-Item -LiteralPath (Join-Path $BinDir 'sidecar')   -Destination (Join-Path $stage 'sidecar')   -Recurse -Force
+    $stageSidecar = Join-Path $stage 'sidecar'
+    New-Item -ItemType Directory -Path $stageSidecar | Out-Null
+    foreach ($scName in @('win-mihomo.exe', 'clash-verge-service.exe', 'clash-verge-service-install.exe', 'clash-verge-service-uninstall.exe', 'enableLoopback.exe')) {
+        Copy-Item -LiteralPath (Join-Path $BinDir "sidecar\$scName") -Destination (Join-Path $stageSidecar $scName) -Force
+    }
     Copy-Item -LiteralPath (Join-Path $BinDir 'resources') -Destination (Join-Path $stage 'resources') -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $BinDir 'locales')   -Destination (Join-Path $stage 'locales')   -Recurse -Force
 
