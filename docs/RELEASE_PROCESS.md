@@ -142,6 +142,9 @@ gh run watch <run_id> --repo qiu-yuxiao/clash-win --exit-status --interval 30
 | CI 回归卡死在版本断言 | `test_t35_release_readiness.cpp` 版本写死 | 同步 bump 该用例的版本字面量 |
 | 杀残留内核的测试失败 | 内核改名后测试断言还按旧名 | 同步 bump 测试里的内核名（对齐 `kCoreProcessToken`） |
 | sidecar 还原后 5/5 失败 | `sidecar` 内部归档还含旧内核 | 本地按现行 sidecar 重新打包上传替换该内部 Release 资产 |
+| **v0.2.6** Full regression `2 failed` | 发版改动违背既有契约：`sidecar_core_path()` 被误改成 `<exe>\sidecar\`；仓库 `app-update.json` 被写入真实 url/signature（应为占位符） | 改回既定契约；**发版必须带 `-Build` 本地全量回归**，别等 CI 18 分钟后才暴露 |
+| **v0.2.6** 预检闸 `ParserError`（Build 之前整条 run 红） | 无 BOM 的 UTF-8 中文 `.ps1` 被 CI 的 `pwsh` 7 按系统默认编码（CP936/GBK）误读；本地 Windows PowerShell 5.1 容错，导致「本地 PASS=11」是假象 | 全部 `scripts/*.ps1` 加 UTF-8 BOM；预检新增 **GATE 7**（BOM + 无孤立 CR），让本地 5.1 也能提前拦下编码类 bug |
+| **v0.2.6** `Verify release artifacts` 报 `setup.exe 体积异常偏小 (20.9 MB)` | **断言逻辑与打包事实不符**：NSIS 用 lzma 把 78MB 未压缩内容（含 61MB 内核）压成 20.87MB 磁盘文件；`< 35MB` 体积断言既误杀正确包、又分不出真漏内核（v0.2.5 漏内核 21.9MB） | 删除体积断言，改为校验打包源 `installer/stage/sidecar/win-mihomo.exe` 的**字节数 + SHA256 基线**；新守卫落地前先看打包器原始输出（`Install data` / `Total size`），不凭「体积越大越完整」的假设 |
 
 **标准修复循环**（v0.2.2 验证过）：
 1. `gh run view <id> --log-failed` 看真实报错。
