@@ -186,7 +186,10 @@ std::wstring proxy_head_state_path() {
 }
 std::wstring cores_dir() { return join(app_home_dir(), L"cores"); }
 std::wstring ruleset_dir() { return join(app_home_dir(), L"ruleset"); }
-std::wstring sidecar_core_path() { return join(exe_dir(), L"win-mihomo.exe"); }
+// ← state.rs 兜底：内核随包放在 <exe>\sidecar\win-mihomo.exe（与开发/测试布局落地一致）。
+// 旧实现误指向 <exe>\win-mihomo.exe（根目录无此文件），导致该兜底路径永远落空；
+// 真实兜底依赖 locate_core_path() 里的「<exe>\sidecar\win-mihomo.exe」二次兜底补偿。
+std::wstring sidecar_core_path() { return join(join(exe_dir(), L"sidecar"), L"win-mihomo.exe"); }
 
 std::wstring sidecar_log_dir() {
   std::wstring dir = join(app_logs_dir(), L"sidecar");

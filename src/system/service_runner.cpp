@@ -47,6 +47,22 @@ Result<void> run_elevated(const std::wstring& exe, const char* label) {
   sei.lpDirectory = work_dir.c_str();
   sei.nShow = SW_HIDE;
   sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+
+  // ★ 自报家门（用户 2026-11-11 反馈：UAC 弹窗未标明来源，用户不清楚是哪来的）。
+  // UAC 本身的发布者文字由签名决定（本程序未签名，见 Known Limitation d，不可改），
+  // 因此在提权前先弹出一个明确标注「Clash Win」的确认框，让用户清楚来源与目的。
+  const int pre_answer = ::MessageBoxW(
+      ::GetForegroundWindow(),
+      L"Clash Win 需要管理员权限来安装 / 管理系统代理服务（clash_verge_service），"
+      L"用于启用 TUN 模式或正常联网。\r\n\r\n"
+      L"点击「确定」后 Windows 会弹出用户账户控制（UAC）确认；"
+      L"若您并未主动开启相关功能，可点击「取消」。",
+      L"Clash Win", MB_OKCANCEL | MB_ICONINFORMATION | MB_TOPMOST);
+  if (pre_answer != IDOK) {
+    return Result<void>::err(
+        {errs::kIo, std::string(label) + " cancelled before UAC (user pre-confirm)"});
+  }
+
   if (!ShellExecuteExW(&sei)) {
     return Result<void>::err({errs::kIo, std::string(label) + " failed (UAC cancelled?)"});
   }

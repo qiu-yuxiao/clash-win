@@ -8,6 +8,7 @@
 #include "config/config.h"
 #include "config/proxy_head_state.h"
 #include "core/service_mode.h"
+#include "core/core_updater.h"
 #include "mihomo/service_ipc.h"
 #include "system/service_runner.h"
 #include "util/dirs.h"
@@ -156,6 +157,39 @@ std::wstring locate_core_path() {
   }
   return {};
 }
+
+namespace {
+
+// ★ 内核缺失时运行时自愈（← Mini 由 Tauri sidecar 随包保证内核始终存在；
+//   Clash Win 是原生程序，内核经由安装包 / 运行时下载交付。
+//   当安装包未含内核或内核被清除时，这里从 GitHub 自动下载并校验，
+//   等价于 Mini 的「内核始终可用」保证，避免空节点表）。
+// 注意：恢复期间内核必然未运行，故用 no-op 的 CoreOps 临时接管，
+// 避免 start_core_upgrade 在解压失败时回调 CoreManager::start_auto()
+// 重入 lifecycle_ 锁造成死锁；结束后复位，保证手动内核升级语义不受影响。
+Result<void> try_recover_core() {
+  auto& updater = CoreUpdater::instance();
+  CoreOps noop;
+  noop.stop = []() -> Result<void> { return Result<void>::ok(); };
+  noop.start = []() -> Result<void> { return Result<void>::ok(); };
+  updater.set_lifecycle_ops(noop);
+
+  CWLOG_WARN("core binary missing; attempting runtime recovery (download win-mihomo from GitHub)");
+  auto rel = updater.check_latest_release();
+  if (rel.is_err()) {
+    updater.reset_lifecycle_ops();
+    CWLOG_WARN("core recovery: check_latest_release failed: " + rel.error().message);
+    return Result<void>::err(rel.error());
+  }
+  auto up = updater.start_core_upgrade(rel.value());
+  updater.reset_lifecycle_ops();
+  if (up.is_err()) {
+    CWLOG_WARN("core recovery: start_core_upgrade failed: " + up.error().message);
+  }
+  return up;
+}
+
+}  // namespace
 
 std::wstring build_sidecar_command_line(const SidecarLaunch& s) {
   // ← state.rs:56-79 参数顺序：-d <dir> -f <file> -ext-ctl-pipe <pipe>
@@ -440,6 +474,10 @@ Result<void> CoreManager::start_sidecar_locked(const std::wstring& config_file,
 
   auto core = locate_core_path();
   if (core.empty()) {
+    auto rec = try_recover_core();
+    if (rec.is_ok()) core = locate_core_path();
+  }
+  if (core.empty()) {
     return Result<void>::err({2302, "win-mihomo core not found (cores/ and sidecar both missing)"});
   }
 
@@ -600,6 +638,10 @@ Result<void> CoreManager::start_service_locked(const std::wstring& config_file) 
   service_mode::ServiceIpcAdapter adapter(&ipc);
 
   auto core = locate_core_path();
+  if (core.empty()) {
+    auto rec = try_recover_core();
+    if (rec.is_ok()) core = locate_core_path();
+  }
   if (core.empty()) {
     return Result<void>::err({2302, "win-mihomo core not found (cores/ and sidecar both missing)"});
   }

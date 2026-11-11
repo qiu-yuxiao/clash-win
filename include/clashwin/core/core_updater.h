@@ -76,6 +76,7 @@ class CoreUpdater {
   void set_downloader(std::shared_ptr<ICoreUpdateDownloader> downloader);
   void set_core_api_client(ICoreApiClient* client);
   void set_lifecycle_ops(CoreOps ops);
+  void reset_lifecycle_ops();
 
   // Commands
   Result<GithubRelease> check_latest_release();

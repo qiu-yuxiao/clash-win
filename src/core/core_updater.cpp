@@ -249,6 +249,8 @@ void CoreUpdater::set_lifecycle_ops(CoreOps ops) {
   lifecycle_ops_ = std::move(ops);
 }
 
+void CoreUpdater::reset_lifecycle_ops() { lifecycle_ops_.reset(); }
+
 void CoreUpdater::emit_progress(const std::string& status, uint32_t progress,
                                const std::string& message) {
   CoreUpgradeProgress p{status, progress, message};

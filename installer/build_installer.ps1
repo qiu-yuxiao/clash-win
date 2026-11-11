@@ -13,6 +13,17 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# ---- 根因治理：剥离 WorkBuddy 透明代理注入的大小写重复 *_PROXY ----
+# WorkBuddy 的 sandbox-cli（透明代理，监听 127.0.0.1:2747）会向工具子进程注入
+# 同一份代理值的大小写两版（HTTPS_PROXY 与 https_proxy 并存）。MSBuild 的 CL
+# 任务用区分大小写的字典读取环境，遇到重复 key 直接 "字典关键字冲突" 崩溃。
+# 构建前强制清除所有 *_PROXY（不区分大小写），从根儿上避免该问题。
+foreach ($_n in @('HTTP_PROXY','HTTPS_PROXY','http_proxy','https_proxy',
+                  'ALL_PROXY','all_proxy','FTP_PROXY','ftp_proxy',
+                  'NO_PROXY','no_proxy')) {
+  [Environment]::SetEnvironmentVariable($_n, $null, 'Process')
+}
+
 $RepoRoot  = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $BinDir    = Join-Path $RepoRoot "build\bin\$Configuration"
 $StageDir  = Join-Path $PSScriptRoot 'stage'
