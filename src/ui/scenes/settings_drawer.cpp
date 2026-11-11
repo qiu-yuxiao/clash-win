@@ -511,12 +511,13 @@ BasicCard::BasicCard() : Widget(nullptr) {
   title_->set_i18n_text("settings.components.verge.basic.title");
   add_child(std::move(t));
   struct Def {
-    std::wstring text;
+    const char* i18n_key;
+    const wchar_t* literal;
     SwitchW** slot;
-  } defs[4] = {{tr("settings.sections.system.fields.autoLaunch"), &sw_auto_launch_},
-               {L"Allow LAN", &sw_allow_lan_},
-               {tr("settings.sections.system.fields.silentStart"), &sw_silent_start_},
-               {L"Allow IPv6", &sw_allow_ipv6_}};
+  } defs[4] = {{"settings.sections.system.fields.autoLaunch", nullptr, &sw_auto_launch_},
+               {nullptr, L"Allow LAN", &sw_allow_lan_},
+               {"settings.sections.system.fields.silentStart", nullptr, &sw_silent_start_},
+               {nullptr, L"Allow IPv6", &sw_allow_ipv6_}};
   for (int i = 0; i < 4; ++i) {
     auto lb = std::make_unique<Label>();
     labels_[i] = lb.get();
@@ -524,7 +525,11 @@ BasicCard::BasicCard() : Widget(nullptr) {
     labels_[i]->style.weight = static_cast<int>(Weight::Bold);
     labels_[i]->style.align_v = AlignV::Center;  // src: basic-settings-card.tsx:25 alignItems 'center'
     labels_[i]->style.color = card_text();
-    labels_[i]->set_text(defs[i].text);
+    if (defs[i].i18n_key) {
+      labels_[i]->set_i18n_text(defs[i].i18n_key);
+    } else {
+      labels_[i]->set_text(defs[i].literal);
+    }
     add_child(std::move(lb));
     auto sw = std::make_unique<SwitchW>();
     *defs[i].slot = sw.get();
@@ -570,9 +575,9 @@ void BasicCard::on_arrange(const RectF& area) {
   const float sw_h = sp.track_h * sw_scale;
   const float sw_body_bottom =
       std::max(sw_h, 0.5f * (sw_h + sp.thumb_d * sw_scale));
-  // 13px Bold 文本在 24px 行盒内 AlignV::Center 的字面底沿位于 cy + 17.65f，
-  //   令开关实体底沿落在同一水平线上（← basic-settings-card.tsx:25,148）
-  const float row_bottom_line = 17.65f;
+  // 实时通过 DirectWrite GetOverhangMetrics 测量当前语言与当前系统回退字体下该标签字面底沿，
+  //   令每个开关实体底沿与相邻标签底沿精确处于同一水平线（← basic-settings-card.tsx:25,148）
+  ITextEngine* eng = text_engine();
   for (int i = 0; i < 4; ++i) {
     const bool is_col1 = (i % 2) != 0;
     const float cx = pad + (is_col1 ? (col_w + gap_x) : 0.0f);
@@ -582,9 +587,19 @@ void BasicCard::on_arrange(const RectF& area) {
     labels_[i]->style.align_v = AlignV::Center;
     labels_[i]->style.wrap = false;
     labels_[i]->style.ellipsis = true;
+    const float lb_w = std::max(0.0f, col_w - sw_w - 12.0f);  // src: :24,148 px:0.5 + mr:1px + 间距
     // gridItemSx px:0.5=4：标签左内缩 4；右侧留给 5px 右距 + 开关宽 + 3px 间距
-    labels_[i]->layout_tree(
-        {cx + 4.0f, cy, std::max(0.0f, col_w - sw_w - 12.0f), row_h});
+    labels_[i]->layout_tree({cx + 4.0f, cy, lb_w, row_h});
+    std::wstring probe_txt = labels_[i]->text;
+    // 剔除西文/西里尔小写下伸字母（g/j/p/q/y 等）对基线的干扰，始终对齐字面主底线
+    for (wchar_t& ch : probe_txt) {
+      if (ch == L'g' || ch == L'j' || ch == L'p' || ch == L'q' || ch == L'y') {
+        ch = L'a';
+      }
+    }
+    const float row_bottom_line =
+        eng ? eng->measure_ink_bottom(probe_txt, labels_[i]->style, lb_w, row_h)
+            : 17.65f;  // ← basic-settings-card.tsx:25 无引擎时回退值
     // 右缘 = cx + col_w - 4(px:0.5) - 1(mr:'1px')；底部与标签字面底沿同水平线
     sws[i]->layout_tree(
         {cx + col_w - 5.0f - sw_w, cy + row_bottom_line - sw_body_bottom, sw_w, sw_h});

@@ -115,6 +115,8 @@ class D2dRenderTarget : public IRenderTarget, public ITextEngine {
   // ---- ITextEngine ----
   SizeF measure_text(const std::wstring& text, const TextStyle& ts,
                      float max_w) override;
+  float measure_ink_bottom(const std::wstring& text, const TextStyle& ts,
+                           float box_w, float box_h) override;
 
  private:
   void on_target_ready();

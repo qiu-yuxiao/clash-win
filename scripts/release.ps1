@@ -77,15 +77,17 @@ function Replace-RegexStrict([string]$path, [string]$pattern, [string]$replaceme
   }
 }
 
-function Watch-And-VerifyRelease([string]$ver) {
+function Watch-And-VerifyRelease([string]$ver, [string]$expectedSha = '') {
   $tag = "v$ver"
   Write-Host "`n[盯梢] 正在定位标签 $tag 触发的 GitHub Actions 运行记录..." -ForegroundColor Yellow
   $runId = $null
   for ($attempt = 1; $attempt -le 24; $attempt++) {
-    $jsonTxt = & gh run list --repo $GhRepo --workflow release.yml --limit 8 --json databaseId,headBranch,status,conclusion,createdAt 2>$null
+    $jsonTxt = & gh run list --repo $GhRepo --workflow release.yml --limit 8 --json databaseId,headBranch,headSha,status,conclusion,createdAt 2>$null
     if ($LASTEXITCODE -eq 0 -and $jsonTxt) {
       $runs = $jsonTxt | ConvertFrom-Json
-      $hit = $runs | Where-Object { $_.headBranch -eq $tag } | Select-Object -First 1
+      $hit = $runs | Where-Object {
+        $_.headBranch -eq $tag -and ([string]::IsNullOrEmpty($expectedSha) -or $_.headSha -eq $expectedSha)
+      } | Select-Object -First 1
       if ($hit) {
         $runId = $hit.databaseId
         break
@@ -148,10 +150,10 @@ function Watch-And-VerifyRelease([string]$ver) {
   & git fetch origin --prune
   $curBranch = (& git rev-parse --abbrev-ref HEAD).Trim()
   if ($curBranch -eq 'dev') {
-    & git merge --ff-only origin/main 2>$null
+    & git merge --ff-only origin/main
     if ($LASTEXITCODE -eq 0) {
       & git branch -f main HEAD
-      & git push origin dev 2>$null
+      & git push origin dev
       Write-Host '  [SYNC OK] 本地与远端 dev / main 已完全对齐。' -ForegroundColor Green
     }
   }
@@ -353,11 +355,16 @@ Write-Host '  快进同步 main -> origin/main（无需切换工作树）...' -F
 if ($LASTEXITCODE -ne 0) { throw 'git push origin dev:main 失败（非快进或分支受保护）' }
 & git branch -f main HEAD
 
-Write-Host "  创建附注标签 $tagName 并推送..." -ForegroundColor Cyan
+$targetHeadSha = (& git rev-parse HEAD).Trim()
+Write-Host "  创建附注标签 $tagName ($targetHeadSha) 并推送..." -ForegroundColor Cyan
 if ($Retag) {
+  $remoteTag = (& git ls-remote --tags origin "refs/tags/$tagName")
+  if ($remoteTag) {
+    & git push origin ":refs/tags/$tagName"
+  }
   & git tag -f -a $tagName -m "Clash Win v$Version"
   if ($LASTEXITCODE -ne 0) { throw "git tag -f $tagName 失败" }
-  & git push origin "refs/tags/$tagName" --force
+  & git push origin "refs/tags/$tagName"
 } else {
   & git tag -a $tagName -m "Clash Win v$Version"
   if ($LASTEXITCODE -ne 0) { throw "git tag $tagName 失败" }
@@ -368,6 +375,6 @@ if ($LASTEXITCODE -ne 0) { throw "推送标签 $tagName 失败" }
 Write-Host "[OK] 已成功推送 dev / main 及标签 $tagName！" -ForegroundColor Green
 
 if (-not $NoWatch) {
-  Watch-And-VerifyRelease $Version
+  Watch-And-VerifyRelease $Version $targetHeadSha
 }
 exit 0

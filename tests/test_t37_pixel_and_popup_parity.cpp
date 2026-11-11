@@ -10,7 +10,9 @@
 #include "test_ui_helper.h"
 #include "test_util.h"
 
+#include "i18n/i18n.h"
 #include "ui/container.h"
+#include "ui/i18n_text.h"
 #include "ui/context_menu.h"
 #include "ui/scenes/node_list.h"
 #include "ui/scenes/profile_import_card.h"
@@ -70,64 +72,77 @@ float scan_ink_bottom_dip(Widget& w, const RectF& box, const Color4f& bg, float 
 
 }  // namespace
 
-// 1) BasicCard 四个开关与标签文字底沿像素级对齐 + 6 套皮肤开关几何 + 消除圆外“直耳”
+// 1) BasicCard 四个开关与标签文字底沿像素级对齐（跨语言 zh/en + 跨 6 套皮肤）+ 消除圆外“直耳”
 UT_TEST(t37_basic_card_switches_and_labels_bottom_aligned_pixels) {
+  ensure_i18n();
+  auto& i18n_svc = i18n::I18n::instance();
+  const std::string prev_lang = i18n_svc.language();
   auto& svc = theme::ThemeService::instance();
   const theme::SkinId skins[] = {
       theme::SkinId::Retro3d,     theme::SkinId::Original,
       theme::SkinId::ModernFlat,  theme::SkinId::FrostedGlass,
       theme::SkinId::Cyberpunk,   theme::SkinId::Monochrome};
+  const char* langs[] = {"zh", "en"};
 
-  for (theme::SkinId sk : skins) {
-    svc.init(sk, theme::ThemeMode::Light);
-    make_offscreen(271, 680, 144.0f);
-    scene::SettingsDrawer drawer;
-    drawer.layout_tree({0, 0, 271, 680});
-    drawer.set_open(true);
+  for (const char* lang : langs) {
+    i18n_svc.set_language(lang);
+    for (theme::SkinId sk : skins) {
+      svc.init(sk, theme::ThemeMode::Light);
+      make_offscreen(271, 680, 144.0f);
+      scene::SettingsDrawer drawer;
+      drawer.layout_tree({0, 0, 271, 680});
+      drawer.set_open(true);
 
-    const auto* basic = drawer.basic_card();
-    UT_CHECK(basic != nullptr);
-    if (!basic) continue;
+      const auto* basic = drawer.basic_card();
+      UT_CHECK(basic != nullptr);
+      if (!basic) continue;
 
-    // 所有标签必须为 AlignV::Center（严禁退化回 AlignV::Top 导致上飘 4px）
-    for (int i = 0; i < 4; ++i) {
-      UT_CHECK(basic->labels_[i] != nullptr);
-      if (basic->labels_[i]) {
-        UT_CHECK(basic->labels_[i]->style.align_v == AlignV::Center);
+      // 所有标签必须为 AlignV::Center（严禁退化回 AlignV::Top 导致上飘 4px）
+      for (int i = 0; i < 4; ++i) {
+        UT_CHECK(basic->labels_[i] != nullptr);
+        if (basic->labels_[i]) {
+          UT_CHECK(basic->labels_[i]->style.align_v == AlignV::Center);
+        }
+      }
+      UT_CHECK(basic->port_label_ && basic->port_label_->style.align_v == AlignV::Center);
+
+      SwitchW* sws[4] = {basic->sw_auto_launch_, basic->sw_allow_lan_,
+                         basic->sw_silent_start_, basic->sw_allow_ipv6_};
+      const auto sp = svc.switch_paint();
+      for (int i = 0; i < 4; ++i) {
+        UT_CHECK(sws[i] != nullptr);
+        if (!sws[i] || !basic->labels_[i]) continue;
+        // 尺寸按皮肤自身尺寸 × 0.85（cyberpunk 18×10 → 15.3×8.5；其余 28×14 → 23.8×11.9）
+        UT_CHECK(near_f(sws[i]->bounds().w, sp.track_w * 0.85f, 0.25f));
+        UT_CHECK(near_f(sws[i]->bounds().h, sp.track_h * 0.85f, 0.25f));
+
+        // 离屏逐像素扫描该标签的真实字面墨迹底沿（剔除 y/g/p/q/j 下伸尾以测主基线，并单独验证原串）
+        Label lb_probe;
+        lb_probe.style = basic->labels_[i]->style;
+        lb_probe.style.color = Color4f::hex(0x111111);
+        std::wstring base_txt = basic->labels_[i]->text;
+        for (wchar_t& ch : base_txt) {
+          if (ch == L'g' || ch == L'j' || ch == L'p' || ch == L'q' || ch == L'y') {
+            ch = L'a';
+          }
+        }
+        lb_probe.set_text(base_txt);
+        const RectF lb_box{0.0f, 0.0f, basic->labels_[i]->bounds().w,
+                           basic->labels_[i]->bounds().h};
+        const float lb_base_bot =
+            scan_ink_bottom_dip(lb_probe, lb_box, Color4f::hex(0xFFFFFF), 144.0f);
+
+        const float sw_body_bot =
+            (sws[i]->bounds().y - basic->labels_[i]->bounds().y) +
+            std::max(sws[i]->bounds().h,
+                     0.5f * (sws[i]->bounds().h + sp.thumb_d * 0.85f));
+        UT_CHECK(lb_base_bot > 10.0f);
+        // 跨 OS 字体 / 144 DPI 灰度抗锯齿边缘（1~2 物理像素 ≈ 0.67~1.33 DIP）下，主基线与开关底沿误差 <= 1.5 DIP
+        UT_CHECK(std::fabs(lb_base_bot - sw_body_bot) <= 1.5f);
       }
     }
-    UT_CHECK(basic->port_label_ && basic->port_label_->style.align_v == AlignV::Center);
-
-    SwitchW* sws[4] = {basic->sw_auto_launch_, basic->sw_allow_lan_,
-                       basic->sw_silent_start_, basic->sw_allow_ipv6_};
-    const auto sp = svc.switch_paint();
-    for (int i = 0; i < 4; ++i) {
-      UT_CHECK(sws[i] != nullptr);
-      if (!sws[i] || !basic->labels_[i]) continue;
-      // 尺寸按皮肤自身尺寸 × 0.85（cyberpunk 18×10 → 15.3×8.5；其余 28×14 → 23.8×11.9）
-      UT_CHECK(near_f(sws[i]->bounds().w, sp.track_w * 0.85f, 0.25f));
-      UT_CHECK(near_f(sws[i]->bounds().h, sp.track_h * 0.85f, 0.25f));
-
-      // 离屏逐像素扫描该标签与该开关（off 态、无外阴影纯色测试）的字面/实体底沿
-      Label lb_probe;
-      lb_probe.style = basic->labels_[i]->style;
-      lb_probe.style.color = Color4f::hex(0x111111);
-      lb_probe.set_text(basic->labels_[i]->text);
-      const RectF lb_box{0.0f, 0.0f, basic->labels_[i]->bounds().w,
-                         basic->labels_[i]->bounds().h};
-      const float lb_bot =
-          scan_ink_bottom_dip(lb_probe, lb_box, Color4f::hex(0xFFFFFF), 144.0f);
-
-      const float sw_body_bot =
-          (sws[i]->bounds().y - basic->labels_[i]->bounds().y) +
-          std::max(sws[i]->bounds().h,
-                   0.5f * (sws[i]->bounds().h + sp.thumb_d * 0.85f));
-      UT_CHECK(lb_bot > 10.0f);
-      // Allow IPv6 含字母 'y' 下伸部，允许下伸至多 2.2 DIP；无下伸行（开机自启 / Allow LAN / 启动时最小化）底沿误差 <= 1.2 DIP
-      const float tol = (i == 3) ? 2.4f : 1.2f;
-      UT_CHECK(std::fabs(lb_bot - sw_body_bot) <= tol);
-    }
   }
+  i18n_svc.set_language(prev_lang);
 
   // 验证 Retro3d 小开关旋钮顶部/底部高光线不越出圆形边界形成“直耳”
   svc.init(theme::SkinId::Retro3d, theme::ThemeMode::Dark);

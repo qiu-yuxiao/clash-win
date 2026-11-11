@@ -180,6 +180,12 @@ class ITextEngine {
   // max_w>0 时 wrap 生效按宽换行测量；返回内容期望尺寸
   virtual SizeF measure_text(const std::wstring& text, const TextStyle& ts,
                              float max_w) = 0;
+  // 测量文本在 (box_w × box_h) 盒内按 ts 排版后的真实可见墨迹底边 y（DIP）
+  virtual float measure_ink_bottom(const std::wstring& text, const TextStyle& ts,
+                                   float box_w, float box_h) {
+    (void)text; (void)ts; (void)box_w;
+    return box_h * 0.735f;  // ← basic-settings-card.tsx:25 13px/24px 居中墨迹底边缺省比
+  }
 };
 ITextEngine* text_engine();
 void set_text_engine(ITextEngine* engine);

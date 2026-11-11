@@ -368,6 +368,45 @@ SizeF D2dRenderTarget::measure_text(const std::wstring& text,
   return s;
 }
 
+float D2dRenderTarget::measure_ink_bottom(const std::wstring& text,
+                                          const TextStyle& ts, float box_w,
+                                          float box_h) {
+  // ← basic-settings-card.tsx:25,148 按当前系统真实解析字体测量字形底边，消除跨 OS 字体回退误差
+  const float fallback = box_h * 0.735f;
+  if (!ctx_.init() || text.empty() || box_w <= 0.0f || box_h <= 0.0f) {
+    return fallback;
+  }
+  IDWriteTextFormat* fmt = format(ts);
+  if (!fmt) return fallback;
+  IDWriteTextLayout* layout = nullptr;
+  HRESULT hr = ctx_.dwrite()->CreateTextLayout(
+      text.c_str(), static_cast<UINT32>(text.size()), fmt, box_w, box_h,
+      &layout);
+  if (FAILED(hr) || !layout) return fallback;
+  layout->SetTextAlignment(
+      ts.align_h == AlignH::Left     ? DWRITE_TEXT_ALIGNMENT_LEADING
+      : ts.align_h == AlignH::Center ? DWRITE_TEXT_ALIGNMENT_CENTER
+                                     : DWRITE_TEXT_ALIGNMENT_TRAILING);
+  layout->SetParagraphAlignment(
+      ts.align_v == AlignV::Top      ? DWRITE_PARAGRAPH_ALIGNMENT_NEAR
+      : ts.align_v == AlignV::Center ? DWRITE_PARAGRAPH_ALIGNMENT_CENTER
+                                     : DWRITE_PARAGRAPH_ALIGNMENT_FAR);
+  layout->SetWordWrapping(
+      ts.wrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+  if (ts.ellipsis) {
+    DWRITE_TRIMMING trim{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+    layout->SetTrimming(&trim, nullptr);
+  }
+  DWRITE_OVERHANG_METRICS overhangs{};
+  hr = layout->GetOverhangMetrics(&overhangs);
+  layout->Release();
+  if (FAILED(hr)) return fallback;
+  const float ink_bot = box_h + overhangs.bottom;
+  // 豁免: Mini 无对应物 — DirectWrite GetOverhangMetrics 极端字形越界保护（出处: 无）
+  if (ink_bot <= 2.0f || ink_bot > box_h + 4.0f) return fallback;
+  return ink_bot;
+}
+
 // 复用 draw_text 的 format 缓存
 IDWriteTextFormat* D2dRenderTarget::layout_for_measure(const TextStyle& ts) {
   return format(ts);
