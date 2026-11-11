@@ -48,6 +48,16 @@ std::wstring Segmented::tooltip_text() const {
              : std::wstring();
 }
 
+std::optional<RectF> Segmented::tooltip_anchor_rect() const {
+  if (hover_ < 0 || options_.empty() ||
+      hover_ >= static_cast<int>(options_.size()) || bounds().w <= 0.0f) {
+    return std::nullopt;
+  }
+  const RectF g = global_bounds();
+  const float seg_w = g.w / static_cast<float>(options_.size());
+  return RectF{g.x + static_cast<float>(hover_) * seg_w, g.y, seg_w, g.h};
+}
+
 void Segmented::set_selected(int i) {
   if (i < 0 || i >= static_cast<int>(options_.size()) || i == selected_) return;
   selected_ = i;

@@ -7,6 +7,7 @@
 #include <cctype>
 #include <ctime>
 #include <iomanip>
+#include <memory>
 #include <sstream>
 
 #include "cmd/cmd_support.h"
@@ -140,23 +141,47 @@ bool NodeData::test_and_select(const std::vector<std::string>& nodes) {
     }
   }
   if (need_batch) set_delays_batch(nodes, -2);
+  last_batch_summary_ = BatchTestSummary{};
   if (!hooks_.test_and_select) return false;
   std::string fastest = hooks_.test_and_select(nodes);
   bool ok = !fastest.empty();
+  if (hooks_.last_batch_summary) {
+    last_batch_summary_ = hooks_.last_batch_summary();
+  } else {
+    last_batch_summary_.executed = true;
+    last_batch_summary_.selected = ok;
+    last_batch_summary_.selected_node = fastest;
+    last_batch_summary_.selected_delay_ms = ok ? row_delay(fastest) : -1;
+  }
 
+  auto anchor = self_;
   if (ok) {
     CWLOG_INFO("NodeData::test_and_select: 群测最优节点 = " + fastest +
                "，执行切换");
-    UiPostbox::instance().post([this, fastest] {
-      this->select(fastest);
+    UiPostbox::instance().post([anchor, fastest] {
+      if (!anchor) return;
+      NodeData* self = nullptr;
+      {
+        std::lock_guard<std::mutex> lk(anchor->mu);
+        self = anchor->ptr;
+      }
+      if (self) self->select(fastest);
     });
   } else if (hooks_.fetch_group) {
     std::vector<std::string> all;
     std::string now;
     if (hooks_.fetch_group(&all, &now)) {
-      UiPostbox::instance().post([this, now] {
-        now_ = now;
-        notify();
+      UiPostbox::instance().post([anchor, now] {
+        if (!anchor) return;
+        NodeData* self = nullptr;
+        {
+          std::lock_guard<std::mutex> lk(anchor->mu);
+          self = anchor->ptr;
+        }
+        if (self) {
+          self->now_ = now;
+          self->notify();
+        }
       });
     }
   }
@@ -230,12 +255,22 @@ DataHooks NodeData::production_hooks(const std::string& group) {
     *items = std::move(px.value().proxies);
     return true;
   };
-  h.select_node = [group](const std::string& node) {
+  auto select_err = std::make_shared<std::string>();
+  h.select_node = [group, select_err](const std::string& node) {
     auto r = cmd::mihomo();
-    if (!r.is_ok()) return false;
-    return static_cast<bool>(
-        r.value()->select_node_for_group(group, node).is_ok());
+    if (!r.is_ok()) {
+      *select_err = r.error().message;
+      return false;
+    }
+    auto sr = r.value()->select_node_for_group(group, node);
+    if (!sr.is_ok()) {
+      *select_err = sr.error().message;
+      return false;
+    }
+    select_err->clear();
+    return true;
   };
+  h.last_select_error = [select_err] { return *select_err; };
   h.test_group = [group](const std::string& g) {
     auto r = cmd::mihomo();
     if (!r.is_ok()) return false;
@@ -264,7 +299,9 @@ DataHooks NodeData::production_hooks(const std::string& group) {
   //   ← Mini proxy-groups.tsx:230-275 handleCheckAll
   //     triggerAutoSelect(currentUid, visibleNames, 0, true)
   //   → cmd trigger_auto_select（cmd_profile.cpp:585）→ AutoSelect::trigger
-  h.test_and_select = [](const std::vector<std::string>& nodes) -> std::string {
+  auto batch_sum = std::make_shared<BatchTestSummary>();
+  h.test_and_select = [batch_sum](const std::vector<std::string>& nodes) -> std::string {
+    *batch_sum = BatchTestSummary{};
     std::string uid;
     try {
       auto latest = config::Config::instance().profiles().latest_arc();
@@ -277,13 +314,26 @@ DataHooks NodeData::production_hooks(const std::string& group) {
         uid, nodes.empty() ? std::nullopt
                             : std::optional<std::vector<std::string>>(nodes),
         /*sort_type=*/0, /*select=*/true);
+    batch_sum->busy = outcome.busy;
+    batch_sum->executed = !outcome.busy && !outcome.display.empty();
+    batch_sum->selected = outcome.selected && !outcome.selected_node.empty();
+    if (batch_sum->selected) {
+      batch_sum->selected_node = outcome.selected_node;
+      for (const auto& [nm, ms] : outcome.display) {
+        if (nm == outcome.selected_node) {
+          batch_sum->selected_delay_ms = static_cast<int>(ms);
+          break;
+        }
+      }
+    }
     if (outcome.busy) {
       CWLOG_WARN("test_and_select: AUTO_SELECT_BUSY（互斥占用，本次不执行）");
       return "";
     }
     // 结果经 backend-delay-results 事件回灌缓存（AutoSelect 内部已发）
-    return outcome.selected ? outcome.selected_node : "";
+    return batch_sum->selected ? batch_sum->selected_node : "";
   };
+  h.last_batch_summary = [batch_sum] { return *batch_sum; };
   return h;
 }
 

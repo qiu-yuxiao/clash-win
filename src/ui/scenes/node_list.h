@@ -47,6 +47,8 @@ inline constexpr float kScrollTopShowPx = 100;   // proxy-groups.tsx:172 scrollT
 
 // 五档延迟色（← formatDelayColor → MUI 色名 → defaultTheme 色值）
 Color4f delay_tier_color(DelayTier tier);
+// 清洗节点展示名（← proxy-item.tsx:51 剥离重名去重六位数字后缀）
+std::string clean_node_display_name(const std::string& raw);
 
 // 单行（节点行）
 class NodeRowWidget : public Widget {
@@ -55,6 +57,7 @@ class NodeRowWidget : public Widget {
             bool selected);
   void on_paint(IRenderTarget& rt) override;
   bool on_mouse(const MouseEvent& e) override;
+  std::wstring tooltip_text() const override;
   std::function<void()> on_click;
   int index_in_group = 0;  // 奇偶行底色
 
@@ -63,6 +66,7 @@ class NodeRowWidget : public Widget {
   int delay_ = -1;
   bool selected_ = false;
   bool hover_ = false;
+  float hover_x_ = 0.0f;
 };
 
 // 一张 3D 卡片的入参（← proxy-render.tsx:32-50 每个 ProxyItem 单元格）
@@ -151,6 +155,8 @@ class NodeList : public Widget {
 
   // 过滤后的行数（测试断言）
   size_t visible_count() const { return visible_.size(); }
+  // 当前过滤 + 排序后的可见节点名称序列（← active-node-card.tsx:139 轮换节点源）
+  std::vector<std::string> visible_node_names() const;
   // 空态是否在显示（测试断言）
   bool empty_state_visible() const;
   ScrollList* list() const { return list_; }
@@ -167,6 +173,10 @@ class NodeList : public Widget {
   // 点击节点回调（NodeData::select 由宿主接，失败回弹由 NodeList 处理：
   // select 失败时不更新选中态）
   std::function<bool(const std::string& node)> select_node;  // 返回 false 回弹
+  // 批量测速择优（⚡ 点击 / 过滤输入触发）生命周期钩子，供宿主弹常驻提示与结果通知
+  std::function<uint64_t()> on_batch_test_begin;
+  std::function<void(uint64_t wait_id, const BatchTestSummary& summary)>
+      on_batch_test_end;
 
   void on_paint(IRenderTarget& rt) override;
   void on_arrange(const RectF& area) override;

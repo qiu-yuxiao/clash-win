@@ -71,6 +71,7 @@ void HelpMenu::execute_action(HelpAction action, HWND hwnd) {
         if (!res.is_ok()) {
           CWLOG_WARN("export_diagnostic_bundle failed: " + res.error().message);
           events::NoticeService::instance().hide(wait_id);
+          events::NoticeService::instance().push("error", res.error().message);
           return;
         }
         if (res.value().is_string()) {

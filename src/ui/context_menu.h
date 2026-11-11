@@ -35,6 +35,11 @@ class MenuList : public Widget {
   bool on_mouse(const MouseEvent& e) override;
   void on_paint(IRenderTarget& rt) override;
 
+  float content_height() const;
+  float scroll_y() const { return scroll_y_; }
+  void set_scroll_y(float sy);
+  void scroll_to_selected();
+
   // 绘制参数
   Color4f bg_ = Color4f::hex(0xFFFFFF);  // src: MUI background.paper #fff
   Color4f border_ = Color4f::hex(0x000000, 0.12f);  // src: MUI palette.divider
@@ -81,6 +86,9 @@ class MenuList : public Widget {
   Color4f panel_bg_{0, 0, 0, 0};
   Color4f panel_border_{0, 0, 0, 0};
   float panel_border_w_ = 1;
+
+ private:
+  float scroll_y_ = 0.0f;
 };
 
 // 菜单外观（Mini 订阅右键菜单用；缺省 = 旧观感）
@@ -88,6 +96,7 @@ struct MenuStyle {
   float item_h = 28;
   float sep_h = 9;
   float min_w = 140;
+  float max_h = 0;  // >0 时显式限制菜单最大可视高度（超出走滚轮）
   float radius = 4;
   float font_size = 0;
   int font_weight = 0;

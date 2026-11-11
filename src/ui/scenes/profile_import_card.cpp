@@ -229,6 +229,28 @@ bool ProfileRowWidget::on_mouse(const MouseEvent& e) {
   return false;
 }
 
+std::wstring ProfileRowWidget::tooltip_text() const {
+  // src: profile-import-card.tsx:260,280,290 动作钮提示优先，其余区域显示完整订阅名
+  if (hover_delete_) return tr("shared.actions.delete");
+  if (hover_update_) return tr("shared.actions.update");
+  if (hover_row_) return clashwin::utf::utf8_to_utf16(name_);
+  return {};
+}
+
+std::optional<RectF> ProfileRowWidget::tooltip_anchor_rect() const {
+  const RectF g = global_bounds();
+  const float del_cx = g.w - 8.0f - 9.0f;
+  const float upd_cx = del_cx - 20.0f;
+  const float btn_cy = 15.0f;
+  if (hover_delete_) {
+    return RectF{g.x + del_cx - 9.0f, g.y + btn_cy - 9.0f, 18.0f, 18.0f};
+  }
+  if (hover_update_) {
+    return RectF{g.x + upd_cx - 9.0f, g.y + btn_cy - 9.0f, 18.0f, 18.0f};
+  }
+  return std::nullopt;
+}
+
 // ---------------- ProfileImportCard ----------------
 // src: profile-import-card.tsx:94-369 卡容器 p1 + get3DCardStyle('default')
 ProfileImportCard::ProfileImportCard(Widget* parent) : Widget(parent) {
@@ -237,6 +259,7 @@ ProfileImportCard::ProfileImportCard(Widget* parent) : Widget(parent) {
   title_ = title.get();
   title_->style.size = 13;
   title_->style.weight = 700;  // src: :116 fontWeight 'bold'
+  title_->style.align_v = AlignV::Center;
   title_->set_i18n_text("settings.mini.profilesTitle");
   title_->flex_weight = 0;
   add_child(std::move(title));
@@ -304,8 +327,24 @@ bool ProfileImportCard::url_valid() const {
 void ProfileImportCard::do_import() {
   // ← Verge 前端口径：导入框同时接受 http(s) 订阅链接与直连节点，
   //   解析在命令链路（from_url → from_url_direct）完成。此处仅要求非空。
-  if (url().empty()) return;
-  bool ok = on_import ? on_import(url(), name()) : false;
+  const std::string target_url = url();
+  if (target_url.empty()) return;
+  if (import_btn_ && !import_btn_->enabled()) return;
+  if (on_import_async) {
+    if (url_field_) url_field_->set_enabled(false);
+    if (import_btn_) import_btn_->set_enabled(false);
+    on_import_async(target_url, name(), [this](bool ok) {
+      if (url_field_) url_field_->set_enabled(true);
+      if (import_btn_) import_btn_->set_enabled(true);
+      if (ok) {
+        if (url_field_) url_field_->clear_text();
+        reload_profiles();
+      }
+      invalidate();
+    });
+    return;
+  }
+  bool ok = on_import ? on_import(target_url, name()) : false;
   if (ok) {
     if (url_field_) url_field_->clear_text();
     reload_profiles();

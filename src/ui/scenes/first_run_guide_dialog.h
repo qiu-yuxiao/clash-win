@@ -84,6 +84,10 @@ class FirstRunGuideDialog : public Widget {
 
   // 动作回调
   std::function<bool(const std::string& url)> on_import;
+  // 异步导入回调（生产主窗口接线：避免 UI 线程在网络导入期间卡死，使加载态与通知即时显示）
+  std::function<void(const std::string& url,
+                     std::function<void(bool ok, const std::string& err)> done)>
+      on_import_async;
   std::function<void(bool)> on_patch_system_proxy;
   std::function<void()> on_retest_nodes;
   std::function<void()> on_refresh_proxy;  // ← refreshProxy（proxies 上下文重载）

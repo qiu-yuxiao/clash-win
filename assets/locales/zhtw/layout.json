@@ -123,6 +123,24 @@
     "clientUpToDate": "目前已是最新版本",
     "clientCheckFailed": "檢查更新失敗: {{message}}",
     "clientInstallCompleted": "更新安裝完成，請重新啟動應用程式以套用變更",
-    "clientUpdateFailed": "更新失敗: {{message}}"
+    "clientUpdateFailed": "更新失敗: {{message}}",
+    "switchedToGlobalProxy": "已切換為全域代理",
+    "switchedToGfwList": "已切換為 GFWList 智慧分流",
+    "autoLaunchEnabled": "開機自啟已開啟",
+    "autoLaunchDisabled": "開機自啟已關閉",
+    "silentStartEnabled": "靜默啟動已開啟",
+    "silentStartDisabled": "靜默啟動已關閉",
+    "allowLanEnabled": "區域網路連線 (Allow LAN) 已開啟",
+    "allowLanDisabled": "區域網路連線 (Allow LAN) 已關閉",
+    "ipv6Enabled": "IPv6 已開啟",
+    "ipv6Disabled": "IPv6 已關閉",
+    "nodeSwitched": "已切換節點: {{name}}",
+    "nodeSwitchFailed": "切換節點失敗: {{message}}",
+    "batchTestingNodes": "正在並發測速並優選節點…",
+    "batchTestSelected": "測速完成，已優選最快節點：{{name}} ({{delay}}ms)",
+    "batchTestAllTimeout": "所有候選節點測速均逾時",
+    "windowPinned": "視窗置頂已開啟",
+    "windowUnpinned": "視窗置頂已取消",
+    "allConnectionsClosed": "已中斷全部活動連線"
   }
 }

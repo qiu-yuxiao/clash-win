@@ -41,6 +41,8 @@ class ProfileRowWidget : public Widget {
   void on_paint(IRenderTarget& rt) override;
   bool on_mouse(const MouseEvent& e) override;
   HCURSOR cursor(const PointF& local) const override;
+  std::wstring tooltip_text() const override;
+  std::optional<RectF> tooltip_anchor_rect() const override;
 
   const std::string& uid() const { return uid_; }
   const std::string& display_name() const { return name_; }
@@ -83,6 +85,10 @@ class ProfileImportCard : public Widget {
   // 通知已在命令链路 emit）
   std::function<bool(const std::string& url, const std::string& name)>
       on_import;
+  // 异步导入回调（生产主窗口接线：后台线程执行 HTTP/校验，避免阻塞 UI 线程）
+  std::function<void(const std::string& url, const std::string& name,
+                     std::function<void(bool ok)> done)>
+      on_import_async;
   std::function<void(const std::string& uid)> on_select_profile;
   std::function<void(const std::string& uid)> on_update_profile;
   std::function<void(const std::string& uid)> on_delete_profile;

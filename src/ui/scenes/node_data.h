@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -41,6 +43,15 @@ struct NodeRow {
   std::string type;
 };
 
+// 批量测速择优结构化结果摘要（供宿主区分繁忙 / 已择优最快节点 / 全员超时 / 未执行）
+struct BatchTestSummary {
+  bool busy = false;
+  bool executed = false;
+  bool selected = false;
+  std::string selected_node;
+  int selected_delay_ms = -1;
+};
+
 // 数据源钩子（测试注入 mock；生产在 main_window 绑 cmd::mihomo()）
 struct DataHooks {
   // get_group_by_name("PROXY") → (成员列表, 当前选中)；false=失败
@@ -49,6 +60,7 @@ struct DataHooks {
   std::function<bool(std::map<std::string, mihomo::ProxyItem>* items)> fetch_proxies;
   // select_node_for_group("PROXY", node)；false=失败（UI 回弹）
   std::function<bool(const std::string& node)> select_node;
+  std::function<std::string()> last_select_error;
   // 触发组测速（delay_group；结果经 backend-delay-results 事件回灌）
   std::function<bool(const std::string& group)> test_group;
   // ★ §5.2/§5.6「所见即所选」：批量测速 + 择优切换（限可见子集）
@@ -58,12 +70,60 @@ struct DataHooks {
   //   nodes 为空 → 全量（与 F1 自动优选同语义）
   //   返回择优选中的节点名（空表示未选中/繁忙）
   std::function<std::string(const std::vector<std::string>& nodes)> test_and_select;
+  std::function<BatchTestSummary()> last_batch_summary;
   std::function<int64_t()> now_ms;  // 时钟注入（TTL/测试确定性）
 };
 
 class NodeData {
  public:
-  explicit NodeData(DataHooks hooks) : hooks_(std::move(hooks)) {}
+  explicit NodeData(DataHooks hooks)
+      : hooks_(std::move(hooks)), self_(std::make_shared<SelfAnchor>()) {
+    self_->ptr = this;
+  }
+  NodeData(NodeData&& o) noexcept
+      : hooks_(std::move(o.hooks_)),
+        rows_(std::move(o.rows_)),
+        now_(std::move(o.now_)),
+        group_(std::move(o.group_)),
+        delay_cache_(std::move(o.delay_cache_)),
+        proxy_history_(std::move(o.proxy_history_)),
+        last_batch_summary_(std::move(o.last_batch_summary_)),
+        subs_(std::move(o.subs_)),
+        next_id_(o.next_id_),
+        self_(std::move(o.self_)) {
+    if (self_) {
+      std::lock_guard<std::mutex> lk(self_->mu);
+      self_->ptr = this;
+    }
+  }
+  NodeData& operator=(NodeData&& o) noexcept {
+    if (this == &o) return *this;
+    if (self_) {
+      std::lock_guard<std::mutex> lk(self_->mu);
+      self_->ptr = nullptr;
+    }
+    hooks_ = std::move(o.hooks_);
+    rows_ = std::move(o.rows_);
+    now_ = std::move(o.now_);
+    group_ = std::move(o.group_);
+    delay_cache_ = std::move(o.delay_cache_);
+    proxy_history_ = std::move(o.proxy_history_);
+    last_batch_summary_ = std::move(o.last_batch_summary_);
+    subs_ = std::move(o.subs_);
+    next_id_ = o.next_id_;
+    self_ = std::move(o.self_);
+    if (self_) {
+      std::lock_guard<std::mutex> lk(self_->mu);
+      self_->ptr = this;
+    }
+    return *this;
+  }
+  ~NodeData() {
+    if (self_) {
+      std::lock_guard<std::mutex> lk(self_->mu);
+      self_->ptr = nullptr;
+    }
+  }
 
   // 全量加载（组 + 细节合并）；失败返回 false（内容保持上次状态）
   bool load();
@@ -75,6 +135,11 @@ class NodeData {
   // 单点写入（手动单节点测速完成时）
   void set_delay(const std::string& name, int delay);
   void set_delays_batch(const std::vector<std::string>& names, int delay);
+  // 切换订阅时清空内存延迟缓存（← _layout.tsx:921 delayManager.clearCache()）
+  void clear_delay_cache() {
+    delay_cache_.clear();
+    notify();
+  }
 
   // 切换节点：select_node 成功后更新 now_（失败返回 false，UI 回弹）
   bool select(const std::string& node);
@@ -95,6 +160,10 @@ class NodeData {
   const std::string& group() const { return group_; }
   // 行延迟（TTL 30min 惰性判过期 → -1 Unknown；-2 testing 原样透传）
   int row_delay(const std::string& name) const;
+  std::string last_select_error() const {
+    return hooks_.last_select_error ? hooks_.last_select_error() : std::string();
+  }
+  BatchTestSummary last_batch_summary() const { return last_batch_summary_; }
 
   // 变更通知（UI invalidate / 局部刷新回调）
   uint64_t subscribe(std::function<void()> cb);
@@ -121,8 +190,14 @@ class NodeData {
     std::string time;     // history.time（RFC3339）
   };
   std::map<std::string, ProxyHistory> proxy_history_;
+  struct SelfAnchor {
+    std::mutex mu;
+    NodeData* ptr = nullptr;
+  };
+  BatchTestSummary last_batch_summary_;
   std::vector<std::pair<uint64_t, std::function<void()>>> subs_;
   uint64_t next_id_ = 1;
+  std::shared_ptr<SelfAnchor> self_;
 };
 
 }  // namespace clashwin::ui::scene

@@ -113,6 +113,7 @@ inline void draw_top_inset_shadow(IRenderTarget& rt, const RectF& r,
     const float x0 = (r.x + R) - dx;
     const float x1 = (r.right() - R) + dx;
     if (x1 <= x0) continue;
+    // 豁免: Mini 无对应物 — 逐行内阴影描边宽度，D2D 无 inset box-shadow 原语，纯实现层（出处: 无）
     rt.draw_line({x0, y}, {x1, y}, Pen{c, 1.0f});
   }
 }

@@ -226,10 +226,15 @@ class MainWindow : public app::ILifecycleWindow {
   void apply_geometry_restore();  // window_state.json 恢复（含脱屏居中）
 
   void reload_nodes();                             // NodeData 加载 + QuickBar 同步（失败 2s 重试）
+  void sync_quick_bar(bool empty_as_dash = false); // 同步活跃节点名/延迟/协议胶囊/地址到 QuickBar
   void trigger_auto_select_and_refresh(const std::string& uid); // 1:1 对齐 Mini：全量并发测速择优+10s复核
   void update_ime_position();                      // IME 候选窗跟随光标与 Win32 原生 Caret 同步
   // 首启就绪轮询：只刷新 proxies/activeDelay，不触发组测速
   void sync_first_run_proxy();
+  // 异步订阅导入（← _layout.tsx:838-908 handleImportProfile + FirstRunGuide 共用）
+  void run_import_profile_async(
+      const std::string& url, const std::string& name,
+      std::function<void(bool ok, const std::string& err)> done);
   // ★ ❌5 设置开关失败回滚：patch 失败后用权威配置值回填抽屉开关（set_checked 不触发回调），
   //   对齐 Mini use-minimal-settings.ts:77-79 patch 失败 → mutateInfo() 权威值回滚、开关弹回。
   void resync_settings_ui();
@@ -288,8 +293,10 @@ class MainWindow : public app::ILifecycleWindow {
   std::unique_ptr<mihomo::WsManager> ws_;  // T14：traffic/connections WS
   uint64_t ws_sub_traffic_ = 0, ws_sub_conn_ = 0, ws_sub_logs_ = 0;
   uint64_t theme_sub_ = 0;  // ThemeService 热切换订阅（切皮肤/亮暗 → 全窗重绘）
+  uint64_t bus_sub_core_upgrade_ = 0;  // kCoreUpgradeProgress → CoreUpdateModal + 结果通知
   uint64_t postbox_sub_delay_ = 0;
   uint64_t postbox_sub_refresh_ = 0;
+  std::atomic<bool> profile_importing_{false};  // ← _layout.tsx:839 isImportingRef 防重入锁
   int64_t aurora_tick_ms_ = 0;  // 极光动画自续帧节流（10fps；src: layout.scss:23）
 
   Breakpoints bp_;
@@ -317,6 +324,7 @@ class MainWindow : public app::ILifecycleWindow {
   //   keyCode!==229）：STARTCOMPOSITION 置位、ENDCOMPOSITION 清零，组词中
   //   吞掉 Enter，防过滤框误触发自动择优提交
   bool ime_composing_ = false;
+  bool mouse_tracking_ = false;  // TrackMouseEvent(TME_LEAVE) 在途标记
   system::Tray* tray_ = nullptr;
   // —— TUN 自动关闭守卫（← use-system-state.ts:99-128）——
   //   TUN 已开但当前不可用（非管理员且服务不可用）→ 自动关 TUN + 回退系统代理，

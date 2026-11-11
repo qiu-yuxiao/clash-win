@@ -13,6 +13,7 @@
 
 #include "cmd/cmd_support.h"
 
+#include <atomic>
 #include <map>
 #include <mutex>
 #include <string>
@@ -40,6 +41,12 @@ class CommandService {
 
   CmdResult invoke(const std::string& name, const Json& args = Json::object());
 
+  // ← services/cmds.ts:24-35 beginLongOperation / endLongOperation / isLongOperationRunning
+  // 长操作（切接管模式/重载内核/服务安装）期间抑制探针超时弹窗风暴
+  void begin_long_operation();
+  void end_long_operation();
+  bool is_long_operation_running() const;
+
   // 装配全部命令（幂等；九个 cmd 文件的 install_* 依次调用）
   void install_all();
 
@@ -48,6 +55,16 @@ class CommandService {
   mutable std::mutex mu_;
   std::map<std::string, std::pair<CmdHandler, int>> table_;
   bool installed_ = false;
+  std::atomic<int> long_op_count_{0};
+};
+
+// RAII 守卫（等价于 Mini try { beginLongOperation() } finally { endLongOperation() }）
+class LongOperationGuard {
+ public:
+  LongOperationGuard() { CommandService::instance().begin_long_operation(); }
+  ~LongOperationGuard() { CommandService::instance().end_long_operation(); }
+  LongOperationGuard(const LongOperationGuard&) = delete;
+  LongOperationGuard& operator=(const LongOperationGuard&) = delete;
 };
 
 }  // namespace clashwin::cmd

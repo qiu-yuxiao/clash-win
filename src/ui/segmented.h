@@ -23,6 +23,9 @@ class Segmented : public Widget {
   void set_options_i18n(std::vector<const char*> keys, int sel);
   void set_tooltips_i18n(std::vector<const char*> keys);
   std::wstring tooltip_text() const override;
+  // src: routing-preference-card.tsx:94-241 <Tooltip placement="top" arrow> 锚定悬停分段
+  std::optional<RectF> tooltip_anchor_rect() const override;
+  bool tooltip_prefer_top_arrow() const override { return true; }
   void set_selected(int i);  // 触发 on_change
   void select_silent(int i);  // 仅同步外观（外部配置回填用，不触发回调）
   int selected() const { return selected_; }

@@ -9,6 +9,42 @@
 namespace clashwin::ui {
 
 // ---------- MenuList ----------
+float MenuList::content_height() const {
+  float h = pad_top_ + pad_bottom_;
+  for (const auto& it : items) h += it.separator ? sep_height_ : item_height;
+  return h;
+}
+
+void MenuList::set_scroll_y(float sy) {
+  const float max_s = std::max(0.0f, content_height() - bounds().h);
+  const float clamped = std::clamp(sy, 0.0f, max_s);
+  if (clamped != scroll_y_) {
+    scroll_y_ = clamped;
+    invalidate();
+  }
+}
+
+void MenuList::scroll_to_selected() {
+  const float view_h = bounds().h;
+  if (view_h <= 0.0f || content_height() <= view_h) {
+    scroll_y_ = 0.0f;
+    return;
+  }
+  float cy = pad_top_;
+  for (const auto& it : items) {
+    const float ih = it.separator ? sep_height_ : item_height;
+    if (it.selected && !it.separator) {
+      if (cy < scroll_y_) {
+        set_scroll_y(std::max(0.0f, cy - pad_top_));
+      } else if (cy + ih > scroll_y_ + view_h) {
+        set_scroll_y(cy + ih - view_h + pad_bottom_);
+      }
+      return;
+    }
+    cy += ih;
+  }
+}
+
 SizeF MenuList::on_measure(float max_w, float max_h) {
   TextStyle ts;
   if (font_size_ > 0) ts.size = font_size_;
@@ -20,16 +56,16 @@ SizeF MenuList::on_measure(float max_w, float max_h) {
       w = std::max(w, s.w + padding_h * 2);
     }
   }
-  float h = pad_top_ + pad_bottom_;
-  for (const auto& it : items) h += it.separator ? sep_height_ : item_height;
+  float h = content_height();
   if (max_w > 0 && w > max_w) w = max_w;
   if (max_h > 0 && h > max_h) h = max_h;
   return {w, h};
 }
 
 bool MenuList::on_mouse(const MouseEvent& e) {
-  // 逐项累加命中：分隔线占 9px，不能再用 y/item_height 整除（多分隔线会错位）
-  auto hit_index = [this](float y) -> int {
+  // 逐项累加命中（叠加纵向滚动偏移 scroll_y_）
+  auto hit_index = [this](float local_y) -> int {
+    const float y = local_y + scroll_y_;
     float cy = pad_top_;
     for (int i = 0; i < static_cast<int>(items.size()); ++i) {
       const float h = items[static_cast<size_t>(i)].separator ? sep_height_ : item_height;
@@ -40,6 +76,22 @@ bool MenuList::on_mouse(const MouseEvent& e) {
     return -1;
   };
   switch (e.type) {
+    case MouseEventType::Wheel: {
+      if (content_height() <= bounds().h) return true;
+      // src: MUI Menu paper overflowY 'auto' 滚轮滚动
+      const float notches = static_cast<float>(e.wheel_delta) / 120.0f;
+      const float step = std::max(24.0f, item_height);
+      set_scroll_y(scroll_y_ - notches * step);
+      hover_index = hit_index(e.pos.y);
+      return true;
+    }
+    case MouseEventType::Leave: {
+      if (hover_index != -1) {
+        hover_index = -1;
+        invalidate();
+      }
+      return true;
+    }
     case MouseEventType::Down: {
       hover_index = hit_index(e.pos.y);
       invalidate();
@@ -78,11 +130,9 @@ void MenuList::on_paint(IRenderTarget& rt) {
     Brush bg_b{panel_bg_.a > 0.001f ? panel_bg_ : bg_};
     rt.round_rect(r, radius_, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &bg_b);
   }
-  {
-    const Color4f bc = panel_border_.a > 0.001f ? panel_border_ : border_;
-    rt.round_rect(r, radius_, Pen{bc, panel_border_w_}, nullptr);
-  }
-  float y = pad_top_;
+
+  rt.push_clip({1.0f, 1.0f, std::max(0.0f, r.w - 2.0f), std::max(0.0f, r.h - 2.0f)});
+  float y = pad_top_ - scroll_y_;
   for (int i = 0; i < static_cast<int>(items.size()); ++i) {
     const MenuItem& it = items[static_cast<size_t>(i)];
     if (it.separator) {
@@ -93,6 +143,10 @@ void MenuList::on_paint(IRenderTarget& rt) {
       rt.fill_rect(line, Brush{gradient_panel_ ? border_
                                                : Color4f::hex(0x000000, 0.10f)});
       y += sep_height_;
+      continue;
+    }
+    if (y + item_height < 0.0f || y > r.h) {
+      y += item_height;
       continue;
     }
     const RectF item_rect{hover_inset_, y, r.w - hover_inset_ * 2, item_height};
@@ -136,6 +190,25 @@ void MenuList::on_paint(IRenderTarget& rt) {
                    {r.w - 8 - 56, y, 56, item_height}, ts);
     }
     y += item_height;
+  }
+  const float total_h = content_height();
+  if (total_h > r.h + 1.0f && r.h > 16.0f) {
+    // src: MUI Menu paper 纵向溢出滚动条滑块
+    const float track_h = r.h - 8.0f;
+    const float thumb_h = std::max(18.0f, track_h * (r.h / total_h));
+    const float max_s = std::max(1.0f, total_h - r.h);
+    const float thumb_y = 4.0f + (track_h - thumb_h) * (scroll_y_ / max_s);
+    Color4f sc = text_;
+    sc.a = 0.28f;
+    Brush sb{sc};
+    rt.round_rect({r.w - 5.0f, thumb_y, 3.0f, thumb_h}, 1.5f,
+                  Pen{Color4f{0, 0, 0, 0}, 0.0f}, &sb);
+  }
+  rt.pop_clip();
+
+  {
+    const Color4f bc = panel_border_.a > 0.001f ? panel_border_ : border_;
+    rt.round_rect(r, radius_, Pen{bc, panel_border_w_}, nullptr);
   }
 }
 
@@ -190,14 +263,24 @@ void ContextMenu::open(const std::vector<MenuItem>& items, PointF anchor) {
   };
   menu_ = ml.get();
   add_child(std::move(ml));
-  // measure（无引擎时按最小尺寸），定位在 anchor；越界向内收 4px
+  // measure（无引擎时按最小尺寸），定位在 anchor；按宿主可用区域双向钳制宽高与坐标
+  // src: MUI Popover marginThreshold = 16 / paper maxHeight 'calc(100% - 32px)'
   SizeF s = menu_->measure(0, 0);
+  float w = s.w, h = s.h;
+  if (style_.max_h > 0.0f) h = std::min(h, style_.max_h);
   float x = anchor.x, y = anchor.y;
-  if (Widget* p = parent(); p && p->bounds().w > 0) {
-    if (x + s.w > p->bounds().w) x = std::max(0.0f, p->bounds().w - s.w - 4.0f);
-    if (y + s.h > p->bounds().h) y = std::max(0.0f, p->bounds().h - s.h - 4.0f);
+  const float avail_w =
+      bounds().w > 0.0f ? bounds().w : (parent() ? parent()->bounds().w : 0.0f);
+  const float avail_h =
+      bounds().h > 0.0f ? bounds().h : (parent() ? parent()->bounds().h : 0.0f);
+  if (avail_w > 16.0f && avail_h > 16.0f) {
+    w = std::min(w, avail_w - 8.0f);
+    h = std::min(h, avail_h - 8.0f);
+    x = std::clamp(x, 4.0f, std::max(4.0f, avail_w - w - 4.0f));
+    y = std::clamp(y, 4.0f, std::max(4.0f, avail_h - h - 4.0f));
   }
-  menu_->set_bounds({x, y, s.w, s.h});
+  menu_->set_bounds({x, y, w, h});
+  menu_->scroll_to_selected();
   open_ = true;
   invalidate();
 }

@@ -150,7 +150,7 @@ bool ConnPanelRowWidget::on_mouse(const MouseEvent& e) {
 
   if (e.type == MouseEventType::Down) {
     if (e.buttons & kMouseRight) {
-      if (on_context_menu) on_context_menu(item_, pt, global_bounds());
+      if (on_context_menu) on_context_menu(item_, to_global(pt), global_bounds());
       return true;
     }
     return true;
@@ -400,7 +400,7 @@ void ConnectionsPanel::show_context_menu(const ConnItem& item, PointF anchor, Re
   items.push_back({tr("connections.components.contextMenu.copyAddress"), false, false, L""});
   items.push_back({tr("connections.components.contextMenu.viewDetail"), false, false, L""});
 
-  context_menu_->open(items, anchor);
+  context_menu_->open(items, to_local(anchor));
   context_menu_->on_select = [this, item, row_global](int idx) {
     switch (idx) {
       case 0:

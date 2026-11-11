@@ -111,6 +111,15 @@ std::wstring TextField::tooltip_text() const {
   return Widget::tooltip_text();
 }
 
+std::optional<RectF> TextField::tooltip_anchor_rect() const {
+  if (clear_button_ && clear_hover_) {
+    const RectF g = global_bounds();
+    const RectF c = clear_button_rect();
+    return RectF{g.x + c.x, g.y + c.y, c.w, c.h};
+  }
+  return std::nullopt;
+}
+
 // ---- 编辑命令（EM_* 等价） ----
 bool TextField::can_cut() const { return has_selection(); }
 bool TextField::can_copy() const { return has_selection(); }

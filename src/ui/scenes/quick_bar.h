@@ -45,10 +45,15 @@ class QuickBar : public Row {
   bool on_mouse(const MouseEvent& e) override;
   void on_paint(IRenderTarget& rt) override;  // 渐变卡/协议胶囊/徽章胶囊/钮底
 
-  // src: active-node-card.tsx:242 rotateNodeTooltip 「点击轮换下一个节点」
+  // src: active-node-card.tsx:281 仅节点名文本区域显示 rotateNodeTooltip
   std::wstring tooltip_text() const override {
-    return node_label_ && !node_label_->text.empty() ? std::wstring(tr("settings.mini.rotateNodeTooltip"))
-                                                    : std::wstring();
+    return (node_hover_ && node_label_ && !node_label_->text.empty())
+               ? std::wstring(tr("settings.mini.rotateNodeTooltip"))
+               : std::wstring();
+  }
+  std::optional<RectF> tooltip_anchor_rect() const override {
+    if (node_hover_ && node_label_) return node_label_->global_bounds();
+    return std::nullopt;
   }
 
   std::function<void()> on_toggle_pin;    // 图钉（T19 置顶窗口）
@@ -106,6 +111,14 @@ class TakeoverSegmented : public Widget {
     if (hover_ == 2) return tr("settings.mini.takeoverTooltipTun");
     return {};
   }
+  // src: takeover-mode-card.tsx:95-246 <Tooltip placement="top" arrow> 锚定当前悬停分段
+  std::optional<RectF> tooltip_anchor_rect() const override {
+    if (hover_ < 0 || hover_ >= 3 || bounds().w <= 0.0f) return std::nullopt;
+    const RectF g = global_bounds();
+    const float seg_w = g.w / 3.0f;
+    return RectF{g.x + static_cast<float>(hover_) * seg_w, g.y, seg_w, g.h};
+  }
+  bool tooltip_prefer_top_arrow() const override { return true; }
 
  private:
   int hit_segment(const PointF& local) const;

@@ -278,7 +278,7 @@ void install_cmd_profile(CommandService& svc) {
        },
        consts::kTimeoutHeavy});
 
-  // ---- update_profile（← profile.rs:198-212：from_url 覆写原 file）----
+  // ---- update_profile（← profile.rs:198-212 + feat/profile.rs:69-133 三级回退与通知）----
   svc.register_command(
       "update_profile",
       {[](const Json& args) -> CmdResult {
@@ -293,29 +293,69 @@ void install_cmd_profile(CommandService& svc) {
          if (!old || !old->url) {
            return CmdResult::err({errs::kBadArgs, "profile not found or has no url"});
          }
-         PrfOption option;
+         const std::string profile_name =
+             old->name.value_or(std::string("UnKnown Profile"));
+         PrfOption option = old->option.value_or(PrfOption{});
          if (const Json* op = find_arg(args, {"option"}); op && op->is_object()) {
-           option = prf_option_from_json(*op);
+           PrfOption override_opt = prf_option_from_json(*op);
+           if (override_opt.user_agent) option.user_agent = override_opt.user_agent;
+           if (override_opt.with_proxy) option.with_proxy = override_opt.with_proxy;
+           if (override_opt.self_proxy) option.self_proxy = override_opt.self_proxy;
+           if (override_opt.update_interval) option.update_interval = override_opt.update_interval;
+           if (override_opt.danger_accept_invalid_certs)
+             option.danger_accept_invalid_certs = override_opt.danger_accept_invalid_certs;
+           if (override_opt.allow_auto_update) option.allow_auto_update = override_opt.allow_auto_update;
+           if (override_opt.timeout_seconds) option.timeout_seconds = override_opt.timeout_seconds;
          }
          auto& profiles = config::Config::instance().profiles();
          std::optional<config::PrfItem> item_opt;
-         bool touched_current = false;
+         bool used_proxy_fallback = false;
+         std::string last_err;
          profiles.edit_draft([&](config::IProfiles& d) {
-           touched_current =
-               d.current.has_value() && old->uid && *d.current == *old->uid;
-           config::profiles::set_profiles_instance(&d);
-           auto item = config::PrfItem::from_url(*old->url, old->name,
-                                                 old->desc, option);
-           config::profiles::set_profiles_instance(nullptr);
-           // ← 失败保留原文：from_url 失败时 append_item 不执行，
-           //   profiles/原文件均不变（错误上抛通知）
-           if (item.is_err()) return;
+           auto try_fetch = [&](const PrfOption& opt) -> Result<config::PrfItem> {
+             config::profiles::set_profiles_instance(&d);
+             auto res = config::PrfItem::from_url(*old->url, old->name, old->desc, opt);
+             config::profiles::set_profiles_instance(nullptr);
+             return res;
+           };
+           // 1) 正常更新（← feat/profile.rs:69）
+           auto item = try_fetch(option);
+           if (item.is_err()) {
+             last_err = item.error().message;
+             // 2) Clash 代理回退（← feat/profile.rs:86-95）
+             PrfOption clash_opt = option;
+             clash_opt.self_proxy = true;
+             clash_opt.with_proxy = false;
+             item = try_fetch(clash_opt);
+             if (item.is_ok()) {
+               used_proxy_fallback = true;
+             } else {
+               last_err = item.error().message;
+               // 3) 系统代理回退（← feat/profile.rs:108-117）
+               PrfOption sys_opt = option;
+               sys_opt.self_proxy = false;
+               sys_opt.with_proxy = true;
+               item = try_fetch(sys_opt);
+               if (item.is_ok()) {
+                 used_proxy_fallback = true;
+               } else {
+                 last_err = item.error().message;
+                 return;  // 失败保留原文
+               }
+             }
+           }
            item.value().uid = old->uid;  // 同 uid → 更新元数据 + 覆写文件
            auto r = d.append_item(item.value());
            if (r.is_ok()) item_opt = item.value();
          });
          if (!item_opt) {
-           return CmdResult::err({errs::kIo, "更新订阅失败（原文已保留）"});
+           const std::string detail =
+               profile_name + " - " + (last_err.empty() ? "更新订阅失败（原文已保留）" : last_err);
+           events::EventBus::notice_message("update_failed_even_with_clash", detail);
+           return CmdResult::err({errs::kIo, "[notified] " + detail});
+         }
+         if (used_proxy_fallback) {
+           events::EventBus::notice_message("update_with_clash_proxy", profile_name);
          }
          profiles.apply();
          if (auto save = profiles.data_arc()->save_file(); !save.is_ok()) {

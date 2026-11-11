@@ -357,6 +357,8 @@ add_executable(clashwin_test
   tests/test_t34_hit_chain.cpp
   tests/test_t35_release_readiness.cpp
   tests/test_t36_m11_challenge.cpp
+  tests/test_t37_pixel_and_popup_parity.cpp
+  tests/test_t38_notice_parity.cpp
   tests/test_coexist.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_app clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32 bcrypt)

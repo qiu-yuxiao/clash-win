@@ -123,6 +123,24 @@
     "clientUpToDate": "当前已是最新版本",
     "clientCheckFailed": "检查更新失败: {{message}}",
     "clientInstallCompleted": "更新安装完毕，请重启应用以应用更改",
-    "clientUpdateFailed": "更新失败: {{message}}"
+    "clientUpdateFailed": "更新失败: {{message}}",
+    "switchedToGlobalProxy": "已切换为全局代理",
+    "switchedToGfwList": "已切换为 GFWList 智能分流",
+    "autoLaunchEnabled": "开机自启已开启",
+    "autoLaunchDisabled": "开机自启已关闭",
+    "silentStartEnabled": "静默启动已开启",
+    "silentStartDisabled": "静默启动已关闭",
+    "allowLanEnabled": "局域网连接 (Allow LAN) 已开启",
+    "allowLanDisabled": "局域网连接 (Allow LAN) 已关闭",
+    "ipv6Enabled": "IPv6 已开启",
+    "ipv6Disabled": "IPv6 已关闭",
+    "nodeSwitched": "已切换节点: {{name}}",
+    "nodeSwitchFailed": "切换节点失败: {{message}}",
+    "batchTestingNodes": "正在并发测速并优选节点…",
+    "batchTestSelected": "测速完成，已优选最快节点：{{name}} ({{delay}}ms)",
+    "batchTestAllTimeout": "所有候选节点测速均超时",
+    "windowPinned": "窗口置顶已开启",
+    "windowUnpinned": "窗口置顶已取消",
+    "allConnectionsClosed": "已断开全部活动连接"
   }
 }

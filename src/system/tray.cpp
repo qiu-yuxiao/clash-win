@@ -46,10 +46,10 @@ void Win32TrayBackend::show_menu(HWND hwnd, POINT pt, bool in_lite_mode, std::fu
   HMENU hMenu = CreatePopupMenu();
   if (!hMenu) return;
 
+  // src: src-tauri/src/core/tray/mod.rs:292 MenuItem::with_id 文本自身带 "✔ "，
+  //   不叠乘 Win32 CheckMenuItem（否则会出现「✓ ✔」双重勾号）
   std::wstring lite_text = in_lite_mode ? L"✔ 轻量模式 / Lite mode" : L"轻量模式 / Lite mode";
-  UINT lite_flags = MF_STRING;
-  if (in_lite_mode) lite_flags |= MF_CHECKED;
-  AppendMenuW(hMenu, lite_flags, kMenuLiteModeId, lite_text.c_str());
+  AppendMenuW(hMenu, MF_STRING, kMenuLiteModeId, lite_text.c_str());
   AppendMenuW(hMenu, MF_STRING, kMenuExitId, L"退出 (Exit)");
 
   SetForegroundWindow(hwnd);
@@ -90,10 +90,14 @@ void Tray::load_icons() {
   size_t pos = exe_dir.find_last_of(L"\\/");
   if (pos != std::wstring::npos) exe_dir.resize(pos);
 
+  const int cx_sm = GetSystemMetrics(SM_CXSMICON);
+  const int cy_sm = GetSystemMetrics(SM_CYSMICON);
   auto load_one = [&](const std::wstring& rel_path) -> HICON {
     std::wstring full = exe_dir + L"\\" + rel_path;
     HICON h = static_cast<HICON>(
-        LoadImageW(nullptr, full.c_str(), IMAGE_ICON, 16, 16, LR_LOADFROMFILE));
+        LoadImageW(nullptr, full.c_str(), IMAGE_ICON,
+                   cx_sm > 0 ? cx_sm : 16, cy_sm > 0 ? cy_sm : 16,
+                   LR_LOADFROMFILE));
     if (!h) {
       h = static_cast<HICON>(
           LoadImageW(nullptr, full.c_str(), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE));

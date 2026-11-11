@@ -60,6 +60,19 @@ std::vector<std::string> CommandService::command_names() const {
   return out;
 }
 
+void CommandService::begin_long_operation() {
+  long_op_count_.fetch_add(1, std::memory_order_relaxed);
+}
+
+void CommandService::end_long_operation() {
+  int prev = long_op_count_.fetch_sub(1, std::memory_order_relaxed);
+  if (prev <= 1) long_op_count_.store(0, std::memory_order_relaxed);
+}
+
+bool CommandService::is_long_operation_running() const {
+  return long_op_count_.load(std::memory_order_relaxed) > 0;
+}
+
 CmdResult CommandService::invoke(const std::string& name, const Json& args) {
   CmdHandler handler;
   int timeout_ms = consts::kTimeoutConfig;
@@ -91,10 +104,14 @@ CmdResult CommandService::invoke(const std::string& name, const Json& args) {
   std::thread(std::move(task)).detach();
   if (fut.wait_for(std::chrono::milliseconds(timeout_ms)) != std::future_status::ready) {
     CWLOG_WARN("command timeout: " + name + " (" + std::to_string(timeout_ms) + "ms)");
-    // ← services/cmds.ts:84-110：超时要给用户看得见的反馈（否则界面像「点了没反应」），
-    //   同 label 5 秒内只弹一次，避免超时风暴刷屏。
     const std::string msg =
         "[" + name + "] IPC call timed out after " + std::to_string(timeout_ms) + "ms";
+    // ← services/cmds.ts:89-94：长操作期间静默，不弹 Notice、不写节流表
+    if (is_long_operation_running()) {
+      return CmdResult::err({errs::kTimeout, "command timeout: " + name});
+    }
+    // ← services/cmds.ts:95-108：超时要给用户看得见的反馈（否则界面像「点了没反应」），
+    //   同 label 5 秒内只弹一次，避免超时风暴刷屏。
     bool emit = false;
     {
       std::lock_guard<std::mutex> lock(ipc_timeout_mu());

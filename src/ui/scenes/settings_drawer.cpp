@@ -434,6 +434,7 @@ TakeoverCard::TakeoverCard() : Widget(nullptr) {
   title_ = t.get();
   title_->style.size = 13;  // src: takeover-mode-card.tsx:60 fontSize 13px
   title_->style.weight = static_cast<int>(Weight::Bold);
+  title_->style.align_v = AlignV::Center;
   title_->style.color = card_text();
   title_->set_i18n_text("settings.mini.takeoverMode");
   add_child(std::move(t));
@@ -465,6 +466,7 @@ RoutingCard::RoutingCard() : Widget(nullptr) {
   title_ = t.get();
   title_->style.size = 13;
   title_->style.weight = static_cast<int>(Weight::Bold);
+  title_->style.align_v = AlignV::Center;
   title_->style.color = card_text();
   title_->set_i18n_text("settings.mini.proxyMethod");
   add_child(std::move(t));
@@ -504,6 +506,7 @@ BasicCard::BasicCard() : Widget(nullptr) {
   title_ = t.get();
   title_->style.size = 13;  // src: basic-settings-card.tsx:158 fontSize 13px
   title_->style.weight = static_cast<int>(Weight::Bold);
+  title_->style.align_v = AlignV::Center;
   title_->style.color = card_text();
   title_->set_i18n_text("settings.components.verge.basic.title");
   add_child(std::move(t));
@@ -519,6 +522,7 @@ BasicCard::BasicCard() : Widget(nullptr) {
     labels_[i] = lb.get();
     labels_[i]->style.size = 13;  // src: basic-settings-card.tsx:240 caption 13px bold
     labels_[i]->style.weight = static_cast<int>(Weight::Bold);
+    labels_[i]->style.align_v = AlignV::Center;  // src: basic-settings-card.tsx:25 alignItems 'center'
     labels_[i]->style.color = card_text();
     labels_[i]->set_text(defs[i].text);
     add_child(std::move(lb));
@@ -530,6 +534,7 @@ BasicCard::BasicCard() : Widget(nullptr) {
   port_label_ = pl.get();
   port_label_->style.size = 13;  // src: basic-settings-card.tsx:240 caption 13px
   port_label_->style.weight = static_cast<int>(Weight::Bold);
+  port_label_->style.align_v = AlignV::Center;  // src: basic-settings-card.tsx:214 alignItems 'center'
   port_label_->style.color = card_text();
   port_label_->set_text(L"Mixed Port");
   add_child(std::move(pl));
@@ -558,20 +563,31 @@ void BasicCard::on_arrange(const RectF& area) {
   const float row_h = 24.0f;    // caption 13px*1.66=21.6 + py 0.15*2=2.4（src: :23-29）
   SwitchW* sws[4] = {sw_auto_launch_, sw_allow_lan_, sw_silent_start_,
                      sw_allow_ipv6_};
+  // src: basic-settings-card.tsx:147-150 size="small" + marginRight '1px' + scale(0.85)
+  const auto sp = theme::ThemeService::instance().switch_paint();
+  const float sw_scale = 0.85f;
+  const float sw_w = sp.track_w * sw_scale;
+  const float sw_h = sp.track_h * sw_scale;
+  const float sw_body_bottom =
+      std::max(sw_h, 0.5f * (sw_h + sp.thumb_d * sw_scale));
+  // 13px Bold 文本在 24px 行盒内 AlignV::Center 的字面底沿位于 cy + 17.65f，
+  //   令开关实体底沿落在同一水平线上（← basic-settings-card.tsx:25,148）
+  const float row_bottom_line = 17.65f;
   for (int i = 0; i < 4; ++i) {
     const bool is_col1 = (i % 2) != 0;
     const float cx = pad + (is_col1 ? (col_w + gap_x) : 0.0f);
     const float cy = grid_y + (i / 2) * row_h;
-    labels_[i]->style.size = 13.0f;   // src: :31-36 labelSx fontSize 13px bold（此前误用 12）
+    labels_[i]->style.size = 13.0f;   // src: :31-36 labelSx fontSize 13px bold
     labels_[i]->style.weight = static_cast<int>(Weight::Bold);
+    labels_[i]->style.align_v = AlignV::Center;
     labels_[i]->style.wrap = false;
     labels_[i]->style.ellipsis = true;
-    // gridItemSx px:0.5=4：标签左内缩 4；space-between → 文字左、开关右（gap = col_w-32-textW，与 Mini 一致）
-    labels_[i]->layout_tree({cx + 4.0f, cy, col_w - 32.0f, row_h});
-    // 开关 scale(0.85)：28×14 → 24×12，右对齐（cx+col_w-4-24），垂直居中
-    // src: basic-settings-card.tsx:147-150 / base-switch.tsx:26
-    sws[i]->layout_tree({cx + col_w - 28.0f,
-                         cy + (row_h - 12.0f) / 2.0f, 24.0f, 12.0f});
+    // gridItemSx px:0.5=4：标签左内缩 4；右侧留给 5px 右距 + 开关宽 + 3px 间距
+    labels_[i]->layout_tree(
+        {cx + 4.0f, cy, std::max(0.0f, col_w - sw_w - 12.0f), row_h});
+    // 右缘 = cx + col_w - 4(px:0.5) - 1(mr:'1px')；底部与标签字面底沿同水平线
+    sws[i]->layout_tree(
+        {cx + col_w - 5.0f - sw_w, cy + row_bottom_line - sw_body_bottom, sw_w, sw_h});
   }
   // Mixed Port 行：grid 第 3 行跨两列，mt 0.25=2（src: :210-217）
   const float mixed_y = grid_y + row_h * 2 + 2.0f;
@@ -590,6 +606,7 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   title_ = t.get();
   title_->style.size = 13;
   title_->style.weight = static_cast<int>(Weight::Bold);
+  title_->style.align_v = AlignV::Center;  // src: theme-settings-card.tsx:151 alignItems 'center'
   title_->style.color = card_text();
   title_->set_i18n_text("settings.components.verge.basic.fields.themeSetting");
   add_child(std::move(t));
@@ -700,6 +717,7 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   copyright_ = cp.get();
   copyright_->style.size = 11;
   copyright_->style.align_h = AlignH::Center;
+  copyright_->style.align_v = AlignV::Center;
   copyright_->style.color =
       // src: :471 text.secondary + 页脚整体 opacity .75（:459）→ 复合 alpha .45
       (theme::ThemeService::instance().skin() == theme::SkinId::Retro3d && !is_light())
@@ -712,6 +730,7 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   email_ = em.get();
   email_->style.size = 10;  // src: theme-settings-card.tsx:486 fontSize 10
   email_->style.align_h = AlignH::Center;
+  email_->style.align_v = AlignV::Center;
   // src: :486 color 'primary.main' + 页脚 opacity .75（:459）
   Color4f pc = theme::ThemeService::instance().primary();
   pc.a = 0.75f;
@@ -1403,8 +1422,15 @@ void SettingsDrawer::open_profile_menu(const std::string& uid, PointF anchor) {
     if (idx == 0) {
       open_edit_profile(uid);
     } else if (idx == 1) {
+      // ← _layout.tsx:976-984 handleEditProfileFileClick：viewProfile 失败 → showNotice.error
       const config::PrfItem* it = profile_card_->find_item(uid);
-      if (it && it->file) open_profile_file(*it->file);
+      if (!it || !it->file || !open_profile_file(*it->file)) {
+        auto vr = cmd::CommandService::instance().invoke(
+            "view_profile", nlohmann::json::object({{"index", uid}}));
+        if (!vr.is_ok()) {
+          events::NoticeService::instance().push("error", vr.error().message);
+        }
+      }
     } else if (idx == 3) {
       // ← _layout.tsx:987-998 handleCopyProfileLinkClick：
       //   写剪贴板成功 → success profileLinkCopied；失败 → error copyFailed
@@ -1421,7 +1447,8 @@ void SettingsDrawer::open_profile_menu(const std::string& uid, PointF anchor) {
       if (on_delete_profile) on_delete_profile(uid);
     }
   };
-  profile_menu_->open(its, anchor);
+  // ContextMenu 是 panel_ 子件：锚点需转 panel_ 局部（与 open_url_menu 对齐）
+  profile_menu_->open(its, panel_ ? panel_->to_local(anchor) : anchor);
 }
 
 void SettingsDrawer::open_url_menu(PointF anchor) {
@@ -1493,6 +1520,22 @@ void SettingsDrawer::wire_callbacks() {
                                     const std::string& name) {
     return on_import_profile ? on_import_profile(url, name) : false;
   };
+  profile_card_->on_import_async =
+      [this](const std::string& url, const std::string& name,
+             std::function<void(bool ok)> done) {
+        if (on_import_profile_async) {
+          on_import_profile_async(
+              url, name, [this, done = std::move(done)](bool ok) {
+                if (done) done(ok);
+                if (ok && bounds().w > 0) {
+                  layout_tree(bounds());
+                  invalidate();
+                }
+              });
+        } else if (done) {
+          done(on_import_profile ? on_import_profile(url, name) : false);
+        }
+      };
   profile_card_->on_select_profile = [this](const std::string& uid) {
     if (on_select_profile) on_select_profile(uid);
   };
@@ -1626,9 +1669,13 @@ void SettingsDrawer::wire_callbacks() {
         it.selected = (cur == codes[i]);
         items.push_back(it);
       }
-      RectF gb = lang_btn_->global_bounds();
-      // 菜单向上弹出：13 项 × 48 + pad 2×2 = 628，锚点抬到按钮上方
-      lang_menu_->open(items, {gb.x, gb.y - 628.0f - 4.0f});
+      // lang_btn_ 与 lang_menu_ 同属 panel_ 坐标系，直接用局部 bounds() 向上锚定，
+      //   超出抽屉高度时由 ContextMenu::open 自动钳制高度并滚动到当前选中语言
+      RectF lb = lang_btn_->bounds();
+      const float max_menu_h = std::max(120.0f, lb.y - 8.0f);
+      const float want_h = std::min(628.0f, max_menu_h);
+      lang_menu_->style_.max_h = want_h;
+      lang_menu_->open(items, {lb.x, lb.y - want_h - 4.0f});
     };
     lang_menu_->on_select = [this](int i) {
       static const char* codes[13] = {"zh",  "en", "ru",  "fa",   "tt",

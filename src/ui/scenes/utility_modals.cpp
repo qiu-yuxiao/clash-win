@@ -76,8 +76,8 @@ void EditProfileModal::close() {
 void EditProfileModal::on_arrange(const RectF& area) {
   set_bounds(area);
   // src: layout-dialogs.tsx:124-137 paper p3 / width calc(100%-32px) / maxWidth 450
-  const float cw = std::min(450.0f, std::max(240.0f, area.w - 32.0f));
-  const float ch = 360.0f;
+  const float cw = std::min(450.0f, std::max(200.0f, area.w - 32.0f));
+  const float ch = std::min(360.0f, std::max(260.0f, area.h - 16.0f));
   const float cx = std::max(0.0f, (area.w - cw) / 2.0f);
   const float cy = std::max(0.0f, (area.h - ch) / 2.0f);
   card_rect_ = {cx, cy, cw, ch};
@@ -89,7 +89,7 @@ void EditProfileModal::on_arrange(const RectF& area) {
   url_input_rect_ = {cx + pad, cy + 164.0f, cw - pad * 2, 40.0f};
   interval_input_rect_ = {cx + pad, cy + 244.0f, cw - pad * 2, 40.0f};
 
-  const float bw = 56.0f, bh = 28.0f, gap = 12.0f, by = cy + 308.0f;
+  const float bw = 56.0f, bh = 28.0f, gap = 12.0f, by = cy + ch - 52.0f;
   btn_save_rect_ = {cx + cw - pad - bw, by, bw, bh};
   btn_cancel_rect_ = {cx + cw - pad - bw - gap - bw, by, bw, bh};
 }
@@ -432,19 +432,22 @@ void ClientUpdateModal::set_progress(int p, const std::string& msg) {
 
 void ClientUpdateModal::on_arrange(const RectF& area) {
   set_bounds(area);
-  const float cw = 420.0f;
-  const float ch = 340.0f;
+  // src: layout-dialogs.tsx:262-265 width 'calc(100% - 32px)' / maxWidth '500px'
+  const float cw = std::min(500.0f, std::max(200.0f, area.w - 32.0f));
+  const float ch = std::min(340.0f, std::max(240.0f, area.h - 16.0f));
   float cx = std::max(0.0f, (area.w - cw) / 2.0f);
   float cy = std::max(0.0f, (area.h - ch) / 2.0f);
   card_rect_ = {cx, cy, cw, ch};
 
+  const float pad = cw < 280.0f ? 16.0f : 24.0f;
   btn_close_x_rect_ = {cx + cw - 32.0f, cy + 6.0f, 26.0f, 24.0f};  // 保留成员（Mini 无 ✕，不绘制）
-  changelog_box_rect_ = {cx + 24.0f, cy + 124.0f, cw - 48.0f, 120.0f};
+  const float chg_h = std::max(60.0f, ch - 220.0f);
+  changelog_box_rect_ = {cx + pad, cy + 124.0f, cw - pad * 2.0f, chg_h};
   // ← layout-dialogs.tsx:343 bar 高 8px（radius 4）
-  progress_bar_rect_ = {cx + 24.0f, cy + 252.0f, cw - 48.0f, 8.0f};
+  progress_bar_rect_ = {cx + pad, cy + 132.0f + chg_h, cw - pad * 2.0f, 8.0f};
 
-  btn_close_rect_ = {cx + cw - 180.0f, cy + ch - 44.0f, 76.0f, 30.0f};
-  btn_update_rect_ = {cx + cw - 96.0f, cy + ch - 44.0f, 82.0f, 30.0f};
+  btn_update_rect_ = {cx + cw - pad - 82.0f, cy + ch - 44.0f, 82.0f, 30.0f};
+  btn_close_rect_ = {btn_update_rect_.x - 8.0f - 76.0f, cy + ch - 44.0f, 76.0f, 30.0f};
 }
 
 void ClientUpdateModal::on_paint(IRenderTarget& rt) {
@@ -472,15 +475,17 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
   Brush card_bg{vars.theme_bg};
   rt.round_rect(card_rect_, 8.0f, {Color4f(1, 1, 1, 0.12f), 1.0f}, &card_bg);
 
+  const float pad = card_rect_.w < 280.0f ? 16.0f : 24.0f;
   // 标题（MUI DialogContentText h6 = 1.25rem = 20px bold）
   TextStyle title_ts;
   title_ts.size = 20.0f;
   title_ts.weight = static_cast<int>(Weight::Bold);
   title_ts.color = ThemeService::instance().text_primary();
   title_ts.align_v = AlignV::Center;
+  title_ts.ellipsis = true;
   // src: locales/zh/layout.json:58 「"title": "软件本体更新"」（layout-dialogs.tsx:280 🚀）
   rt.draw_text(L"🚀 " + tr("layout.components.dialogs.client.title"),
-               {card_rect_.x + 24.0f, card_rect_.y + 14.0f, card_rect_.w - 48.0f, 28.0f},
+               {card_rect_.x + pad, card_rect_.y + 14.0f, card_rect_.w - pad * 2.0f, 28.0f},
                title_ts);
 
   // 版本信息两行（body2 = 14px；最新版本行 bold；v 前缀 ← layout-dialogs.tsx:288-306）
@@ -489,23 +494,24 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
   ver_ts.size = 14.0f;
   ver_ts.color = ThemeService::instance().text_primary();
   ver_ts.align_v = AlignV::Center;
+  ver_ts.ellipsis = true;
   rt.draw_text(tr("layout.components.dialogs.update.currentVersion",
                   {{"version", current_version_.empty() ? utf::utf16_to_utf8(unknown)
                                                        : current_version_}}),
-               {card_rect_.x + 24.0f, card_rect_.y + 48.0f, card_rect_.w - 48.0f, 20.0f},
+               {card_rect_.x + pad, card_rect_.y + 48.0f, card_rect_.w - pad * 2.0f, 20.0f},
                ver_ts);
   TextStyle ver_bold = ver_ts;
   ver_bold.weight = static_cast<int>(Weight::Bold);
   rt.draw_text(tr("layout.components.dialogs.update.latestVersion",
                   {{"version", latest_version_.empty() ? utf::utf16_to_utf8(unknown)
                                                        : latest_version_}}),
-               {card_rect_.x + 24.0f, card_rect_.y + 72.0f, card_rect_.w - 48.0f, 20.0f},
+               {card_rect_.x + pad, card_rect_.y + 72.0f, card_rect_.w - pad * 2.0f, 20.0f},
                ver_bold);
 
   TextStyle chg_label = ver_bold;
   // src: locales/zh/layout.json:59 「"更新日志:"」（layout-dialogs.tsx:318）
   rt.draw_text(tr("layout.components.dialogs.client.changelog"),
-               {card_rect_.x + 24.0f, card_rect_.y + 100.0f, card_rect_.w - 48.0f, 20.0f},
+               {card_rect_.x + pad, card_rect_.y + 100.0f, card_rect_.w - pad * 2.0f, 20.0f},
                chg_label);
 
   // 更新日志框（13px pre-wrap；← layout-dialogs.tsx:320-336）
@@ -546,16 +552,37 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
                             progress_bar_rect_.w, 18.0f}, stat_ts);
   }
 
-  // 底部按钮（关闭 outlined 禁用于 downloading；更新 contained primary）
+  // 底部按钮（关闭 outlined 禁用于 downloading；更新 contained primary ← layout-dialogs.tsx:377-408）
   const bool busy = is_downloading_;
   auto paint_themed_btn = [&](IRenderTarget& rt2, const RectF& r, bool hovered,
-                              bool disabled, const char* color_type,
+                              bool disabled, const char* color_type, bool outlined,
                               const std::wstring& label) {
-    auto p = ThemeService::instance().button_paint(color_type);
-    Color4f fill = disabled ? p.fill_disabled
-                            : (hovered ? p.fill_hover : p.fill);
-    Brush b{fill};
-    rt2.round_rect(r, p.radius, {p.border, p.border_w}, &b);
+    auto p = ThemeService::instance().button_paint(color_type, outlined);
+    if (!disabled && p.has_shadow)
+      draw_soft_shadow(rt2, r, p.radius, p.shadow_color, p.shadow_dy, p.shadow_blur);
+    if (!disabled && p.glow.a > 0)
+      draw_glow(rt2, r, p.radius, p.glow, p.glow_blur);
+    if (!disabled && p.use_grad) {
+      const GradientStop* gs = hovered ? p.grad_hover : p.grad;
+      rt2.fill_round_rect_gradient_angle(r, p.radius, gs, p.grad_count, p.grad_angle);
+    } else {
+      Color4f fill = disabled ? p.fill_disabled
+                              : (hovered ? p.fill_hover : p.fill);
+      Brush b{fill};
+      rt2.round_rect(r, p.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &b);
+    }
+    if (p.border_w > 0.01f) {
+      Color4f bc = p.border;
+      if (disabled) bc.a *= 0.38f;
+      rt2.round_rect(r, p.radius, Pen{bc, p.border_w}, nullptr);
+    }
+    if (!disabled && p.use_grad && p.bevel_dark.a > 0) {
+      rt2.draw_line({r.x + p.radius, r.y + 1.0f},
+                    {r.right() - p.radius, r.y + 1.0f}, Pen{p.bevel_hi, 1.0f});
+      rt2.draw_line({r.x + p.radius, r.bottom() - 1.0f},
+                    {r.right() - p.radius, r.bottom() - 1.0f},
+                    Pen{p.bevel_dark, 1.0f});
+    }
     TextStyle ts;
     ts.size = 12.0f;  // MUI Button body2
     ts.weight = p.weight;
@@ -564,7 +591,7 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
     ts.align_v = AlignV::Center;
     rt2.draw_text(label, r, ts);
   };
-  paint_themed_btn(rt, btn_close_rect_, hover_close_, busy, "default",
+  paint_themed_btn(rt, btn_close_rect_, hover_close_, busy, "default", true,
                    tr("shared.actions.close"));
 
   // 标签逻辑（← layout-dialogs.tsx:400-407）：done→准备重启；downloading→更新中...；
@@ -578,7 +605,7 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
     upd_label = tr("layout.components.dialogs.update.upToDate");
   else
     upd_label = tr("layout.components.dialogs.update.updateNow");
-  paint_themed_btn(rt, btn_update_rect_, hover_update_, busy, "primary", upd_label);
+  paint_themed_btn(rt, btn_update_rect_, hover_update_, busy, "primary", false, upd_label);
 }
 
 bool ClientUpdateModal::on_mouse(const MouseEvent& e) {
@@ -705,18 +732,20 @@ void CoreUpdateModal::handle_progress_event(const std::string& status, int progr
 
 void CoreUpdateModal::on_arrange(const RectF& area) {
   set_bounds(area);
-  const float cw = 400.0f;
-  const float ch = 280.0f;
+  // src: layout-dialogs.tsx:431-434 width 'calc(100% - 32px)' / maxWidth '450px'
+  const float cw = std::min(450.0f, std::max(200.0f, area.w - 32.0f));
+  const float ch = std::min(280.0f, std::max(190.0f, area.h - 16.0f));
   float cx = std::max(0.0f, (area.w - cw) / 2.0f);
   float cy = std::max(0.0f, (area.h - ch) / 2.0f);
   card_rect_ = {cx, cy, cw, ch};
 
+  const float pad = cw < 280.0f ? 16.0f : 24.0f;
   btn_close_x_rect_ = {cx + cw - 32.0f, cy + 6.0f, 26.0f, 24.0f};  // 保留成员（Mini 无 ✕，不绘制）
   // ← layout-dialogs.tsx:484 bar 高 8px
-  progress_bar_rect_ = {cx + 24.0f, cy + 148.0f, cw - 48.0f, 8.0f};
+  progress_bar_rect_ = {cx + pad, cy + std::min(148.0f, ch - 92.0f), cw - pad * 2.0f, 8.0f};
 
-  btn_close_rect_ = {cx + cw - 180.0f, cy + ch - 44.0f, 76.0f, 30.0f};
-  btn_upgrade_rect_ = {cx + cw - 96.0f, cy + ch - 44.0f, 82.0f, 30.0f};
+  btn_upgrade_rect_ = {cx + cw - pad - 82.0f, cy + ch - 44.0f, 82.0f, 30.0f};
+  btn_close_rect_ = {btn_upgrade_rect_.x - 8.0f - 76.0f, cy + ch - 44.0f, 76.0f, 30.0f};
 }
 
 void CoreUpdateModal::on_paint(IRenderTarget& rt) {
@@ -744,15 +773,17 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
   //      + border 1px solid rgba(255,255,255,.12)；同名定义见 :264-265 / :433-434）
   rt.round_rect(card_rect_, 8.0f, {Color4f(1, 1, 1, 0.12f), 1.0f}, &card_bg);
 
+  const float pad = card_rect_.w < 280.0f ? 16.0f : 24.0f;
   // 标题（h6 = 20px bold）
   TextStyle title_ts;
   title_ts.size = 20.0f;
   title_ts.weight = static_cast<int>(Weight::Bold);
   title_ts.color = ThemeService::instance().text_primary();
   title_ts.align_v = AlignV::Center;
+  title_ts.ellipsis = true;
   // src: locales/zh/layout.json:64 「"title": "Mihomo 内核更新"」（layout-dialogs.tsx:449 ⚙️）
   rt.draw_text(L"⚙️ " + tr("layout.components.dialogs.core.title"),
-               {card_rect_.x + 24.0f, card_rect_.y + 14.0f, card_rect_.w - 48.0f, 28.0f},
+               {card_rect_.x + pad, card_rect_.y + 14.0f, card_rect_.w - pad * 2.0f, 28.0f},
                title_ts);
 
   // 版本信息两行（body2 = 14px；最新版本行 bold；formatCoreVersion ← style-helpers.tsx:221）
@@ -760,9 +791,10 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
   ver_ts.size = 14.0f;
   ver_ts.color = ThemeService::instance().text_primary();
   ver_ts.align_v = AlignV::Center;
+  ver_ts.ellipsis = true;
   rt.draw_text(tr("layout.components.dialogs.update.currentVersion",
                   {{"version", format_core_version(current_version_)}}),
-               {card_rect_.x + 24.0f, card_rect_.y + 48.0f, card_rect_.w - 48.0f, 20.0f},
+               {card_rect_.x + pad, card_rect_.y + 48.0f, card_rect_.w - pad * 2.0f, 20.0f},
                ver_ts);
   // src: layout.json:51/65 「最新版本: {{version}} / 获取中...」（layout-dialogs.tsx:471-474）
   TextStyle ver_bold = ver_ts;
@@ -772,7 +804,7 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
                                    ? utf::utf16_to_utf8(
                                          tr("layout.components.dialogs.core.fetching"))
                                    : format_core_version(latest_version_)}}),
-               {card_rect_.x + 24.0f, card_rect_.y + 72.0f, card_rect_.w - 48.0f, 20.0f},
+               {card_rect_.x + pad, card_rect_.y + 72.0f, card_rect_.w - pad * 2.0f, 20.0f},
                ver_bold);
 
   // 升级进度条（仅 status ≠ idle；8px/radius4/底 10% 黑白/填充 primary ← :479-514）
@@ -795,17 +827,38 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
                                progress_bar_rect_.w, 20.0f}, msg_ts);
   }
 
-  // 底部按钮（关闭 outlined 禁用于 busy；升级 contained primary）
+  // 底部按钮（关闭 outlined 禁用于 busy；升级 contained primary ← layout-dialogs.tsx:518-551）
   const bool busy = is_upgrading_ || status_ == "checking" || status_ == "downloading" ||
                     status_ == "extracting";
   auto paint_themed_btn = [&](IRenderTarget& rt2, const RectF& r, bool hovered,
-                              bool disabled, const char* color_type,
+                              bool disabled, const char* color_type, bool outlined,
                               const std::wstring& label) {
-    auto p = ThemeService::instance().button_paint(color_type);
-    Color4f fill = disabled ? p.fill_disabled
-                            : (hovered ? p.fill_hover : p.fill);
-    Brush b{fill};
-    rt2.round_rect(r, p.radius, {p.border, p.border_w}, &b);
+    auto p = ThemeService::instance().button_paint(color_type, outlined);
+    if (!disabled && p.has_shadow)
+      draw_soft_shadow(rt2, r, p.radius, p.shadow_color, p.shadow_dy, p.shadow_blur);
+    if (!disabled && p.glow.a > 0)
+      draw_glow(rt2, r, p.radius, p.glow, p.glow_blur);
+    if (!disabled && p.use_grad) {
+      const GradientStop* gs = hovered ? p.grad_hover : p.grad;
+      rt2.fill_round_rect_gradient_angle(r, p.radius, gs, p.grad_count, p.grad_angle);
+    } else {
+      Color4f fill = disabled ? p.fill_disabled
+                              : (hovered ? p.fill_hover : p.fill);
+      Brush b{fill};
+      rt2.round_rect(r, p.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &b);
+    }
+    if (p.border_w > 0.01f) {
+      Color4f bc = p.border;
+      if (disabled) bc.a *= 0.38f;
+      rt2.round_rect(r, p.radius, Pen{bc, p.border_w}, nullptr);
+    }
+    if (!disabled && p.use_grad && p.bevel_dark.a > 0) {
+      rt2.draw_line({r.x + p.radius, r.y + 1.0f},
+                    {r.right() - p.radius, r.y + 1.0f}, Pen{p.bevel_hi, 1.0f});
+      rt2.draw_line({r.x + p.radius, r.bottom() - 1.0f},
+                    {r.right() - p.radius, r.bottom() - 1.0f},
+                    Pen{p.bevel_dark, 1.0f});
+    }
     TextStyle ts;
     ts.size = 12.0f;  // MUI Button body2
     ts.weight = p.weight;
@@ -814,7 +867,7 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
     ts.align_v = AlignV::Center;
     rt2.draw_text(label, r, ts);
   };
-  paint_themed_btn(rt, btn_close_rect_, hover_close_, busy, "default",
+  paint_themed_btn(rt, btn_close_rect_, hover_close_, busy, "default", true,
                    tr("shared.actions.close"));
 
   // 标签逻辑（← layout-dialogs.tsx:544-550）：done→更新完成；busy→更新中...；
@@ -826,7 +879,7 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
     upd_label = tr("layout.components.dialogs.update.updating");
   else
     upd_label = tr("layout.components.dialogs.update.updateNow");
-  paint_themed_btn(rt, btn_upgrade_rect_, hover_upgrade_, busy, "primary", upd_label);
+  paint_themed_btn(rt, btn_upgrade_rect_, hover_upgrade_, busy, "primary", false, upd_label);
 }
 
 bool CoreUpdateModal::on_mouse(const MouseEvent& e) {

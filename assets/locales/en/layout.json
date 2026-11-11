@@ -123,6 +123,24 @@
     "clientUpToDate": "Already the latest version",
     "clientCheckFailed": "Failed to check for updates: {{message}}",
     "clientInstallCompleted": "Update installed. Please restart the app to apply changes.",
-    "clientUpdateFailed": "Update failed: {{message}}"
+    "clientUpdateFailed": "Update failed: {{message}}",
+    "switchedToGlobalProxy": "Switched to Global Proxy",
+    "switchedToGfwList": "Switched to GFWList Smart Routing",
+    "autoLaunchEnabled": "Auto Launch enabled",
+    "autoLaunchDisabled": "Auto Launch disabled",
+    "silentStartEnabled": "Silent Start enabled",
+    "silentStartDisabled": "Silent Start disabled",
+    "allowLanEnabled": "Allow LAN enabled",
+    "allowLanDisabled": "Allow LAN disabled",
+    "ipv6Enabled": "IPv6 enabled",
+    "ipv6Disabled": "IPv6 disabled",
+    "nodeSwitched": "Switched node: {{name}}",
+    "nodeSwitchFailed": "Failed to switch node: {{message}}",
+    "batchTestingNodes": "Benchmarking and selecting best node…",
+    "batchTestSelected": "Benchmark complete, selected fastest: {{name}} ({{delay}}ms)",
+    "batchTestAllTimeout": "All candidate nodes timed out",
+    "windowPinned": "Always on Top enabled",
+    "windowUnpinned": "Always on Top disabled",
+    "allConnectionsClosed": "Closed all active connections"
   }
 }

@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -138,8 +139,13 @@ class Widget {
   void invalidate(const RectF& local);     // 局部（父坐标系内再转全局）
 
   // ---- tooltip 钩子（TooltipHost 扫描用；返回空=无提示） ----
-  void set_tooltip_text(std::wstring t) { tooltip_text_ = t; }
+  void set_tooltip_text(std::wstring t) { tooltip_text_ = std::move(t); }
+  void set_i18n_tooltip(const char* key) { bind_i18n_text(&tooltip_text_, key); }
   virtual std::wstring tooltip_text() const { return tooltip_text_; }
+  // 可选：指定提示锚定矩形（全局 DIP 坐标，如分段器的当前悬停子段、输入框清空钮）
+  virtual std::optional<RectF> tooltip_anchor_rect() const { return std::nullopt; }
+  // 可选：对齐 Mini <Tooltip placement="top" arrow>（分段器悬停提示）
+  virtual bool tooltip_prefer_top_arrow() const { return false; }
 
   // ---- flex 权重（Column/Row 主轴分配；0 = 固定尺寸） ----
   float flex_weight = 0;
@@ -211,6 +217,7 @@ Widget* route_key_event(Widget* root, KeyEvent& e);
 Widget* hovered_widget();
 Widget* captured_widget();
 Widget* focused_widget();
+void clear_mouse_hover();  // 鼠标移出窗口（WM_MOUSELEAVE）时派发 Leave 并清 g_hover
 void clear_input_state();  // 树析构前调用防悬空
 
 }  // namespace clashwin::ui

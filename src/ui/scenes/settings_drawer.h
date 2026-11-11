@@ -175,6 +175,9 @@ class SettingsDrawer : public Stack {
   std::function<void(const std::string& mode)> on_patch_clash_mode;
   std::function<bool(const std::string& url, const std::string& name)>
       on_import_profile;
+  std::function<void(const std::string& url, const std::string& name,
+                     std::function<void(bool ok)> done)>
+      on_import_profile_async;
   std::function<void(const std::string& uid)> on_select_profile;
   std::function<void(const std::string& uid)> on_update_profile;
   std::function<void(const std::string& uid)> on_delete_profile;

@@ -540,6 +540,65 @@ void FirstRunGuideDialog::submit_import() {
   error_message_.clear();
   invalidate();
 
+  auto finish_import = [this](bool success, const std::string& err_msg) {
+    if (success) {
+      // src: :398 verge 已加载且 enable_system_proxy/enable_tun_mode 均未开启 → 自动接管
+      bool checked = false;
+      bool takeover_on = false;
+      try {
+        const auto& v = *config::Config::instance().verge().latest_arc();
+        takeover_on = v.enable_system_proxy.value_or(false) ||
+                      v.enable_tun_mode.value_or(false);
+        checked = true;
+      } catch (...) {
+      }
+      if (checked && !takeover_on) {
+        if (on_patch_system_proxy) {
+          on_patch_system_proxy(true);
+        } else {
+          try {
+            cmd::CommandService::instance().invoke("patch_verge_config",
+                                                   {{"enable_system_proxy", true}});
+          } catch (...) {}
+        }
+        takeover_on = true;
+      }
+      // src: :181-186 isTakeoverOff = Boolean(verge && …)：verge 未加载时不误报
+      takeover_active_ = !checked || takeover_on;
+
+      // src: :401 setStep('ready')；BUG-311 守卫先释放，避免阻塞后续测速
+      is_importing_ = false;
+      if (url_field_) url_field_->set_enabled(true);  // 下一步隐藏，先复位可用态
+      step_ = FirstRunStep::Ready;
+      gave_up_ = false;
+      ready_started_ms_ = 0;
+      last_poll_ms_ = 0;
+      if (bounds().w > 0.0f && bounds().h > 0.0f) on_arrange(bounds());
+      invalidate();
+
+      // src: :207-225 首次进入 ready 且未就绪 → 后台全节点测速优选（仅一次）
+      if (!auto_retested_) {
+        auto_retested_ = true;
+        if (on_retest_nodes) on_retest_nodes();
+      }
+    } else {
+      // src: :403 errImport
+      is_importing_ = false;
+      if (url_field_) url_field_->set_enabled(true);  // 留在导入步，允许重新编辑
+      if (!err_msg.empty()) {
+        error_message_ = "导入失败: " + err_msg;
+      } else {
+        error_message_ = "订阅导入失败，请检查链接是否有效后重试";
+      }
+      invalidate();
+    }
+  };
+
+  if (on_import_async) {
+    on_import_async(target_url, finish_import);
+    return;
+  }
+
   bool success = false;
   std::string err_msg;
   if (on_import) {
@@ -553,59 +612,7 @@ void FirstRunGuideDialog::submit_import() {
       err_msg = res.error().message;
     }
   }
-
-  if (success) {
-    // src: :398 verge 已加载且 enable_system_proxy/enable_tun_mode 均未开启 → 自动接管
-    bool checked = false;
-    bool takeover_on = false;
-    try {
-      const auto& v = *config::Config::instance().verge().latest_arc();
-      takeover_on = v.enable_system_proxy.value_or(false) ||
-                    v.enable_tun_mode.value_or(false);
-      checked = true;
-    } catch (...) {
-    }
-    if (checked && !takeover_on) {
-      if (on_patch_system_proxy) {
-        on_patch_system_proxy(true);
-      } else {
-        try {
-          cmd::CommandService::instance().invoke("patch_verge_config",
-                                                 {{"enable_system_proxy", true}});
-        } catch (...) {}
-      }
-      takeover_on = true;
-    }
-    // src: :181-186 isTakeoverOff = Boolean(verge && …)：verge 未加载时不误报
-    takeover_active_ = !checked || takeover_on;
-
-    // src: :401 setStep('ready')；BUG-311 守卫先释放，避免阻塞后续测速
-    is_importing_ = false;
-    if (url_field_) url_field_->set_enabled(true);  // 下一步隐藏，先复位可用态
-    step_ = FirstRunStep::Ready;
-    gave_up_ = false;
-    ready_started_ms_ = 0;
-    last_poll_ms_ = 0;
-    if (bounds().w > 0.0f && bounds().h > 0.0f) on_arrange(bounds());
-    invalidate();
-    invalidate();
-
-    // src: :207-225 首次进入 ready 且未就绪 → 后台全节点测速优选（仅一次）
-    if (!auto_retested_) {
-      auto_retested_ = true;
-      if (on_retest_nodes) on_retest_nodes();
-    }
-  } else {
-    // src: :403 errImport
-    is_importing_ = false;
-    if (url_field_) url_field_->set_enabled(true);  // 留在导入步，允许重新编辑
-    if (!err_msg.empty()) {
-      error_message_ = "导入失败: " + err_msg;
-    } else {
-      error_message_ = "订阅导入失败，请检查链接是否有效后重试";
-    }
-    invalidate();
-  }
+  finish_import(success, err_msg);
 }
 
 void FirstRunGuideDialog::finish() {

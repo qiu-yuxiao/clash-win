@@ -107,6 +107,10 @@ bool is_preset_proxy(const std::string& name) {
 }
 }  // namespace
 
+std::string clean_node_display_name(const std::string& raw) {
+  return utf::utf16_to_utf8(strip_six_digit_suffix(utf::utf8_to_utf16(raw)));
+}
+
 // ---------- NodeRowWidget ----------
 void NodeRowWidget::bind(const std::string& type, const std::string& name,
                          int delay, bool selected) {
@@ -259,8 +263,9 @@ void NodeRowWidget::on_paint(IRenderTarget& rt) {
 }
 
 bool NodeRowWidget::on_mouse(const MouseEvent& e) {
-  if (e.type == MouseEventType::Move) {
+  if (e.type == MouseEventType::Move || e.type == MouseEventType::Enter) {
     hover_ = true;
+    hover_x_ = e.pos.x;
     return true;
   }
   if (e.type == MouseEventType::Leave) {
@@ -276,6 +281,21 @@ bool NodeRowWidget::on_mouse(const MouseEvent& e) {
     return true;
   }
   return false;
+}
+
+std::wstring NodeRowWidget::tooltip_text() const {
+  if (!hover_) return {};
+  // src: proxy-item.tsx:160 左侧协议列悬停显示协议类型
+  if (hover_x_ < kNodeTypeColW) {
+    return clashwin::utf::utf8_to_utf16(type_);
+  }
+  // src: proxy-item.tsx:128-132 名称列悬停显示完整名称（选中项附「 - 当前节点」）
+  if (hover_x_ < bounds().w - kNodeDelayColW) {
+    std::wstring tip = clashwin::utf::utf8_to_utf16(name_);
+    if (selected_) tip += L" - " + tr("proxies.components.item.currentNode");
+    return tip;
+  }
+  return {};
 }
 
 // ---------- NodeGridRowWidget ----------
@@ -442,6 +462,8 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   bolt->box_w = bolt->box_h = 26;
   bolt->color_ = pal.primary_text;
   bolt->flex_weight = 0;
+  // src: proxy-head.tsx:145 title={t('proxies.page.tooltips.delayCheck')}
+  bolt->set_i18n_tooltip("proxies.page.tooltips.delayCheck");
   bolt_btn_ = bolt.get();
   bolt->on_click = [this] {
     // ★ §5.2/§5.6「所见即所选」（← Mini proxy-groups.tsx:230-275 handleCheckAll）：
@@ -457,14 +479,20 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
     }
     // src: proxy-groups.tsx:256-258 视觉占位：UI 线程立即置 -2 触发 BaseLoading 脉冲
     data_->set_delays_batch(names, -2);
-    if (false) {
-      // batch applied above
-    }
     invalidate();
+    const uint64_t wait_id =
+        (!names.empty() && on_batch_test_begin) ? on_batch_test_begin() : 0;
+    auto end_cb = on_batch_test_end;
     // src: proxy-groups.tsx:263 异步后台线程执行测速，保障 UI 线程 60fps 脉冲动画
     auto* data_ptr = data_;
-    std::thread([data_ptr, names] {
+    std::thread([data_ptr, names, wait_id, end_cb] {
       data_ptr->test_and_select(names);
+      if (end_cb && !names.empty()) {
+        const BatchTestSummary sum = data_ptr->last_batch_summary();
+        UiPostbox::instance().post([end_cb, wait_id, sum] {
+          end_cb(wait_id, sum);
+        });
+      }
     }).detach();
   };
   bar_p->add_child(std::move(bolt));
@@ -478,7 +506,7 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   sort->size_ = 17;
   sort->box_w = sort->box_h = 26;
   sort->color_ = pal.primary_text;
-  sort->set_tooltip_text(tr("proxies.page.tooltips.sortDelay"));  // src: locales/zh/proxies.json:34-36
+  sort->set_i18n_tooltip("proxies.page.tooltips.sortDelay");  // src: locales/zh/proxies.json:34-36
   sort->on_click = [this] { toggle_sort(); };
   bar_p->add_child(std::move(sort));
 
@@ -651,7 +679,7 @@ void NodeList::restore_head_state() {
   if (search_) search_->set_text_silent(utf::utf8_to_utf16(gs->filter_text));
   if (sort_btn_) {
     sort_btn_->set_icon(kSortIcons[sort_type_]);
-    sort_btn_->set_tooltip_text(tr(kSortTipKeys[sort_type_]));
+    sort_btn_->set_i18n_tooltip(kSortTipKeys[sort_type_]);
   }
 
   // 兜底：恢复出的过滤词不视为「新词」，避免后续被误判触发自动测速择优
@@ -723,7 +751,7 @@ void NodeList::toggle_sort() {
   // src: proxy-head.tsx:131-139
   if (sort_btn_) {
     sort_btn_->set_icon(kSortIcons[sort_type_]);
-    sort_btn_->set_tooltip_text(tr(kSortTipKeys[sort_type_]));
+    sort_btn_->set_i18n_tooltip(kSortTipKeys[sort_type_]);
   }
   rebuild_visible();
   sync_list();
@@ -732,6 +760,19 @@ void NodeList::toggle_sort() {
 // 皮肤/亮暗热切换：重刷控件级缓存
 // src: button-styles.ts:734-927 get3DInputStyle —— 每次 render 现取，
 //   Win 侧 apply_theme 把结果缓存进成员，切皮肤后必须重调。
+std::vector<std::string> NodeList::visible_node_names() const {
+  std::vector<std::string> out;
+  if (!data_) return out;
+  const auto& rows = data_->rows();
+  out.reserve(visible_.size());
+  for (int i : visible_) {
+    if (i >= 0 && static_cast<size_t>(i) < rows.size()) {
+      out.push_back(rows[static_cast<size_t>(i)].name);
+    }
+  }
+  return out;
+}
+
 void NodeList::trigger_auto_select_visible() {
   if (!data_ || visible_.empty()) return;
   std::vector<std::string> names;
@@ -748,10 +789,19 @@ void NodeList::trigger_auto_select_visible() {
   data_->set_delays_batch(names, -2);
   invalidate();
 
+  const uint64_t wait_id = on_batch_test_begin ? on_batch_test_begin() : 0;
+  auto end_cb = on_batch_test_end;
+
   // 异步后台线程执行多路测速与择优切换
   auto* data_ptr = data_;
-  std::thread([data_ptr, names] {
+  std::thread([data_ptr, names, wait_id, end_cb] {
     data_ptr->test_and_select(names);
+    if (end_cb) {
+      const BatchTestSummary sum = data_ptr->last_batch_summary();
+      UiPostbox::instance().post([end_cb, wait_id, sum] {
+        end_cb(wait_id, sum);
+      });
+    }
   }).detach();
 }
 

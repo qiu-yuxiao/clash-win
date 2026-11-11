@@ -20,6 +20,14 @@ Widget* g_focus = nullptr;
 Widget* hovered_widget() { return g_hover; }
 Widget* captured_widget() { return g_capture; }
 Widget* focused_widget() { return g_focus; }
+void clear_mouse_hover() {
+  if (g_hover) {
+    Widget* prev = g_hover;
+    g_hover = nullptr;
+    MouseEvent leave{MouseEventType::Leave, {-1.0f, -1.0f}};
+    prev->on_mouse(leave);
+  }
+}
 void clear_input_state() { g_hover = g_capture = g_focus = nullptr; }
 
 // ---------- 树 ----------
@@ -231,6 +239,13 @@ void Widget::paint(IRenderTarget& rt, const RectF& clip) {
 // ---------- i18n 文本绑定（F-D01） ----------
 void Widget::bind_i18n_text(std::wstring* slot, const char* key) {
   if (!slot || !key || !*key) return;
+  for (auto& s : i18n_slots_) {
+    if (s.slot == slot) {
+      s.key = key;
+      *slot = tr(key);
+      return;
+    }
+  }
   i18n_slots_.push_back({slot, key});
   *slot = tr(key);
 }

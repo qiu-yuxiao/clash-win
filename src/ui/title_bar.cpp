@@ -113,6 +113,7 @@ TitleBar::TitleBar(MainWindow* owner) {
   title_label_ = label.get();
   title_label_->style.size = 12;
   title_label_->style.weight = static_cast<int>(Weight::Medium);
+  title_label_->style.align_v = AlignV::Center;  // src: _layout.tsx:1135 alignItems 'center'
   title_label_->style.ellipsis = true;
   // src: _layout.tsx:1155-1169 标题 span flex 不伸缩、宽度随内容
   title_label_->flex_weight = 0;
@@ -183,8 +184,16 @@ void TitleBar::on_paint(IRenderTarget& rt) {
   rt.fill_rect({bounds().x, bounds().bottom() - 1, bounds().w, 1},
                Brush{svc.vars().theme_border});
   // src: layout.scss:168 box-shadow 0 1px 4px var(--theme-border-outer)
-  //   阴影须盖在内容层之上 → 由 MainWindow::draw 在 root 之后绘制
-  //   注：:167 backdrop-filter blur(8×depth) 需背景模糊，本渲染器无此能力（卡点）
+  //   TitleBar 在 flow_ 内 z_order=10 高于 content_(0)，而 flow_(0) 低于
+  //   root_ 顶层浮层（弹窗/TooltipHost/SnackbarW），故在此绘制阴影既能压在
+  //   内容区之上，又绝不横穿顶部通知条或弹窗，且随 stealth 隐藏自动消隐。
+  const Color4f outer = svc.vars().theme_border_outer;
+  for (int i = 1; i <= 4; ++i) {
+    Color4f c = outer;
+    c.a = outer.a * (1.0f - static_cast<float>(i - 1) / 4.0f) / 2.0f;
+    rt.fill_rect({0.0f, bounds().h + static_cast<float>(i - 1), bounds().w, 1.0f},
+                 Brush{c});
+  }
 }
 
 }  // namespace clashwin::ui::win

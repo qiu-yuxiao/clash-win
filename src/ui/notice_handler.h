@@ -15,6 +15,9 @@
 #include <cstdint>
 #include <string>
 
+#include <nlohmann/json.hpp>
+#include "ui/scenes/node_data.h"
+
 namespace clashwin::ui {
 
 // 订阅 EventBus::kNoticeMessage；已安装则幂等返回。
@@ -26,5 +29,21 @@ void uninstall_notice_handler();
 // 单条分发的纯函数入口（测试直接调用，绕过 EventBus）
 // 返回 true 表示该 status 有对应规则并已 push。
 bool dispatch_notice(const char* status, const std::string& message);
+
+// ---------- 特约交互增强通知助手（用户拍板补齐双方静默/含糊操作） ----------
+// 1/2. 代理分流模式切换与基础设置 4 个小开关：返回成功提示的 i18n key（无需弹通知时返回空串）
+std::string resolve_verge_patch_success_key(const std::string& k,
+                                            const nlohmann::json& v);
+// 3. 手动点选节点 / 顶栏点击轮换节点结果通知
+void dispatch_node_switch_notice(bool ok, bool changed,
+                                 const std::string& node_name,
+                                 const std::string& err_detail);
+// 4. ⚡ 批量测速择优 / 过滤输入自动测速择优通知（开始常驻 info → 结束结果分流）
+uint64_t begin_batch_test_notice();
+void finish_batch_test_notice(uint64_t wait_id,
+                              const scene::BatchTestSummary& summary);
+// 5. 窗口置顶与断开全部连接通知
+void dispatch_pin_window_notice(bool pinned);
+void dispatch_close_all_connections_notice(bool ok, const std::string& err_detail);
 
 }  // namespace clashwin::ui

@@ -9,6 +9,7 @@
 #include "events/notice.h"
 #include "i18n/i18n.h"
 #include "ui/i18n_text.h"
+#include "ui/scenes/node_list.h"
 #include "util/log.h"
 
 namespace clashwin::ui {
@@ -20,13 +21,14 @@ namespace {
 // 否则消息按 prefixedRaw 语义追加在译文之后。
 struct NoticeRule {
   const char* status;
-  const char* type;    // success | info | error
+  const char* type;    // success | info | warning | error
   const char* key;     // nullptr → 原文
   const char* param;   // 插值参数名
   int duration;        // 0 → 用 NoticeService 按类型的缺省值
+  bool prefer_raw_when_nonempty = false;  // true：msg 非空时直接显示完整句，为空时回退译文
 };
 
-// ---------- ← notification-handlers.ts:12-88 的 27 条 status 表 ----------
+// ---------- ← notification-handlers.ts:12-88 的 status 表 + 后端/组件补充 ----------
 constexpr NoticeRule kRules[] = {
     // 订阅导入
     {"import_sub_url::ok", "success",
@@ -46,6 +48,8 @@ constexpr NoticeRule kRules[] = {
 
     // 校验：整体
     {"config_validate::boot_error", "error", "shared.feedback.validation.config.bootFailed",
+     nullptr, 0},
+    {"config_validate::timeout", "error", "shared.feedback.validation.config.bootFailed",
      nullptr, 0},
     {"config_validate::core_change", "error",
      "shared.feedback.validation.config.coreChangeFailed", nullptr, 0},
@@ -94,11 +98,17 @@ constexpr NoticeRule kRules[] = {
      "settings.feedback.notifications.clash.changeFailed", nullptr, 0},
 
     // ---------- Win 侧状态串（Mini 对应点为组件内直接 showNotice） ----------
-    // ← hooks/use-service-installer.ts:19-46：info 安装中 → success/failed
-    {"install_service::info", "info", "settings.statuses.clashService.installing", nullptr, 0},
+    // ← hooks/use-service-installer.ts:19-44：info 安装中 → success/failed
+    {"install_service::info", "info", "settings.statuses.clashService.installing", nullptr, 0,
+     true},
     {"install_service::ok", "success",
-     "settings.feedback.notifications.clashService.installSuccess", nullptr, 0},
+     "settings.feedback.notifications.clashService.installSuccess", nullptr, 0, true},
     {"install_service::error", "error", nullptr, nullptr, 0},
+    {"reinstall_service::ok", "success",
+     "settings.feedback.notifications.clashService.installSuccess", nullptr, 0, true},
+    {"reinstall_service::error", "error", nullptr, nullptr, 0},
+    // ← core/manager/lifecycle.rs:237 Handle::notice_message("warning", ...)
+    {"warning", "warning", nullptr, nullptr, 0},
     // ← utils/quick-routing.ts:105-109：success(key, raw, 2500)
     {"profile_switched", "success",
      "profiles.page.feedback.notifications.profileSwitched", nullptr, 2500},
@@ -145,8 +155,8 @@ bool dispatch_notice(const char* status, const std::string& message) {
   ensure_i18n();
   auto& i18n = clashwin::i18n::I18n::instance();
   std::string text;
-  if (!rule->key) {
-    text = message;  // 原文
+  if (!rule->key || (rule->prefer_raw_when_nonempty && !message.empty())) {
+    text = message;  // 原文（或完整状态句不重复拼接译文前缀）
   } else if (rule->param && !message.empty()) {
     text = i18n.t(rule->key, {{rule->param, message}});
   } else {
@@ -180,6 +190,104 @@ void uninstall_notice_handler() {
   if (g_sub_id == 0) return;
   events::EventBus::instance().unsubscribe(g_sub_id);
   g_sub_id = 0;
+}
+
+std::string resolve_verge_patch_success_key(const std::string& k,
+                                            const nlohmann::json& v) {
+  if (k == "rule_fallback" && v.is_string()) {
+    const std::string fb = v.get<std::string>();
+    if (fb == "proxy") return "layout.notices.switchedToGlobalProxy";
+    if (fb == "direct") return "layout.notices.switchedToGfwList";
+    return {};  // "addurl" 会立即打开添加网址弹窗，无需重复弹 toast
+  }
+  const bool on = v.is_boolean() && v.get<bool>();
+  if (k == "enable_auto_launch") {
+    return on ? "layout.notices.autoLaunchEnabled"
+              : "layout.notices.autoLaunchDisabled";
+  }
+  if (k == "enable_silent_start") {
+    return on ? "layout.notices.silentStartEnabled"
+              : "layout.notices.silentStartDisabled";
+  }
+  if (k == "clash_allow_lan") {
+    return on ? "layout.notices.allowLanEnabled"
+              : "layout.notices.allowLanDisabled";
+  }
+  if (k == "clash_ipv6") {
+    return on ? "layout.notices.ipv6Enabled" : "layout.notices.ipv6Disabled";
+  }
+  return {};
+}
+
+void dispatch_node_switch_notice(bool ok, bool changed,
+                                 const std::string& node_name,
+                                 const std::string& err_detail) {
+  auto& notices = events::NoticeService::instance();
+  if (ok) {
+    if (!changed || node_name.empty()) return;
+    // 豁免: Mini 无对应物 — 用户特约补齐节点切换成功短提示 1000ms（出处: 无）
+    notices.push(
+        "success",
+        tr8("layout.notices.nodeSwitched",
+            {{"name", scene::clean_node_display_name(node_name)}}),
+        1000);
+  } else {
+    notices.push(
+        "error",
+        tr8("layout.notices.nodeSwitchFailed",
+            {{"message", err_detail.empty() ? "Mihomo API error" : err_detail}}));
+  }
+}
+
+uint64_t begin_batch_test_notice() {
+  return events::NoticeService::instance().push(
+      "info", tr8("layout.notices.batchTestingNodes"), 0);
+}
+
+void finish_batch_test_notice(uint64_t wait_id,
+                              const scene::BatchTestSummary& summary) {
+  auto& notices = events::NoticeService::instance();
+  if (wait_id) notices.hide(wait_id);
+  if (summary.busy) {
+    notices.push("info", tr8("settings.mini.testingInProgress"));
+    return;
+  }
+  if (summary.selected && !summary.selected_node.empty()) {
+    // 豁免: Mini 无对应物 — 用户特约补齐批量测速择优结果提示 2500ms（出处: 无）
+    notices.push(
+        "success",
+        tr8("layout.notices.batchTestSelected",
+            {{"name", scene::clean_node_display_name(summary.selected_node)},
+             {"delay", std::to_string(summary.selected_delay_ms)}}),
+        2500);
+    return;
+  }
+  if (summary.executed) {
+    notices.push("warning", tr8("layout.notices.batchTestAllTimeout"));
+  } else {
+    notices.push("error", tr8("settings.mini.testNotExecuted"));
+  }
+}
+
+void dispatch_pin_window_notice(bool pinned) {
+  // 豁免: Mini 无对应物 — 用户特约补齐窗口置顶切换短提示 1000ms（出处: 无）
+  events::NoticeService::instance().push(
+      "success",
+      tr8(pinned ? "layout.notices.windowPinned"
+                 : "layout.notices.windowUnpinned"),
+      1000);
+}
+
+void dispatch_close_all_connections_notice(bool ok,
+                                           const std::string& err_detail) {
+  if (ok) {
+    // 豁免: Mini 无对应物 — 用户特约补齐断开全部活动连接结果提示 1500ms（出处: 无）
+    events::NoticeService::instance().push(
+        "success", tr8("layout.notices.allConnectionsClosed"), 1500);
+  } else {
+    events::NoticeService::instance().push(
+        "error", err_detail.empty() ? "Failed to close connections" : err_detail);
+  }
 }
 
 }  // namespace clashwin::ui

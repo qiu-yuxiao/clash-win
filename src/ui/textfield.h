@@ -55,6 +55,7 @@ class TextField : public Widget {
   bool clear_button() const { return clear_button_; }
   RectF clear_button_rect() const;  // 局部坐标（点击/悬停判定）
   std::wstring tooltip_text() const override;
+  std::optional<RectF> tooltip_anchor_rect() const override;
 
   // ---- 编辑命令（对应 Win32 EM_* / WM_CUT 等语义；台账 1670-1674） ----
   bool can_undo() const { return false; }  // EM_CANUNDO：本控件无撤销栈 → 恒 false
