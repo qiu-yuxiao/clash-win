@@ -1,4 +1,4 @@
-<#
+﻿<#
   acceptance_clean_machine.ps1 — 干净机 P0「独立可用性」自检与证据链留证。
 
   口径：docs/01-目的与方针.md:27-35

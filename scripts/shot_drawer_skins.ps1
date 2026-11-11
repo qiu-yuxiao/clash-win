@@ -1,4 +1,4 @@
-# 6 套皮肤「设置抽屉」逐套截图（开发期对照用，不属于交付物）
+﻿# 6 套皮肤「设置抽屉」逐套截图（开发期对照用，不属于交付物）
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\shot_drawer_skins.ps1 -Mode light
 #
 # 两个关键点（踩过的坑）：

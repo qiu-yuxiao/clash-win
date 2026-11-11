@@ -1,4 +1,4 @@
-# smoke_shot.ps1 — 仅启动 + 截图（不做网络体检，用于快速目视核对）
+﻿# smoke_shot.ps1 — 仅启动 + 截图（不做网络体检，用于快速目视核对）
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke_shot.ps1 [-Out <目录>\shot.png]
 # 默认输出 %TEMP%\cwrun\shots\shot.png（目录不存在会自动创建）
 param(

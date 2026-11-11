@@ -1,4 +1,4 @@
-# 端到端验证：大尺寸模式 → 打开设置抽屉 → 皮肤条可见 → 点击皮肤格切换皮肤
+﻿# 端到端验证：大尺寸模式 → 打开设置抽屉 → 皮肤条可见 → 点击皮肤格切换皮肤
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\probe_big_skin.ps1
 param(
   [int]$ClickX = -1,      # >=0 时点击皮肤格（客户区物理坐标）

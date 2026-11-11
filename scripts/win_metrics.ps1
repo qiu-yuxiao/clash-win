@@ -1,4 +1,4 @@
-# win_metrics.ps1 — 打印指定进程主窗口的 DPI / 外框 / 客户区 / 换算逻辑尺寸
+﻿# win_metrics.ps1 — 打印指定进程主窗口的 DPI / 外框 / 客户区 / 换算逻辑尺寸
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\win_metrics.ps1 -ProcName clashwin
 param([string[]]$ProcName = @("clashwin", "clash-mini"))
 

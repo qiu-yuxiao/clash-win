@@ -1,4 +1,4 @@
-<#
+﻿<#
   elevate_and_run.ps1 — 用一次 UAC 提升启动 acceptance_uac.ps1。
 
   存在原因：CI / Agent 的 PowerShell 进程通常非管理员且无交互桌面，

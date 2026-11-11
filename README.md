@@ -6,6 +6,11 @@
 [![Language: C++20](https://img.shields.io/badge/Language-C%2B%2B20-00599C?style=flat-square&logo=c%2B%2B)](https://isocpp.org)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-0078D6?style=flat-square&logo=windows)](https://github.com/qiu-yuxiao/clash-win)
 
+> [!IMPORTANT]
+> **发版（Release）有强制流程，不允许例外。**
+> 任何发布新版本都必须严格走 [`docs/RELEASE_PROCESS.md`](docs/RELEASE_PROCESS.md)，**唯一入口是 `scripts/release.ps1`**（版本号自动同步四处、强制预检、本地回归、一步发布）。**切勿手敲 `git tag` 后直接推送**——推送会被 `pre-push` 钩子拦截并失败。
+> 克隆仓库后第一件事：跑一次 `powershell -File scripts/install_hooks.ps1` 安装强制钩子。详见文末「发版流程」。
+
 > **Clash Win v0.2.2** — the pure Windows native C++ rewrite of Clash Mini.
 > Zero web engine. Zero JavaScript runtime. Built with Win32 API, Direct2D/DirectWrite, and modern C++20.
 
@@ -172,6 +177,31 @@ The repository ships a large unit-test suite (offscreen pixel assertions include
 | "Check for updates" does nothing / 检查更新无反应 | [Known Limitations (c)](docs/KNOWN_LIMITATIONS_0.2.2.md) |
 | Ports, service conflicts / 端口与服务冲突 | [Relationship with Clash Mini](#relationship-with-clash-mini-与-clash-mini-的关系) |
 | Something else is broken / 其他问题 | [Issues](https://github.com/qiu-yuxiao/clash-win/issues) (please use the templates) · [Discussions](https://github.com/qiu-yuxiao/clash-win/discussions) |
+
+---
+
+## 发版流程（Release）
+
+发版是**强制流程，不允许绕行，也不允许手敲 `git tag` 直接推送**。完整规则见 [`docs/RELEASE_PROCESS.md`](docs/RELEASE_PROCESS.md)。要点：
+
+1. **克隆后第一件事 —— 安装强制钩子**
+   ```powershell
+   powershell -File scripts/install_hooks.ps1
+   ```
+   它会把 `pre-push` 钩子放进 `.git/hooks/`。此后任何 `git push <remote> vX.Y.Z` 都会**先重跑发版预检，不过即拒绝推送**。
+
+2. **唯一发版入口 —— `scripts/release.ps1`**
+   ```powershell
+   # 本地编译 + 全量回归 + 预检 + 脚手架发布材料，全部自动完成（第一道闸）
+   powershell -File scripts/release.ps1 -Version <新版本号> -Build
+   # 确认无误后再发布（推送 dev/main + 打 tag，触发 CI）
+   powershell -File scripts/release.ps1 -Version <新版本号> -Push
+   ```
+   版本号只输入一次，脚本自动同步 `constants.h` / `clashwin.nsi` / `app-update.json` / 回归测试四处；`-Build` 会先本地编译并跑全量回归，`-Push` 才碰远程。
+
+3. **CI 兜底**：即便绕过本地钩子直接推 tag，`release.yml` 的 build job 在还原 sidecar 后仍会重跑全部预检 gate，任一失败整条 run 失败、绝不发布。
+
+> ⚠️ 不遵守上述流程、手敲 `git tag` + `git push --tags` 的提交，会被 `pre-push` 钩子或 CI 拦截，无法发布。按流程执行，即可一次成功发版。
 | Report a vulnerability / 报告安全漏洞 | [SECURITY.md](SECURITY.md) — **privately**, not via a public issue |
 
 ---

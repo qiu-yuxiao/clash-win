@@ -1,4 +1,4 @@
-# 滑块有效性端到端验证（开发期对照用，不属于交付物）
+﻿# 滑块有效性端到端验证（开发期对照用，不属于交付物）
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\shot_factor_effect.ps1
 #
 # 目的：验证「每套皮肤的两个滑块拖动后画面真的变化」——

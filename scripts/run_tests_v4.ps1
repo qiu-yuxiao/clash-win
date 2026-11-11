@@ -1,4 +1,4 @@
-# 全量测试运行器。
+﻿# 全量测试运行器。
 # 默认：复制到 %TEMP%\cwrun 隔离运行（360 对 build\bin\Release 路径下进程的写限制，
 #       实测 2026-11-03 即使把仓库目录加入信任区后原地仍报 CreateDirectoryW err=5）。
 # -InPlace：在 build\bin\Release 原地运行，用于验证 360 策略是否已对该 exe 生效。

@@ -136,6 +136,30 @@ if (Test-Path -LiteralPath $wmLocal) {
   Check "sidecar/win-mihomo.exe 存在" $false "本地 sidecar/ 缺失内核；本地构建 setup 会失败，CI 也会走上游补齐，但发版前应先补上"
 }
 
+# ---------- GATE 7: 所有 ps1 脚本必须带 UTF-8 BOM 且无孤立 CR ----------
+# v0.2.6 第 3 次 CI 失败根因：无 BOM 的 UTF-8 中文脚本在 pwsh 7 下被按系统默认
+# 编码(CP936)误读，导致字符串/括号语法错乱（ParserError）。本地 PowerShell 5.1 容错
+# 掩盖了该问题。此 gate 让本地（即便 5.1）也能提前发现缺 BOM / 坏编码的脚本，
+# 不再等 CI 跑 18 分钟才暴露。
+Write-Host "`n[7] 发版脚本编码合规（UTF-8 BOM + 无孤立 CR）" -ForegroundColor Yellow
+$allPs1 = @(Get-ChildItem "$RepoRoot/scripts" -Filter *.ps1 -Recurse | Select-Object -ExpandProperty FullName)
+if ($allPs1.Count -eq 0) {
+  Check "找到发版脚本" $false "scripts/ 下没有任何 *.ps1"
+} else {
+  $encBad = @(); $crBad = @()
+  foreach ($p in $allPs1) {
+    $b = [System.IO.File]::ReadAllBytes($p)
+    if (-not ($b.Length -ge 3 -and $b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF)) {
+      $encBad += (Split-Path $p -Leaf)
+    }
+    for ($i = 0; $i -lt $b.Length - 1; $i++) {
+      if ($b[$i] -eq 0x0D -and $b[$i+1] -ne 0x0A) { $crBad += (Split-Path $p -Leaf); break }
+    }
+  }
+  Check ("全部 {0} 个 ps1 含 UTF-8 BOM" -f $allPs1.Count) ($encBad.Count -eq 0) ("missing BOM: " + ($encBad -join ', '))
+  Check ("全部 {0} 个 ps1 无孤立 CR" -f $allPs1.Count) ($crBad.Count -eq 0) ("lone CR: " + ($crBad -join ', '))
+}
+
 # ---------- 汇总 ----------
 Write-Host "`n=== 结果: PASS=$pass  FAIL=$fail ===" -ForegroundColor Cyan
 if ($fail -gt 0) {

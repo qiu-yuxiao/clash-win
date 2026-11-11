@@ -1,4 +1,4 @@
-<#
+﻿<#
   acceptance_uac.ps1 — 把 docs/README.md:129-138 的 5 项 UAC 验收编排为
   「一次管理员授权、逐项自动留证、产出结构化报告」。
 

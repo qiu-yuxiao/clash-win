@@ -1,4 +1,4 @@
-# 6 套皮肤逐套截图（开发期对照用，不属于交付物）
+﻿# 6 套皮肤逐套截图（开发期对照用，不属于交付物）
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\shot_skins.ps1
 # 说明：通过 <app_home>\clashwin-skin.json 指定 skin + 逐皮肤因子槽位
 #       （factors: { "<skin>": { "v1": …, "v2": … } }），逐套启动截图后退出。

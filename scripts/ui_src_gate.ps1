@@ -1,4 +1,4 @@
-# ui_src_gate.ps1 — UI 层「无源码出处常量」门禁（G4 加固版 / 2026-11-07）
+﻿# ui_src_gate.ps1 — UI 层「无源码出处常量」门禁（G4 加固版 / 2026-11-07）
 # 用法：powershell -ExecutionPolicy Bypass -File scripts\ui_src_gate.ps1 [src根目录]
 #   -VerifySources      额外输出出处引用解析明细（RESOLVED 实文 / SHORTHAND）
 #   -Strict             把四类存量弱项一并计入违规（供冻结后 / CI 启用）

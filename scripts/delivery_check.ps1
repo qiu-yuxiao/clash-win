@@ -1,4 +1,4 @@
-# delivery_check.ps1 — 交付前自检（单一事实源 + 四方哈希 + 工作区门禁 + 运行态一致性）
+﻿# delivery_check.ps1 — 交付前自检（单一事实源 + 四方哈希 + 工作区门禁 + 运行态一致性）
 #
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File scripts\delivery_check.ps1 -Record

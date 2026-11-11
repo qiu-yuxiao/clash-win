@@ -1,4 +1,4 @@
-# ClashWin 便携版打包（1:1 对齐 Clash Mini scripts/portable.mjs）
+﻿# ClashWin 便携版打包（1:1 对齐 Clash Mini scripts/portable.mjs）
 #
 # Mini 的做法（scripts/portable.mjs:14-55）：
 #   1) 在配置目录里写一个空的 PORTABLE 标记文件（:25-27）

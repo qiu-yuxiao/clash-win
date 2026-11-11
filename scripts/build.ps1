@@ -1,4 +1,4 @@
-# build.ps1 — ClashWin 标准增量编译入口（开发者日常使用）
+﻿# build.ps1 — ClashWin 标准增量编译入口（开发者日常使用）
 #
 # 根因治理：WorkBuddy 透明代理(sandbox-cli)会向子进程注入大小写重复的 *_PROXY
 # 变量（HTTPS_PROXY 与 https_proxy 同值并存），导致 MSBuild CL 任务 "字典关键字冲突"

@@ -108,3 +108,13 @@ Copyright (c) 2026 秋雨潇潇 <qiuyuxiao@gmail.com> (portions relating to the 
 Copyright (c) the original authors of Clash Verge Rev and Clash Mini (upstream lineage).
 
 This project is licensed under the **GNU General Public License v3.0 (GPL-3.0-only)**. By contributing, you agree that your contributions are licensed under the same terms. See [LICENSE](LICENSE).
+
+## Releasing（发版）
+
+Releasing follows a **mandatory, non-negotiable process**. Full rules: [`docs/RELEASE_PROCESS.md`](docs/RELEASE_PROCESS.md).
+
+- **Single entry point**: `scripts/release.ps1`. You type the version **once**; it auto-syncs `constants.h` / `clashwin.nsi` / `app-update.json` / the release-readiness test, then runs the preflight gates and a local full regression. `-Build` compiles + regresses locally (first gate); `-Push` touches the remote.
+- **Install the hook right after cloning**: `powershell -File scripts/install_hooks.ps1`. After that, pushing a `v*` tag re-runs the preflight gates first and **rejects the push if any gate fails**.
+- **Never hand-type `git tag` + push**: CI (`release.yml`) restores `sidecar/` and re-runs every preflight gate; any failure fails the whole run and publishes nothing.
+
+> Pushing a tag, creating a Release, or uploading assets is a **release action** reserved for the maintainer per the process above — never tag or publish from a feature branch by hand. Following the process is what makes a release succeed on the first CI run.

@@ -1,4 +1,4 @@
-# ClashWin 代码签名脚本（Windows Authenticode / signtool）
+﻿# ClashWin 代码签名脚本（Windows Authenticode / signtool）
 #
 # 作用：
 #   1) 幂等维护一张本机自签代码签名证书（CN=ClashWin，EKU=Code Signing）：

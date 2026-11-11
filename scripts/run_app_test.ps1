@@ -1,4 +1,4 @@
-# run_app_test.ps1 — 一条命令完成「干净环境启动 → 四项自检 → 截图 → 收尾」
+﻿# run_app_test.ps1 — 一条命令完成「干净环境启动 → 四项自检 → 截图 → 收尾」
 #
 # 用法（默认：复制到 %TEMP%\cwrun\app 运行，最贴近发布形态）：
 #   powershell -NoProfile -File scripts\run_app_test.ps1

@@ -1,4 +1,4 @@
-# 在 NSIS 编译期签名卸载器（!uninstfinalize 钩子专用）
+﻿# 在 NSIS 编译期签名卸载器（!uninstfinalize 钩子专用）
 #
 # 背景：NSIS 3.11 的 !uninstfinalize 不注入 UNINSTALLER_OUT_FILE、也不追加路径参数，
 #       但卸载器 blob 会以 %TEMP%\nstXXXX.tmp 的形式在编译期落盘（与编译输出的
