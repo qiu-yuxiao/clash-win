@@ -237,6 +237,7 @@ class SettingsDrawer : public Stack {
   bool bottom_row_visible() const { return bottom_row_visible_; }
   // 启动期用 verge 实际值回填抽屉控件（不触发 patch，避免启动回写）
   void sync_takeover(bool sys_proxy, bool tun);
+  void sync_routing(const std::string& rule_fallback);
   void sync_basic(bool auto_launch, bool silent, bool allow_lan, bool ipv6,
                   int mixed_port);
   static std::wstring fmt_factor(float v);

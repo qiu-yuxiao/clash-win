@@ -32,6 +32,8 @@ class Segmented : public Widget {
   size_t option_count() const { return options_.size(); }
 
   std::function<void(int)> on_change;
+  // 点击当前已选中分段时的附加回调（如代理方式第 3 段「添加网址」重复点击仍需开弹窗）
+  std::function<void(int)> on_reclick;
 
   // T12：主题接入开关（true 时 on_paint 走 ThemeService 查表）
   bool themed_ = false;

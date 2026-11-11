@@ -22,6 +22,7 @@
 #include "ui/scenes/node_data.h"
 #include "ui/scenes/node_list.h"
 #include "ui/scenes/profile_import_card.h"
+#include "ui/scenes/settings_drawer.h"
 #include "ui/snackbar_w.h"
 #include "ui/theme/theme.h"
 #include "ui/title_bar.h"
@@ -308,17 +309,29 @@ UT_TEST(t38_enhanced_verge_switches_and_routing_notices) {
     UT_CHECK(zh_text.find(c.zh_substr) != std::string::npos);
   }
 
-  // 外观/皮肤/语言保持即时视觉生效、不弹冗余成功 toast
-  UT_CHECK(resolve_verge_patch_success_key("theme_mode", "dark").empty());
-  UT_CHECK(resolve_verge_patch_success_key("clash_mini_control_skin", "modern").empty());
-  UT_CHECK(resolve_verge_patch_success_key("language", "en").empty());
+  // 外观主题 / 皮肤 / 语言切换均提供明确结果提示，且 13 种语言词条全部齐备
+  UT_CHECK_EQ(resolve_verge_patch_success_key("theme_mode", "dark"),
+              std::string("layout.notices.themeSwitchedDark"));
+  UT_CHECK_EQ(resolve_verge_patch_success_key("theme_mode", "light"),
+              std::string("layout.notices.themeSwitchedLight"));
+  UT_CHECK_EQ(resolve_verge_patch_success_key("theme_mode", "system"),
+              std::string("layout.notices.themeSwitchedSystem"));
+  UT_CHECK_EQ(resolve_verge_patch_success_key("clash_mini_control_skin", "modern-flat"),
+              std::string("layout.notices.skinSwitched"));
+  UT_CHECK_EQ(resolve_verge_patch_success_message("clash_mini_control_skin", "modern-flat"),
+              std::string("已切换皮肤: Modern"));
+  UT_CHECK_EQ(resolve_verge_patch_success_key("language", "en"),
+              std::string("layout.notices.languageSwitched"));
 
-  // 英文词条同步完整可用
-  i18n.set_language("en");
-  UT_CHECK_EQ(i18n.t("layout.notices.switchedToGlobalProxy"),
-              std::string("Switched to Global Proxy"));
-  UT_CHECK_EQ(i18n.t("layout.notices.autoLaunchEnabled"),
-              std::string("Auto Launch enabled"));
+  static const char* kAllLangs[] = {"zh", "zhtw", "en", "ar", "de", "es", "fa",
+                                    "id", "jp",   "ko", "ru", "tr", "tt"};
+  for (const char* lang : kAllLangs) {
+    i18n.set_language(lang);
+    const std::string t1 = i18n.t("layout.notices.switchedToGlobalProxy");
+    const std::string t2 = i18n.t("layout.notices.languageSwitched");
+    UT_CHECK(!t1.empty() && t1 != "layout.notices.switchedToGlobalProxy");
+    UT_CHECK(!t2.empty() && t2 != "layout.notices.languageSwitched");
+  }
   i18n.set_language("zh");
 }
 
@@ -486,5 +499,146 @@ UT_TEST(t38_enhanced_node_switch_batch_test_pin_and_conn_notices) {
   UT_CHECK_EQ(snap[0].type, std::string("error"));
   UT_CHECK_EQ(snap[0].message, std::string("API unreachable"));
 
+  // (6) 单节点测速与排序模式切换通知
   clear_notices(ns);
+  dispatch_single_delay_notice("JP Edge (999888)", 35);
+  snap = ns.snapshot();
+  UT_CHECK_EQ(snap.size(), 1u);
+  UT_CHECK_EQ(snap[0].type, std::string("success"));
+  UT_CHECK_EQ(snap[0].message, std::string("节点测速: JP Edge (35ms)"));
+
+  clear_notices(ns);
+  dispatch_single_delay_notice("JP Edge (999888)", 0);
+  snap = ns.snapshot();
+  UT_CHECK_EQ(snap.size(), 1u);
+  UT_CHECK_EQ(snap[0].type, std::string("warning"));
+  UT_CHECK_EQ(snap[0].message, std::string("节点测速超时: JP Edge"));
+
+  clear_notices(ns);
+  dispatch_sort_mode_notice(1);
+  snap = ns.snapshot();
+  UT_CHECK_EQ(snap.size(), 1u);
+  UT_CHECK_EQ(snap[0].type, std::string("info"));
+  UT_CHECK_EQ(snap[0].message, std::string("排序方式: 按延迟排序"));
+
+  clear_notices(ns);
+}
+
+// 7. 致命死锁回归：UI 线程在 SnackbarW::attach 后直接调 NoticeService::push / hide
+//    必须同步刷新 items_ 并真实渲染出 Alert 像素（此前持非递归锁回调 refresh->snapshot 抛异常被吞）
+UT_TEST(t38_live_snackbar_attach_ui_thread_push_hide_and_d2d_pixels) {
+  auto& i18n = i18n::I18n::instance();
+  if (!i18n.inited()) i18n.init(util::dirs::exe_dir() + L"\\locales", "zh");
+  i18n.set_language("zh");
+
+  UiPostbox::instance().mark_ui_thread();
+  UT_CHECK(UiPostbox::instance().on_ui_thread());
+
+  auto& ts = theme::ThemeService::instance();
+  ts.init(theme::SkinId::Retro3d, theme::ThemeMode::Dark);
+
+  auto& ns = events::NoticeService::instance();
+  clear_notices(ns);
+
+  // 复刻用户真实窗口参数：逻辑 271×680 @ 144 DPI (150% 缩放 = 物理 407×1020)
+  make_offscreen(407, 1020, 144.0f);
+  Stack root;
+  auto drawer = std::make_unique<scene::SettingsDrawer>();
+  scene::SettingsDrawer* drawer_ptr = drawer.get();
+  drawer_ptr->wire_callbacks();
+  drawer_ptr->set_open(true);
+  root.add_child(std::move(drawer));
+
+  auto snack = std::make_unique<SnackbarW>();
+  SnackbarW* snack_ptr = snack.get();
+  snack_ptr->set_position("top-right");
+  snack_ptr->attach(ns);
+  root.add_child(std::move(snack));
+
+  root.layout_tree({0, 0, 271.0f, 680.0f});
+  UT_CHECK_EQ(snack_ptr->visible_count(), 0u);
+
+  // Step A: UI 线程 push 常驻等待通知（如点击 Allow LAN 开关瞬间）
+  const uint64_t wait_id = ns.push("info", tr8("layout.notices.adjusting"), 0);
+  UT_CHECK_EQ(snack_ptr->visible_count(), 1u);
+  UT_CHECK_EQ(snack_ptr->item_rects().size(), 1u);
+
+  rt().begin_frame();
+  rt().clear(ts.vars().theme_bg);
+  root.paint_all(rt());
+  rt().end_frame();
+
+  const RectF rc_info = snack_ptr->item_rects()[0];
+  // 逻辑坐标 (rc_info.x + 6, rc_info.y + 10) × 1.5 转物理像素采样通知左缘纯色背景
+  const int px_x = static_cast<int>(std::round((rc_info.x + 6.0f) * 1.5f));
+  const int px_y = static_cast<int>(std::round((rc_info.y + 10.0f) * 1.5f));
+  const Px p_info = pixel(px_x, px_y);
+  const Color4f exp_info = ts.palette().info_color;
+  UT_CHECK(std::abs(static_cast<int>(p_info.r) - static_cast<int>(std::round(exp_info.r * 255.0f))) <= 3);
+  UT_CHECK(std::abs(static_cast<int>(p_info.g) - static_cast<int>(std::round(exp_info.g * 255.0f))) <= 3);
+  UT_CHECK(std::abs(static_cast<int>(p_info.b) - static_cast<int>(std::round(exp_info.b * 255.0f))) <= 3);
+
+  // Step B: UI 线程 hide(wait_id) + push("success", ...)（模拟 UiPostbox 收尾回调）
+  ns.hide(wait_id);
+  UT_CHECK_EQ(snack_ptr->visible_count(), 0u);
+  ns.push("success", tr8("layout.notices.allowLanEnabled"), 2500);
+  UT_CHECK_EQ(snack_ptr->visible_count(), 1u);
+  UT_CHECK_EQ(snack_ptr->items()[0].message, std::string("局域网连接 (Allow LAN) 已开启"));
+
+  rt().begin_frame();
+  rt().clear(ts.vars().theme_bg);
+  root.paint_all(rt());
+  rt().end_frame();
+
+  const Px p_succ = pixel(px_x, px_y);
+  const Color4f exp_succ = ts.palette().success_color;
+  UT_CHECK(std::abs(static_cast<int>(p_succ.r) - static_cast<int>(std::round(exp_succ.r * 255.0f))) <= 3);
+  UT_CHECK(std::abs(static_cast<int>(p_succ.g) - static_cast<int>(std::round(exp_succ.g * 255.0f))) <= 3);
+  UT_CHECK(std::abs(static_cast<int>(p_succ.b) - static_cast<int>(std::round(exp_succ.b * 255.0f))) <= 3);
+
+  // Step C: 临时 SnackbarW 析构绝不能冲掉主窗口 snack_ptr 的订阅句柄
+  {
+    SnackbarW temp_bar;
+    temp_bar.attach(ns);
+    UT_CHECK_EQ(temp_bar.visible_count(), 1u);
+  }
+  clear_notices(ns);
+  UT_CHECK_EQ(snack_ptr->visible_count(), 0u);
+  ns.push("success", "主窗口通知条仍然存活", 2500);
+  UT_CHECK_EQ(snack_ptr->visible_count(), 1u);
+
+  clear_notices(ns);
+}
+
+// 8. 代理方式三段同步与「添加网址」重复点击回归
+UT_TEST(t38_routing_card_sync_and_addurl_reclick) {
+  make_offscreen(271, 680, 96.0f);
+  scene::SettingsDrawer drawer;
+  int patch_calls = 0;
+  int add_rule_calls = 0;
+  drawer.on_patch_verge = [&](const std::string&, const nlohmann::json&) {
+    ++patch_calls;
+  };
+  drawer.on_add_rule = [&] { ++add_rule_calls; };
+  drawer.wire_callbacks();
+  drawer.set_open(true);
+  drawer.layout_tree({0, 0, 271.0f, 680.0f});
+
+  // sync_routing 静默同步三种配置态，不触发 on_patch_verge
+  drawer.sync_routing("proxy");
+  UT_CHECK_EQ(drawer.routing_card()->seg_->selected(), 0);
+  drawer.sync_routing("direct");
+  UT_CHECK_EQ(drawer.routing_card()->seg_->selected(), 1);
+  drawer.sync_routing("addurl");
+  UT_CHECK_EQ(drawer.routing_card()->seg_->selected(), 2);
+  UT_CHECK_EQ(patch_calls, 0);
+
+  // 已处于第 2 段（添加网址）时再次点击第 2 段：必须照常打开 AddUrlDialog
+  Segmented* seg = drawer.routing_card()->seg_;
+  const PointF third_seg_pt{seg->bounds().w * 0.85f, seg->bounds().h * 0.5f};
+  MouseEvent down{MouseEventType::Down, third_seg_pt, kMouseLeft};
+  MouseEvent up{MouseEventType::Up, third_seg_pt, kMouseLeft};
+  seg->on_mouse(down);
+  seg->on_mouse(up);
+  UT_CHECK_EQ(add_rule_calls, 1);
 }

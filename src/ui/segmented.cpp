@@ -121,7 +121,12 @@ bool Segmented::on_mouse(const MouseEvent& e) {
     int idx = hit_segment(e.pos);
     pressed_ = -1;
     if (idx >= 0) {
-      set_selected(idx);
+      if (idx == selected_) {
+        invalidate();
+        if (on_reclick) on_reclick(idx);
+      } else {
+        set_selected(idx);
+      }
       return true;
     }
   }

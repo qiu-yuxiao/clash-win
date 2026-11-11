@@ -31,18 +31,24 @@ void uninstall_notice_handler();
 bool dispatch_notice(const char* status, const std::string& message);
 
 // ---------- 特约交互增强通知助手（用户拍板补齐双方静默/含糊操作） ----------
-// 1/2. 代理分流模式切换与基础设置 4 个小开关：返回成功提示的 i18n key（无需弹通知时返回空串）
+// 1/2. 代理分流模式切换、基础设置开关、外观主题/皮肤/语言切换：
+//      resolve_verge_patch_success_key 返回对应 i18n key（无需弹通知时返回空串）；
+//      resolve_verge_patch_success_message 返回已完成参数插值的本地化提示文本。
 std::string resolve_verge_patch_success_key(const std::string& k,
                                             const nlohmann::json& v);
-// 3. 手动点选节点 / 顶栏点击轮换节点结果通知
+std::string resolve_verge_patch_success_message(const std::string& k,
+                                                const nlohmann::json& v);
+// 3. 手动点选节点 / 顶栏点击轮换节点 / 顶栏单节点测速结果通知
 void dispatch_node_switch_notice(bool ok, bool changed,
                                  const std::string& node_name,
                                  const std::string& err_detail);
-// 4. ⚡ 批量测速择优 / 过滤输入自动测速择优通知（开始常驻 info → 结束结果分流）
+void dispatch_single_delay_notice(const std::string& node_name, int delay_ms);
+// 4. ⚡ 批量测速择优 / F1 全量测速择优 / 过滤输入自动测速择优通知
 uint64_t begin_batch_test_notice();
 void finish_batch_test_notice(uint64_t wait_id,
                               const scene::BatchTestSummary& summary);
-// 5. 窗口置顶与断开全部连接通知
+void dispatch_sort_mode_notice(int sort_type);
+// 5. 窗口置顶与连接管理通知
 void dispatch_pin_window_notice(bool pinned);
 void dispatch_close_all_connections_notice(bool ok, const std::string& err_detail);
 

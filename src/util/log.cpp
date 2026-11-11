@@ -1,7 +1,8 @@
 #include "util/log.h"
 #include <windows.h>
-#include <mutex>
 #include <cstdio>
+#include <filesystem>
+#include <mutex>
 
 namespace clashwin {
 
@@ -18,7 +19,8 @@ void Logger::init(const std::wstring& exe_dir) {
   std::lock_guard lk(g_mutex);
   if (inited_) return;
   const std::wstring dir = exe_dir + L"\\logs";
-  CreateDirectoryW(dir.c_str(), nullptr);  // 已存在则忽略
+  std::error_code ec;
+  std::filesystem::create_directories(std::filesystem::path(dir), ec);
   const std::wstring path = dir + L"\\clashwin.log";
   HANDLE h = CreateFileW(path.c_str(), FILE_APPEND_DATA,
                          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,

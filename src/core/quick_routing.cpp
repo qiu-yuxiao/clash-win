@@ -6,6 +6,7 @@
 
 #include "cmd/cmd_support.h"
 #include "events/event_bus.h"
+#include "i18n/i18n.h"
 #include "util/dirs.h"
 #include "util/log.h"
 #include "util/str_utils.h"
@@ -205,7 +206,15 @@ QuickRouteResult add_quick_routing_rule(RuleType type, const std::string& value,
   cmd::run_enhance_pipeline();
 
   // Send EventBus notification
-  events::EventBus::notice_message("profile_switched", "手动路径控制规则已置顶生效: " + new_rule);
+  std::string msg = "手动路径控制规则已置顶生效: " + new_rule;
+  if (i18n::I18n::instance().inited()) {
+    const std::string localized =
+        i18n::I18n::instance().t("layout.notices.quickRuleApplied", {{"rule", new_rule}});
+    if (localized != "layout.notices.quickRuleApplied" && !localized.empty()) {
+      msg = localized;
+    }
+  }
+  events::EventBus::notice_message("profile_switched", msg);
 
   return {true, new_rule, ""};
 }

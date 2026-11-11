@@ -36,8 +36,10 @@ class NoticeService {
   // 当前可见条目（到期的在快照前惰性裁剪）
   std::vector<NoticeItem> snapshot();
 
-  void subscribe(ChangeCallback cb);   // 返回前先回调一次由订阅方自行调用
-  void unsubscribe();
+  // 返回订阅句柄（非 0）；回调在内部互斥锁释放后触发，允许回调内安全调用 snapshot()
+  uint64_t subscribe(ChangeCallback cb);
+  void unsubscribe(uint64_t sub_id);
+  void unsubscribe();  // 清空全部订阅（兼容旧测试清场）
 
   // 到期扫描（内部线程驱动；测试可手动调）
   void sweep();

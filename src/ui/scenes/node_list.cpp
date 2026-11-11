@@ -755,6 +755,7 @@ void NodeList::toggle_sort() {
   }
   rebuild_visible();
   sync_list();
+  if (on_sort_changed) on_sort_changed(sort_type_);
 }
 
 // 皮肤/亮暗热切换：重刷控件级缓存

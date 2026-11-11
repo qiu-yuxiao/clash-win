@@ -332,7 +332,8 @@ bool App::init() {
     (void)sysopt.update_sysproxy(view);
     sysopt.refresh_guard(view);
 
-    // ← module/monitor.rs 守护线程
+    // ← module/monitor.rs 守护线程（v3.2.4 BUG-315：双频 TCP:53 + DNS 兜底物理网络探测）
+    auto net_probe = std::make_shared<core::CoreMonitor::ThrottledNetProbe>();
     auto& monitor = system::CoreMonitor::instance();
     monitor.set_hooks({
         /*.api_alive =*/[] {
@@ -369,20 +370,23 @@ bool App::init() {
           return rr;
         },
         /*.network_online =*/
-        [] {
-          ULONG size = 16 * 1024;
-          std::vector<char> buf(size);
-          auto* aa = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buf.data());
-          if (GetAdaptersAddresses(AF_UNSPEC,
-                                   GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST,
-                                   nullptr, aa, &size) != NO_ERROR) {
-            return false;
-          }
-          for (auto* a = aa; a; a = a->Next)
-            if (a->IfType != IF_TYPE_SOFTWARE_LOOPBACK &&
-                a->OperStatus == IfOperStatusUp)
-              return true;
-          return false;
+        [net_probe] {
+          // ← monitor.rs:289-308 + :1275-1293（v3.2.4 BUG-315）：
+          //   在线 60s / 离线 5s 节流；优先 TCP:53 直连 223.5.5.5 / 119.29.29.29 /
+          //   1.1.1.1，避开 TUN 代理环路与 DNS 解析死锁，最后回退 test_url DNS 兜底。
+          const int64_t now = static_cast<int64_t>(GetTickCount64());
+          return net_probe->check(now, [] {
+            std::string test_url = "https://cp.cloudflare.com/generate_204";
+            try {
+              const auto verge = config::Config::instance().verge().latest_arc();
+              if (verge && verge->default_latency_test &&
+                  !verge->default_latency_test->empty()) {
+                test_url = *verge->default_latency_test;
+              }
+            } catch (...) {
+            }
+            return core::CoreMonitor::is_physical_network_online(2, test_url);
+          });
         },
         /*.node_healthy =*/
         []() -> bool {
@@ -415,9 +419,9 @@ bool App::init() {
         },
         /*.probe_metrics_with_fallback =*/
         []() -> bool {
-          // ★ §5.1 按需拨测门控（← Mini monitor.rs:673-683 evaluate_failover）
-          //   活跃节点健康且数据新鲜(<60s) → 不拨测；已判死且 10s 内刚复核 → 不重复拨测；
-          //   其余才真正拨测，复现 Mini 修复的「探测自激误报」（monitor.rs:62-63 注释）。
+          // ★ §5.1 按需拨测门控（← Mini monitor.rs:63,70,673-683 evaluate_failover，v3.2.4 BUG-315）
+          //   活跃节点健康且数据新鲜(<20s) → 不拨测；已判死且 10s 内刚复核 → 不重复拨测；
+          //   其余才真正拨测，兼顾突发断流快速感知与防止探测风暴自激误报。
           auto& client = cmd::mihomo_unchecked();
           auto grp = client.get_group_by_name("PROXY");
           if (grp.is_ok() && grp.value().now && !grp.value().now->empty()) {
@@ -439,9 +443,12 @@ bool App::init() {
                   }
                 }
                 int64_t now_sec = static_cast<int64_t>(std::time(nullptr));
-                if (p.alive && rec_sec >= 0 && (now_sec - rec_sec) < 60)
-                  return true;  // 健康且数据新鲜(<60s) → 免拨测
-                if (!p.alive && rec_sec >= 0 && (now_sec - rec_sec) < 10)
+                if (p.alive && rec_sec >= 0 &&
+                    (now_sec - rec_sec) < core::CoreMonitor::kHealthDataFreshSecs)
+                  return true;  // 健康且数据新鲜(<20s) → 免拨测
+                if (!p.alive && rec_sec >= 0 &&
+                    (now_sec - rec_sec) <
+                        core::CoreMonitor::kDeadConfirmMinIntervalSecs)
                   return true;  // 死判定且 10s 内刚复核 → 免重复拨测
               }
             }

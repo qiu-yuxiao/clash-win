@@ -110,11 +110,12 @@ constexpr NoticeRule kRules[] = {
     // ← core/manager/lifecycle.rs:237 Handle::notice_message("warning", ...)
     {"warning", "warning", nullptr, nullptr, 0},
     // ← utils/quick-routing.ts:105-109：success(key, raw, 2500)
+    //   msg 非空时已为完整规则生效说明句，直接显示不重复拼接「配置已切换」前缀
     {"profile_switched", "success",
-     "profiles.page.feedback.notifications.profileSwitched", nullptr, 2500},
-    // ← _layout.tsx:929-932：success(key, 1000)（切换配置，无明细）
+     "profiles.page.feedback.notifications.profileSwitched", nullptr, 2500, true},
+    // ← _layout.tsx:929-932：切换订阅配置成功提示
     {"profile_switched::ok", "success",
-     "profiles.page.feedback.notifications.profileSwitched", nullptr, 1000},
+     "profiles.page.feedback.notifications.profileSwitched", nullptr, 2500},
     // ← _layout.tsx:938-952：更新订阅 info → success
     {"update_subscription::info", "info", "layout.notices.updatingSubscription", nullptr, 0},
     {"update_subscription::ok", "success", "layout.notices.subscriptionUpdated", nullptr, 0},
@@ -198,7 +199,19 @@ std::string resolve_verge_patch_success_key(const std::string& k,
     const std::string fb = v.get<std::string>();
     if (fb == "proxy") return "layout.notices.switchedToGlobalProxy";
     if (fb == "direct") return "layout.notices.switchedToGfwList";
-    return {};  // "addurl" 会立即打开添加网址弹窗，无需重复弹 toast
+    return {};  // "addurl" 会立即打开添加网址弹窗，提交后再弹规则变更结果
+  }
+  if (k == "theme_mode" && v.is_string()) {
+    const std::string m = v.get<std::string>();
+    if (m == "light") return "layout.notices.themeSwitchedLight";
+    if (m == "dark") return "layout.notices.themeSwitchedDark";
+    return "layout.notices.themeSwitchedSystem";
+  }
+  if (k == "clash_mini_control_skin" && v.is_string()) {
+    return "layout.notices.skinSwitched";
+  }
+  if (k == "language" && v.is_string()) {
+    return "layout.notices.languageSwitched";
   }
   const bool on = v.is_boolean() && v.get<bool>();
   if (k == "enable_auto_launch") {
@@ -219,23 +232,59 @@ std::string resolve_verge_patch_success_key(const std::string& k,
   return {};
 }
 
+std::string resolve_verge_patch_success_message(const std::string& k,
+                                                const nlohmann::json& v) {
+  const std::string key = resolve_verge_patch_success_key(k, v);
+  if (key.empty()) return {};
+  if (k == "clash_mini_control_skin" && v.is_string()) {
+    const std::string raw = v.get<std::string>();
+    std::string display = raw;
+    if (raw == "retro-3d") display = "Trump-3D";
+    else if (raw == "original") display = "Original";
+    else if (raw == "modern-flat") display = "Modern";
+    else if (raw == "frosted-glass") display = "Frosted";
+    else if (raw == "cyberpunk") display = "Cyberpunk";
+    else if (raw == "monochrome") display = "Monochrome";
+    return tr8(key.c_str(), {{"name", display}});
+  }
+  return tr8(key.c_str());
+}
+
 void dispatch_node_switch_notice(bool ok, bool changed,
                                  const std::string& node_name,
                                  const std::string& err_detail) {
   auto& notices = events::NoticeService::instance();
   if (ok) {
     if (!changed || node_name.empty()) return;
-    // 豁免: Mini 无对应物 — 用户特约补齐节点切换成功短提示 1000ms（出处: 无）
+    // 豁免: Mini 无对应物 — 用户特约补齐节点切换成功提示 2000ms（出处: 无）
     notices.push(
         "success",
         tr8("layout.notices.nodeSwitched",
             {{"name", scene::clean_node_display_name(node_name)}}),
-        1000);
+        2000);
   } else {
     notices.push(
         "error",
         tr8("layout.notices.nodeSwitchFailed",
             {{"message", err_detail.empty() ? "Mihomo API error" : err_detail}}));
+  }
+}
+
+void dispatch_single_delay_notice(const std::string& node_name, int delay_ms) {
+  if (node_name.empty()) return;
+  auto& notices = events::NoticeService::instance();
+  const std::string clean = scene::clean_node_display_name(node_name);
+  if (delay_ms > 0 && delay_ms < 10000) {
+    // 豁免: Mini 无对应物 — 用户特约补齐单节点测速结果提示 2000ms（出处: 无）
+    notices.push("success",
+                 tr8("layout.notices.nodeDelayResult",
+                     {{"name", clean}, {"delay", std::to_string(delay_ms)}}),
+                 2000);
+  } else {
+    // 豁免: Mini 无对应物 — 用户特约补齐单节点测速超时提示 2500ms（出处: 无）
+    notices.push("warning",
+                 tr8("layout.notices.nodeDelayTimeout", {{"name", clean}}),
+                 2500);
   }
 }
 
@@ -269,21 +318,32 @@ void finish_batch_test_notice(uint64_t wait_id,
   }
 }
 
+void dispatch_sort_mode_notice(int sort_type) {
+  const char* tip_key = "proxies.page.tooltips.sortDefault";
+  if (sort_type == 1) tip_key = "proxies.page.tooltips.sortDelay";
+  else if (sort_type == 2) tip_key = "proxies.page.tooltips.sortName";
+  // 豁免: Mini 无对应物 — 用户特约补齐节点排序切换提示 1500ms（出处: 无）
+  events::NoticeService::instance().push(
+      "info",
+      tr8("layout.notices.sortChanged", {{"mode", tr8(tip_key)}}),
+      1500);
+}
+
 void dispatch_pin_window_notice(bool pinned) {
-  // 豁免: Mini 无对应物 — 用户特约补齐窗口置顶切换短提示 1000ms（出处: 无）
+  // 豁免: Mini 无对应物 — 用户特约补齐窗口置顶切换提示 2000ms（出处: 无）
   events::NoticeService::instance().push(
       "success",
       tr8(pinned ? "layout.notices.windowPinned"
                  : "layout.notices.windowUnpinned"),
-      1000);
+      2000);
 }
 
 void dispatch_close_all_connections_notice(bool ok,
                                            const std::string& err_detail) {
   if (ok) {
-    // 豁免: Mini 无对应物 — 用户特约补齐断开全部活动连接结果提示 1500ms（出处: 无）
+    // 豁免: Mini 无对应物 — 用户特约补齐断开全部活动连接结果提示 2000ms（出处: 无）
     events::NoticeService::instance().push(
-        "success", tr8("layout.notices.allConnectionsClosed"), 1500);
+        "success", tr8("layout.notices.allConnectionsClosed"), 2000);
   } else {
     events::NoticeService::instance().push(
         "error", err_detail.empty() ? "Failed to close connections" : err_detail);

@@ -230,16 +230,27 @@ bool D2dRenderTarget::resize(int width_px, int height_px) {
 // ---- 设备丢失恢复 ----
 bool D2dRenderTarget::recreate() {
   if (hwnd_) {
+    HWND saved_hwnd = hwnd_;
     int w = pixel_width(), h = pixel_height();
     destroy();
     if (!ctx_.init()) return false;
-    dpi_ = static_cast<float>(GetDpiForWindow(hwnd_));  // 【DPIARCH】重建同样换挡
+    hwnd_ = saved_hwnd;
+    if (w <= 0 || h <= 0) {
+      RECT rc{};
+      GetClientRect(hwnd_, &rc);
+      w = rc.right - rc.left;
+      h = rc.bottom - rc.top;
+    }
+    const UINT raw_dpi = GetDpiForWindow(hwnd_);
+    dpi_ = raw_dpi > 0 ? static_cast<float>(raw_dpi) : 96.0f;  // ← GetDpiForWindow 换挡
     HRESULT hr = ctx_.d2d()->CreateHwndRenderTarget(
         D2D1::RenderTargetProperties(
             D2D1_RENDER_TARGET_TYPE_DEFAULT,
             D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_UNKNOWN),
             dpi_, dpi_),
-        D2D1::HwndRenderTargetProperties(hwnd_, D2D1::SizeU(w, h)), &hwnd_rt_);
+        D2D1::HwndRenderTargetProperties(
+            hwnd_, D2D1::SizeU(static_cast<UINT32>(w), static_cast<UINT32>(h))),
+        &hwnd_rt_);
     if (FAILED(hr)) return false;
     active_rt_ = hwnd_rt_;
     on_target_ready();

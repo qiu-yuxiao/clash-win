@@ -177,6 +177,8 @@ class NodeList : public Widget {
   std::function<uint64_t()> on_batch_test_begin;
   std::function<void(uint64_t wait_id, const BatchTestSummary& summary)>
       on_batch_test_end;
+  // 排序模式切换回调（0=默认 1=延迟 2=名称），供宿主弹出排序结果提示
+  std::function<void(int sort_type)> on_sort_changed;
 
   void on_paint(IRenderTarget& rt) override;
   void on_arrange(const RectF& area) override;

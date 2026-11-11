@@ -1179,6 +1179,15 @@ void SettingsDrawer::sync_takeover(bool sys_proxy, bool tun) {
   takeover_card_->seg_->set_mode(tun ? "TUN" : (sys_proxy ? "SYS" : "MAN"));
 }
 
+void SettingsDrawer::sync_routing(const std::string& rule_fallback) {
+  if (!routing_card_ || !routing_card_->seg_) return;
+  // ← _layout.tsx:391-396 policyActiveIndex：proxy→0，addurl→2，其余(direct)→1
+  const int idx = (rule_fallback == "proxy")
+                      ? 0
+                      : ((rule_fallback == "addurl") ? 2 : 1);
+  routing_card_->seg_->select_silent(idx);
+}
+
 void SettingsDrawer::sync_basic(bool auto_launch, bool silent, bool allow_lan,
                                 bool ipv6, int mixed_port) {
   if (!basic_card_) return;
@@ -1620,6 +1629,10 @@ void SettingsDrawer::wire_callbacks() {
     static const char* fb[] = {"proxy", "direct", "addurl"};
     if (on_patch_verge) on_patch_verge("rule_fallback", fb[i]);
     if (on_patch_clash_mode) on_patch_clash_mode("rule");
+    if (i == 2 && on_add_rule) on_add_rule();
+  };
+  // ← routing-preference-card.tsx:202：已处于 addurl 段时再次点击「添加网址」仍须打开弹窗
+  routing_card_->seg_->on_reclick = [this](int i) {
     if (i == 2 && on_add_rule) on_add_rule();
   };
   // 2×2 开关

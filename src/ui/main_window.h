@@ -227,7 +227,7 @@ class MainWindow : public app::ILifecycleWindow {
 
   void reload_nodes();                             // NodeData 加载 + QuickBar 同步（失败 2s 重试）
   void sync_quick_bar(bool empty_as_dash = false); // 同步活跃节点名/延迟/协议胶囊/地址到 QuickBar
-  void trigger_auto_select_and_refresh(const std::string& uid); // 1:1 对齐 Mini：全量并发测速择优+10s复核
+  void trigger_auto_select_and_refresh(const std::string& uid, bool user_initiated = false); // 1:1 对齐 Mini：全量并发测速择优+10s复核
   void update_ime_position();                      // IME 候选窗跟随光标与 Win32 原生 Caret 同步
   // 首启就绪轮询：只刷新 proxies/activeDelay，不触发组测速
   void sync_first_run_proxy();

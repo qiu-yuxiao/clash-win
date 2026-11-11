@@ -141,6 +141,19 @@
     "batchTestAllTimeout": "所有候选节点测速均超时",
     "windowPinned": "窗口置顶已开启",
     "windowUnpinned": "窗口置顶已取消",
-    "allConnectionsClosed": "已断开全部活动连接"
+    "allConnectionsClosed": "已断开全部活动连接",
+    "themeSwitchedSystem": "已切换为跟随系统主题",
+    "themeSwitchedLight": "已切换为浅色主题",
+    "themeSwitchedDark": "已切换为深色主题",
+    "skinSwitched": "已切换皮肤: {{name}}",
+    "languageSwitched": "语言已切换为简体中文",
+    "importingSubscription": "正在导入订阅，请稍候…",
+    "switchingProfile": "正在切换配置，请稍候…",
+    "nodeDelayResult": "节点测速: {{name}} ({{delay}}ms)",
+    "nodeDelayTimeout": "节点测速超时: {{name}}",
+    "sortChanged": "排序方式: {{mode}}",
+    "connectionClosed": "已断开连接",
+    "connectionHistoryCleared": "历史连接记录已清空",
+    "quickRuleApplied": "手动路径控制规则已置顶生效: {{rule}}"
   }
 }

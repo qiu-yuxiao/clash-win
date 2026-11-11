@@ -25,7 +25,7 @@ namespace clashwin::ui {
 
 class SnackbarW : public Widget {
  public:
-  explicit SnackbarW(Widget* parent = nullptr) {
+  explicit SnackbarW(Widget* parent = nullptr) : Widget(parent) {
     set_z_order(1500);  // ← notice-manager.tsx:165 zIndex 1500
   }
   ~SnackbarW() override;
@@ -90,7 +90,8 @@ class SnackbarW : public Widget {
   std::vector<events::NoticeItem> items_;
   std::vector<RectF> item_rects_;
   std::string position_ = "top-right";
-  bool attached_ = false;
+  events::NoticeService* svc_ = nullptr;
+  uint64_t sub_id_ = 0;
 };
 
 }  // namespace clashwin::ui

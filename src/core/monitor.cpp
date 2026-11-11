@@ -1,15 +1,121 @@
 #include "core/monitor.h"
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 
+#include <algorithm>
+#include <cctype>
 #include <exception>
+#include <format>
+#include <fstream>
+#include <future>
 
 #include "util/log.h"
 #include "util/dirs.h"
 #include "yaml-cpp/yaml.h"
-#include <fstream>
+
+#pragma comment(lib, "ws2_32.lib")
 
 namespace clashwin::core {
+
+namespace {
+
+bool tcp_connect_ipv4_ms(const char* ip, uint16_t port, int timeout_ms) {
+  if (!ip || timeout_ms <= 0) return false;
+  static bool wsa_ok = [] {
+    WSADATA w{};
+    return WSAStartup(MAKEWORD(2, 2), &w) == 0;
+  }();
+  (void)wsa_ok;
+
+  SOCKET s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (s == INVALID_SOCKET) return false;
+
+  u_long nonblock = 1;
+  ::ioctlsocket(s, FIONBIO, &nonblock);
+
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+  if (::inet_pton(AF_INET, ip, &addr.sin_addr) != 1) {
+    ::closesocket(s);
+    return false;
+  }
+
+  if (::connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
+    ::closesocket(s);
+    return true;
+  }
+
+  const int wsa_err = ::WSAGetLastError();
+  if (wsa_err != WSAEWOULDBLOCK) {
+    ::closesocket(s);
+    return false;
+  }
+
+  fd_set wset, eset;
+  FD_ZERO(&wset);
+  FD_SET(s, &wset);
+  FD_ZERO(&eset);
+  FD_SET(s, &eset);
+  timeval tv{};
+  tv.tv_sec = timeout_ms / 1000;
+  tv.tv_usec = (timeout_ms % 1000) * 1000;
+  const int ready = ::select(0, nullptr, &wset, &eset, &tv);
+  if (ready <= 0 || FD_ISSET(s, &eset) || !FD_ISSET(s, &wset)) {
+    ::closesocket(s);
+    return false;
+  }
+
+  int so_err = 0;
+  int len = sizeof(so_err);
+  const bool ok =
+      (::getsockopt(s, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&so_err),
+                    &len) == 0 &&
+       so_err == 0);
+  ::closesocket(s);
+  return ok;
+}
+
+bool dns_lookup_with_timeout_ms(const std::string& host, uint16_t port,
+                                int timeout_ms) {
+  if (host.empty() || timeout_ms <= 0) return false;
+  static bool wsa_ok = [] {
+    WSADATA w{};
+    return WSAStartup(MAKEWORD(2, 2), &w) == 0;
+  }();
+  (void)wsa_ok;
+
+  auto prom = std::make_shared<std::promise<bool>>();
+  auto fut = prom->get_future();
+  const std::string port_str = std::to_string(port);
+  std::thread([prom, host, port_str] {
+    addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    addrinfo* res = nullptr;
+    const bool ok =
+        (::getaddrinfo(host.c_str(), port_str.c_str(), &hints, &res) == 0 &&
+         res != nullptr);
+    if (res) ::freeaddrinfo(res);
+    try {
+      prom->set_value(ok);
+    } catch (...) {
+    }
+  }).detach();
+
+  if (fut.wait_for(std::chrono::milliseconds(timeout_ms)) ==
+      std::future_status::ready) {
+    return fut.get();
+  }
+  return false;
+}
+
+}  // namespace
 
 CoreMonitor& CoreMonitor::instance() {
   static CoreMonitor s;
@@ -149,7 +255,9 @@ CoreMonitor::Action CoreMonitor::heal(const std::string& uid) {
                               : static_cast<int64_t>(GetTickCount64());
   int64_t last = last_heal_ms_.load();
   if (last != 0 && now - last < params_.heal_cooldown_ms) {
-    CWLOG_INFO("CoreMonitor: 自愈冷却中，跳过");
+    CWLOG_INFO(std::format(
+        "CoreMonitor: 自愈选点在 {} 秒冷却中（已过 {} 秒），跳过本次",
+        params_.heal_cooldown_ms / 1000, (now - last) / 1000));
     return Action::Idle;
   }
   last_heal_ms_.store(now);
@@ -212,8 +320,8 @@ void CoreMonitor::reset_state() {
   failed_servers_.clear();
 }
 
-// ★ §5.1 切换宽限期判定（← Mini monitor.rs:1383-1396）
-//   切换后 60s 内：失败判定只记日志、不计入连续失败次数。
+// ★ §5.1 切换宽限期判定（← Mini monitor.rs:1383-1396，v3.2.4 BUG-315 = 20s）
+//   切换后 20s 内：失败判定只记日志、不计入连续失败次数。
 bool CoreMonitor::in_switch_grace() const {
   if (!has_node_change_.load()) return false;
   int64_t changed = last_node_change_ms_.load();
@@ -274,7 +382,7 @@ CoreMonitor::Action CoreMonitor::tick_once() {
   api_fail_count_.store(0);
 
   // ★ §5.1 活跃节点切换检测（← Mini monitor.rs:1358-1370）
-  //   节点发生变化（含自动选点与手动切换）→ 记录切换时刻、起算 60s 宽限期，
+  //   节点发生变化（含自动选点与手动切换）→ 记录切换时刻、起算 20s 宽限期，
   //   并立即清零连续失败计数与重试模式（Mini 同语义）。
   if (h.active_node_name) {
     const std::string active = h.active_node_name();
@@ -291,7 +399,9 @@ CoreMonitor::Action CoreMonitor::tick_once() {
           h.now_ms ? h.now_ms() : static_cast<int64_t>(GetTickCount64()));
       has_node_change_.store(true);
       node_fail_count_.store(0);
-      CWLOG_INFO("CoreMonitor: 活跃节点发生变化，起算 60s 切换宽限期");
+      CWLOG_INFO(std::format(
+          "CoreMonitor: 活跃节点发生变化，起算 {}s 切换宽限期",
+          p.switch_grace_ms / 1000));
     }
   }
 
@@ -326,7 +436,7 @@ CoreMonitor::Action CoreMonitor::tick_once() {
   // 4. 节点健康：连续 2 次判死 → 自愈
   bool node_ok = h.node_healthy ? h.node_healthy() : true;
   if (!node_ok) {
-    // ★ §5.1 切换宽限期：切到新节点后 60s 内失败判定可接受，
+    // ★ §5.1 切换宽限期：切到新节点后 20s 内失败判定可接受，
     //   不累计连续失败次数（防乒乓震荡）——← Mini monitor.rs:1383-1396
     if (in_switch_grace()) {
       CWLOG_INFO(
@@ -356,6 +466,161 @@ CoreMonitor::Action CoreMonitor::tick_once() {
   }
   node_fail_count_.store(0);
   return Action::Idle;
+}
+
+std::pair<std::string, uint16_t> CoreMonitor::resolve_probe_target(
+    const std::string& test_url) {
+  const auto fallback = []() -> std::pair<std::string, uint16_t> {
+    return {"cp.cloudflare.com", 443};
+  };
+
+  size_t scheme_end = test_url.find("://");
+  if (scheme_end == std::string::npos || scheme_end == 0) return fallback();
+
+  std::string scheme = test_url.substr(0, scheme_end);
+  for (char& ch : scheme) {
+    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  }
+  uint16_t default_port = 443;
+  if (scheme == "http" || scheme == "ws") {
+    default_port = 80;
+  } else if (scheme == "https" || scheme == "wss") {
+    default_port = 443;
+  } else if (scheme == "ftp") {
+    default_port = 21;
+  }
+
+  size_t auth_start = scheme_end + 3;
+  size_t auth_end = test_url.find_first_of("/?#", auth_start);
+  std::string authority = (auth_end == std::string::npos)
+                              ? test_url.substr(auth_start)
+                              : test_url.substr(auth_start, auth_end - auth_start);
+  if (authority.empty()) return fallback();
+
+  // Strip optional userinfo@
+  size_t at_pos = authority.rfind('@');
+  if (at_pos != std::string::npos) {
+    authority = authority.substr(at_pos + 1);
+  }
+  if (authority.empty()) return fallback();
+
+  auto parse_port = [&](const std::string& s, uint16_t& out_port) -> bool {
+    if (s.empty()) return false;
+    int val = 0;
+    for (char c : s) {
+      if (c < '0' || c > '9') return false;
+      val = val * 10 + (c - '0');
+      if (val > 65535) return false;
+    }
+    if (val <= 0) return false;
+    out_port = static_cast<uint16_t>(val);
+    return true;
+  };
+
+  // IPv6 literal: [::1]:8443 or [2606:4700::1]
+  if (authority.front() == '[') {
+    size_t close_br = authority.find(']');
+    if (close_br == std::string::npos || close_br <= 1) return fallback();
+    std::string ipv6 = authority.substr(1, close_br - 1);
+    uint16_t port = default_port;
+    if (close_br + 1 < authority.size()) {
+      if (authority[close_br + 1] != ':') return fallback();
+      if (!parse_port(authority.substr(close_br + 2), port)) return fallback();
+    }
+    return {ipv6, port};
+  }
+
+  // IPv4 or domain: host[:port]
+  size_t colon = authority.find(':');
+  if (colon != std::string::npos) {
+    // Reject unbracketed multi-colon IPv6
+    if (authority.find(':', colon + 1) != std::string::npos) return fallback();
+    std::string host = authority.substr(0, colon);
+    if (host.empty()) return fallback();
+    uint16_t port = default_port;
+    std::string port_part = authority.substr(colon + 1);
+    if (!port_part.empty() && !parse_port(port_part, port)) return fallback();
+    return {host, port};
+  }
+
+  return {authority, default_port};
+}
+
+bool CoreMonitor::probe_physical_network_with(uint64_t timeout_secs,
+                                              const std::string& test_url,
+                                              const PhysicalNetProbeOps& ops) {
+  const int64_t budget_ms =
+      static_cast<int64_t>(std::max<uint64_t>(timeout_secs, 1) * 1000);
+  auto now_fn = [&]() -> int64_t {
+    return ops.now_ms ? ops.now_ms() : static_cast<int64_t>(GetTickCount64());
+  };
+  const int64_t start_ms = now_fn();
+  auto remaining_ms = [&]() -> int64_t {
+    return budget_ms - (now_fn() - start_ms);
+  };
+
+  // ← monitor.rs:293-301：优先直连公网高可用 DNS IP (TCP:53)，
+  //   避开域名解析和代理环路，毫秒级快速确认物理网卡状态。
+  static constexpr const char* kPublicDnsIps[] = {
+      "223.5.5.5",
+      "119.29.29.29",
+      "1.1.1.1",
+  };
+  const int64_t per_ip_cap = std::max<int64_t>(250, budget_ms / 4);
+  if (ops.tcp_connect) {
+    for (const char* ip : kPublicDnsIps) {
+      const int64_t rem = remaining_ms();
+      if (rem <= 0) return false;
+      const int step_ms = static_cast<int>(std::min<int64_t>(rem, per_ip_cap));
+      if (ops.tcp_connect(ip, 53, step_ms)) {
+        return true;
+      }
+    }
+  }
+
+  // ← monitor.rs:302-305：兜底——若特定局域网封禁出站 53 端口，回退至域名 DNS 查询
+  const int64_t rem = remaining_ms();
+  if (rem <= 0 || !ops.dns_lookup) return false;
+  const auto [host, port] = resolve_probe_target(test_url);
+  return ops.dns_lookup(host, port, static_cast<int>(rem));
+}
+
+bool CoreMonitor::is_physical_network_online(uint64_t timeout_secs,
+                                             const std::string& test_url) {
+  PhysicalNetProbeOps ops;
+  ops.tcp_connect = tcp_connect_ipv4_ms;
+  ops.dns_lookup = dns_lookup_with_timeout_ms;
+  ops.now_ms = [] { return static_cast<int64_t>(GetTickCount64()); };
+  return probe_physical_network_with(timeout_secs, test_url, ops);
+}
+
+bool CoreMonitor::ThrottledNetProbe::check(
+    int64_t now_ms, const std::function<bool()>& probe_fn) {
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (has_checked_) {
+      const int64_t interval =
+          was_online_ ? kOnlineProbeIntervalMs : kOfflineProbeIntervalMs;
+      if ((now_ms - last_check_ms_) < interval) {
+        return was_online_;
+      }
+    }
+  }
+  const bool online = probe_fn ? probe_fn() : true;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    has_checked_ = true;
+    was_online_ = online;
+    last_check_ms_ = now_ms;
+  }
+  return online;
+}
+
+void CoreMonitor::ThrottledNetProbe::reset() {
+  std::lock_guard<std::mutex> lock(mu_);
+  has_checked_ = false;
+  was_online_ = true;
+  last_check_ms_ = 0;
 }
 
 bool CoreMonitor::wait_for_clash_ready(const ReadyHooks& h) {

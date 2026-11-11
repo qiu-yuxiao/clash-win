@@ -2,11 +2,15 @@
 // T22 内核守护（CoreMonitor）：
 // 对照源：ClashVerge src-tauri/src/module/monitor.rs
 //
-// 间隔/判死/自愈/升级参数：
+// 间隔/判死/自愈/升级参数（对齐 Clash Mini v3.2.4 / BUG-315）：
 //   - 体检间隔 15s（重试 3s / 物理网络离线 5s）
+//   - 健康数据新鲜度 20s（HEALTH_DATA_FRESH_SECS = 20）；死节点复核最小间隔 10s
+//   - 节点切换宽限期 20s（SWITCH_GRACE_PERIOD_SECS = 20）
 //   - 活跃节点连续 2 次判死 → 自愈选点（AutoSelect::trigger）
 //   - 内核 API 连续 3 次不可达 → 自愈选点
-//   - 自愈 60s 冷却；BUSY 冲突不计失败、不惩罚冷却
+//   - 自愈 25s 冷却；BUSY 冲突不计失败、不惩罚冷却
+//   - 物理网络连通性双频探测（在线 60s / 离线 5s）：TCP:53 直连 223.5.5.5 / 119.29.29.29 /
+//     1.1.1.1 优先，test_url DNS 解析兜底（打破 TUN 断流下 DNS 死锁）
 //   - 自愈连续失败 3 次 → 归零计数 → API 不可达 → restart_core → restart 失败 → 弹窗警报
 //     （Mini 现行「3 次归零」语义，无独立 5 次弹窗；用户裁决 2026-11-09）
 //   - 失败服务器表（record_server_failure / snapshot_failed_servers，600s 冷却）
@@ -24,6 +28,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "util/result.h"
@@ -32,7 +37,15 @@ namespace clashwin::core {
 
 class CoreMonitor {
  public:
-  // 参数对照表（← census §70 / monitor.rs，全 hooks 注入可测）
+  // ← monitor.rs:63 HEALTH_DATA_FRESH_SECS = 20（v3.2.4 BUG-315 由 60s 缩短至 20s）
+  static constexpr int64_t kHealthDataFreshSecs = 20;
+  // ← monitor.rs:70 DEAD_CONFIRM_MIN_INTERVAL_SECS = 10
+  static constexpr int64_t kDeadConfirmMinIntervalSecs = 10;
+  // ← monitor.rs:1277-1280 物理网络双频探测间隔（在线 60s / 离线 5s）
+  static constexpr int64_t kOnlineProbeIntervalMs = 60000;
+  static constexpr int64_t kOfflineProbeIntervalMs = 5000;
+
+  // 参数对照表（← census §70 / monitor.rs v3.2.4，全 hooks 注入可测）
   struct Params {
     int normal_interval_secs = 15;     // 正常体检 15s
     int retry_interval_secs = 3;       // 判死后重试 3s
@@ -40,12 +53,13 @@ class CoreMonitor {
     int node_dead_threshold = 2;       // 节点连续 2 次判死
     int api_fail_threshold = 3;        // API 连续 3 次不可达
     int heal_fail_threshold = 3;       // 自愈连续失败 3 次（达 3 即归零，见 heal()）
-    int64_t heal_cooldown_ms = 60000;  // 自愈 60s 冷却
+    // ★ §5.3 自愈冷却保护（← monitor.rs:1538-1542 v3.2.4 BUG-315：60s → 25s）
+    int64_t heal_cooldown_ms = 25000;
     int64_t failed_server_cooldown_ms = 600000;  // 失败服务器 600s
-    // ★ §5.1 切换宽限期（← monitor.rs:74 SWITCH_GRACE_PERIOD_SECS = 60）
-    //   切换后 60s 内的失败判定只记日志、不计入连续失败次数
-    //   （防「切到尚未拨测的新节点 → 缓存陈旧误判 → 再次切走」的乒乓震荡）
-    int64_t switch_grace_ms = 60000;
+    // ★ §5.1 切换宽限期（← monitor.rs:74 SWITCH_GRACE_PERIOD_SECS = 20，v3.2.4 BUG-315：60s → 20s）
+    //   切换后 20s 内的失败判定只记日志、不计入连续失败次数
+    //   （兼顾新节点状态稳定与切到不可用节点时的二次自愈时效）
+    int64_t switch_grace_ms = 20000;
   };
 
   struct Hooks {
@@ -118,6 +132,40 @@ class CoreMonitor {
   // 读取运行时配置构建「节点名 → 服务器地址」映射（mihomo /proxies API 不暴露 server）
   std::map<std::string, std::string> load_node_server_map();
 
+  // ---- 物理网络连通性探测（← monitor.rs:271-308 / :1275-1293，v3.2.4 BUG-315） ----
+  // 将测速 URL 解析为 (host, port)，IPv6 自动剥除方括号供 getaddrinfo 使用；
+  // 缺省/解析失败回退 ("cp.cloudflare.com", 443)。
+  static std::pair<std::string, uint16_t> resolve_probe_target(
+      const std::string& test_url);
+
+  // 可注入探测原语（单测零外网依赖）
+  struct PhysicalNetProbeOps {
+    std::function<bool(const char* ip, uint16_t port, int timeout_ms)> tcp_connect;
+    std::function<bool(const std::string& host, uint16_t port, int timeout_ms)>
+        dns_lookup;
+    std::function<int64_t()> now_ms;
+  };
+  static bool probe_physical_network_with(uint64_t timeout_secs,
+                                          const std::string& test_url,
+                                          const PhysicalNetProbeOps& ops);
+  // 生产入口：优先 TCP:53 直连 223.5.5.5 / 119.29.29.29 / 1.1.1.1，
+  // 全部不通时回退 test_url 域名 DNS 查询兜底。
+  static bool is_physical_network_online(uint64_t timeout_secs,
+                                         const std::string& test_url);
+
+  // 双频探测节流器（← monitor.rs:1275-1293：在线 60s / 离线 5s，首次必探）
+  class ThrottledNetProbe {
+   public:
+    bool check(int64_t now_ms, const std::function<bool()>& probe_fn);
+    void reset();
+
+   private:
+    std::mutex mu_;
+    bool has_checked_ = false;
+    bool was_online_ = true;
+    int64_t last_check_ms_ = 0;
+  };
+
   // ---- wait_for_clash_ready（T16 留位转正） ----
   struct ReadyHooks {
     std::function<bool()> api_alive;
@@ -133,7 +181,7 @@ class CoreMonitor {
   int node_fail_count() const { return node_fail_count_.load(); }
   int heal_fail_count() const { return heal_fail_count_.load(); }
   int64_t last_heal_ms() const { return last_heal_ms_.load(); }
-  // ★ §5.1 切换宽限期：当前是否处于宽限期内（切节点后 60s）
+  // ★ §5.1 切换宽限期：当前是否处于宽限期内（切节点后 20s）
   bool in_switch_grace() const;
   int64_t last_node_change_ms() const { return last_node_change_ms_.load(); }
 

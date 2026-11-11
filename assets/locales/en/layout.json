@@ -141,6 +141,19 @@
     "batchTestAllTimeout": "All candidate nodes timed out",
     "windowPinned": "Always on Top enabled",
     "windowUnpinned": "Always on Top disabled",
-    "allConnectionsClosed": "Closed all active connections"
+    "allConnectionsClosed": "Closed all active connections",
+    "themeSwitchedSystem": "Switched to System theme",
+    "themeSwitchedLight": "Switched to Light theme",
+    "themeSwitchedDark": "Switched to Dark theme",
+    "skinSwitched": "Switched skin: {{name}}",
+    "languageSwitched": "Language switched to English",
+    "importingSubscription": "Importing subscription, please wait…",
+    "switchingProfile": "Switching profile, please wait…",
+    "nodeDelayResult": "Node latency: {{name}} ({{delay}}ms)",
+    "nodeDelayTimeout": "Node test timed out: {{name}}",
+    "sortChanged": "Sort order: {{mode}}",
+    "connectionClosed": "Connection closed",
+    "connectionHistoryCleared": "Connection history cleared",
+    "quickRuleApplied": "Quick routing rule applied: {{rule}}"
   }
 }

@@ -53,12 +53,19 @@ constexpr size_t kMaxVisible = 8;  // 同屏最多绘制条数（Mini 上限 50�
 }  // namespace
 
 SnackbarW::~SnackbarW() {
-  if (attached_) events::NoticeService::instance().unsubscribe();
+  if (svc_ && sub_id_ != 0) {
+    svc_->unsubscribe(sub_id_);
+    sub_id_ = 0;
+  }
 }
 
 void SnackbarW::attach(events::NoticeService& svc) {
-  svc.subscribe([this]() { refresh(); });
-  attached_ = true;
+  if (svc_ && sub_id_ != 0) {
+    svc_->unsubscribe(sub_id_);
+    sub_id_ = 0;
+  }
+  svc_ = &svc;
+  sub_id_ = svc.subscribe([this]() { refresh(); });
   refresh();
 }
 

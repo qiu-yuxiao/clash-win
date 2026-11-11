@@ -619,22 +619,53 @@ void MainWindow::update_ime_position() {
   }
 }
 
-void MainWindow::trigger_auto_select_and_refresh(const std::string& uid) {
+void MainWindow::trigger_auto_select_and_refresh(const std::string& uid,
+                                                 bool user_initiated) {
   if (uid.empty()) return;
-  std::thread([this, uid] {
+  const uint64_t wait_id = user_initiated ? begin_batch_test_notice() : 0;
+  std::thread([this, uid, user_initiated, wait_id] {
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     while (std::chrono::steady_clock::now() < deadline) {
       if (cmd::mihomo_unchecked().get_base_config().is_ok()) break;
       std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
-    cmd::CommandService::instance().invoke(
+    auto r = cmd::CommandService::instance().invoke(
         "trigger_auto_select",
         nlohmann::json::object(
             {{"profile_uid", uid}, {"sort_type", 1}, {"select", true}}));
 
-    UiPostbox::instance().post([this] {
+    scene::BatchTestSummary sum;
+    if (user_initiated) {
+      if (!r.is_ok()) {
+        if (r.error().message.find("AUTO_SELECT_BUSY") != std::string::npos) {
+          sum.busy = true;
+        }
+      } else if (r.value().is_array() && !r.value().empty()) {
+        sum.executed = true;
+        auto grp = cmd::mihomo_unchecked().get_group_by_name("PROXY");
+        const std::string now_node =
+            (grp.is_ok() && grp.value().now) ? *grp.value().now : std::string();
+        for (const auto& item : r.value()) {
+          if (item.is_array() && item.size() == 2 && item[0].is_string() &&
+              item[0].get<std::string>() == now_node) {
+            const int d = item[1].get<int>();
+            if (d >= core::kNodeDelayMinMs && d < core::kNodeDelayMaxMs) {
+              sum.selected = true;
+              sum.selected_node = now_node;
+              sum.selected_delay_ms = d;
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    UiPostbox::instance().post([this, user_initiated, wait_id, sum] {
       reload_nodes();
+      if (user_initiated) finish_batch_test_notice(wait_id, sum);
     });
+
+    if (user_initiated) return;
 
     // 10s 后复核兜底（profile-coordination.ts:161-195）
     std::this_thread::sleep_for(std::chrono::seconds(10));
@@ -759,6 +790,9 @@ void MainWindow::build_scene() {
       [](uint64_t wait_id, const scene::BatchTestSummary& sum) {
         finish_batch_test_notice(wait_id, sum);
       };
+  node_list_->on_sort_changed = [](int sort_type) {
+    dispatch_sort_mode_notice(sort_type);
+  };
   // src: active-node-card.tsx:139-200 handleCycleNode：
   //   在当前过滤+排序后的可见列表中顺序轮换，自动跳过已确认超时（delay==0 || delay>=10000）的节点；
   //   若全部超时则回退至紧邻下一个节点，最后完整同步顶栏元数据。
@@ -863,6 +897,7 @@ void MainWindow::build_scene() {
         }
         node_data_->set_delay(node, delay);
         quick_bar_->set_badge(delay, true);
+        dispatch_single_delay_notice(node, delay);
       });
     }).detach();
   };
@@ -937,12 +972,17 @@ void MainWindow::build_scene() {
         std::thread([id] {
           auto r = cmd::CommandService::instance().invoke(
               "close_connection", nlohmann::json::object({{"id", id}}));
-          if (!r.is_ok()) {
-            const std::string err = r.error().message;
-            UiPostbox::instance().post([err] {
+          const bool ok = r.is_ok();
+          const std::string err = ok ? std::string() : r.error().message;
+          UiPostbox::instance().post([ok, err] {
+            if (ok) {
+              // 豁免: Mini 无对应物 — 用户特约补齐断开单条连接结果提示 1500ms（出处: 无）
+              events::NoticeService::instance().push(
+                  "success", tr8("layout.notices.connectionClosed"), 1500);
+            } else {
               events::NoticeService::instance().push("error", err);
-            });
-          }
+            }
+          });
         }).detach();
       };
       cp->on_close_all = [] {
@@ -957,7 +997,12 @@ void MainWindow::build_scene() {
         }).detach();
       };
       cp->on_clear_history = [this] {
-        if (conn_data_) conn_data_->clear_closed();
+        if (conn_data_) {
+          conn_data_->clear_closed();
+          // 豁免: Mini 无对应物 — 用户特约补齐清空连接历史结果提示 1500ms（出处: 无）
+          events::NoticeService::instance().push(
+              "info", tr8("layout.notices.connectionHistoryCleared"), 1500);
+        }
       };
     }
     settings_drawer_->on_open_changed = [this](bool open) {
@@ -975,19 +1020,21 @@ void MainWindow::build_scene() {
     //   std::thread 后台执行 svc.invoke → 收尾经 UiPostbox 回 UI 线程。
     settings_drawer_->on_patch_verge =
         [this](const std::string& k, const nlohmann::json& v) {
-          // ---- UI 线程：键分派 + 常驻 info 的 wait_id ----
-          // ← use-minimal-settings.ts:71-83 Allow LAN/IPv6：常驻 info「正在调整」→
-          //   patch_clash_config → 成功「已更新」→ 失败 error 原文 + 回滚，finally hide。
-          // ← _layout.tsx:398-424 代理方式三段：常驻 info「正在调整代理模式」→
-          //   patchVerge → 成功完全静默 → 失败 error 原文，finally hide。
-          // ← basic-settings-card.tsx:129-151,181-191 自启/静默启动：裸 patchVerge，
-          //   成功完全静默（use-verge.ts:47-71 乐观写缓存，仅失败 showNotice.error）。
+          const std::string success_msg = resolve_verge_patch_success_message(k, v);
+          if (k == "clash_mini_control_skin") {
+            // 皮肤偏好已由 SettingsDrawer::select_skin 落盘至 clashwin-skin.json，
+            // 无需调未知 IVerge 字段写盘；直接弹出明确皮肤切换提示。
+            if (!success_msg.empty()) {
+              // 豁免: Mini 无对应物 — 用户特约补齐皮肤切换提示 2000ms（出处: 无）
+              events::NoticeService::instance().push("success", success_msg, 2000);
+            }
+            return;
+          }
           const bool is_clash = (k == "clash_allow_lan" || k == "clash_ipv6");
           const bool is_rule = (k == "rule_fallback");
           const char* info_key =
               is_clash ? "layout.notices.adjusting"
                        : (is_rule ? "layout.notices.adjustingProxyMode" : nullptr);
-          const std::string success_key = resolve_verge_patch_success_key(k, v);
           const std::string cmd =
               is_clash ? "patch_clash_config" : "patch_verge_config";
           nlohmann::json args;
@@ -1004,7 +1051,7 @@ void MainWindow::build_scene() {
                        : 0;
 
           // ---- 后台线程：只做阻塞式 svc.invoke（UI 线程不再被 wait_for 拖住）----
-          std::thread([this, k, cmd, args, wait_id, success_key, is_clash, is_rule] {
+          std::thread([this, k, cmd, args, wait_id, success_msg, is_clash, is_rule] {
             std::optional<cmd::LongOperationGuard> long_guard;
             if (is_clash || is_rule) long_guard.emplace();
             auto r = cmd::CommandService::instance().invoke(cmd, args);
@@ -1019,14 +1066,14 @@ void MainWindow::build_scene() {
                        (ok ? " ok" : " FAIL " + err));
             // ---- 收尾统一回 UI 线程（避免 NoticeService 变更回调跨线程触碰 SnackbarW）----
             UiPostbox::instance().post(
-                [this, wait_id, success_key, ok, err] {
+                [this, wait_id, success_msg, ok, err] {
                   auto& notices = events::NoticeService::instance();
                   if (wait_id) notices.hide(wait_id);  // finally hideNotice
                   if (!settings_drawer_) return;       // 同 on_takeover_change 生命周期守卫
                   if (ok) {
-                    if (!success_key.empty()) {
-                      // 豁免: Mini 无对应物 — 用户特约补齐分流切换与 4 项基础开关明确结果提示 1500ms（出处: 无）
-                      notices.push("success", tr8(success_key.c_str()), 1500);
+                    if (!success_msg.empty()) {
+                      // 豁免: Mini 无对应物 — 用户特约补齐切换操作明确结果提示 2500ms（出处: 无）
+                      notices.push("success", success_msg, 2500);
                     }
                   } else {
                     notices.push("error", err);
@@ -1164,14 +1211,18 @@ void MainWindow::build_scene() {
       const int core_port =
           static_cast<int>(cfg.clash().latest_arc()->get_mixed_port());
       if (port == verge_port && port == core_port) return true;  // 无变更，静默
-      std::thread([this, port] {
+      const uint64_t wait_id = events::NoticeService::instance().push(
+          "info", tr8("layout.notices.adjusting"), 0);
+      std::thread([this, port, wait_id] {
         cmd::LongOperationGuard long_guard;
         auto& svc = cmd::CommandService::instance();
         auto inuse =
             svc.invoke("is_port_in_use", nlohmann::json::object({{"port", port}}));
         if (inuse.is_ok() && inuse.value().is_boolean() && inuse.value().get<bool>()) {
-          UiPostbox::instance().post([this, port] {
-            events::NoticeService::instance().push(
+          UiPostbox::instance().post([this, port, wait_id] {
+            auto& notices = events::NoticeService::instance();
+            notices.hide(wait_id);
+            notices.push(
                 "error", tr8("settings.modals.clashPort.messages.portInUse",
                              {{"port", std::to_string(port)}}));
             if (settings_drawer_ && settings_drawer_->basic_card() &&
@@ -1190,15 +1241,16 @@ void MainWindow::build_scene() {
         const bool ok = a.is_ok() && b.is_ok();
         const std::string err =
             ok ? std::string() : (a.is_ok() ? b.error().message : a.error().message);
-        UiPostbox::instance().post([this, port, ok, err] {
+        UiPostbox::instance().post([this, port, wait_id, ok, err] {
+          auto& notices = events::NoticeService::instance();
+          notices.hide(wait_id);
           if (ok) {
             if (settings_drawer_ && settings_drawer_->basic_card()) {
               settings_drawer_->basic_card()->port_current_ = port;
             }
-            events::NoticeService::instance().push("success",
-                                                   tr8("settings.mini.portSaved"));
+            notices.push("success", tr8("settings.mini.portSaved"));
           } else {
-            events::NoticeService::instance().push("error", err);
+            notices.push("error", err);
             if (settings_drawer_ && settings_drawer_->basic_card() &&
                 settings_drawer_->basic_card()->port_current_ > 0) {
               settings_drawer_->basic_card()->port_field_->set_text(
@@ -1265,13 +1317,16 @@ void MainWindow::build_scene() {
         return;
       }
       if (node_data_) node_data_->clear_delay_cache();
-      std::thread([this, uid] {
+      const uint64_t wait_id = events::NoticeService::instance().push(
+          "info", tr8("layout.notices.switchingProfile"), 0);
+      std::thread([this, uid, wait_id] {
         cmd::LongOperationGuard long_guard;
         auto r = cmd::CommandService::instance().invoke(
             "patch_profiles_config", nlohmann::json::object({{"current", uid}}));
         const bool ok = r.is_ok();
         const std::string err = ok ? std::string() : r.error().message;
-        UiPostbox::instance().post([this, uid, ok, err] {
+        UiPostbox::instance().post([this, uid, wait_id, ok, err] {
+          events::NoticeService::instance().hide(wait_id);
           if (ok) {
             events::EventBus::notice_message("profile_switched::ok", "");
             if (settings_drawer_ && settings_drawer_->profile_card()) {
@@ -1697,6 +1752,7 @@ void MainWindow::build_scene() {
         settings_drawer_->sync_theme_mode(utf::utf8_to_utf16(*v.theme_mode));
       settings_drawer_->sync_takeover(v.enable_system_proxy.value_or(false),
                                       v.enable_tun_mode.value_or(false));
+      settings_drawer_->sync_routing(v.rule_fallback.value_or("direct"));
       // ★ ❌7：自启开关读真实注册表状态（Run 键）而非 verge 配置值，
       //   避免「开关显示开、实际开机不自启」错位（← Mini autostart.rs:65 真实状态优先）。
       bool real_auto_launch = v.enable_auto_launch.value_or(false);
@@ -1737,10 +1793,14 @@ void MainWindow::run_import_profile_async(
     std::function<void(bool ok, const std::string& err)> done) {
   // ← _layout.tsx:838-908 handleImportProfile（抽屉导入与首次向导共用同一条链路）
   if (profile_importing_.exchange(true)) {
-    if (done) done(false, "正在导入订阅，请稍候");
+    const std::string busy_msg = tr8("layout.notices.importingSubscription");
+    events::NoticeService::instance().push("info", busy_msg);
+    if (done) done(false, busy_msg);
     return;
   }
-  std::thread([this, url, name, done = std::move(done)]() mutable {
+  const uint64_t wait_id = events::NoticeService::instance().push(
+      "info", tr8("layout.notices.importingSubscription"), 0);
+  std::thread([this, url, name, wait_id, done = std::move(done)]() mutable {
     cmd::LongOperationGuard long_guard;
     nlohmann::json args = nlohmann::json::object({{"url", url}});
     if (!name.empty()) args["name"] = name;
@@ -1768,8 +1828,9 @@ void MainWindow::run_import_profile_async(
     }
     const std::string err = ok ? std::string() : r.error().message;
     UiPostbox::instance().post(
-        [this, ok, used_proxy, new_uid, err, done = std::move(done)] {
+        [this, wait_id, ok, used_proxy, new_uid, err, done = std::move(done)] {
           profile_importing_.store(false);
+          events::NoticeService::instance().hide(wait_id);
           if (ok) {
             events::NoticeService::instance().push(
                 "success",
@@ -1806,6 +1867,7 @@ void MainWindow::resync_settings_ui() {
       settings_drawer_->sync_theme_mode(utf::utf8_to_utf16(*v.theme_mode));
     settings_drawer_->sync_takeover(v.enable_system_proxy.value_or(false),
                                     v.enable_tun_mode.value_or(false));
+    settings_drawer_->sync_routing(v.rule_fallback.value_or("direct"));
     // ★ ❌7：自启开关读真实注册表状态（Run 键），非 verge 配置值
     bool real_auto_launch = v.enable_auto_launch.value_or(false);
     auto launch_st = core::AutostartManager::instance().get_launch_status();
@@ -2612,7 +2674,7 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
         if (wp == VK_F1) {
           auto cur = config::Config::instance().profiles().latest_arc()->current;
           if (cur && !cur->empty()) {
-            trigger_auto_select_and_refresh(*cur);
+            trigger_auto_select_and_refresh(*cur, true);
             return 0;
           }
         }
@@ -2720,7 +2782,13 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       // 退出序列：立即落盘（跳过节流；← save_window_state_immediately）
       persist_geometry(true);
       set_frame_clock(nullptr);
-      PostQuitMessage(0);
+      // src: src-tauri/src/lib.rs:377-383 RunEvent::ExitRequested 防意外退出铁律（BUG-315）：
+      //   仅当 Lifecycle 已进入显式退出流程时才投递 WM_QUIT，防止非预期窗口销毁杀死托盘与守护线程。
+      if (app::Lifecycle::instance().is_exiting()) {
+        PostQuitMessage(0);
+      } else {
+        CWLOG_WARN("MainWindow: intercepted WM_DESTROY while !is_exiting(), preventing exit");
+      }
       return 0;
     }
   }
@@ -2729,7 +2797,16 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 
 int MainWindow::run() {
   MSG msg;
-  while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+  for (;;) {
+    const BOOL ret = GetMessageW(&msg, nullptr, 0, 0);
+    if (ret <= 0) {
+      if (ret == 0 && !app::Lifecycle::instance().is_exiting()) {
+        // src: src-tauri/src/lib.rs:377-383 RunEvent::ExitRequested 防意外退出铁律（BUG-315）
+        CWLOG_WARN("MainWindow::run: intercepted WM_QUIT while !is_exiting(), keeping tray alive");
+        continue;
+      }
+      break;
+    }
     TranslateMessage(&msg);
     DispatchMessageW(&msg);
   }
