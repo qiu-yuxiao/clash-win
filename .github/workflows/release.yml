@@ -362,16 +362,31 @@ jobs:
             if ($names -notcontains $n) { throw "portable.zip missing entry: $n" }
           }
           "OK  portable entries: $($names.Count)"
-          # ---- setup 必须含内核（v0.2.5 漏内核、且当时无任何步骤拦截的根因）----
-          $wmBuild = Join-Path $Pwd.Path 'build\bin\Release\sidecar\win-mihomo.exe'
-          if (-not (Test-Path -LiteralPath $wmBuild)) {
-            throw "setup 构建源缺失 win-mihomo.exe：$wmBuild（build_installer 应已失败，若到此处说明守卫退化）"
+          # ---- setup 必须含内核（v0.2.5 漏内核根因）----
+          # 关键修正：NSIS 用 lzma 把 78MB 未压缩内容整体压成 ~21MB 磁盘文件，
+          # 含内核与漏内核的 setup 磁盘体积几乎一样（v0.2.5 漏内核 21.9MB，v0.2.6 含内核 20.87MB），
+          # 故「体积断言」无法区分两者，纯属无效锁。改为校验**打包源** win-mihomo.exe 的
+          # 字节数 + SHA256 基线（scripts/verify_sidecar.ps1 的权威基线），
+          # build_installer.ps1 把 build\bin\Release\sidecar 暂存到 installer\stage\sidecar，
+          # NSIS 直接从此源打包；源是上游原版完整内核 ⇒ setup 内必含完整内核。
+          $wmStage = Join-Path $Pwd.Path 'installer\stage\sidecar\win-mihomo.exe'
+          if (-not (Test-Path -LiteralPath $wmStage)) {
+            throw "打包源缺失 win-mihomo.exe：$wmStage（build_installer 应已失败，若到此处说明守卫退化）"
           }
-          $setupSize = (Get-Item -LiteralPath $setup).Length
-          if ($setupSize -lt 35MB) {
-            throw "setup.exe 体积异常偏小 ($([math]::Round($setupSize/1MB,1)) MB)，疑似未打入 win-mihomo 内核"
+          $wmBytes = (Get-Item -LiteralPath $wmStage).Length
+          if ($wmBytes -ne 61247488) {
+            throw "打包源 win-mihomo.exe 字节数异常 ($wmBytes)，疑似占位/空文件/copy_resources 未正确拷贝，setup 会漏内核"
           }
-          "OK  setup 构建源含 win-mihomo.exe，体积 $([math]::Round($setupSize/1MB,1)) MB"
+          # 字节数相同仍可能是占位/损坏文件，再按基线校验 SHA256，确保打进 setup 的就是上游未改动的内核本体。
+          $wmHash = (Get-FileHash -LiteralPath $wmStage -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($wmHash -ne '1CDE41CFFFD3DE0AEDAD63C0A8515E1CE5EEA507E8133AED0F637D316C93800A') {
+            throw "打包源 win-mihomo.exe SHA256 不匹配基线 ($wmHash)，setup 内内核非上游原版"
+          }
+          "OK  stage win-mihomo.exe 完整 ($wmBytes bytes, sha256 匹配基线)，setup 必含内核"
+          # 兜底：setup 磁盘文件必须存在且非空（防上游产出 0 字节损坏包），但不以体积判内核有无
+          if ((Get-Item -LiteralPath $setup).Length -lt 1MB) {
+            throw "setup.exe 磁盘体积异常 (<1MB)，疑似构建产物损坏"
+          }
           # SHA256 清单（用户可离线校验）
           $lines = foreach ($f in @($zip, $setup)) {
             $h = (Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash.ToLowerInvariant()

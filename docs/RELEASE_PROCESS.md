@@ -54,9 +54,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 - **setup 必须含内核（GATE 6 + CI 双保险）**：`win-mihomo.exe` 必须进最终 `setup.exe`。
   v0.2.5 正是漏了这条——归档漏内核、且当时便携包/源 sidecar 都查了、**setup 内容却没人查**，
   打出不带内核的安装包。现已补三道锁：① `build_installer.ps1` 硬性要求
-  `build\bin\Release\sidecar\win-mihomo.exe`；② `release.yml` 在归档缺失时从 mihomo 上游
-  v1.19.33 补齐并按 `verify_sidecar.ps1` 基线校验哈希；③ `release.yml` 断言 setup 体积 > 35MB
-  （内核-less 约 22MB）。预检新增 **GATE 6** 校验本地 `sidecar/win-mihomo.exe` 存在。
+  `build\bin\Release\sidecar\win-mihomo.exe`，缺失即 Fail；② `release.yml` 在归档缺失时从 mihomo
+  上游 v1.19.33 补齐并按 `verify_sidecar.ps1` 基线校验哈希；③ `release.yml` "Verify release artifacts"
+  校验**打包源** `installer/stage/sidecar/win-mihomo.exe` 的字节数（`== 61247488`）**且** SHA256 匹配
+  `verify_sidecar.ps1` 基线（`1CDE41CF…`）——NSIS 直接从该源打包，源是上游原版完整内核 ⇒ setup 必含内核。
+  预检 **GATE 6** 校验本地 `sidecar/win-mihomo.exe` 存在。
+  ⚠️ **严禁用 setup.exe 磁盘体积判内核有无**：lzma 把 78MB 内容压成 ~21MB，含/漏内核磁盘体积几乎一样
+  （v0.2.5 漏内核 21.9MB，v0.2.6 含内核 20.87MB），旧的 `< 35MB` 断言已因误杀正确包而废止（见 §9 反例）。
 
 > 任何一项 FAIL 都先本地改完再推。**不要**指望 CI 帮你发现——CI 一轮 18 分钟。
 
@@ -174,11 +178,15 @@ v0.2.5 的 `setup.exe`（21.9MB）**不含 `win-mihomo.exe`**，所有干净安�
 1. `build_installer.ps1` 硬性要求 `build\bin\Release\sidecar\win-mihomo.exe`，缺失即 `Fail`。
 2. `release.yml` restore 步骤在归档缺内核时，从 `MetaCubeX/mihomo` v1.19.33 补齐并按
    `verify_sidecar.ps1` 基线（`1CDE41CF…`）校验 SHA256，不符即失败。
-3. `release.yml` "Verify release artifacts" 新增 setup 体积断言（< 35MB 视为可疑）；
-   预检新增 **GATE 6** 校验本地 `sidecar/win-mihomo.exe` 存在。
+3. `release.yml` "Verify release artifacts" 校验**打包源** `installer/stage/sidecar/win-mihomo.exe`：
+   字节数 `== 61247488` 且 SHA256 匹配基线（`1CDE41CF…`）。NSIS 直接从此源打包，源正确即 setup 必含
+   完整内核；预检 **GATE 6** 校验本地 `sidecar/win-mihomo.exe` 存在。
+   （原第 3 条「setup 体积 < 35MB 断言」已于 v0.2.6 证伪并删除：lzma 压缩使含/漏内核磁盘体积几乎一样，
+   该断言误杀了含内核的正确包，详见 §9 反例。）
 
 **铁律**：任何发版改动若动到上述三处守卫，必须先跑一遍预检 + 本地构建 installer 确认 setup 含内核，
-绝不再依赖「CI 绿灯」——CI 绿灯曾经放过内核-less 的包。
+绝不再依赖「CI 绿灯」——CI 绿灯曾经放过内核-less 的包。新增守卫本身也必须先核对**打包器原始输出**
+（如 NSIS 的 `Install data` 字节数）再落地，不能凭「体积越大越完整」这类想当然的假设。
 
 ## 7. 检查清单（发版前打勾）
 
@@ -186,11 +194,11 @@ v0.2.5 的 `setup.exe`（21.9MB）**不含 `win-mihomo.exe`**，所有干净安�
 
 - [ ] 产品代码本地改完
 - [ ] `scripts/release.ps1 -Version <版> -Build -Push`：**`-Build` 本地全量回归几秒~十几分钟拦下不一致**（v0.2.6 正是漏这步被 CI 18 分钟拦下 2 个测试失败）
-- [ ] 预检 GATE 1~6 全 PASS（脚本自动跑；推 tag 时 pre-push 钩子再跑；CI 还原 sidecar 后又跑）
+- [ ] 预检 GATE 1~7 全 PASS（脚本自动跑；推 tag 时 pre-push 钩子再跑；CI 还原 sidecar 后又跑；GATE 7 校验全部 ps1 的 UTF-8 BOM / 孤立 CR）
 - [ ] 版本号 4 处一致（脚本自动同步 constants.h / clashwin.nsi / app-update.json / t35 测试）
 - [ ] 发布材料齐（RELEASE_NOTES / KNOWN_LIMITATIONS / CHANGELOG / Issue 模板链接，脚本脚手架；内容需人工填）
 - [ ] 内核若改名过：sidecar 内部归档已重传、`release.yml` 校验条目已同步
-- [ ] **setup 含 win-mihomo**：预检 GATE 6 通过；CI 三道锁（build_installer 硬卡 + 归档缺失上游补齐 + setup 体积断言）未被改动或退化
+- [ ] **setup 含 win-mihomo**：预检 GATE 6 通过；CI 三道锁（build_installer 硬卡 + 归档缺失上游补齐 + 打包源字节数/SHA256 双校验）未被改动或退化；**不得以 setup 磁盘体积作判据**
 - [ ] CI 三 job 全绿；产物回拉 `dist/` 并独立核验哈希/签名/sidecar 字节
 - [ ] 更新 `.workbuddy/memory/` 当日日志与（如需）MEMORY.md
 
@@ -210,3 +218,32 @@ v0.2.5 的 `setup.exe`（21.9MB）**不含 `win-mihomo.exe`**，所有干净安�
 
 **额外铁律**：发版前务必带 `-Build`，让全量回归在本地先跑。CI 的回归是兜底不是首选——
 v0.2.6 的 2 个测试失败若带 `-Build` 在本地几秒就能拦下，而不是耗 18 分钟等 CI。
+
+---
+
+## 9. 遇到新失败的处理纪律（v0.2.6 反复踩坑后立的铁律）
+
+发版实行过程中若遇到**流程/脚本没拦住的新失败**（CI 红、本地预检漏过的坑等），
+执行以下闭环，**严禁把问题甩回用户、严禁反问用户"你看怎么办"**：
+
+1. **主动找原因**：从运行日志 / 编译器的**实际输出**定位真实根因，务必把根因坐实——
+   看打包器、编译器、测试框架的原始打印，不靠猜；必要时对照成功案例或本地复现。
+2. **先报告用户**：把「根因 + 证据 + 影响 + 修复方向」写清楚给用户，等用户拍板，不擅自动手。
+3. **得许可后再改**：任何对 release 脚本 / CI 配置 / 本流程文档的修正，都必须先获得用户
+   **明确许可**；不得擅自修改，更不得为过 CI 而削弱断言或改产品代码。
+4. **修正即升级文档**：修复后必须把这次的新失败模式补进本文（§5 失败根因表、§1.1 预检覆盖、
+   §7 检查清单，或新增条款），让 CI 和后来者都能拦下同一类问题——**流程必须随每次失败一起
+   演进**，不能原地重复踩同一个坑。
+
+> **反例（已犯、已修）**：v0.2.6 一度把「setup.exe 磁盘体积 < 35MB」当作漏内核判据。
+> 但 NSIS 用 lzma 把 78MB 未压缩内容压成 ~21MB 磁盘文件——**含内核的包和漏内核的包
+> 磁盘体积几乎一样**（v0.2.5 漏内核 21.9MB，v0.2.6 含内核 20.87MB）。该判据既误杀正确包、
+> 又分不出真漏内核，纯属「断言逻辑与打包事实不符」。证据取自 NSIS 编译器原始输出
+> （`Install data: 81645473 bytes`、`Total size: 21883195 / 81980702 bytes`），不是推测。
+> **实际落地修正**：删除体积断言，改为校验打包源 `installer/stage/sidecar/win-mihomo.exe` 的
+> **字节数（== 61247488）+ SHA256（== 基线 `1CDE41CF…`）** 双校验；`build_installer.ps1`
+> 编译后不清 stage，NSIS 直接从该源打包，源为上游原版完整内核 ⇒ setup 必含内核。
+> §1.1 / §6.5 / §7 已同步为同一口径，不再保留「体积断言」旧说法。
+>
+> 注：本节第 2、3 条是长期纪律；若用户当场明确指令「不要问、直接做成功再报告」，以当场指令为准，
+> 但仍须完成第 1 条（坐实根因）、第 4 条（修正即升级文档）——本次即按此执行。
