@@ -10,7 +10,7 @@
       四处（彻底消灭"版本不一致"这一类错；app-update.json 同时被清空为占位符，
       因为真实清单由 publish 步骤运行时生成并推回 main）。
     - 自动脚手架发布材料（RELEASE_NOTES / KNOWN_LIMITATIONS / CHANGELOG / Issue 模板链接）。
-    - 强制跑 release_preflight.ps1（GATE 1~6 全过才放行）。
+    - 强制跑 release_preflight.ps1（GATE 1~7 全过才放行）。
     - 【关键门禁】-Build 会在本地编译并跑全量回归；v0.2.6 正是漏了本地回归，
       被 CI 在 18 分钟后才拦下 2 个测试失败。本地回归几秒~十几分钟就能拦下。
     - -Push 才会真正提交/推 dev/快进 main/打 tag/推 tag；此步需显式开关，
@@ -155,8 +155,8 @@ Get-ChildItem "$RepoRoot/.github/ISSUE_TEMPLATE/*.yml" | ForEach-Object {
   if ($t2 -ne $t) { Set-Content -Path $_.FullName -Value $t2 -NoNewline }
 }
 
-# ---------- 5. 强制预检（GATE 1~6）----------
-Write-Host "`n[3] 运行 release_preflight（GATE 1~6，不过即退出）" -ForegroundColor Yellow
+# ---------- 5. 强制预检（GATE 1~7）----------
+Write-Host "`n[3] 运行 release_preflight（GATE 1~7，不过即退出）" -ForegroundColor Yellow
 & "$PSScriptRoot/release_preflight.ps1" -Version $Version
 if ($LASTEXITCODE -ne 0) {
   Write-Host "预检未通过，停止。先本地修完再继续（不要等 CI 跑 18 分钟）。" -ForegroundColor Red
