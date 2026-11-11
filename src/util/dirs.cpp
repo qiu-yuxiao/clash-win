@@ -186,10 +186,12 @@ std::wstring proxy_head_state_path() {
 }
 std::wstring cores_dir() { return join(app_home_dir(), L"cores"); }
 std::wstring ruleset_dir() { return join(app_home_dir(), L"ruleset"); }
-// ← state.rs 兜底：内核随包放在 <exe>\sidecar\win-mihomo.exe（与开发/测试布局落地一致）。
-// 旧实现误指向 <exe>\win-mihomo.exe（根目录无此文件），导致该兜底路径永远落空；
-// 真实兜底依赖 locate_core_path() 里的「<exe>\sidecar\win-mihomo.exe」二次兜底补偿。
-std::wstring sidecar_core_path() { return join(join(exe_dir(), L"sidecar"), L"win-mihomo.exe"); }
+// ← dirs.rs 兜底：sidecar 内核兜底字符串为 <exe>\win-mihomo.exe，与 test_dirs.cpp:148-150
+// 「用户 2026-11-10 裁决」、dirs.h:52 注释、内核定位优先级（cores/ → <exe>\win-mihomo.exe →
+// <exe>\sidecar\win-mihomo.exe）第二优先完全一致。注意：安装布局里内核实际落在
+// <exe>\sidecar\win-mihomo.exe，真实查找由 locate_core_path() 第三重兜底补偿；本函数只返回
+// 约定的兜底字符串，不得擅改（改了会让 dirs_fixed_paths 测试与既定裁决对不上）。
+std::wstring sidecar_core_path() { return join(exe_dir(), L"win-mihomo.exe"); }
 
 std::wstring sidecar_log_dir() {
   std::wstring dir = join(app_logs_dir(), L"sidecar");

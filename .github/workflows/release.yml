@@ -226,6 +226,18 @@ jobs:
           & .\scripts\verify_sidecar.ps1
           if ($LASTEXITCODE -ne 0) { throw "sidecar baseline verification failed" }
 
+      # ---- 发版强制门禁：还原 sidecar 后重跑全部 preflight gate ----
+      # 即便有人绕过本地 release.ps1 / pre-push 钩子直接推 tag，CI 也在此兜底：
+      # 任一 GATE 失败 → 整条 build 失败 → publish 不触发 → 绝不发布。
+      # （GATE 5/6 依赖 sidecar，故必须排在「Verify sidecar baseline」之后。）
+      - name: Run release preflight gates (post-restore, fail-fast)
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          & .\scripts\release_preflight.ps1 -Version $env:VERSION
+          if ($LASTEXITCODE -ne 0) { throw "release_preflight 未通过，阻止发布" }
+
       # -A x64 在 VS18 generator 下照旧（CMake 官方 generator 文档明确支持），
       # cmake --build --config Release 不因 generator 变化而改变。
       # CMAKE_POLICY_VERSION_MINIMUM=3.5：镜像是 CMake 4.4.5，已移除对 <3.5 的

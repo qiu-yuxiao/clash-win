@@ -6,20 +6,35 @@
 
 ---
 
-## 0. 一句话流程
+## 0. 一句话流程（法律：唯一切口是 `scripts/release.ps1`）
 
 ```
-本地改完产品代码 → 跑回归(678/0) → 跑预检脚本 → 改版本号3处+发布材料 → 提交
-→ 推 dev → 快进 main 并推 → 打 annotated tag → 推 tag → 等 CI → 回拉产物到 dist/ 核验
+本地改完产品代码 → 跑 scripts/release.ps1 -Version X -Build -Push（-Build 含本地全量回归）
+→ 脚本自动：同步版本号4处 + 脚手架发布材料 + 跑预检(GATE1~6) + 本地回归
+→ 提交 → 推 dev → 快进 main → 推 main → 打 tag → 推 tag（pre-push 钩子再拦一道）
+→ CI（validate→build→publish，build 还原 sidecar 后重跑全部预检 gate）→ 回拉 dist/ 核验
 ```
 
-任何一步失败，**先本地修，不要为了过 CI 改产品代码**。CI 红 = 仓库脚本/断言过期，不是产品 bug。
+> **⚠️ 铁律：发版唯一受支持且被强制的路径就是 `scripts/release.ps1`。**
+> 不得手敲 `git tag` / `git push` 走发版——pre-push 钩子会在你推 `v*` tag 时强制跑预检，
+> 不过即拒绝推送；CI build job 还原 sidecar 后也会重跑全部预检 gate，任一失败整条 run 失败、绝不发布。
+> 三层兜底（脚本 → 钩子 → CI）让"漏步"在动作发生那一刻就被拦下，不必等 CI 18 分钟。
+> **切勿为了过 CI 改产品代码**：CI 红 = 仓库脚本/断言过期或本地漏跑回归，先本地修。
+
+### 新人三件事（克隆后一次即可，之后全自动）
+1. `powershell -File scripts/install_hooks.ps1` —— 装好 pre-push 钩子（幂等）。
+2. 发版只用 `scripts/release.ps1 -Version X -Build -Push`；`-Build` 跑本地回归是第一道闸。
+3. 绝不手敲 `git tag`/`git push` 发版；若误敲，钩子会拦。
 
 ---
 
 ## 1. 发版前本地必做（拦住 90% 的坑）
 
-### 1.1 跑预检脚本（核心）
+### 1.1 跑预检脚本（现由 `release.ps1` 自动跑，不必手敲）
+> 预检现已**强制化**：`scripts/release.ps1` 在提交前自动跑 `release_preflight.ps1`；
+> pre-push 钩子在推 `v*` tag 时再跑一次；CI build job 还原 sidecar 后又跑一次。
+> 三处任一不过都走不下去。下列清单是预检覆盖的内容，供你理解"为什么拦"，不是让你手敲。
+
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File scripts/release_preflight.ps1 -Version <新版本号>
@@ -167,11 +182,31 @@ v0.2.5 的 `setup.exe`（21.9MB）**不含 `win-mihomo.exe`**，所有干净安�
 
 ## 7. 检查清单（发版前打勾）
 
-- [ ] 产品代码本地改完、全量回归 678/0 绿
-- [ ] `release_preflight.ps1 -Version <版>` 全 PASS
-- [ ] 版本号 3 处一致；发布材料 4 件套齐（RELEASE_NOTES / KNOWN_LIMITATIONS / CHANGELOG / Issue 模板链接）
+> 以下绝大多数由 `scripts/release.ps1` 自动完成；本清单用于复核，不是手敲步骤。
+
+- [ ] 产品代码本地改完
+- [ ] `scripts/release.ps1 -Version <版> -Build -Push`：**`-Build` 本地全量回归几秒~十几分钟拦下不一致**（v0.2.6 正是漏这步被 CI 18 分钟拦下 2 个测试失败）
+- [ ] 预检 GATE 1~6 全 PASS（脚本自动跑；推 tag 时 pre-push 钩子再跑；CI 还原 sidecar 后又跑）
+- [ ] 版本号 4 处一致（脚本自动同步 constants.h / clashwin.nsi / app-update.json / t35 测试）
+- [ ] 发布材料齐（RELEASE_NOTES / KNOWN_LIMITATIONS / CHANGELOG / Issue 模板链接，脚本脚手架；内容需人工填）
 - [ ] 内核若改名过：sidecar 内部归档已重传、`release.yml` 校验条目已同步
 - [ ] **setup 含 win-mihomo**：预检 GATE 6 通过；CI 三道锁（build_installer 硬卡 + 归档缺失上游补齐 + setup 体积断言）未被改动或退化
-- [ ] 提交 → 推 dev → 快进 main → 推 main → 打 tag → 推 tag
 - [ ] CI 三 job 全绿；产物回拉 `dist/` 并独立核验哈希/签名/sidecar 字节
 - [ ] 更新 `.workbuddy/memory/` 当日日志与（如需）MEMORY.md
+
+---
+
+## 8. 强制遵守机制（防漏步——本节是 v0.2.6 反复踩坑后的固化）
+
+每次 release 都重复踩前面的坑，根因是"流程写在文档里、靠人记忆守纪律"。
+现把流程变成**不按流程就走不下去的代码**，三层兜底，绕不过去：
+
+| 层 | 机制 | 拦在哪个动作 | 效果 |
+|---|---|---|---|
+| ① 唯一切口 | `scripts/release.ps1` | 唯一发版命令 | 版本号只输入一次自动同步 4 处；自动脚手架发布材料；自动跑预检；`-Build` 跑本地全量回归；`-Push` 才碰远程 |
+| ② 本地钩子 | `scripts/git-hooks/pre-push`（受跟踪，`install_hooks.ps1` 启用） | `git push origin vX` 那一刻 | 推 tag 前强制重跑预检，不过即拒绝推送——正好拦在"等 CI 才发现"之前 |
+| ③ CI 重闸 | `release.yml` build job 还原 sidecar 后重跑 `release_preflight.ps1` | CI 内 | 即便有人绕过①②手推 tag，CI 仍 fail-fast，绝不发布 |
+| ④ 文档即法律 | 本文 §0「唯一切口」+ 新人三件事 | 阅读/克隆时 | 新人克隆后第一件事装钩子、只用脚本；手敲 git tag/push 不被允许的路径 |
+
+**额外铁律**：发版前务必带 `-Build`，让全量回归在本地先跑。CI 的回归是兜底不是首选——
+v0.2.6 的 2 个测试失败若带 `-Build` 在本地几秒就能拦下，而不是耗 18 分钟等 CI。
