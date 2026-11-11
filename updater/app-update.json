@@ -1,12 +1,12 @@
 {
-  "version": "0.2.8",
-  "notes": "### 通知反馈彻底修复与全场景补齐\n- **根治通知栏同线程自死锁导致操作无弹窗的问题**：修复 `NoticeService` 在主线程（UI 线程）推送通知时持非递归互斥锁同步回调 `SnackbarW::refresh()` 重入取快照引发 `resource_deadlock_would_occur` 异常并被静默吞没的致命缺陷；改为锁外派发通知回调并支持多订阅者独立句柄，确保主线程与后台线程触发的所有操作提示都能 100% 即时弹出。\n- **全操作链通知覆盖与 13 语种对齐**：补齐订阅导入/切换/删除、端口保存、亮暗主题/皮肤/语言切换、单节点右键测速、`F1` 全局自动优选、排序模式切换、单条连接断开与清空历史记录等全场景的「进行中 + 结果」通知，统一补全全部 13 套语言包文案，并将原先 1~1.5 秒一闪而过的提示统一延长至清晰的 2~2.5 秒。\n\n### 同步跟进 Clash Mini v3.2.4（BUG-315）\n- **物理网络连通性双频快速探测重构（打破 TUN 断流死锁）**：将后台守护的物理网络探测升级为「在线 60s / 离线 5s」双频节流，优先对公网高可用 IP（`223.5.5.5:53`、`119.29.29.29:53`、`1.1.1.1:53`）发起毫秒级 TCP 握手，在局域网封禁 53 端口时自动回退测速地址 DNS 解析兜底——彻底消除虚拟网卡常亮导致的假在线误判，以及 TUN 模式下节点断流引发 DNS 卡死导致的自愈死锁。\n- **断流自愈感知与二次切点全面提速**：1:1 同步缩短三大计时阈值——节点健康数据新鲜度阈值从 `60s` 缩短至 `20s`，节点切换宽限期从 `60s` 缩短至 `20s`，自愈失败冷却保护从 `60s` 缩短至 `25s`，突发断流自愈响应收敛至 15~25 秒。\n- **隐身轻量模式主循环防意外退出加固**：在 `WM_DESTROY` 与主消息循环补充显式退出状态守卫（`Lifecycle::is_exiting()`），防止非预期窗口销毁或外部消息误终止常驻托盘与后台防断流守护线程。\n\n### 其它稳定性与交互细节修复\n- **Direct2D 设备丢失自愈修复**：修复 `D2dRenderTarget::recreate()` 在销毁旧渲染目标时误清空 `hwnd_` 导致远程桌面切换或显卡驱动重置后窗口无法恢复绘制的问题。\n- **代理分流卡片与全新安装日志目录修复**：启动与刷新设置时自动同步代理分流分段控件状态；已处于自定义路由档位时再次点击「添加网址」支持随时重开添加弹窗；修复全新安装首次启动时 `%APPDATA%` 父目录尚未创建导致日志文件初始化失败的问题。",
-  "pub_date": "2026-11-11T17:28:23Z",
+  "version": "0.2.9",
+  "notes": "### 同步跟进 Clash Mini v3.2.5（BUG-316）：双层防误杀与零断流自愈守护\n- **第一层事前免疫——常驻零渲染防清理哨兵窗口对**：针对 Windows 下隐藏至系统托盘后因无可见顶层窗口被 360 加速球等第三方内存清理工具以 `TerminateProcess(hProcess, 99)` 无差别强杀导致托盘图标消失、后台防断流守护停摆的问题，在主线程创建全生命周期常驻的 1×1 屏幕外全透明（`alpha=0`）哨兵窗口对——既满足系统可见性契约彻底豁免无窗口清理，又完全不在任务栏与 `Alt+Tab` 露面，渲染与 CPU 开销为零。\n- **第二层事后兜底——超轻量级伴生看门狗（`--guardian`）与退出码取证**：启动时拉起纯内核事件阻塞态的伴生看门狗进程（`0% CPU`、约 `1 MB` 工作集）；主进程正常退出、系统关机注销或对端互斥接管时毫秒级同步退出，而在后台隐身/轻量模式下遭遇外部强杀或致命异常时，同步向 `clashwin.log` 写入含退出码特征诊断（如 `99/0x63` 360 强杀特征码、`0xC0000005` 等）、存活时长与自愈代数的取证记录，并在通过关机、卸载/安装器、对端客户端及单实例端口四重安全校验后静默自愈拉起主进程（含快速崩溃退避上限保护）。\n- **系统服务内核零断流无感挂载（`--guardian-respawn`）**：伴生看门狗静默拉起主进程时，直接以无闪烁零渲染模式进入托盘轻量态；若 `clash_verge_service` 持有的 `win-mihomo` 内核仍在健康运行，直接无感挂载现有内核并延续当前出口节点健康守护，全程不重建 TUN 网卡、不打断正在进行的下载或通话。\n- **双端互斥礼貌协作与监测日志闭环**：互斥接管终止对端客户端前先置位其主动退出事件避免误报崩溃日志，看门狗检测到对端客户端运行时自动让位；同时在 `CoreMonitor` 补齐偶发节点抖动复检恢复后的闭环日志记录。",
+  "pub_date": "2026-11-11T21:25:42Z",
   "platforms": {
     "windows-x86_64": {
-      "url": "https://github.com/qiu-yuxiao/clash-win/releases/download/v0.2.8/ClashWin_0.2.8_x64-setup.exe",
-      "sha256": "ac3b733fa8288336d27804534c7db2c5b023b3c6c5f178af7ba2408092fc53c3",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIG1pbmlzaWduIHNlY3JldCBrZXkKUlVTdHVzTXdmNGo2dm9Ld3NVRDhNMjcvRkRFUkVSTjJ3OFlvMmNWMzN1cTJNQ3c2c2hKck5OaE51UXZ4WmdIM2srL0ZMLzc2Rm5aQUhlbDhzbElCQkVzd1FvY3ZuSFJER0E4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NDE4MTAzCWZpbGU6Q2xhc2hXaW5fMC4yLjhfeDY0LXNldHVwLmV4ZQloYXNoZWQKWThRSkZrUkkxVEZFZms2ZUlPcEQxT0RnS2dBM0RyQ3VMbnNma3lQNG1KV09wQzJ1d2NUQUdIS1RKYTFOY0M0Y2czclF6UWloc3BFNjFEbUFxUUtnQWc9PQ=="
+      "url": "https://github.com/qiu-yuxiao/clash-win/releases/download/v0.2.9/ClashWin_0.2.9_x64-setup.exe",
+      "sha256": "89d0831c7f848a67c1d1986de97f4c3fd3d20c13cf626489ae525cc064235546",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIG1pbmlzaWduIHNlY3JldCBrZXkKUlVTdHVzTXdmNGo2dnJSVnpMc3phcGlUeGtNZHRYbUxKVW1GMTRuNk56NzRQdHc3UFJob1BjRHNHdHpRVXBOMzdWZGlJNVlia1E2OGYwU2ZiSDk2dHBsdHBSY0t6NkRUNWdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NDMyMzQyCWZpbGU6Q2xhc2hXaW5fMC4yLjlfeDY0LXNldHVwLmV4ZQloYXNoZWQKb2F4allrbGhTQkpMbERtbU1seFpMQ0JLMk5ZRmZVQmJJdXFlQ1VKMVJtb2o3ekR0TVo3ZU1KM3NWSHQ2clNqNXZtb1k4elFMWFJ2Z0xscGt4ZlZ6Q1E9PQ=="
     }
   }
 }
