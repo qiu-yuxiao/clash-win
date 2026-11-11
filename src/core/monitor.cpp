@@ -14,6 +14,7 @@
 #include <fstream>
 #include <future>
 
+#include "core/core_manager.h"
 #include "util/log.h"
 #include "util/dirs.h"
 #include "yaml-cpp/yaml.h"
@@ -156,10 +157,17 @@ void CoreMonitor::start() {
           std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
         // 若无窗口可见（托盘启动），执行一次初始化自动选点
+        // （← monitor.rs:1236-1247 v3.2.5 BUG-316：若系看门狗无感挂载存活服务内核，
+        //  跳过启动自动重选，避免打断用户正在进行的下载/通话）
         if (hooks_.is_headless && hooks_.is_headless()) {
-          std::string uid = hooks_.current_uid ? hooks_.current_uid() : "";
-          if (!uid.empty() && hooks_.auto_select_trigger) {
-            hooks_.auto_select_trigger();
+          if (CoreManager::instance().take_reattached_existing_core()) {
+            CWLOG_INFO(
+                "CoreMonitor: [后台监测] 伴生看门狗已无感挂载运行中内核，延续现有出口节点健康守护");
+          } else {
+            std::string uid = hooks_.current_uid ? hooks_.current_uid() : "";
+            if (!uid.empty() && hooks_.auto_select_trigger) {
+              hooks_.auto_select_trigger();
+            }
           }
         }
       }
@@ -464,7 +472,13 @@ CoreMonitor::Action CoreMonitor::tick_once() {
     }
     return Action::Idle;
   }
-  node_fail_count_.store(0);
+  // ← monitor.rs:1399-1406（v3.2.5 BUG-316）：重试恢复闭环日志
+  const int prev_fails = node_fail_count_.exchange(0);
+  if (prev_fails > 0) {
+    CWLOG_INFO(std::format(
+        "CoreMonitor: 活跃节点复检恢复正常（此前连续失败 {} 次），解除重试状态",
+        prev_fails));
+  }
   return Action::Idle;
 }
 

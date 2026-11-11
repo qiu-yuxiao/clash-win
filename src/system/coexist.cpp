@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "core/service_mode.h"
+#include "system/guardian.h"
 #include "util/dirs.h"
 #include "util/log.h"
 #include "util/utf.h"
@@ -292,6 +293,9 @@ int kill_other_processes() {
         const bool mini_dir = dir.find(L"clash mini") != std::wstring::npos ||
                               dir.find(L"clash-mini") != std::wstring::npos;
         if (!own && (shared || mini_dir)) {
+          // 互斥接管前先礼貌置位对方 v3.2.5+ 伴生看门狗的 IntentionalExit 事件，
+          // 使其 0ms 同步退出而不误记崩溃取证日志或尝试反向拉起。
+          (void)guardian::signal_foreign_guardian_exit(pe.th32ProcessID);
           if (::TerminateProcess(p, 1)) {
             ++killed;
             CWLOG_INFO(std::format("coexist: 已终止对方进程 pid={} path={}",

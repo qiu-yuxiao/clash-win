@@ -8,6 +8,7 @@
 #include "config/config.h"
 #include "core/validate.h"
 #include "enhance/enhance.h"
+#include "system/guardian.h"
 #include "util/dirs.h"
 #include "util/utf.h"
 
@@ -184,6 +185,15 @@ void install_cmd_clash(CommandService& svc) {
   svc.register_command(
       "start_core",
       {[](const Json&) -> CmdResult {
+         // ← lifecycle.rs:149-165（v3.2.5 BUG-316）：
+         //   --guardian-respawn 自愈拉起时，若系统服务内核（clash_verge_service）仍健康存活，
+         //   直接将 running_mode 恢复为 Service 并标记无感挂载，跳过配置重生成与内核重启（零断流）。
+         if (system::guardian::is_guardian_respawn() &&
+             core::CoreManager::instance().try_reattach_running_service_core(
+                 [] { return mihomo_unchecked().get_base_config().is_ok(); })) {
+           events::EventBus::refresh_clash();
+           return CmdResult::ok(Json::object());
+         }
          // 启动前先重生成运行时产物（← start_core_by_sidecar generate_file(Run)）
          auto outcome = run_enhance_pipeline();
          if (!outcome.is_valid()) {

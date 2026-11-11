@@ -198,6 +198,13 @@ class CoreManager {
   void set_notifier(Notifier n) { notifier_ = std::move(n); }
   void notify(const char* status, const std::string& message);
 
+  // ---- 伴生看门狗零断流挂载（← Mini manager/mod.rs:34,113-119 + lifecycle.rs:149-165，v3.2.5 BUG-316）----
+  // 当 --guardian-respawn 自愈拉起时，若系统服务持有的内核进程（core_pid != 0）与 Mihomo IPC
+  // 均健康存活，则直接将 running_mode 恢复为 Service 并标记无感挂载，跳过内核重启与首次重选节点。
+  bool try_reattach_running_service_core(const std::function<bool()>& api_alive_fn);
+  void mark_reattached_existing_core();
+  bool take_reattached_existing_core();
+
  private:
   Result<void> stop_sidecar_locked();
   // 调用方须已持有 lifecycle_（start_auto 内部先决策再分派）
@@ -207,6 +214,7 @@ class CoreManager {
   Result<void> start_service_locked(const std::wstring& config_file);
 
   std::atomic<RunningMode> mode_{RunningMode::NotRunning};
+  std::atomic<bool> reattached_existing_core_{false};
   std::mutex lifecycle_;           // ← manager/mod.rs lifecycle_lock（串行化启停）
   void* child_ = nullptr;          // HANDLE（避免头文件引入 windows.h）
   uint32_t pid_ = 0;

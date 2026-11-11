@@ -13,6 +13,7 @@
 #include "core/timer.h"
 #include "events/event_bus.h"
 #include "system/guard_monitor.h"
+#include "system/guardian.h"
 #include "system/sysproxy.h"
 #include "system/tray.h"
 #include "system/service_runner.h"
@@ -133,7 +134,10 @@ bool Lifecycle::entry_lightweight_mode(bool force) {
     bool enable_auto = verge ? verge->enable_auto_light_weight_mode.value_or(false) : false;
     if (!enable_auto) {
       CWLOG_INFO("Lifecycle: enable_auto_light_weight_mode is false, only hiding window");
-      if (window_) window_->hide();
+      if (window_) {
+        window_->hide();
+        system::guardian::set_lightweight_mode_signal(true);
+      }
       if (tray_) tray_->update_lite_mode_menu(false);
       return true;
     }
@@ -147,6 +151,7 @@ bool Lifecycle::entry_lightweight_mode(bool force) {
   }
 
   CWLOG_INFO("Lifecycle: entering lightweight mode");
+  system::guardian::set_lightweight_mode_signal(true);
 
   if (window_) {
     window_->hide();
@@ -176,6 +181,7 @@ bool Lifecycle::exit_lightweight_mode() {
 
   if (state() == LifecycleState::Normal) {
     CWLOG_INFO("Lifecycle: in Normal state, showing and activating window");
+    system::guardian::set_lightweight_mode_signal(false);
     if (window_) window_->show_and_activate();
     if (tray_) tray_->update_lite_mode_menu(false);
     return true;
@@ -187,6 +193,7 @@ bool Lifecycle::exit_lightweight_mode() {
   }
 
   CWLOG_INFO("Lifecycle: exiting lightweight mode");
+  system::guardian::set_lightweight_mode_signal(false);
 
   events::EventBus::instance().set_lightweight_filter(false);
 
@@ -207,6 +214,8 @@ bool Lifecycle::exit_lightweight_mode() {
 }
 
 void Lifecycle::prepare_exit() {
+  // ★ 第一时间通知伴生看门狗系主动退出（← shutdown.rs:106-112，v3.2.5 BUG-316）
+  system::guardian::notify_intentional_exit();
   state_.store(static_cast<uint8_t>(LifecycleState::PreparingExit), std::memory_order_release);
   CWLOG_INFO("Lifecycle::prepare_exit: Step 1 to Step 4 starting");
 
@@ -408,6 +417,7 @@ void Lifecycle::reset() {
   state_.store(static_cast<uint8_t>(LifecycleState::Normal), std::memory_order_release);
   is_cleaning_up_.store(false);
   events::EventBus::instance().set_lightweight_filter(false);
+  system::guardian::set_lightweight_mode_signal(false);
   window_ = nullptr;
   tray_ = nullptr;
   reset_hooks();

@@ -1,4 +1,5 @@
 #include "system/signals.h"
+#include "system/guardian.h"
 #include "util/log.h"
 #include <format>
 
@@ -62,6 +63,9 @@ void SignalHandler::handle_session_end(bool session_ending, uintptr_t /*lparam*/
 }
 
 void SignalHandler::dispatch(SignalType sig) {
+  // ★ 系统关机/注销/控制台终止信号：第一时间通知伴生看门狗系主动退出（← shutdown.rs:106-112）
+  guardian::notify_intentional_exit();
+
   bool expected = false;
   if (!is_cleaning_up_.compare_exchange_strong(expected, true)) {
     CWLOG_INFO(std::format("SignalHandler::dispatch: already cleaning up, ignoring repeated signal {}",
