@@ -1,12 +1,12 @@
 {
-  "version": "0.2.6",
-  "notes": "Clash Win v0.2.6",
-  "pub_date": "2026-11-11T05:14:21Z",
+  "version": "0.2.7",
+  "notes": "### 用户可见修复与交互完善\n- **像素级布局与浮层防裁剪精修**：修正基础设置 4 个小开关标签与开关实体的水平底边对齐；悬浮提示框（Tooltip）改为独立顶层透明分层窗口承载，彻底消除靠近主窗口边缘时被截断一半的问题；补齐各图标按钮缺失的悬停提示与鼠标移出清理；右键菜单支持视口边界钳制与滚轮滚动；窄窗（271px）下各模态对话框自适应贴合不溢出。\n- **操作与结果通知全面补齐**：修复服务安装/重装通知重复前缀、订阅导入/更新与配置切换期间误弹 `IPC timeout` 错误条、标题栏阴影穿透污染右上角通知条像素等问题；并为代理分流切换（全局代理 / GFWList）、基础设置 4 项开关（开机自启 / 静默启动 / Allow LAN / IPv6）、手动/轮换切换节点、`⚡` 批量测速择优、窗口置顶及断开全部连接补齐清晰明确的状态与结果提示。\n- **节点过滤条件与窗口几何跨重启记忆**：启动时自动读回上次保存的过滤词与排序方式并回填界面（程序化回填不误触发自动测速，且保留用户输入原始大小写）；安装/升级脚本保留 `window_state.json`，并修正高 DPI 副屏/缩放屏脱屏判定口径。\n- **设置开关即时响应与真实初始态**：设置命令全面改为后台异步执行，点击即刻位移不卡 UI 线程；Allow LAN / IPv6 启动时读取真实配置状态。\n\n### 工程与发版体系重构\n- **发版全链路重构**：统一 `constants.h` / `clashwin.rc` / `clashwin.nsi` 版本同步与跨文件单测门禁，统一本地与 CI 的隔离回归测试运行器 `scripts/run_tests.ps1`，消除发布前清空 `updater/app-update.json` 导致的分支分叉与窗口期断档，修复 `pre-push` 钩子在 Windows PowerShell 5.1 下的兼容性并收敛常青文档 `docs/KNOWN_LIMITATIONS.md`。",
+  "pub_date": "2026-11-11T14:52:29Z",
   "platforms": {
     "windows-x86_64": {
-      "url": "https://github.com/qiu-yuxiao/clash-win/releases/download/v0.2.6/ClashWin_0.2.6_x64-setup.exe",
-      "sha256": "0af5546450de2fe3c2cda55fff721ac25ba403aa03a8ba8af2d0a75c9dae7548",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIG1pbmlzaWduIHNlY3JldCBrZXkKUlVTdHVzTXdmNGo2dmwzRjU1ZFEvMVN1UnluNTBPb1pqUSszRTNCbnFuKzA2bXVXdFRxVkhoTFB6T21rNTQ5NDRCT2VlL0JaVldjazN4VnpuUUcwVTAvUXQrclBnd0JxbWdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0Mzc0MDYxCWZpbGU6Q2xhc2hXaW5fMC4yLjZfeDY0LXNldHVwLmV4ZQloYXNoZWQKTWRvYmNYaGVjMFpzV1J2dElzWlMwQUltZDdTRDlBYkFHZEZwWnJEY2lmQ0hjYlRVVXVWeEpKV2xHTjduaU9BcUx3WkdzdUxXaDlyUWhqRTlLMm1PQ3c9PQ=="
+      "url": "https://github.com/qiu-yuxiao/clash-win/releases/download/v0.2.7/ClashWin_0.2.7_x64-setup.exe",
+      "sha256": "5b405e86f26b7b8165fc5641a06e9d8165137704ae5012a37f06abcd8ca27268",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIG1pbmlzaWduIHNlY3JldCBrZXkKUlVTdHVzTXdmNGo2dnJjTlJUQTY5QnUyQ2JKREdkSVJOdFV1dlAvZXRWOXBHak5tdDV6QXVVa05HNG80VkE2S2x5ajVnRkM3SEdQdnNhLzFadEQrVFl5YjFRbjFWQVNWZ0FrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NDA4NzQ5CWZpbGU6Q2xhc2hXaW5fMC4yLjdfeDY0LXNldHVwLmV4ZQloYXNoZWQKZ0hJTDAzTFBnSkg4cEM2OVZnUGhoMlJjblZsQTE3NDk3T29pa1VKWWEyN1RvS3ArUkhnQ2Vydlkvb3QrdUY5MmJ4cnI4NGY4MEJwNXptbWtJcElBQXc9PQ=="
     }
   }
 }
