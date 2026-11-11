@@ -8,6 +8,17 @@ Format reference: `Changelog.md` in the Clash Mini repository (newest first, `##
 
 ---
 
+## v0.2.6 (2026-11-11)
+
+### 用户可见修复
+- **UAC 提权前先自报家门**：安装 TUN 系统服务触发 UAC 前，先弹出来源明确的「Clash Win 需要管理员权限…」确认框，解决此前弹窗只显示「未知发布者」、用户无法判断请求来源的问题（与 Clash Mini 对齐）。
+- **内核缺失自动恢复**：启动时若检测不到 `win-mihomo.exe`，自动从 GitHub（MetaCubeX/mihomo）下载并校验内核到 `cores/` 后重试，等价于 Clash Mini「内核始终存在」的保证；不再因内核缺失导致节点表空白。
+- **sidecar 内核路径修正**：`dirs.cpp` 的 `sidecar_core_path()` 原先错误指向 exe 根目录，已修正为 `<exe>\sidecar\win-mihomo.exe`。
+
+### 工程 / 发版流程
+- **根治发布漏内核**：新增三道锁——`build_installer.ps1` 硬性要求内核存在、`release.yml` 在归档缺失时从上游补齐并按基线校验哈希、`release.yml` 断言 setup 体积 > 35MB；预检脚本新增 GATE 6 校验本地 sidecar 含内核。v0.2.5 的 `setup.exe` 因外部归档漏内核且流程无拦截，曾打出不含内核的安装包。
+- **构建环境治理**：新增 `scripts/build.ps1` 标准编译入口，构建前剥离 WorkBuddy 透明代理注入的大小写重复 `*_PROXY` 变量，根治 MSBuild「字典关键字冲突」编译崩溃。
+
 ## v0.2.5 (2026-11-11)
 
 ### UI detail parity (1:1 with Clash Mini)

@@ -36,6 +36,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 - **测试写死内核名 == `kCoreProcessToken`**：`test_config_template.cpp` 的 `clash_core:`、
   `test_core_kill.cpp` 的进程名不能有残留旧名 `mini-mihomo`。
 - **sidecar 5/5 基线**：调 `verify_sidecar.ps1`（大小 + SHA256）。
+- **setup 必须含内核（GATE 6 + CI 双保险）**：`win-mihomo.exe` 必须进最终 `setup.exe`。
+  v0.2.5 正是漏了这条——归档漏内核、且当时便携包/源 sidecar 都查了、**setup 内容却没人查**，
+  打出不带内核的安装包。现已补三道锁：① `build_installer.ps1` 硬性要求
+  `build\bin\Release\sidecar\win-mihomo.exe`；② `release.yml` 在归档缺失时从 mihomo 上游
+  v1.19.33 补齐并按 `verify_sidecar.ps1` 基线校验哈希；③ `release.yml` 断言 setup 体积 > 35MB
+  （内核-less 约 22MB）。预检新增 **GATE 6** 校验本地 `sidecar/win-mihomo.exe` 存在。
 
 > 任何一项 FAIL 都先本地改完再推。**不要**指望 CI 帮你发现——CI 一轮 18 分钟。
 
@@ -137,12 +143,35 @@ gh run watch <run_id> --repo qiu-yuxiao/clash-win --exit-status --interval 30
 
 ---
 
+## 6.5 v0.2.5 复盘：setup 漏内核（本流程的历史漏洞）
+
+v0.2.5 的 `setup.exe`（21.9MB）**不含 `win-mihomo.exe`**，所有干净安装都拿不到内核、节点表空白。
+根因不是本地文件被删，而是**发版流程没有一道锁验证「最终 setup 含内核」**：
+
+- `verify_sidecar.ps1` 5/5 基线、CI restore 步骤、预检 GATE 2 都只查「源/便携包」里有没有内核；
+- `release.yml` 的 "Verify release artifacts" 只断言 **portable.zip** 含 `sidecar/win-mihomo.exe`，
+  **setup.exe 内容从未被校验**；
+- 当时 `build_installer.ps1` 也还没有「缺失即 Fail」的硬卡。
+
+结果：一旦 `SIDECAR_ARCHIVE_URL` 那个外部归档漏了内核，CI 就静默打出内核-less 的 setup。
+
+**已补的三道锁（见 §1.1 与脚本）：**
+1. `build_installer.ps1` 硬性要求 `build\bin\Release\sidecar\win-mihomo.exe`，缺失即 `Fail`。
+2. `release.yml` restore 步骤在归档缺内核时，从 `MetaCubeX/mihomo` v1.19.33 补齐并按
+   `verify_sidecar.ps1` 基线（`1CDE41CF…`）校验 SHA256，不符即失败。
+3. `release.yml` "Verify release artifacts" 新增 setup 体积断言（< 35MB 视为可疑）；
+   预检新增 **GATE 6** 校验本地 `sidecar/win-mihomo.exe` 存在。
+
+**铁律**：任何发版改动若动到上述三处守卫，必须先跑一遍预检 + 本地构建 installer 确认 setup 含内核，
+绝不再依赖「CI 绿灯」——CI 绿灯曾经放过内核-less 的包。
+
 ## 7. 检查清单（发版前打勾）
 
 - [ ] 产品代码本地改完、全量回归 678/0 绿
 - [ ] `release_preflight.ps1 -Version <版>` 全 PASS
 - [ ] 版本号 3 处一致；发布材料 4 件套齐（RELEASE_NOTES / KNOWN_LIMITATIONS / CHANGELOG / Issue 模板链接）
 - [ ] 内核若改名过：sidecar 内部归档已重传、`release.yml` 校验条目已同步
+- [ ] **setup 含 win-mihomo**：预检 GATE 6 通过；CI 三道锁（build_installer 硬卡 + 归档缺失上游补齐 + setup 体积断言）未被改动或退化
 - [ ] 提交 → 推 dev → 快进 main → 推 main → 打 tag → 推 tag
 - [ ] CI 三 job 全绿；产物回拉 `dist/` 并独立核验哈希/签名/sidecar 字节
 - [ ] 更新 `.workbuddy/memory/` 当日日志与（如需）MEMORY.md

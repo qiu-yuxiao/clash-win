@@ -124,6 +124,18 @@ if (Test-Path $vs) {
   Check "verify_sidecar.ps1 退出码 0（5/5）" ($code -eq 0) ("exit=$code")
 } else { Check "verify_sidecar.ps1 存在" $false $vs }
 
+# ---------- GATE 6: 本地 sidecar 必须含 win-mihomo（setup 内核源头）----------
+# v0.2.5 复盘：归档漏内核 + 无步骤拦截 → setup 不含 win-mihomo。
+# 本地发版前必须有内核；CI 侧另有「归档缺失时上游补齐 + setup 体积断言」双保险。
+Write-Host "`n[6] 本地 sidecar 含 win-mihomo.exe（setup 内核源头）" -ForegroundColor Yellow
+$wmLocal = Join-Path $RepoRoot 'sidecar\win-mihomo.exe'
+if (Test-Path -LiteralPath $wmLocal) {
+  $wmItem = Get-Item -LiteralPath $wmLocal
+  Check "sidecar/win-mihomo.exe 存在" $true ("$('{0:N0}' -f $wmItem.Length) bytes")
+} else {
+  Check "sidecar/win-mihomo.exe 存在" $false "本地 sidecar/ 缺失内核；本地构建 setup 会失败，CI 也会走上游补齐，但发版前应先补上"
+}
+
 # ---------- 汇总 ----------
 Write-Host "`n=== 结果: PASS=$pass  FAIL=$fail ===" -ForegroundColor Cyan
 if ($fail -gt 0) {

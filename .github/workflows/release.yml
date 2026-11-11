@@ -196,6 +196,29 @@ jobs:
           Expand-Archive -LiteralPath $archive -DestinationPath sidecar -Force
           Get-ChildItem sidecar -Filter *.exe | ForEach-Object {
             "restored: $($_.Name)  $($_.Length) bytes" }
+          # 兜底补齐内核（v0.2.5 教训：归档若漏 win-mihomo，setup 会缺内核且无步骤拦截）
+          $ExpectedWinMihomoHash = '1CDE41CFFFD3DE0AEDAD63C0A8515E1CE5EEA507E8133AED0F637D316C93800A'
+          $wm = Join-Path $Pwd.Path 'sidecar\win-mihomo.exe'
+          if (-not (Test-Path -LiteralPath $wm)) {
+            Write-Host "归档缺 win-mihomo.exe，从 MetaCubeX/mihomo v1.19.33 补齐..." -ForegroundColor Yellow
+            $tag = 'v1.19.33'
+            $mz = Join-Path $env:RUNNER_TEMP "mihomo-$tag.zip"
+            $url = "https://github.com/MetaCubeX/mihomo/releases/download/$tag/mihomo-windows-amd64-$tag.zip"
+            Invoke-WebRequest -Uri $url -OutFile $mz -UseBasicParsing
+            $tmp = Join-Path $env:RUNNER_TEMP 'mihomo-extract'
+            if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
+            Expand-Archive -LiteralPath $mz -DestinationPath $tmp -Force
+            $exe = Get-ChildItem $tmp -Filter *.exe | Select-Object -First 1
+            if (-not $exe) { throw "mihomo 归档内未找到 exe" }
+            Copy-Item -LiteralPath $exe.FullName -Destination $wm -Force
+            $h = (Get-FileHash -LiteralPath $wm -Algorithm SHA256).Hash.ToUpperInvariant()
+            if ($h -ne $ExpectedWinMihomoHash) {
+              throw "补齐的 win-mihomo.exe 哈希不匹配基线 ($h != $ExpectedWinMihomoHash)，请核对内核版本"
+            }
+            "fetched fallback win-mihomo.exe  $($exe.Length) bytes  sha256=$h"
+          } else {
+            "win-mihomo.exe 已就位（来自归档）"
+          }
 
       - name: Verify sidecar baseline (5/5)
         shell: pwsh
@@ -327,6 +350,16 @@ jobs:
             if ($names -notcontains $n) { throw "portable.zip missing entry: $n" }
           }
           "OK  portable entries: $($names.Count)"
+          # ---- setup 必须含内核（v0.2.5 漏内核、且当时无任何步骤拦截的根因）----
+          $wmBuild = Join-Path $Pwd.Path 'build\bin\Release\sidecar\win-mihomo.exe'
+          if (-not (Test-Path -LiteralPath $wmBuild)) {
+            throw "setup 构建源缺失 win-mihomo.exe：$wmBuild（build_installer 应已失败，若到此处说明守卫退化）"
+          }
+          $setupSize = (Get-Item -LiteralPath $setup).Length
+          if ($setupSize -lt 35MB) {
+            throw "setup.exe 体积异常偏小 ($([math]::Round($setupSize/1MB,1)) MB)，疑似未打入 win-mihomo 内核"
+          }
+          "OK  setup 构建源含 win-mihomo.exe，体积 $([math]::Round($setupSize/1MB,1)) MB"
           # SHA256 清单（用户可离线校验）
           $lines = foreach ($f in @($zip, $setup)) {
             $h = (Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash.ToLowerInvariant()
