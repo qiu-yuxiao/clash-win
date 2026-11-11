@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Clash Win 唯一切口发版编排器 —— 把"遵守 release process"变成"不按流程就走不下去"。
 

@@ -1,12 +1,12 @@
-<#
-  只读校验 sidecar/ 下 5 个上游内核与服务二进制的完整性。
-  不下载、不复制、不替换、不修改任何文件。
-  口径与基线见 docs/05-sidecar-内核资产.md。
+﻿<#
+  Read-only integrity check for the 5 upstream sidecar binaries in sidecar/.
+  Does NOT download / copy / replace / modify any file.
+  Baseline spec: docs/05-sidecar-内核资产.md
 
-  用法：
+  Usage:
     powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify_sidecar.ps1
 
-  退出码：0 = 5/5 与基线一致；1 = 存在缺失或不匹配（此时不要构建 / 测试 / 发版）。
+  Exit code: 0 = 5/5 match baseline; 1 = missing or mismatched (do NOT build/test/release).
 #>
 param(
   [string]$SidecarDir = ''
@@ -27,7 +27,7 @@ $expected = @(
 )
 
 if (-not (Test-Path -LiteralPath $SidecarDir -PathType Container)) {
-  Write-Host "[FAIL] sidecar 目录不存在: $SidecarDir"
+  Write-Host "[FAIL] sidecar directory not found: $SidecarDir"
   exit 1
 }
 
@@ -68,9 +68,9 @@ foreach ($e in $expected) {
 
 Write-Host ''
 if ($fail -gt 0) {
-  Write-Host ("FAIL: {0}/{1} 项与基线不一致，请勿构建或发版。" -f $fail, $expected.Count)
+  Write-Host ("FAIL: {0}/{1} items mismatch baseline, do NOT build or release." -f $fail, $expected.Count)
   exit 1
 }
 
-Write-Host ("PASS: {0}/{1} 项与基线一致，内核资产未被改动。" -f $expected.Count, $expected.Count)
+Write-Host ("PASS: {0}/{1} items match baseline, sidecar assets unchanged." -f $expected.Count, $expected.Count)
 exit 0

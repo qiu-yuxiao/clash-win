@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   安装 Clash Win 的 git hooks（幂等，跑一次即可）。
 .DESCRIPTION
