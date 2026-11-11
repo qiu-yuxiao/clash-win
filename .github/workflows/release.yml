@@ -320,13 +320,32 @@ jobs:
           URL="https://github.com/${REPO}/releases/download/v${VERSION}/ClashWin_${VERSION}_x64-setup.exe"
           SIG=""
           if [ -n "${MINISIGN_PRIVATE_KEY:-}" ]; then
-            (sudo apt-get update -qq && sudo apt-get install -y -qq minisign) >/dev/null 2>&1
             KEYDIR="$(mktemp -d)"
             trap 'rm -rf "$KEYDIR"' EXIT
+            MS_TGZ="$KEYDIR/minisign-0.12-linux.tar.gz"
+            MS_URL="https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz"
+            MS_SHA256="9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73"
+            curl -fsSL --retry 3 --connect-timeout 15 -o "$MS_TGZ" "$MS_URL"
+            echo "${MS_SHA256}  ${MS_TGZ}" | sha256sum -c -
+            tar -xzf "$MS_TGZ" -C "$KEYDIR" minisign-linux/x86_64/minisign
+            MINISIGN_BIN="$KEYDIR/minisign-linux/x86_64/minisign"
+            chmod +x "$MINISIGN_BIN"
+
             printf '%s\n' "$MINISIGN_PRIVATE_KEY" > "$KEYDIR/sec.key"
             chmod 600 "$KEYDIR/sec.key"
-            minisign -Sm "$SETUP" -s "$KEYDIR/sec.key" -x "$KEYDIR/setup.sig"
+            "$MINISIGN_BIN" -Sm "$SETUP" -s "$KEYDIR/sec.key" -x "$KEYDIR/setup.sig" < /dev/null
+
+            # 自校验：生成的签名必须能通过客户端内置公钥 (src/config/update_keys.h) 验签
+            python3 - "$KEYDIR/pub.key" <<'PYPUB'
+          import base64, pathlib, re, sys
+          hdr = pathlib.Path("src/config/update_keys.h").read_text(encoding="utf-8")
+          chunks = re.findall(r'"([A-Za-z0-9+/=]+)"', hdr)
+          assert chunks, "Failed to extract kUpdatePubkeyFileB64 from update_keys.h"
+          pathlib.Path(sys.argv[1]).write_bytes(base64.b64decode("".join(chunks)))
+          PYPUB
+            "$MINISIGN_BIN" -Vm "$SETUP" -p "$KEYDIR/pub.key" -x "$KEYDIR/setup.sig"
             SIG="$(cat "$KEYDIR/setup.sig")"
+            echo "OK: minisign 0.12 signed and verified against src/config/update_keys.h"
           else
             echo "::warning::MINISIGN_PRIVATE_KEY is not configured -> app-update.json will ship without signature."
           fi
