@@ -6,7 +6,7 @@
 [![Language: C++20](https://img.shields.io/badge/Language-C%2B%2B20-00599C?style=flat-square&logo=c%2B%2B)](https://isocpp.org)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?style=flat-square&logo=windows)](https://github.com/qiu-yuxiao/clash-win)
 
-> **Clash Win** — A pixel-level 1:1 Windows-native clone of **Clash Mini** (synced through **v3.2.5**), engineered 100% by AI with zero lines of manual code.
+> **Clash Win** — A pixel-level 1:1 Windows-native clone of **Clash Mini** (synced through **v3.2.6**), engineered 100% by AI with zero lines of manual code.
 > Built with modern **C++20**, **Win32 API**, and **Direct2D / DirectWrite** — zero WebView2, zero Chromium, zero UI browser engine.
 
 Clash Win preserves everything about Clash Mini — its minimalist zero-threshold workflow, two-step clean-install onboarding wizard, 6 themes & 3D skeuomorphic visuals, smart filtered auto-switching, dual-frequency failover probe, and live path routing — differing only in programming language and name. It can coexist peacefully on disk alongside Clash Mini while enforcing clean runtime mutual exclusion so the two clients never conflict (see [Relationship with Clash Mini](#relationship-with-clash-mini-与-clash-mini-的关系) and [Known Limitations](docs/KNOWN_LIMITATIONS.md)).
@@ -156,12 +156,12 @@ Get-FileHash .\ClashWin_<version>_x64_portable.zip -Algorithm SHA256
 | **UI & Host Stack** | Tauri 2 + Rust + React / MUI (WebView2) | **Pure C++20 + Win32 + Direct2D / DirectWrite** |
 | **Browser Engine** | Chromium / Edge WebView2 | **None (0 MB Web Engine)** |
 | **Code Authorship** | Reference baseline | **100% AI-generated, 0 lines of manual code** |
-| **Feature & Pixel Parity** | Upstream truth source (synced through **v3.2.5**) | **1:1 behavior, layout, skins, locales & core pipeline** |
+| **Feature & Pixel Parity** | Upstream truth source (synced through **v3.2.6**) | **1:1 behavior, layout, skins, locales & core pipeline** |
 | **Clean-Install Onboarding** | Two-step zero-threshold wizard | **1:1 two-step wizard (installer language inheritance + smart clipboard sniffing + live readiness dashboard)** |
 | **Internationalization (i18n)** | 13 languages (`840+` keys) | **1:1 all 13 languages (`zh` / `zhtw` / `en` / `jp` / `ko` / `ru` / `de` / `es` / `id` / `tr` / `fa` / `ar` / `tt`), live hot-switch** |
 | **Screen Reader (A11y)** | WebView2 DOM `aria-*` exposed to Narrator / NVDA | **1:1 Native Win32 UI Automation (`WM_GETOBJECT` / `IRawElementProvider*`) — Narrator / NVDA / JAWS support across all 13 languages with 0 MB WebView** |
 | **Data Directory** | `%APPDATA%\io.github.clash-mini.clash-mini` | `%APPDATA%\io.github.clash-win.clash-win` |
-| **Version Track** | `3.x` | Independent `0.x` (`v0.1.0` → current `v0.2.10`) |
+| **Version Track** | `3.x` | Independent `0.x` (`v0.1.0` → current `v0.3.0`) |
 
 ### Peaceful Coexistence & Runtime Mutual Exclusion ("Borrow & Return" / 借用与归还)
 * **Safe Dual Installation**: Clash Win and Clash Mini store configurations, subscriptions, and logs in completely separate `%APPDATA%` directories. Neither installer nor uninstaller ever deletes the other's files, shortcuts, or autostart entries.

@@ -2,11 +2,23 @@
 
 All notable changes to **Clash Win** are documented here.
 
-Version format follows the project's **own** line starting at `0.1.0` (constitution §5.3): Clash Win versions increment independently and are **not** bound to Clash Mini's `3.x` numbering (`v3.2.2` was the initial port reference anchor, with subsequent releases continuously synced through `v3.2.5`).
+Version format follows the project's **own** line starting at `0.1.0` (constitution §5.3): Clash Win versions increment independently and are **not** bound to Clash Mini's `3.x` numbering (`v3.2.2` was the initial port reference anchor, with subsequent releases continuously synced through `v3.2.6`).
 
 Format reference: `Changelog.md` in the Clash Mini repository (newest first, `## vX.Y.Z` headings with grouped change bullets). Content here is Clash Win's own history, not a copy of Mini's entries.
 
 ---
+
+## v0.3.0 (2026-11-13)
+
+### 订阅拉取兼容标识解耦与单订阅自定义 User-Agent（BUG-362）
+- **默认订阅 `User-Agent` 恒定锚定 `clash-verge/v2.5.10`，与客户端独立版本号彻底解耦**：将远程订阅默认请求标识独立为单一事实源常量 `kSubscriptionCompatUserAgent = "clash-verge/v2.5.10"`（对齐当前内置 `win-mihomo.exe` 即 `Mihomo v1.19.33` 的协议支持代际），不再随客户端 `0.x` 版本号拼接变化——彻底解决部分机场面板将 `0.x` 误判为远古客户端而拦截下发「请升级客户端」假节点的问题，同时消除未来版本号高频递增触发字典序比较缺陷、超前下发未知协议或暴露唯一版本指纹的隐患。
+- **单条订阅自定义 `User-Agent` 完整闭环**：支持在单条订阅配置项中独立设置自定义 `user_agent`（空白字符自动裁剪并回退全局兼容标识），修复订阅导入与合并更新时自定义 `user_agent` 持久化丢失的问题。
+
+### 同步跟进 Clash Mini v3.2.6（BUG-317 ~ BUG-361）：探针语义重构、服务内核加固与原生交互升级
+- **测速数据来源语义重建、并行竞速探针与断流自愈闭环（BUG-317 / BUG-318 / BUG-320 ~ BUG-322 / BUG-336 / BUG-344 / BUG-345 / BUG-348 / BUG-349 / BUG-359）**：彻底废除 120 秒陈旧历史延迟兜底，区分实时探测（`LiveProbe`）与新鲜缓存（`FreshMetricsCache`，前端缓存续期上限钳制 30 秒），测速未执行或异常中断时精确回滚 `-2` 占位符杜绝永久转圈；物理网络连通性升级为三路公网 DNS `TCP:53` 600ms 非阻塞并行竞速 + 域名解析保底；解耦内核 API 失活重启计数与全节点断流告警计数，超时 `0ms` 节点在延迟升序下恒定置底；顶栏快捷区新增离线/全节点超时警示胶囊（支持脉冲提示与点击一键重测自愈），并拦截后台健康状态广播避免底部通知条重复刷屏。
+- **内核热更原子替换、TUN 临时降级锁盘与零 UAC 极速退出（BUG-319 / BUG-324 ~ BUG-326 / BUG-328 ~ BUG-331 / BUG-334 / BUG-335 / BUG-346 / BUG-347 / BUG-351 / BUG-352）**：内核在线升级改为 `.staging` 暂存校验后原子替换，完整解析 `PE32+`（AMD64 COFF 与节表结构）以严格区分「下载包损坏」与「杀软瞬态文件锁占用」，切换前等待旧内核释放句柄并在失败时自动回滚快照；新增非阻塞注册表 SCM 三态核验（未安装 / 已禁用或缺失 / 正常启用）与服务操作全局重入互斥锁，冷启动服务繁忙触发会话级临时回退时锁住磁盘 `enable_tun_mode` 真值不被覆盖；正常退出改走无锁服务 IPC 直停内核并兜底清理残留进程，彻底消除普通用户退出时误弹 UAC 提权框的问题；加固命名管道 HTTP 只读幂等重连与 WebSocket 15 秒封顶指数退避重连。
+- **连接期 SSRF 纵深防护、通用协议 URI 与深链解析加固（BUG-323 / BUG-327 / BUG-333 / BUG-340 / BUG-353）**：补齐 IPv4 映射 IPv6 地址（`::ffff:a.b.c.d`）及局域网后缀拦截，在 WinHTTP 建立连接阶段直接校验实际目标 IP（`WINHTTP_OPTION_CONNECTION_INFO`）并对 `30x` 重定向逐跳复检，根除 DNS Rebinding 时序绕过漏洞；统一 9 类代理节点 URI 预处理管线（兼容非标 VMess `sni` 字段与复杂密码后缀），修复 `clash://install-config` 深链携带嵌套未编码参数时的截断问题。
+- **原生 Direct2D 交互体验、快捷键守卫与 13 国语言补齐（BUG-332 / BUG-337 ~ BUG-339 / BUG-341 ~ BUG-343 / BUG-350 / BUG-354 ~ BUG-358 / BUG-360 / BUG-361）**：手动点击节点支持 `0ms` 乐观高亮切换（失败按世代守卫自动回滚）并同步重置守护宽限期；节点卡片右侧延迟区支持独立点击单点测速且不切换当前出口；列表可见序列未变时原地更新卡片、高频流量刷新局部脏区隔离、皮肤双因子滑块拖动期零同步写盘（200ms 防抖 / 松手单次落盘）；统一 `Ctrl+F` / `F4` / `F1` 全局快捷键的输入态、IME 组合态与模态遮挡守卫，过滤框 `Esc` 优先取消自动测速倒计时并保留过滤词；矮屏幕高度（`<= 830px`）下在设置顶栏常驻右上角帮助菜单按钮防止展开裁切，优化日志查看器滚动锚点与系统托盘左键单击唤醒/隐藏切换，并同步补齐全部 13 种内置语言的新增提示词条。
 
 ## v0.2.10 (2026-11-12)
 

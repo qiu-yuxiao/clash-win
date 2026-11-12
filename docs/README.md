@@ -1,15 +1,15 @@
 # Clash Win 工程文档索引与现状总览
 
-> **一句话定位**：把 **Clash Mini**（当前 1:1 同步至 **v3.2.5**）原封不动移植为纯 Windows 原生客户端（**C++20 + Win32 + Direct2D/DirectWrite**），零 WebView2、零浏览器运行时，除编程语言与显示名（`Clash Mini` → `Clash Win`）外实现像素级与语义级 1:1 对齐。
+> **一句话定位**：把 **Clash Mini**（当前 1:1 同步至 **v3.2.6**）原封不动移植为纯 Windows 原生客户端（**C++20 + Win32 + Direct2D/DirectWrite**），零 WebView2、零浏览器运行时，除编程语言与显示名（`Clash Mini` → `Clash Win`）外实现像素级与语义级 1:1 对齐。
 
 ---
 
-## 一、项目当前状态（v0.2.9）
+## 一、项目当前状态（v0.3.0）
 
 | 维度 | 当前状态 |
 | :--- | :--- |
-| **当前发布版本** | `v0.2.9`（单一事实源：`include/clashwin/config/constants.h` 的 `kAppVersion`） |
-| **上游同步基线** | **Clash Mini v3.2.5**（自 `v3.2.2` 起步，已完整同步跟进 `v3.2.3` BUG-314、`v3.2.4` BUG-315、`v3.2.5` BUG-316） |
+| **当前发布版本** | `v0.3.0`（单一事实源：`include/clashwin/config/constants.h` 的 `kAppVersion`） |
+| **上游同步基线** | **Clash Mini v3.2.6**（自 `v3.2.2` 起步，已完整同步跟进 `v3.2.3` BUG-314、`v3.2.4` BUG-315、`v3.2.5` BUG-316、`v3.2.6` BUG-317~362） |
 | **代理内核与服务** | 上游 `MetaCubeX/mihomo` **v1.19.33**（`with_gvisor`，重命名为 `win-mihomo.exe`，缺失时支持自动下载校验恢复）；系统服务共用 `clash_verge_service` |
 | **与 Clash Mini 关系** | **可同机共处、不可同时运行**（「借用与归还」方针）：双端配置文件隔离、互不删改磁盘与注册表；启动或安装一方时自动礼貌终止另一方运行进程并共用服务，卸载时若对方仍在则自动归还服务路径 |
 | **网络与单实例参数** | 1:1 对齐：Mixed `10801` / SOCKS `10802` / HTTP `10803` / Guard 兜底 `7899` / Controller `9098` / 单实例 `33335` / IPC 管道 `\\.\pipe\mini-mihomo-win` |

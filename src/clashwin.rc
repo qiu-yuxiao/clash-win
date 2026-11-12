@@ -7,8 +7,8 @@
 // 此处数值/字符串需与之同步（每次 bump 时一并改）。
 // 1:1 对齐 Clash Mini：Mini 主程序 FileDescription 为 “Clash Mini”，Win 对应为 “Clash Win”。
 1 VERSIONINFO
-FILEVERSION 0,2,10,0
-PRODUCTVERSION 0,2,10,0
+FILEVERSION 0,3,0,0
+PRODUCTVERSION 0,3,0,0
 FILEFLAGSMASK 0x3fL
 FILEFLAGS 0x0L
 FILEOS 0x40004L
@@ -21,11 +21,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "ClashWin"
             VALUE "FileDescription", "Clash Win"
-            VALUE "FileVersion", "0.2.10"
+            VALUE "FileVersion", "0.3.0"
             VALUE "InternalName", "clashwin"
             VALUE "OriginalFilename", "clashwin.exe"
             VALUE "ProductName", "Clash Win"
-            VALUE "ProductVersion", "0.2.10"
+            VALUE "ProductVersion", "0.3.0"
         END
     END
     BLOCK "VarFileInfo"
