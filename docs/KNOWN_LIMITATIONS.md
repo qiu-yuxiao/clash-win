@@ -22,3 +22,6 @@ Direct2D 1.0 无 Web 引擎 CSS `backdrop-filter: blur()` 原语，`frosted-glas
 
 ## (f) 少量低优先级瞬态界面缓存未单独落盘
 窗口几何尺寸/位置（`window_state.json`）及代理页过滤词/排序方式（`proxy_head_state.json`）均已实现跨重启持久化；代理列表滚动条像素偏移（`proxy-scroll-positions`）等低优先级瞬态尚未单独落盘。
+
+## (g) 纯自绘 Direct2D 界面暂未接入 Windows UI Automation 读屏无障碍桥接
+Clash Mini 基于 Edge WebView2（Chromium）渲染，其 HTML `aria-label` / `aria-expanded` 语义属性可由浏览器内核自动映射为 Windows UI Automation (UIA) / MSAA 节点供「Windows 讲述人（Narrator）」、NVDA 等外部读屏软件朗读。Clash Win 为彻底消除浏览器引擎开销采用纯 Direct2D 单画布自绘控件树：虽然完整保留了 13 语种 `a11y.*` 词条（用于图标按钮悬停提示 Tooltip）、WCAG 高对比度色板与键盘快捷键，但当前尚未在 C++ `Widget` 层实现 `WM_GETOBJECT` / `IRawElementProviderSimple` 无障碍接口桥接，读屏软件暂无法逐项朗读主窗口画布内的自绘按钮与节点列表（视障读屏用户现阶段建议优先选用同机兼容的 Clash Mini）。

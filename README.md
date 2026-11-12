@@ -36,7 +36,7 @@ Clash Win preserves everything about Clash Mini — its minimalist zero-threshol
 * **[Auto Switch & Fast Failover]**: Automatically speed-tests and switches to the fastest node upon importing or switching subscriptions, strictly respecting your active node filter subset to avoid undesired regions. A background 15–25s dual-frequency probe (`TCP:53` direct public IP + DNS fallback) detects congestion or dead nodes in real time and self-heals automatically.
 * **[Rule Updates]**: Integrates popular rule sets and GeoIP / GeoSite databases, kept synced automatically.
 * **[Mini-Monitoring & Zero-Render Standby]**: Shrink the window to its minimum size (`271×126`) to turn Clash Win into a compact desktop traffic monitor, or close to tray for true zero-render lightweight standby protected by offscreen sentinel windows and a `~1 MB` companion watchdog (`--guardian` with zero-drop core re-attach).
-* **[6 Skins × Light/Dark & 13 Languages]**: Switch seamlessly among `Trump-3D (Retro-3D)`, `Original`, `Modern`, `Frosted`, `Cyberpunk`, and `Monochrome` skins with per-skin dual-factor sliders and 13 UI languages.
+* **[6 Skins × Light/Dark & 13 Languages]**: Switch seamlessly among `Trump-3D (Retro-3D)`, `Original`, `Modern`, `Frosted`, `Cyberpunk`, and `Monochrome` skins with per-skin dual-factor sliders, plus **13 built-in UI languages** (`简体中文`, `繁體中文`, `English`, `日本語`, `한국어`, `Русский`, `Deutsch`, `Español`, `Bahasa Indonesia`, `Türkçe`, `فارسی`, `العربية`, `Татарча` — `840+` keys 100% aligned, auto-detected from installer/OS locale, and hot-switchable anytime without restart via the bottom **[Language]** bar when expanded/maximized).
 * **[Right-Click Routing (Advanced)]**: Expand or maximize the window to open **[Path Control]** alongside settings; right-click any live or historical connection to set highest-priority Direct, Proxy, or Reject rules on the fly.
 * **[100% Native Architecture]**: Single native Win32/Direct2D client paired with upstream `mihomo` `v1.19.33` (`win-mihomo.exe`, with automatic missing-core recovery) and Ed25519 Minisign-verified in-app updates.
 
@@ -65,7 +65,7 @@ Clash Win preserves everything about Clash Mini — its minimalist zero-threshol
 * **[自动切换与秒级自愈]**：导入或切换订阅后自动测速并切至最快节点；测速与自动切换严格遵循当前节点过滤子集，精准规避特定区域。内置 15～25 秒双频（`TCP:53` 直连公网 IP / DNS 兜底）健康度探针，实时避开拥堵或断流节点。
 * **[规则自动同步]**：内置主流分流规则集与 GeoIP / GeoSite 数据库，后台静默同步更新。
 * **[迷你监控与零渲染驻留]**：将窗口缩至最小尺寸（`271×126`）即可化身为桌面微型流量监控器；关闭窗口入托盘即进入真正零 D2D 渲染的极轻驻留态，并由屏幕外 1×1 防清理哨兵窗口与 `~1 MB` 伴生看门狗（`--guardian`，支持零断流无感重挂内核）双重守护。
-* **[六套主题皮肤与 13 国语言]**：内置 `Trump-3D`（复古拟物）、`Original`、`Modern`、`Frosted`、`Cyberpunk`、`Monochrome` 六套主题皮肤，支持亮/暗/跟随系统切换、逐皮肤双因子实时滑块调节及 13 种界面语言热切换。
+* **[六套主题皮肤与 13 国语言]**：内置 `Trump-3D`（复古拟物）、`Original`、`Modern`、`Frosted`、`Cyberpunk`、`Monochrome` 六套主题皮肤，支持亮/暗/跟随系统切换及逐皮肤双因子实时滑块调节；完整内置 **13 种界面语言**（`简体中文`、`繁體中文`、`English`、`日本語`、`한국어`、`Русский`、`Deutsch`、`Español`、`Bahasa Indonesia`、`Türkçe`、`فارسی` 波斯语、`العربية` 阿拉伯语、`Татарча` 鞑靼语 —— `840+` 词条 100% 齐套，首启自动继承安装器或系统区域语言，最大化/拉高窗口后可在设置抽屉底栏点击 **[Language]** 免重启即时热切换）。
 * **[右键快捷路由（高级用户）]**：拉宽或最大化窗口后，在右侧 **[路径控制]** 面板右键点击任意实时/历史连接域名，即可一键生成最高优先级的直连、代理或封锁规则。
 * **[100% 纯原生与纯 AI 构建]**：全仓无一行人工手写代码，无 Chromium / WebView2 依赖（内置 QuickJS 仅用于离线执行订阅 `Script.js` 增强脚本）；搭载 `mihomo` `v1.19.33` 内核（`win-mihomo.exe`，缺失可自动下载校验恢复），支持基于 Minisign Ed25519 强验签的应用内自动更新。
 
@@ -156,6 +156,8 @@ Get-FileHash .\ClashWin_<version>_x64_portable.zip -Algorithm SHA256
 | **Code Authorship** | Reference baseline | **100% AI-generated, 0 lines of manual code** |
 | **Feature & Pixel Parity** | Upstream truth source (synced through **v3.2.5**) | **1:1 behavior, layout, skins, locales & core pipeline** |
 | **Clean-Install Onboarding** | Two-step zero-threshold wizard | **1:1 two-step wizard (installer language inheritance + smart clipboard sniffing + live readiness dashboard)** |
+| **Internationalization (i18n)** | 13 languages (`840+` keys) | **1:1 all 13 languages (`zh` / `zhtw` / `en` / `jp` / `ko` / `ru` / `de` / `es` / `id` / `tr` / `fa` / `ar` / `tt`), live hot-switch** |
+| **Screen Reader (A11y)** | WebView2 DOM `aria-*` exposed to Narrator / NVDA | **Custom Direct2D canvas (`a11y.*` tooltips & WCAG contrast preserved; UIA screen-reader bridge not yet implemented — see [Known Limitations](docs/KNOWN_LIMITATIONS.md))** |
 | **Data Directory** | `%APPDATA%\io.github.clash-mini.clash-mini` | `%APPDATA%\io.github.clash-win.clash-win` |
 | **Version Track** | `3.x` | Independent `0.x` (`v0.1.0` → current `v0.2.9`) |
 
