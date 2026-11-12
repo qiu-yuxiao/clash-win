@@ -1,12 +1,12 @@
 {
-  "version": "0.2.9",
-  "notes": "### 同步跟进 Clash Mini v3.2.5（BUG-316）：双层防误杀与零断流自愈守护\n- **第一层事前免疫——常驻零渲染防清理哨兵窗口对**：针对 Windows 下隐藏至系统托盘后因无可见顶层窗口被 360 加速球等第三方内存清理工具以 `TerminateProcess(hProcess, 99)` 无差别强杀导致托盘图标消失、后台防断流守护停摆的问题，在主线程创建全生命周期常驻的 1×1 屏幕外全透明（`alpha=0`）哨兵窗口对——既满足系统可见性契约彻底豁免无窗口清理，又完全不在任务栏与 `Alt+Tab` 露面，渲染与 CPU 开销为零。\n- **第二层事后兜底——超轻量级伴生看门狗（`--guardian`）与退出码取证**：启动时拉起纯内核事件阻塞态的伴生看门狗进程（`0% CPU`、约 `1 MB` 工作集）；主进程正常退出、系统关机注销或对端互斥接管时毫秒级同步退出，而在后台隐身/轻量模式下遭遇外部强杀或致命异常时，同步向 `clashwin.log` 写入含退出码特征诊断（如 `99/0x63` 360 强杀特征码、`0xC0000005` 等）、存活时长与自愈代数的取证记录，并在通过关机、卸载/安装器、对端客户端及单实例端口四重安全校验后静默自愈拉起主进程（含快速崩溃退避上限保护）。\n- **系统服务内核零断流无感挂载（`--guardian-respawn`）**：伴生看门狗静默拉起主进程时，直接以无闪烁零渲染模式进入托盘轻量态；若 `clash_verge_service` 持有的 `win-mihomo` 内核仍在健康运行，直接无感挂载现有内核并延续当前出口节点健康守护，全程不重建 TUN 网卡、不打断正在进行的下载或通话。\n- **双端互斥礼貌协作与监测日志闭环**：互斥接管终止对端客户端前先置位其主动退出事件避免误报崩溃日志，看门狗检测到对端客户端运行时自动让位；同时在 `CoreMonitor` 补齐偶发节点抖动复检恢复后的闭环日志记录。",
-  "pub_date": "2026-11-11T21:25:42Z",
+  "version": "0.2.10",
+  "notes": "### 原生无障碍声音读屏（Win32 UI Automation）全量补齐\n- **纯自绘 Direct2D 控件树原生桥接 Windows UI Automation (`WM_GETOBJECT`)**：在零 WebView2 / 零浏览器内核开销的前提下，完整实现 `IRawElementProviderSimple` / `IRawElementProviderFragment` / `IRawElementProviderFragmentRoot` COM 无障碍提供程序树，支持 **Windows 讲述人（Narrator）**、**NVDA**、**JAWS** 及 Accessibility Insights 直接发现、逐项聚焦、框选定位并语音朗读全界面自绘控件。\n- **六大 UIA 标准控制模式与复合控件虚拟子项全覆盖**：全面实现 `IInvokeProvider`（按钮/菜单项点击）、`IToggleProvider`（开关/置顶/皮肤格状态读写）、`IValueProvider`（过滤框/订阅框/端口框与弹窗输入框读写）、`IRangeValueProvider`（各皮肤双因子滑块精确调节）、`ISelectionItemProvider`（代理节点切换、流量接管/分流分段单选、连接标签页）及 `IExpandCollapseProvider`（13 国语言选择器与帮助菜单展开状态），并为自绘复合区域（快捷栏活跃节点卡与延迟胶囊、订阅条目动作钮、连接面板表头、首启两步式向导及全部模态弹窗）补齐虚拟无障碍子项。\n- **13 种内置语言实时读屏热切换与智能降噪**：接入惰性 `i18n` 版本校验（`ensure_i18n_fresh`），切换 13 种界面语言（`简体中文`、`繁體中文`、`English`、`日本語`、`한국어`、`Русский`、`Deutsch`、`Español`、`Bahasa Indonesia`、`Türkçe`、`فارسی`、`العربية`、`Татарча`）后无需等待重绘即可即时向读屏器输出对应语种 `aria-label`（`layout.a11y.*` 等）文案；自动聚合节点行（名称 + 协议 + 延迟 + 当前节点标注 + `PositionInSet/SizeOfSet`）与底部四宫格流量摘要，屏蔽碎片化装饰图元干扰。\n- **实时通知语音播报、模态焦点隔离与全键盘无障碍导航**：动态绑定 Windows `UiaRaiseNotificationEvent` 实现 `SnackbarW` 顶部通知条免抢焦点实时语音播报；在打开清洁安装首启引导、编辑订阅、调试日志等模态弹窗或展开设置抽屉时自动屏蔽底层被遮挡控件，提供 `Tab` / `Shift+Tab` 模态环绕焦点遍历与 `Space` / `Enter` 激活，并在控件动态销毁时自动断开 COM 引用杜绝悬空访问。",
+  "pub_date": "2026-11-12T07:13:58Z",
   "platforms": {
     "windows-x86_64": {
-      "url": "https://github.com/qiu-yuxiao/clash-win/releases/download/v0.2.9/ClashWin_0.2.9_x64-setup.exe",
-      "sha256": "89d0831c7f848a67c1d1986de97f4c3fd3d20c13cf626489ae525cc064235546",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIG1pbmlzaWduIHNlY3JldCBrZXkKUlVTdHVzTXdmNGo2dnJSVnpMc3phcGlUeGtNZHRYbUxKVW1GMTRuNk56NzRQdHc3UFJob1BjRHNHdHpRVXBOMzdWZGlJNVlia1E2OGYwU2ZiSDk2dHBsdHBSY0t6NkRUNWdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NDMyMzQyCWZpbGU6Q2xhc2hXaW5fMC4yLjlfeDY0LXNldHVwLmV4ZQloYXNoZWQKb2F4allrbGhTQkpMbERtbU1seFpMQ0JLMk5ZRmZVQmJJdXFlQ1VKMVJtb2o3ekR0TVo3ZU1KM3NWSHQ2clNqNXZtb1k4elFMWFJ2Z0xscGt4ZlZ6Q1E9PQ=="
+      "url": "https://github.com/qiu-yuxiao/clash-win/releases/download/v0.2.10/ClashWin_0.2.10_x64-setup.exe",
+      "sha256": "e72d5db72a5f94a182b067936a37de7736c3bd4dc9716924053736a3db1515f6",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIG1pbmlzaWduIHNlY3JldCBrZXkKUlVTdHVzTXdmNGo2dmtpSlZMT2NEcXFTZFpKMzl6ZWZ5MHh4T0FVOFdFMGhvSEc4NnVDeWloMk1uZUgxOHQzeWVuU2pBYzRKWmtMck1FOFp1NzBPMnlXa2NoQkNwQmlEZEFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NDY3NjM4CWZpbGU6Q2xhc2hXaW5fMC4yLjEwX3g2NC1zZXR1cC5leGUJaGFzaGVkCk9tV2NQL013UWo1S0NKOU96djdLTEdzYldzNnVzYXp6dUNFWTZvSmZXUVBLZkg4QW55ODRKZFJBemwybW5mSlRRdmU3a1RDT2x0L21TZjRoOWhJMkR3PT0="
     }
   }
 }
