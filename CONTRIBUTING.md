@@ -2,16 +2,16 @@
 
 Thank you for your interest in contributing to **Clash Win**! This guide covers the development setup, the 1:1 parity discipline, and the checks a change must pass before it can be merged.
 
-> **Read first**: `移植基本准则.md` (the project constitution) in the repository root. It defines the only permitted deviations from Clash Mini v3.2.2, the version line, and the submission/evidence rules. Its rules take precedence over this file.
+> **Read first**: [`移植基本准则.md`](移植基本准则.md) (the project constitution) in the repository root. It defines the only permitted deviations from Clash Mini (currently synced through **v3.2.5**), the version line, and the submission/evidence rules. Its rules take precedence over this file.
 
 ## Relationship to Clash Mini
 
-Clash Win is a **Windows-native C++20/Win32/Direct2D 1:1 port** of Clash Mini v3.2.2. The only public difference is the display name `Clash Mini` → `Clash Win`. Consequences for contributors:
+Clash Win is a **Windows-native C++20 / Win32 / Direct2D 1:1 clone** of Clash Mini (initial port anchor `v3.2.2`, continuously synced through `v3.2.5`). The only public differences are the programming language/stack and the display name `Clash Mini` → `Clash Win`. Consequences for contributors:
 
-- **Do not invent behavior.** If Mini's source (TS/TSX + Rust) has a behavior, reproduce it — including its quirks — rather than "improving" it.
-- **Do not add features Mini does not have.** If a native implementation requires something Mini lacks (Webview2 lifecycle, zip extraction), implement semantic equivalence and register the "form difference" with its rationale in `docs/`.
-- **Reference Mini with `file:line`.** Every parity claim should cite the Mini source location. Mini is a read-only reference; never modify it.
-- **Conflicts go to the maintainer.** When a ruling record and Mini v3.2.2 source evidence conflict, stop and report both `file:line` quotes. Do not self-adjudicate (§3.2 of the constitution).
+- **Do not invent behavior.** If Mini's source (TS/TSX + Rust) has a behavior, reproduce it — including its nuances — rather than "improving" it on one side.
+- **Do not add features Mini does not have.** If a native implementation requires something Mini lacks (e.g. Win32 window lifecycle, Direct2D rendering compensations), implement semantic equivalence and register the native-form difference with its rationale in `docs/`.
+- **Reference Mini with `file:line`.** Every UI/behavioral parity claim must cite the Mini source location (`src: <file>:<line>`). `scripts/ui_src_gate.ps1` enforces this automatically on `src/ui/**`.
+- **Conflicts go to the maintainer.** When a ruling record and Clash Mini source evidence conflict, stop and report both `file:line` quotes. Do not self-adjudicate (§3.2 of the constitution).
 
 ## Development Setup
 
@@ -23,29 +23,27 @@ Clash Win is a **Windows-native C++20/Win32/Direct2D 1:1 port** of Clash Mini v3
 | IDE / compiler | Visual Studio 2022 (or VS Build Tools) with **Desktop development with C++** |
 | CMake | 3.20+ |
 | NSIS | 3.x (only needed to build the installer) |
-| Python | 3.x (test runner) |
-| PowerShell | 5.1+ (packaging / verification scripts) |
+| PowerShell | 5.1+ (build, test, packaging, and preflight scripts) |
 
-Third-party C/C++ dependencies are vendored under `third_party/`; no vcpkg or package manager bootstrap is required.
+Third-party C/C++ dependencies (`yaml-cpp`, `nlohmann/json`, `QuickJS`) are vendored under `third_party/`; no vcpkg or package manager bootstrap is required.
 
 ### Configure and build
 
 ```powershell
-# 1. Configure (VS2022 generator, x64)
+# Recommended wrapper (cleans duplicate proxy env vars that trip MSBuild, configures & builds Release):
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build.ps1
+
+# Or directly via CMake:
 cmake -B build -G "Visual Studio 17 2022" -A x64
-#    or: cmake --preset default
-
-# 2. Build Release
 cmake --build build --config Release
-#    or: cmake --build --preset release
 
-# 3. Run
+# Run:
 .\build\bin\Release\clashwin.exe
 ```
 
 ### Sidecar kernels (important)
 
-The five upstream binaries under `sidecar/` (`mini-mihomo.exe`, the service, and helpers) are **not committed** — `.gitignore` excludes `*.exe`. A fresh clone therefore **compiles but cannot run**. See `docs/05-sidecar-内核资产.md` for the baseline (byte sizes and SHA256 values) and how to obtain the upstream originals.
+The five upstream binaries under `sidecar/` (`win-mihomo.exe`, `clash-verge-service.exe`, `clash-verge-service-install.exe`, `clash-verge-service-uninstall.exe`, `enableLoopback.exe`) are **not committed** — `.gitignore` excludes `*.exe`. A fresh clone therefore **compiles and passes static checks, but requires `sidecar/` to run locally**. See [`docs/05-sidecar-内核资产.md`](docs/05-sidecar-内核资产.md) for the exact byte sizes, SHA256 baseline, and upstream provenance (`MetaCubeX/mihomo` v1.19.33).
 
 ```powershell
 # After placing the 5 upstream binaries into sidecar/:
@@ -53,7 +51,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify_sidecar.ps1
 # Exit 0 = 5/5 match the baseline. Any mismatch -> do not build, test or release.
 ```
 
-Never commit, replace, or "fix" these binaries, and never add an `*.exe` to a PR.
+Never commit, re-sign, replace, or modify these binaries, and never add an `*.exe` to a PR.
 
 ### Run the tests
 
@@ -64,20 +62,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run_tests.ps1 -Filte
 
 The unified PowerShell runner copies `clashwin_test.exe` plus `sidecar/`, `locales/`, `resources/`, and `assets/locales/` into an isolated run directory, sets `CLASHWIN_REPO_ROOT` and `TMP`/`TEMP`, and writes the full log to `build/cwtest_logs/tests_full.log`. The pass criterion is **`EXIT=0` + `0 failed` + `0 assertion failures`** — the case count grows as new regressions are added.
 
-Every new or fixed defect **must** come with a regression case, and that case must be validated by temporarily reverting the fix (case fails) and restoring it (case passes). New test `.cpp` files must also be registered in the `add_executable(clashwin_test ...)` source list in `CMakeLists.txt` — an unregistered file silently contributes zero executed cases.
+Every new or fixed defect **must** come with a regression case, and that case must be validated by temporarily reverting the fix (case fails) and restoring it (case passes). New test `.cpp` files must also be registered in the `add_executable(clashwin_test ...)` source list in `CMakeLists.txt` — enforced by GATE 4 of `release_preflight.ps1` and `t35`.
 
 ### Build the distributables
 
 ```powershell
-# Portable ZIP (layout: clashwin.exe + sidecar\ + resources\ + locales\
-#               + .config\PORTABLE + 用户必读.txt)
+# Portable ZIP (layout: clashwin.exe + sidecar\ + resources\ + locales\ + .config\PORTABLE + 用户必读.txt)
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\portable.ps1 -Version <version>
 
-# NSIS installer
-powershell -NoProfile -ExecutionPolicy Bypass -File installer\build_installer.ps1 -Version <version>
+# NSIS installer (pass -SkipSign for non-elevated / CI builds)
+powershell -NoProfile -ExecutionPolicy Bypass -File installer\build_installer.ps1 -Version <version> -SkipSign
 ```
 
-Both write to `dist/`: `ClashWin_<version>_x64_portable.zip` and `ClashWin_<version>_x64-setup.exe`. Official releases rely on `SHA256SUMS.txt` plus Minisign Ed25519 signatures for in-app updates — see [Known Limitations](docs/KNOWN_LIMITATIONS.md). Do **not** pass `-SkipStage` when preparing a release artifact.
+Both write to `dist/`: `ClashWin_<version>_x64_portable.zip` and `ClashWin_<version>_x64-setup.exe`. Official releases rely on `SHA256SUMS.txt` plus Minisign Ed25519 signatures for in-app updates — see [Known Limitations](docs/KNOWN_LIMITATIONS.md).
 
 ### Pre-submit checks
 
@@ -90,17 +87,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\release_preflight.ps
 
 ## Committing and submitting
 
-1. Fork the repository and create a topic branch.
-2. Make small, verifiable steps: one change → rebuild → full test run → evidence (`docs/evidence/`).
-3. Commit with a clear message. **Signed commits are required** — see [GitHub: signing commits](https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-commits).
-4. Add an explicit `git add` for every new file (including untracked test sources); `git commit -a` / `git add -u` will silently omit them. Verify `git status --porcelain` is empty before asking for a release build.
-5. Open a PR using `.github/PULL_REQUEST_TEMPLATE.md`, citing Mini `file:line` for parity claims.
-
-Code changes and local commits are within normal contributor authority. **Pushing a tag, creating a Release, or uploading assets is a release action** — follow `.github/workflows/release.yml` and the repository maintainer's release decision; do not tag or publish from a feature branch.
+1. Install repository git hooks right after cloning:
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install_hooks.ps1
+   ```
+2. Make focused, verifiable steps: change → build → isolated test run.
+3. Add an explicit `git add` for every new file (including untracked test sources); verify `git status --porcelain` is clean before submitting.
+4. Open a PR using `.github/PULL_REQUEST_TEMPLATE.md`, citing Mini `file:line` for parity claims.
 
 ## Versioning
 
-Clash Win has its **own** version line starting at `0.1.0` and incrementing independently (constitution §5.3). It does **not** track Clash Mini's `3.2.2`; that number is only the source-reference anchor used when citing Mini code. The single source of truth is `kAppVersion` in `include/clashwin/config/constants.h`; `README`, `CHANGELOG.md`, installer defines, portable package names and Release tags must all agree with it.
+Clash Win maintains its **own** version line starting at `0.1.0` and incrementing independently (constitution §5.3). It does **not** use Clash Mini's `3.x` version numbers as its own release tags. The single source of truth is `kAppVersion` in `include/clashwin/config/constants.h`; `src/clashwin.rc`, `installer/clashwin.nsi`, `CHANGELOG.md`, and Release tags are synchronized automatically via `scripts/release.ps1`.
 
 ## Copyright and Licensing
 

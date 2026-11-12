@@ -17,8 +17,8 @@ body:
 
         ## 关于 1:1 移植范围 / About 1:1 parity
 
-        Clash Win 是 Clash Mini v3.2.2 的 Windows 原生 1:1 移植，唯一公开差异是显示名。
-        若请求的是「Mini 本身没有的新功能」，请说明它为何不应进入上游、而应由本项目承接。
+        Clash Win 是 Clash Mini（当前同步至 v3.2.5）的 Windows 原生 1:1 克隆，唯一公开差异是编程语言与软件名称。
+        若请求的是「Clash Mini 本身没有的新功能」，请说明它为何不应进入上游、而应由本项目承接。
 
         ## Before submitting:
 
@@ -47,7 +47,7 @@ body:
     id: mini-behavior
     attributes:
       label: 与 Clash Mini 的对照 / Clash Mini behavior
-      description: 若该功能与 Mini 行为有关，请说明 Mini v3.2.2 当前怎么做（最好给出文件路径）/ If related to Mini, describe its current v3.2.2 behavior (file path preferred)
+      description: 若该功能与 Mini 行为有关，请说明 Clash Mini 当前怎么做（最好给出文件路径）/ If related to Mini, describe its current behavior (file path preferred)
     validations:
       required: false
 

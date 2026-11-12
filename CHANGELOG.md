@@ -2,7 +2,7 @@
 
 All notable changes to **Clash Win** are documented here.
 
-Version format follows the project's **own** line starting at `0.1.0` (constitution §5.3): Clash Win versions increment independently and are **not** bound to Clash Mini `3.2.2`, which is only the source-reference anchor for the port.
+Version format follows the project's **own** line starting at `0.1.0` (constitution §5.3): Clash Win versions increment independently and are **not** bound to Clash Mini's `3.x` numbering (`v3.2.2` was the initial port reference anchor, with subsequent releases continuously synced through `v3.2.5`).
 
 Format reference: `Changelog.md` in the Clash Mini repository (newest first, `## vX.Y.Z` headings with grouped change bullets). Content here is Clash Win's own history, not a copy of Mini's entries.
 
@@ -150,7 +150,7 @@ Format reference: `Changelog.md` in the Clash Mini repository (newest first, `##
 - **Distribution**: two artifacts per release — `ClashWin_0.1.0_x64-setup.exe` (NSIS, per-machine, requires UAC) and `ClashWin_0.1.0_x64_portable.zip` (extract-and-run, `.config/PORTABLE`), with `SHA256SUMS.txt` for offline verification.
 - **Verification**: full regression passed (`EXIT=0`, `0 failed`) — see the delivery records in `docs/06-验收状态台账.md` and `docs/evidence/`. The case count is intentionally not pinned here: the suite grows with each regression addition.
 
-See [Release notes](docs/RELEASE_NOTES_0.1.0.md) for the exact release scope and [Known limitations](docs/KNOWN_LIMITATIONS_0.1.0.md) for v0.1.0's explicitly registered gaps.
+See the [v0.1.0 GitHub Release](https://github.com/qiu-yuxiao/clash-win/releases/tag/v0.1.0) for the historical v0.1.0 release notes and [Known limitations](docs/KNOWN_LIMITATIONS.md) for the current evergreen disclosure list.
 
 ### Notes
 
