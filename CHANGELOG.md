@@ -8,6 +8,14 @@ Format reference: `Changelog.md` in the Clash Mini repository (newest first, `##
 
 ---
 
+## v0.3.1 (2026-11-13)
+
+### 轻量模式与后台托盘防第三方清理软件误杀四重加固（BUG-363）
+- **伴生看门狗二进制异名异目录物理隔离（`clashwin-guard.exe`）**：针对 360 安全卫士加速球等清理工具在匹配主进程清理规则时会按映像名或安装目录将同名看门狗一并加入同批次强杀列表（导致看门狗与主进程在 `0ms` 内被同时 `TerminateProcess(99)` 连坐秒杀）的问题，启动看门狗前将程序自动同步至独立的 `%LOCALAPPDATA%\io.github.clash-win.clash-win\guard\clashwin-guard.exe`（通过 `.staging` 原子替换并在主槽位锁定时自动回退至 `clashwin-guard-alt.exe`），并通过 `--target-exe` 显式指向主程序路径——使伴生看门狗在进程名与磁盘目录两个维度与主进程彻底解耦。
+- **主进程与伴生看门狗双向互锁监督与退避重建**：改变看门狗单次发射后不复检的模型，主进程新增后台监督线程（`WaitForMultipleObjects` 同时等待伴生进程句柄与主动退出事件，日常 `0% CPU`）；正常退出时毫秒级唤醒收尾，若看门狗在运行期被外部误杀则按 `1.5s -> 2s -> 5s -> 15s -> 30s` 阶梯退避自动重新同步并拉起伴生进程，形成「看门狗守主进程 + 主进程守看门狗」的双向自愈闭环。
+- **主屏工作区 `1×1` 极微透明（`alpha=1`）鼠标穿透哨兵窗与消息泵保活**：升级防清理哨兵窗口对 `create_sentinel_window_pair`——将 `1×1` `WS_POPUP | WS_VISIBLE` 哨兵窗置于主显示器工作区左上角（`SPI_GETWORKAREA`，确保 `MonitorFromWindow != NULL`）、赋予非空窗口标题、将分层透明度由 `alpha=0` 提升至肉眼完全不可见的 `alpha=1`（`1/255`，规避针对屏幕外坐标与全透明 `alpha=0` 假窗口的启发式剔除），同时在窗口过程中对 `WM_NCHITTEST` 恒定返回 `HTTRANSPARENT` 确保绝对不拦截任何鼠标点击；伴生看门狗同样挂载独立哨兵窗并改用 `MsgWaitForMultipleObjects(..., QS_ALLINPUT)` 泵送窗口消息，确保 `IsHungAppWindow` 恒为 `FALSE`。
+- **稳态运行计数复位延长与安装/卸载/双端互斥全链路清理**：将看门狗判定主进程稳定运行以重置自愈代数（`generation`）的阈值从 `60s` 上调至 `120s`；主窗口无论是否开启自动轻量模式，在隐藏至托盘时均同步置位轻量模式守护信令、唤醒显示时复位；并在 NSIS 安装、升级、卸载脚本及双端互斥接管流程中补齐隔离看门狗进程与缓存目录的自动清理。
+
 ## v0.3.0 (2026-11-13)
 
 ### 订阅拉取兼容标识解耦与单订阅自定义 User-Agent（BUG-362）
