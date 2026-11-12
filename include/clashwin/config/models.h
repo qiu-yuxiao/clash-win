@@ -112,6 +112,15 @@ struct IVerge {
   // ← verge.rs::save_file（写 <home>\verge.yaml，前缀 "# Clash Verge Config"）
   Result<void> save_file() const;
 
+  // BUG-328: 临时 TUN 降级快照（← verge.rs TempTunFallbackSnapshot）
+  // 服务已装且启用但单次启动瞬态失败时仅内存降级系统代理，任意后续无关 save_file()
+  // 通过 effective_for_disk() 保留盘上原 enable_tun_mode / enable_system_proxy 意图。
+  static void enter_temp_tun_fallback(std::optional<bool> persisted_tun,
+                                      std::optional<bool> persisted_sysproxy);
+  static void clear_temp_tun_fallback();
+  static bool has_temp_tun_fallback();
+  IVerge effective_for_disk() const;
+
   // ← verge.rs::VALID_CLASH_CORES / get_valid_clash_core
   static constexpr const char* kValidClashCores[] = {"win-mihomo"};
   std::string get_valid_clash_core() const;

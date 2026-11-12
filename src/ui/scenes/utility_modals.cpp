@@ -966,12 +966,11 @@ LogViewerModal::LogViewerModal(Widget* parent) : Widget(parent) {
     menu->set_visible(false);
     menu->on_select = [this](int i) {
       static const char* vals[5] = {"all", "debug", "info", "warn", "error"};
-      level_filter_ = vals[i];
       if (lvl_menu_) {
         for (int k = 0; k < 5; ++k) lvl_menu_->items[k].selected = (k == i);
         lvl_menu_->set_visible(false);
       }
-      invalidate();
+      set_level_filter(vals[i]);
     };
   }
   add_child(std::move(menu));
@@ -1028,11 +1027,35 @@ void LogViewerModal::flush_incoming() {
   if (incoming_queue_.empty()) return;
 
   if (!paused_) {
+    const float item_w = std::max(40.0f, log_area_rect_.w - 12.0f);  // src: src/components/log/log-item.tsx:10
+    float added_h = 0.0f;
+    float evicted_h = 0.0f;
     for (auto& item : incoming_queue_) {
+      if (matches_filter(item)) {
+        added_h += measure_entry_height(item, item_w);
+      }
       logs_.push_back(std::move(item));
       // 1000 行环形截断 (FIFO clamp)
       if (logs_.size() > kMaxLogLines) {
+        if (matches_filter(logs_.front())) {
+          evicted_h += measure_entry_height(logs_.front(), item_w);
+        }
         logs_.pop_front();
+      }
+    }
+    recompute_total_height();
+    const float max_s = max_scroll();
+    if (desc_) {
+      if (scroll_y_ > 4.0f) {  // src: src/pages/logs.tsx:74
+        scroll_y_ = std::clamp(scroll_y_ + added_h, 0.0f, max_s);
+      } else {
+        scroll_y_ = 0.0f;
+      }
+    } else {
+      if (stick_to_bottom_) {
+        scroll_y_ = max_s;
+      } else {
+        scroll_y_ = std::clamp(scroll_y_ - evicted_h, 0.0f, max_s);
       }
     }
   }
@@ -1043,8 +1066,87 @@ void LogViewerModal::flush_incoming() {
 void LogViewerModal::clear_logs() {
   logs_.clear();
   incoming_queue_.clear();
-  scroll_y_ = 0;
+  total_content_h_ = 0.0f;
+  scroll_y_ = 0.0f;
+  stick_to_bottom_ = true;
   invalidate();
+}
+
+void LogViewerModal::set_desc(bool d) {
+  if (desc_ == d) return;
+  desc_ = d;
+  recompute_total_height();
+  if (desc_) {
+    scroll_y_ = 0.0f;
+  } else {
+    stick_to_bottom_ = true;
+    scroll_y_ = max_scroll();
+  }
+  invalidate();
+}
+
+void LogViewerModal::set_level_filter(const std::string& lvl) {
+  if (level_filter_ == lvl) return;
+  level_filter_ = lvl;
+  recompute_total_height();
+  if (!desc_ && stick_to_bottom_) {
+    scroll_y_ = max_scroll();
+  } else {
+    scroll_y_ = std::clamp(scroll_y_, 0.0f, max_scroll());
+  }
+  invalidate();
+}
+
+void LogViewerModal::set_search_query(const std::string& q) {
+  if (search_query_ == q) return;
+  search_query_ = q;
+  recompute_total_height();
+  if (!desc_ && stick_to_bottom_) {
+    scroll_y_ = max_scroll();
+  } else {
+    scroll_y_ = std::clamp(scroll_y_, 0.0f, max_scroll());
+  }
+  invalidate();
+}
+
+float LogViewerModal::max_scroll() const {
+  return std::max(0.0f, total_content_h_ - std::max(0.0f, log_area_rect_.h));
+}
+
+void LogViewerModal::set_scroll_y(float y) {
+  const float max_s = max_scroll();
+  scroll_y_ = std::clamp(y, 0.0f, max_s);
+  if (!desc_) {
+    stick_to_bottom_ = (max_s - scroll_y_ <= 48.0f);  // src: src/pages/logs.tsx:74
+  }
+  invalidate();
+}
+
+float LogViewerModal::measure_entry_height(const LogEntry& e, float item_w) const {
+  TextStyle log_ts;
+  log_ts.size = 10.0f;  // src: src/components/log/log-item.tsx:13
+  log_ts.weight = static_cast<int>(Weight::Normal);
+  log_ts.align_v = AlignV::Center;
+  log_ts.wrap = true;  // src: src/components/log/log-item.tsx:38
+  log_ts.ellipsis = false;
+  float msg_h = 16.0f;  // src: src/components/log/log-item.tsx:11
+  if (ITextEngine* eng = text_engine()) {
+    msg_h = eng->measure_text(utf::utf8_to_utf16(e.message), log_ts, item_w).h;
+  }
+  if (msg_h < 16.0f) msg_h = 16.0f;  // src: src/components/log/log-item.tsx:11
+  return 17.0f + msg_h + 5.0f;  // src: src/components/log/log-item.tsx:9
+}
+
+void LogViewerModal::recompute_total_height() {
+  const float item_w = std::max(40.0f, log_area_rect_.w - 12.0f);  // src: src/components/log/log-item.tsx:10
+  float sum = 0.0f;
+  size_t count = 0;
+  for (const auto& item : logs_) {
+    if (!matches_filter(item)) continue;
+    sum += measure_entry_height(item, item_w);
+    ++count;
+  }
+  total_content_h_ = count > 0 ? (sum + 12.0f) : 0.0f;  // src: src/components/log/log-item.tsx:9
 }
 
 bool LogViewerModal::matches_filter(const LogEntry& entry) const {
@@ -1092,6 +1194,12 @@ void LogViewerModal::on_arrange(const RectF& area) {
 
   // G6: 日志区起于 header44 + 过滤行39 + mb4 = cy+87；底边距 8 不变
   log_area_rect_ = {cx + 10.0f, cy + 87.0f, cw - 20.0f, ch - 95.0f};
+  recompute_total_height();
+  if (!desc_ && stick_to_bottom_) {
+    scroll_y_ = max_scroll();
+  } else {
+    scroll_y_ = std::clamp(scroll_y_, 0.0f, max_scroll());
+  }
 }
 
 void LogViewerModal::on_paint(IRenderTarget& rt) {
@@ -1359,9 +1467,8 @@ bool LogViewerModal::on_mouse(const MouseEvent& e) {
   }
 
   if (e.type == MouseEventType::Wheel) {
-    float delta = static_cast<float>(e.wheel_delta) / 120.0f * line_height_ * 3.0f;
-    scroll_y_ = std::max(0.0f, scroll_y_ - delta);
-    invalidate();
+    float delta = static_cast<float>(e.wheel_delta) / 120.0f * line_height_ * 3.0f;  // src: src/pages/logs.tsx:227
+    set_scroll_y(scroll_y_ - delta);
     return true;
   }
 

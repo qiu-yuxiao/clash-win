@@ -63,6 +63,10 @@ constexpr UINT_PTR kTimerFirstReady = 5;  // src: first-run-guide-dialog.tsx:46-
 // TUN 可用性轮询 5s（← use-system-state.ts:65-67：启动期 5s / 常态 30s，
 // 取更密的启动期值，成本仅为一次服务 IPC 探测）
 constexpr UINT_PTR kTimerTunGuard = 6;
+// BUG-358：滑块拖动 200ms 防抖落盘定时器
+constexpr UINT_PTR kTimerSkinPersist = 7;  // src: src/pages/_layout/hooks/use-skin-controls.ts:4
+// BUG-360：过滤框 700ms 可取消自动测速防抖定时器
+constexpr UINT_PTR kTimerFilterAutoTest = 8;  // src: src/components/proxy/proxy-head.tsx:148
 constexpr int kResizeBorder = 10;     // ← resize-handles.tsx HANDLE_SIZE
 constexpr int kCornerSize = 20;       // ← HANDLE_SIZE*2（角落热区）
 // 关闭键拖动判定（原版 mouseup 位移 <5 恢复标题栏）
@@ -170,6 +174,10 @@ MainWindow::~MainWindow() {
   if (postbox_sub_refresh_) {
     UiPostbox::instance().unsubscribe(postbox_sub_refresh_);
     postbox_sub_refresh_ = 0;
+  }
+  if (net_health_sub_) {
+    unsubscribe_network_health(net_health_sub_);
+    net_health_sub_ = 0;
   }
   if (frame_clock() == &clock_) {
     set_frame_clock(nullptr);
@@ -559,8 +567,8 @@ void MainWindow::sync_quick_bar(bool empty_as_dash) {
   const char* fallback = empty_as_dash ? "-" : "暂无激活的代理节点";
   quick_bar_->set_node_text(utf::utf8_to_utf16(now.empty() ? fallback : now));
   quick_bar_->set_badge(node_data_->row_delay(now), !now.empty());
-  // 协议胶囊 + 地址：type 取组成员记录，地址取 get_proxy_addr 的 "server:port"
-  // src: active-node-card.tsx:278（type）、:89-96（getProxyAddr → `${server}:${port}`）
+  // 协议胶囊 + 异步地址解析（BUG-356/339：切节点与批量刷延迟 0ms 更新 UI，不阻塞在 IPC）
+  // src: src/pages/_layout/components/active-node-card.tsx:155
   std::string type;
   for (const auto& r : node_data_->rows()) {
     if (r.name == now) {
@@ -568,8 +576,21 @@ void MainWindow::sync_quick_bar(bool empty_as_dash) {
       break;
     }
   }
-  std::wstring addr;
-  if (!now.empty()) {
+  if (now.empty()) {
+    quick_bar_meta_node_.clear();
+    quick_bar_meta_addr_.clear();
+    quick_bar_->set_node_meta(type, L"");
+    return;
+  }
+  if (now == quick_bar_meta_node_) {
+    quick_bar_->set_node_meta(type, quick_bar_meta_addr_);
+    return;
+  }
+  quick_bar_meta_node_ = now;
+  quick_bar_meta_addr_.clear();
+  quick_bar_->set_node_meta(type, L"");
+  std::thread([this, now, type] {
+    std::wstring addr;
     auto r = cmd::CommandService::instance().invoke(
         "get_proxy_addr", nlohmann::json::object({{"name", now}}));
     if (r.is_ok() && r.value().is_object()) {
@@ -579,8 +600,207 @@ void MainWindow::sync_quick_bar(bool empty_as_dash) {
         addr = utf::utf8_to_utf16(server + ":" + std::to_string(port));
       }
     }
+    UiPostbox::instance().post([this, now, type, addr] {
+      if (!node_data_ || !quick_bar_ || node_data_->now() != now) return;
+      quick_bar_meta_node_ = now;
+      quick_bar_meta_addr_ = addr;
+      quick_bar_->set_node_meta(type, addr);
+    });
+  }).detach();
+}
+
+void MainWindow::switch_node_optimistic_async(const std::string& target) {
+  if (!node_data_ || target.empty()) return;
+  // BUG-356：0ms 乐观高亮更新，点击瞬间切换主列表与顶栏活跃节点，失败按代数守卫回滚
+  // src: src/hooks/use-proxy-selection.ts:95
+  const std::string prev = node_data_->set_now_optimistic(target);
+  const bool changed = (target != prev);
+  sync_quick_bar(true);
+  const uint64_t epoch =
+      switch_epoch_.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+  std::thread([this, target, prev, changed, epoch] {
+    bool ok = false;
+    std::string err;
+    auto mc = cmd::mihomo();
+    if (!mc.is_ok() || !mc.value()) {
+      err = mc.is_ok() ? "Mihomo client unavailable" : mc.error().message;
+    } else {
+      auto r = mc.value()->select_node_for_group("PROXY", target);
+      if (r.is_ok()) {
+        ok = true;
+      } else {
+        err = r.error().message;
+      }
+    }
+
+    if (ok) {
+      // BUG-336：通知后端自愈监控进入手动切点宽限期，并持久化写回当前订阅 selected
+      // src: src/hooks/use-proxy-selection.ts:111
+      (void)cmd::CommandService::instance().invoke(
+          "notify_node_switched", nlohmann::json::object());
+
+      std::string uid;
+      if (auto p = config::Config::instance().profiles().latest_arc();
+          p && p->current && !p->current->empty()) {
+        uid = *p->current;
+      }
+      if (!uid.empty()) {
+        // src: src/hooks/use-proxy-selection.ts:74
+        auto pr = cmd::CommandService::instance().invoke(
+            "patch_profile",
+            nlohmann::json::object(
+                {{"index", uid},
+                 {"profile",
+                  {{"selected",
+                    nlohmann::json::array(
+                        {{{"name", "PROXY"}, {"now", target}}})}}}}));
+        if (!pr.is_ok()) {
+          CWLOG_WARN("persist selected node failed: " + pr.error().message);
+        }
+      }
+
+      if (changed && !prev.empty()) {
+        bool auto_close = true;
+        try {
+          auto_close = config::Config::instance()
+                           .verge()
+                           .latest_arc()
+                           ->auto_close_connection.value_or(true);
+        } catch (...) {
+        }
+        // src: src/hooks/use-proxy-selection.ts:124
+        if (auto_close && mc.is_ok() && mc.value()) {
+          (void)mc.value()->close_all_connections();
+        }
+      }
+    }
+
+    UiPostbox::instance().post([this, target, prev, changed, epoch, ok, err] {
+      if (!node_data_) return;
+      if (!ok) {
+        if (switch_epoch_.load(std::memory_order_acquire) == epoch) {
+          // src: src/hooks/use-proxy-selection.ts:128
+          node_data_->set_now_optimistic(prev);
+          sync_quick_bar(true);
+        }
+        dispatch_node_switch_notice(false, changed, target, err);
+        return;
+      }
+      if (switch_epoch_.load(std::memory_order_acquire) == epoch) {
+        dispatch_node_switch_notice(true, changed, target, std::string());
+      }
+    });
+  }).detach();
+}
+
+void MainWindow::test_single_node_async(const std::string& node) {
+  if (!node_data_ || node.empty() || scene::is_preset_proxy(node)) return;
+  auto latest = config::Config::instance().profiles().latest_arc();
+  const std::string uid = latest ? latest->current.value_or("") : std::string();
+  if (uid.empty()) return;
+
+  // BUG-321/357：保存原始延迟与时间戳快照，异常/忙碌/空结果时原样恢复，绝不卡在 -2
+  // src: src/services/delay.ts:351
+  auto snap = node_data_->snapshot_delays({node});
+  const auto started = std::chrono::steady_clock::now();
+  node_data_->set_delay(node, -2);  // src: src/services/delay.ts:354
+  if (quick_bar_ && node == node_data_->now()) {
+    quick_bar_->set_badge(-2, true);  // src: src/services/delay.ts:354
   }
-  quick_bar_->set_node_meta(type, addr);
+
+  std::thread([this, node, uid, snap = std::move(snap), started]() mutable {
+    nlohmann::json args = nlohmann::json::object();
+    args["profile_uid"] = uid;
+    args["node_names"] = nlohmann::json::array({node});
+    args["sort_type"] = 0;
+    args["select"] = false;
+    auto r = cmd::CommandService::instance().invoke("trigger_auto_select", args);
+
+    int delay = 0;
+    std::string err;
+    if (!r.is_ok()) {
+      err = r.error().message;
+    } else if (!r.value().is_array() || r.value().empty()) {
+      err = "AUTO_SELECT_NO_RESULT";  // src: src/services/delay.ts:364
+    } else {
+      bool matched = false;
+      for (const auto& item : r.value()) {
+        if (item.is_array() && item.size() == 2 && item[0].is_string() &&
+            item[0].get<std::string>() == node) {
+          delay = item[1].get<int>();
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) delay = 0;  // src: src/services/delay.ts:369
+      const auto elapsed =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now() - started)
+              .count();
+      if (elapsed < 500) {  // src: src/services/delay.ts:373
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(500 - elapsed));  // src: src/services/delay.ts:374
+      }
+    }
+
+    UiPostbox::instance().post(
+        [this, node, snap = std::move(snap), delay, err] {
+          if (!node_data_) return;
+          if (!err.empty()) {
+            // src: src/services/delay.ts:383
+            node_data_->restore_delays_for_still_pending(snap);
+            if (quick_bar_ && node == node_data_->now()) {
+              quick_bar_->set_badge(node_data_->row_delay(node), true);
+            }
+            // src: src/pages/_layout/components/active-node-card.tsx:192
+            if (err.find("AUTO_SELECT_BUSY") != std::string::npos) {
+              events::NoticeService::instance().push(
+                  "info", tr8("settings.mini.testingInProgress"));
+            } else if (err.find("AUTO_SELECT_NO_RESULT") != std::string::npos) {
+              events::NoticeService::instance().push(
+                  "error", tr8("settings.mini.testNotExecuted"));
+            } else {
+              events::NoticeService::instance().push(
+                  "error", tr8("settings.mini.testFailed", {{"message", err}}));
+            }
+            return;
+          }
+          node_data_->set_delay(node, delay);
+          node_data_->restore_delays_for_still_pending(snap);
+          if (quick_bar_ && node == node_data_->now()) {
+            quick_bar_->set_badge(delay, true);
+          }
+          dispatch_single_delay_notice(node, delay);
+        });
+  }).detach();
+}
+
+bool MainWindow::should_tray_click_hide(bool in_lightweight_mode) const {
+  if (!hwnd_) return false;
+  const bool visible = IsWindowVisible(hwnd_) != FALSE;
+  const bool minimized = IsIconic(hwnd_) != FALSE;
+  const bool foreground = GetForegroundWindow() == hwnd_;
+  const uint64_t blur_ms = last_blur_ms_.load(std::memory_order_acquire);
+  const uint64_t cur_ms = GetTickCount64();
+  return compute_should_tray_click_hide(in_lightweight_mode, visible, minimized,
+                                        foreground, blur_ms, cur_ms);
+}
+
+bool MainWindow::is_any_overlay_open() const {
+  // src: src/pages/_layout.tsx:365
+  return (settings_drawer_ && settings_drawer_->is_open()) ||
+         (add_url_ && add_url_->is_open()) ||
+         (log_viewer_ && log_viewer_->is_open()) ||
+         (first_run_ && first_run_->is_open()) ||
+         (unlock_page_ && unlock_page_->visible()) ||
+         (client_update_ && client_update_->is_open()) ||
+         (core_update_ && core_update_->is_open());
+}
+
+bool MainWindow::is_editable_focused() const {
+  // src: src/utils/disable-webview-shortcuts.ts:9
+  return dynamic_cast<TextField*>(focused_widget()) != nullptr;
 }
 
 void MainWindow::reload_nodes() {
@@ -639,11 +859,32 @@ void MainWindow::trigger_auto_select_and_refresh(const std::string& uid,
                                                  bool user_initiated) {
   if (uid.empty()) return;
   const uint64_t wait_id = user_initiated ? begin_batch_test_notice() : 0;
-  std::thread([this, uid, user_initiated, wait_id] {
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  // BUG-321/355：用户主动全量测速（如 F1）先快照并批量置 -2，结束后为仍停在 -2 的行兜底回滚
+  // src: src/services/delay.ts:445
+  scene::NodeData::DelaySnapshotMap snap;
+  if (user_initiated && node_data_) {
+    std::vector<std::string> names;
+    for (const auto& row : node_data_->rows()) {
+      if (!scene::is_preset_proxy(row.name)) {
+        names.push_back(row.name);
+      }
+    }
+    if (!names.empty()) {
+      snap = node_data_->snapshot_delays(names);
+      node_data_->set_delays_batch(names, -2);  // src: src/services/delay.ts:452
+      if (quick_bar_ && !node_data_->now().empty() &&
+          !scene::is_preset_proxy(node_data_->now())) {
+        quick_bar_->set_badge(-2, true);  // src: src/services/delay.ts:452
+      }
+    }
+  }
+  std::thread([this, uid, user_initiated, wait_id, snap = std::move(snap)]() mutable {
+    auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::seconds(10);  // src: src/pages/_layout/utils/profile-coordination.ts:184
     while (std::chrono::steady_clock::now() < deadline) {
       if (cmd::mihomo_unchecked().get_base_config().is_ok()) break;
-      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+      std::this_thread::sleep_for(
+          std::chrono::milliseconds(200));  // src: src/pages/_layout/utils/profile-coordination.ts:184
     }
     auto r = cmd::CommandService::instance().invoke(
         "trigger_auto_select",
@@ -676,10 +917,17 @@ void MainWindow::trigger_auto_select_and_refresh(const std::string& uid,
       }
     }
 
-    UiPostbox::instance().post([this, user_initiated, wait_id, sum] {
-      reload_nodes();
-      if (user_initiated) finish_batch_test_notice(wait_id, sum);
-    });
+    UiPostbox::instance().post(
+        [this, user_initiated, wait_id, sum, snap = std::move(snap)] {
+          if (node_data_ && !snap.empty()) {
+            node_data_->restore_delays_for_still_pending(snap);
+          }
+          reload_nodes();
+          if (node_data_ && !snap.empty()) {
+            node_data_->restore_delays_for_still_pending(snap);
+          }
+          if (user_initiated) finish_batch_test_notice(wait_id, sum);
+        });
 
     if (user_initiated) return;
 
@@ -785,21 +1033,24 @@ void MainWindow::build_scene() {
   auto nl = std::make_unique<scene::NodeList>();
   node_list_ = nl.get();
   node_list_->bind(node_data_.get());
-  // 点击节点 → select_node_for_group（失败回弹：NodeData::select 内处理）
+  // BUG-336/356：点击节点行 → 0ms 乐观高亮更新 + 异步 IPC/回滚 + selected 持久化
+  // src: src/hooks/use-proxy-selection.ts:95
   node_list_->select_node = [this](const std::string& node) {
-    const std::string prev_now = node_data_ ? node_data_->now() : std::string();
-    const bool changed = (node != prev_now);
-    const bool ok = node_data_->select(node);
-    if (ok) {
-      // 切节点后立即同步节点名/延迟/协议胶囊/server:port
-      sync_quick_bar(true);
-      dispatch_node_switch_notice(true, changed, node, std::string());
-    } else {
-      dispatch_node_switch_notice(
-          false, changed, node,
-          node_data_ ? node_data_->last_select_error() : std::string());
-    }
-    return ok;
+    switch_node_optimistic_async(node);
+    return true;
+  };
+  // BUG-357：点击节点行右侧 65px 延迟热区 → 单节点探测（不切换活跃节点）
+  // src: src/components/proxy/proxy-item.tsx:161
+  node_list_->on_test_single = [this](const std::string& name) {
+    test_single_node_async(name);
+  };
+  // BUG-360：过滤框 700ms 可取消自动测速防抖定时器接线
+  // src: src/components/proxy/proxy-head.tsx:148
+  node_list_->on_arm_filter_auto_test_timer = [this](uint32_t ms) {
+    if (hwnd_) SetTimer(hwnd_, kTimerFilterAutoTest, ms, nullptr);
+  };
+  node_list_->on_cancel_filter_auto_test_timer = [this] {
+    if (hwnd_) KillTimer(hwnd_, kTimerFilterAutoTest);
   };
   node_list_->on_batch_test_begin = [] { return begin_batch_test_notice(); };
   node_list_->on_batch_test_end =
@@ -809,9 +1060,9 @@ void MainWindow::build_scene() {
   node_list_->on_sort_changed = [](int sort_type) {
     dispatch_sort_mode_notice(sort_type);
   };
-  // src: active-node-card.tsx:139-200 handleCycleNode：
-  //   在当前过滤+排序后的可见列表中顺序轮换，自动跳过已确认超时（delay==0 || delay>=10000）的节点；
-  //   若全部超时则回退至紧邻下一个节点，最后完整同步顶栏元数据。
+  // src: src/pages/_layout/components/active-node-card.tsx:205 handleCycleNode：
+  //   在当前过滤+排序后的可见列表中顺序轮换，自动跳过已确认超时（delay==0 || delay>=5000）的节点；
+  //   若全部超时则回退至紧邻下一个节点，并走统一乐观切换 + selected 持久化链路（BUG-336/356）。
   quick_bar_->on_cycle_node = [this] {
     if (!node_data_) return;
     std::vector<std::string> candidates;
@@ -832,101 +1083,127 @@ void MainWindow::build_scene() {
     for (size_t step = 1; step <= candidates.size(); ++step) {
       const size_t idx = (cur + step) % candidates.size();
       const int d = node_data_->row_delay(candidates[idx]);
-      // src: active-node-card.tsx:161 delay !== 0 && delay < 10000（-1 未测允许选中）
-      if (d != 0 && d < 10000) {
+      // src: src/pages/_layout/components/active-node-card.tsx:245
+      if (d != 0 && d < scene::kNodeDelayMaxMs) {
         chosen = idx;
         break;
       }
     }
     if (candidates[chosen] == cur_name) return;
-    if (!node_data_->select(candidates[chosen])) {
-      dispatch_node_switch_notice(false, true, candidates[chosen],
-                                  node_data_->last_select_error());
-      return;
-    }
-    sync_quick_bar(true);
-    dispatch_node_switch_notice(true, true, candidates[chosen], std::string());
+    switch_node_optimistic_async(candidates[chosen]);
   };
 
-  // 点击延迟 Chip → 单点测速（← active-node-card.tsx:108-136 handleTestDelay）
-  // 语义：先置 -2（测试中，Chip 显 spinner）→ trigger_auto_select(node_names=[node],
-  // select=false) → 结果写回；控制面失败不伪造成 Timeout，恢复原值并给可读提示。
+  // 点击延迟 Chip → 单点测速（src: src/pages/_layout/components/active-node-card.tsx:174）
   quick_bar_->on_test_delay = [this] {
-    if (!node_data_) return;
-    const std::string node = node_data_->now();
-    if (node.empty()) return;
-    auto latest = config::Config::instance().profiles().latest_arc();
-    const std::string uid = latest->current.value_or("");
-    if (uid.empty()) return;
-    const int prev = node_data_->row_delay(node);
-    const auto started = std::chrono::steady_clock::now();
-    node_data_->set_delay(node, -2);           // ← setDelay(name, group, -2)
-    quick_bar_->set_badge(-2, true);
-    std::thread([this, node, uid, prev, started] {
-      nlohmann::json args = nlohmann::json::object();
-      args["profile_uid"] = uid;
-      args["node_names"] = nlohmann::json::array({node});
-      args["sort_type"] = 0;
-      args["select"] = false;
-      auto r = cmd::CommandService::instance().invoke("trigger_auto_select", args);
-      // ← delay.ts:340-348：至少显示 500ms 的加载动画
-      const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                               std::chrono::steady_clock::now() - started)
-                               .count();
-      if (elapsed < 500) std::this_thread::sleep_for(std::chrono::milliseconds(500 - elapsed));
+    if (node_data_) test_single_node_async(node_data_->now());
+  };
 
-      int delay = 0;
+  // BUG-359：网络健康度持久胶囊同步 + 点击立即重测自愈（src: src/pages/_layout/components/active-node-card.tsx:105-147）
+  quick_bar_->set_network_health(latest_network_health());
+  net_health_sub_ = subscribe_network_health(
+      [this](scene::NetworkHealthIssue issue) {
+        UiPostbox::instance().post([this, issue] {
+          if (quick_bar_) quick_bar_->set_network_health(issue);
+        });
+      });
+  quick_bar_->on_self_heal_retest = [this] {
+    if (!node_data_) return;
+    auto latest = config::Config::instance().profiles().latest_arc();
+    const std::string uid = latest ? latest->current.value_or("") : std::string();
+    if (uid.empty()) return;
+    if (self_heal_busy_.exchange(true)) {
+      events::NoticeService::instance().push(
+          "info", tr8("settings.mini.testingInProgress"));
+      return;
+    }
+    if (quick_bar_) quick_bar_->set_self_heal_testing(true);
+    std::vector<std::string> names;
+    for (const auto& row : node_data_->rows()) {
+      if (!scene::is_preset_proxy(row.name)) {
+        names.push_back(row.name);
+      }
+    }
+    auto snap = node_data_->snapshot_delays(names);
+    if (!names.empty()) node_data_->set_delays_batch(names, -2);  // src: src/services/delay.ts:452
+    std::thread([this, uid, snap = std::move(snap)]() mutable {
+      // src: src/pages/_layout/components/active-node-card.tsx:121
+      auto r = cmd::CommandService::instance().invoke(
+          "trigger_auto_select",
+          nlohmann::json::object(
+              {{"profile_uid", uid}, {"sort_type", 0}, {"select", true}}));
+      bool has_healthy = false;
+      bool empty_result = false;
       std::string err;
       if (!r.is_ok()) {
         err = r.error().message;
       } else if (!r.value().is_array() || r.value().empty()) {
-        err = "AUTO_SELECT_NO_RESULT";  // ← 空数组 = 本次压根没执行（非节点超时）
+        empty_result = true;
       } else {
-        bool matched = false;
         for (const auto& item : r.value()) {
-          if (item.is_array() && item.size() == 2 && item[0].is_string() &&
-              item[0].get<std::string>() == node) {
-            delay = item[1].get<int>();
-            matched = true;
-            break;
+          if (item.is_array() && item.size() == 2 && item[1].is_number_integer()) {
+            const int d = item[1].get<int>();
+            // src: src/pages/_layout/components/active-node-card.tsx:127
+            if (d > 0 && d < scene::kNodeDelayMaxMs) {
+              has_healthy = true;
+              break;
+            }
           }
         }
-        if (!matched) delay = 0;  // 执行了但该节点未返回 → Timeout 语义
       }
-      UiPostbox::instance().post([this, node, prev, delay, err] {
-        if (!node_data_) return;
-        if (!err.empty()) {
-          node_data_->set_delay(node, prev);          // 恢复原值，不伪造 Timeout
-          quick_bar_->set_badge(prev, true);
-          // ← active-node-card.tsx:120-132 三种可读提示，绝不静默
-          if (err.find("AUTO_SELECT_BUSY") != std::string::npos) {
-            events::NoticeService::instance().push(
-                "info", tr8("settings.mini.testingInProgress"));
-          } else if (err.find("AUTO_SELECT_NO_RESULT") != std::string::npos) {
-            events::NoticeService::instance().push(
-                "error", tr8("settings.mini.testNotExecuted"));
-          } else {
-            events::NoticeService::instance().push(
-                "error", tr8("settings.mini.testFailed", {{"message", err}}));
-          }
-          return;
-        }
-        node_data_->set_delay(node, delay);
-        quick_bar_->set_badge(delay, true);
-        dispatch_single_delay_notice(node, delay);
-      });
+      UiPostbox::instance().post(
+          [this, snap = std::move(snap), has_healthy, empty_result, err] {
+            self_heal_busy_.store(false);
+            if (quick_bar_) quick_bar_->set_self_heal_testing(false);
+            if (node_data_) node_data_->restore_delays_for_still_pending(snap);
+            reload_nodes();
+            if (node_data_) node_data_->restore_delays_for_still_pending(snap);
+            if (!err.empty()) {
+              // src: src/pages/_layout/components/active-node-card.tsx:137
+              if (err.find("AUTO_SELECT_BUSY") != std::string::npos) {
+                events::NoticeService::instance().push(
+                    "info", tr8("settings.mini.testingInProgress"));
+              } else if (err.find("AUTO_SELECT_NO_RESULT") != std::string::npos) {
+                events::NoticeService::instance().push(
+                    "error", tr8("settings.mini.testNotExecuted"));
+              } else {
+                events::NoticeService::instance().push(
+                    "error", tr8("settings.mini.testFailed", {{"message", err}}));
+              }
+              return;
+            }
+            if (has_healthy) {
+              // src: src/pages/_layout/components/active-node-card.tsx:128
+              set_latest_network_health(scene::NetworkHealthIssue::None);
+              if (quick_bar_)
+                quick_bar_->set_network_health(scene::NetworkHealthIssue::None);
+            } else if (empty_result) {
+              events::NoticeService::instance().push(
+                  "error", tr8("settings.mini.testNotExecuted"));
+            } else {
+              // src: src/pages/_layout/components/active-node-card.tsx:132
+              const auto cur_issue = latest_network_health();
+              events::NoticeService::instance().push(
+                  "error",
+                  tr8(cur_issue == scene::NetworkHealthIssue::Offline
+                          ? "settings.mini.networkOffline"
+                          : "settings.mini.allNodesTimeout"));
+            }
+          });
     }).detach();
   };
   scene_->attach_node_list(std::move(nl));
 
   // 数据初始加载（内核配置就绪竞态：失败 2s 重试，最多 8 次）
-  node_retry_left_ = 8;
+  node_retry_left_ = 8;  // src: src/pages/_layout.tsx:351
   reload_nodes();
 
-  // 延迟结果事件：局部刷新（← backend-delay-results {group, results}）
+  // 延迟结果事件：局部刷新（BUG-344：区分实时探测 120s 与近期缓存复用 30s 封顶）
+  // src: src/services/delay.ts:397
   postbox_sub_delay_ = UiPostbox::instance().subscribe_ui(
       events::names::kBackendDelayResults, [this](const nlohmann::json& p) {
-        node_data_->apply_delay_results(p);
+        const bool from_probe =
+            p.is_object() ? p.value("fromProbe", true) : true;
+        node_data_->apply_delay_results(p, from_probe);
         quick_bar_->set_node_text(utf::utf8_to_utf16(
             node_data_->now().empty() ? "-" : node_data_->now()));
         quick_bar_->set_badge(node_data_->row_delay(node_data_->now()),
@@ -935,7 +1212,7 @@ void MainWindow::build_scene() {
   // 配置/代理刷新事件：全量重载
   postbox_sub_refresh_ = UiPostbox::instance().subscribe_ui(
       events::names::kRefreshClash, [this](const nlohmann::json&) {
-        node_retry_left_ = 8;
+        node_retry_left_ = 8;  // src: src/pages/_layout.tsx:351
         reload_nodes();
       });
 
@@ -953,7 +1230,7 @@ void MainWindow::build_scene() {
     traffic_pane_->set_visible(false);
   }
 
-  conn_data_ = std::make_unique<scene::ConnectionData>(300);
+  conn_data_ = std::make_unique<scene::ConnectionData>(300);  // src: src/hooks/use-connection-data.ts:24
   conn_data_->on_resync = [this] {
     CWLOG_WARN("conn resync：等待下一个 snapshot 帧（WS 重连）");
     if (ws_sub_conn_ != 0 && ws_) {
@@ -965,18 +1242,41 @@ void MainWindow::build_scene() {
 
   build_ws_pipes();
 
-  // QuickBar 齿轮/图钉接线（Mini：橙方块 gear=开抽屉，pin=置顶）
+  // QuickBar 齿轮/图钉接线（Mini：橙方块 gear=开抽屉，pin=置顶并持久化 enable_always_on_top，BUG-340）
   if (quick_bar_) {
     quick_bar_->on_open_settings = [this] {
       CWLOG_INFO("[GEAR] on_click → toggle drawer");
       if (settings_drawer_) settings_drawer_->set_open(!settings_drawer_->is_open());
     };
     quick_bar_->on_toggle_pin = [this] {
-      pinned_ = !pinned_;
-      SetWindowPos(hwnd_, pinned_ ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
-                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-      if (quick_bar_) quick_bar_->set_pinned(pinned_);
-      dispatch_pin_window_notice(pinned_);
+      // src: src/pages/_layout.tsx:446
+      const bool target_pin = !pinned_;
+      pinned_ = target_pin;
+      if (hwnd_) {
+        SetWindowPos(hwnd_, target_pin ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0,
+                     0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+      }
+      if (quick_bar_) quick_bar_->set_pinned(target_pin);
+      std::thread([this, target_pin] {
+        auto r = cmd::CommandService::instance().invoke(
+            "patch_verge_config",
+            nlohmann::json::object({{"enable_always_on_top", target_pin}}));
+        const bool ok = r.is_ok();
+        const std::string err = ok ? std::string() : r.error().message;
+        UiPostbox::instance().post([this, target_pin, ok, err] {
+          if (ok) {
+            dispatch_pin_window_notice(target_pin);
+          } else {
+            pinned_ = !target_pin;
+            if (hwnd_) {
+              SetWindowPos(hwnd_, pinned_ ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0,
+                           0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+            if (quick_bar_) quick_bar_->set_pinned(pinned_);
+            events::NoticeService::instance().push("error", err);
+          }
+        });
+      }).detach();
     };
   }
 
@@ -1342,6 +1642,15 @@ void MainWindow::build_scene() {
             "patch_profiles_config", nlohmann::json::object({{"current", uid}}));
         const bool ok = r.is_ok();
         const std::string err = ok ? std::string() : r.error().message;
+        if (ok) {
+          // BUG-340：手动切订阅成功后 best-effort 清理旧订阅遗留连接（src: src/pages/_layout.tsx:924）
+          auto cr = cmd::CommandService::instance().invoke(
+              "close_all_connections", nlohmann::json::object());
+          if (!cr.is_ok()) {
+            CWLOG_WARN("close_all_connections after profile switch failed: " +
+                       cr.error().message);
+          }
+        }
         UiPostbox::instance().post([this, uid, wait_id, ok, err] {
           events::NoticeService::instance().hide(wait_id);
           if (ok) {
@@ -1758,6 +2067,13 @@ void MainWindow::build_scene() {
       if (add_url_) add_url_->open();
     };
     // 齿轮入口已统一到 quickbar（Mini 同构）；标题栏仅三键
+    // BUG-358：皮肤滑块拖动 200ms 防抖写盘定时器接线（src: src/pages/_layout/hooks/use-skin-controls.ts:4）
+    settings_drawer_->on_arm_skin_persist_timer = [this](uint32_t ms) {
+      if (hwnd_) SetTimer(hwnd_, kTimerSkinPersist, ms, nullptr);
+    };
+    settings_drawer_->on_cancel_skin_persist_timer = [this] {
+      if (hwnd_) KillTimer(hwnd_, kTimerSkinPersist);
+    };
     settings_drawer_->wire_callbacks();
     // 恢复上次皮肤/因子（clashwin-skin.json）
     settings_drawer_->restore_prefs();
@@ -1765,6 +2081,13 @@ void MainWindow::build_scene() {
     //   本地 skin.json 只是缓存。启动期以 verge 为准回填（不触发回写）。
     try {
       const auto& v = *config::Config::instance().verge().latest_arc();
+      // BUG-340：启动恢复窗口置顶状态（src: src/pages/_layout.tsx:446）
+      pinned_ = v.enable_always_on_top.value_or(false);
+      if (hwnd_) {
+        SetWindowPos(hwnd_, pinned_ ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+      }
+      if (quick_bar_) quick_bar_->set_pinned(pinned_);
       if (v.theme_mode.has_value())
         settings_drawer_->sync_theme_mode(utf::utf8_to_utf16(*v.theme_mode));
       settings_drawer_->sync_takeover(v.enable_system_proxy.value_or(false),
@@ -1880,6 +2203,13 @@ void MainWindow::resync_settings_ui() {
   if (!settings_drawer_) return;
   try {
     const auto& v = *config::Config::instance().verge().latest_arc();
+    // BUG-340：权威值回填置顶状态（src: src/pages/_layout.tsx:446）
+    pinned_ = v.enable_always_on_top.value_or(false);
+    if (hwnd_) {
+      SetWindowPos(hwnd_, pinned_ ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+    if (quick_bar_) quick_bar_->set_pinned(pinned_);
     if (v.theme_mode.has_value())
       settings_drawer_->sync_theme_mode(utf::utf8_to_utf16(*v.theme_mode));
     settings_drawer_->sync_takeover(v.enable_system_proxy.value_or(false),
@@ -2056,6 +2386,9 @@ void MainWindow::show_and_activate() {
 }
 
 void MainWindow::hide() {
+  last_blur_ms_.store(0, std::memory_order_release);
+  if (settings_drawer_) settings_drawer_->flush_pending_skin_prefs();
+  if (node_list_) node_list_->cancel_pending_filter_auto_test();
   mouse_tracking_ = false;
   clear_mouse_hover();
   if (tooltip_host_) tooltip_host_->leave();
@@ -2063,6 +2396,8 @@ void MainWindow::hide() {
 }
 
 void MainWindow::release_d2d_resources() {
+  if (settings_drawer_) settings_drawer_->flush_pending_skin_prefs();
+  if (node_list_) node_list_->cancel_pending_filter_auto_test();
   if (tooltip_host_) tooltip_host_->leave();
   rt_.destroy();
   if (!hwnd_) return;
@@ -2073,6 +2408,8 @@ void MainWindow::release_d2d_resources() {
   // 线程做 is_admin/服务探测，必要时 patch_verge_config），与本应空闲的轻量态相悖。
   KillTimer(hwnd_, kTimerIdle);
   KillTimer(hwnd_, kTimerTunGuard);
+  KillTimer(hwnd_, kTimerSkinPersist);
+  KillTimer(hwnd_, kTimerFilterAutoTest);
 }
 
 void MainWindow::restore_d2d_resources() {
@@ -2086,14 +2423,15 @@ void MainWindow::restore_d2d_resources() {
   RECT rc;
   GetClientRect(hwnd_, &rc);
   on_client_resized(rc.right - rc.left, rc.bottom - rc.top);
-  SetTimer(hwnd_, kTimerFrame, 33, nullptr);
-  SetTimer(hwnd_, kTimerIdle, 1000, nullptr);
-  SetTimer(hwnd_, kTimerTunGuard, 5000, nullptr);
+  SetTimer(hwnd_, kTimerFrame, 33, nullptr);  // src: src/pages/_layout.tsx:1
+  SetTimer(hwnd_, kTimerIdle, 1000, nullptr);  // src: src/providers/window/window-provider.tsx:1
+  SetTimer(hwnd_, kTimerTunGuard, 5000, nullptr);  // src: src/hooks/use-system-state.ts:65
   InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
 void MainWindow::disconnect_ws() {
-  if (ws_) ws_->disconnect_all();
+  // BUG-325：退出/进轻量断开 WS 使用 500ms 有界超时（src: src-tauri/src/feat/window.rs:35）
+  if (ws_) ws_->disconnect_all(500);  // src: src-tauri/src/feat/window.rs:35
 }
 
 void MainWindow::reconnect_ws() {
@@ -2101,6 +2439,7 @@ void MainWindow::reconnect_ws() {
 }
 
 void MainWindow::save_geometry(bool immediately) {
+  if (immediately && settings_drawer_) settings_drawer_->flush_pending_skin_prefs();
   persist_geometry(immediately);
 }
 
@@ -2429,7 +2768,7 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
     }
 
     case WM_SIZING: {
-      // ← lib.rs:411-441：上缘缩放最小高度防下移（top=bottom-minH）
+      // src: src-tauri/src/utils/resolve/window.rs:351 上缘缩放最小高度防下移（top=bottom-minH）
       auto* rc = reinterpret_cast<RECT*>(lp);
       float s = dpi_scale();
       int min_h_px = static_cast<int>(kMinWindowH * s + 0.5);
@@ -2440,6 +2779,7 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_SIZE: {
       if (wp == SIZE_MINIMIZED) {
+        if (settings_drawer_) settings_drawer_->flush_pending_skin_prefs();
         if (tooltip_host_) tooltip_host_->leave();
         clear_mouse_hover();
         if (traffic_pane_) traffic_pane_->set_enabled(false);
@@ -2488,8 +2828,8 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
         KillTimer(hwnd_, kTimerFirstRun);
         if (first_run_) {
           first_run_->open();
-          // src: :228-245 就绪超时/轮询需要周期驱动
-          SetTimer(hwnd_, kTimerFirstReady, 250, nullptr);
+          // src: src/pages/_layout/components/first-run-guide-dialog.tsx:228
+          SetTimer(hwnd_, kTimerFirstReady, 250, nullptr);  // src: src/pages/_layout/components/first-run-guide-dialog.tsx:46
         }
       } else if (wp == kTimerFirstReady) {
         if (first_run_ && first_run_->is_open()) {
@@ -2497,10 +2837,23 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
         } else {
           KillTimer(hwnd_, kTimerFirstReady);
         }
+      } else if (wp == kTimerSkinPersist) {
+        KillTimer(hwnd_, kTimerSkinPersist);
+        if (settings_drawer_) settings_drawer_->flush_pending_skin_prefs();
+      } else if (wp == kTimerFilterAutoTest) {
+        KillTimer(hwnd_, kTimerFilterAutoTest);
+        if (node_list_) node_list_->fire_filter_auto_test_timer();
       }
       return 0;
 
     case WM_ACTIVATE:
+      // BUG-361：记录窗口失焦时刻供托盘左键点击 450ms 前台收起判定（src: src-tauri/src/core/tray/mod.rs:253）
+      if (LOWORD(wp) == WA_INACTIVE) {
+        last_blur_ms_.store(GetTickCount64(), std::memory_order_release);
+        if (settings_drawer_) settings_drawer_->flush_pending_skin_prefs();
+      } else {
+        last_blur_ms_.store(0, std::memory_order_release);
+      }
       // 对齐 Mini traffic-graph.tsx:84-95：失焦时不暂停，仅在最小化(document.hidden)时停采
       break;
 
@@ -2687,21 +3040,36 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
         }
       }
       if (msg == WM_KEYDOWN) {
-        // F4: 当前过滤后可见子集测速 + 择优（所见即所选）
-        if (wp == VK_F4) {
-          if (node_list_ && node_list_->bolt_button() &&
-              node_list_->bolt_button()->on_click) {
-            node_list_->bolt_button()->on_click();
-            return 0;
+        // BUG-355：统一全局快捷键收口（Ctrl+F 聚焦全选过滤框 / F4 可见子集测速择优 / F1 全量组测速择优）
+        // src: src/utils/disable-webview-shortcuts.ts:35-77
+        const bool is_repeat = (lp & (1LL << 30)) != 0;  // src: src/utils/disable-webview-shortcuts.ts:38
+        switch (classify_global_shortcut(static_cast<uint32_t>(wp), e.ctrl, e.alt,
+                                         e.shift, ime_composing_, is_repeat,
+                                         is_any_overlay_open(),
+                                         is_editable_focused())) {
+          case GlobalShortcutAction::FocusFilter:
+            if (node_list_) {
+              node_list_->focus_filter_input();
+              update_ime_position();
+              return 0;
+            }
+            break;
+          case GlobalShortcutAction::TestVisibleSubset:
+            if (node_list_) {
+              node_list_->trigger_auto_select_visible();
+              return 0;
+            }
+            break;
+          case GlobalShortcutAction::TestFullGroup: {
+            auto cur = config::Config::instance().profiles().latest_arc()->current;
+            if (cur && !cur->empty()) {
+              trigger_auto_select_and_refresh(*cur, true);
+              return 0;
+            }
+            break;
           }
-        }
-        // F1: 全局全量节点自动群测 + 择优
-        if (wp == VK_F1) {
-          auto cur = config::Config::instance().profiles().latest_arc()->current;
-          if (cur && !cur->empty()) {
-            trigger_auto_select_and_refresh(*cur, true);
-            return 0;
-          }
+          case GlobalShortcutAction::None:
+            break;
         }
       }
       bool handled = route_key_event(&root_, e);
@@ -2803,6 +3171,8 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       return 0;
 
     case WM_DESTROY: {
+      if (settings_drawer_) settings_drawer_->flush_pending_skin_prefs();
+      if (node_list_) node_list_->cancel_pending_filter_auto_test();
       if (uia_) uia_->shutdown();
       if (tooltip_host_) tooltip_host_->bind_owner_hwnd(nullptr);
       // 退出序列：立即落盘（跳过节流；← save_window_state_immediately）

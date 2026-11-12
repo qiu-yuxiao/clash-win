@@ -24,11 +24,11 @@ namespace clashwin::ui::scene {
 namespace utf = clashwin::utf;
 
 std::wstring format_delay(int delay) {
-  // ← services/delay.ts formatDelay（0/≥timeout 且 ≤1e5 = Timeout；>1e5 = Error）
-  if (delay == -1) return L"";  // src: proxy-item.tsx:215「{delayValue >= 0 && …}」未测空白
-  if (delay == -2) return L"testing";
-  if (delay == 0 || (delay >= kNodeDelayMaxMs && delay <= 100000)) return L"Timeout";
-  if (delay > 100000) return L"Error";
+  // ← src/services/delay.ts:454-460 formatDelay（-1='-'；-2='testing'；0/≥timeout 且 ≤1e5 = Timeout；>1e5 = Error）
+  if (delay == -1) return L"-";  // src: src/services/delay.ts:455
+  if (delay == -2) return L"testing";  // src: src/services/delay.ts:456
+  if (delay == 0 || (delay >= kNodeDelayMaxMs && delay <= 100000)) return L"Timeout";  // src: src/services/delay.ts:457
+  if (delay > 100000) return L"Error";  // src: src/services/delay.ts:458
   return std::to_wstring(delay);
 }
 
@@ -81,34 +81,99 @@ bool NodeData::load() {
   return true;
 }
 
-bool NodeData::apply_delay_results(const nlohmann::json& payload) {
+bool NodeData::apply_delay_results(
+    const std::vector<std::pair<std::string, int>>& items, bool from_probe) {
+  if (items.empty()) return false;
+  const int64_t now = hooks_.now_ms ? hooks_.now_ms() : 0;
+  bool any_visible_changed = false;
+  for (const auto& [name, delay] : items) {
+    if (name.empty()) continue;
+    const int before_vis = row_delay(name);
+    int64_t ttl = kDelayCacheTtlMs;
+    if (!from_probe) {
+      // src: src/services/delay.ts:408-413 复用缓存指标保鲜上限钳制在 30s，不给即将过期的旧记录续命
+      ttl = kReusedMetricsMaxTtlMs;
+      auto it = delay_cache_.find(name);
+      if (it != delay_cache_.end() && it->second.delay != -2) {
+        const int64_t rem = it->second.ttl_ms - (now - it->second.updated_at_ms);
+        if (rem > 0 && rem < ttl) ttl = rem;
+      }
+    }
+    delay_cache_[name] = DelayCacheEntry{delay, now, ttl};
+    if (row_delay(name) != before_vis) any_visible_changed = true;
+  }
+  // BUG-339: 仅当至少一个节点的可见延迟发生变化时才广播 UI 重绘通知
+  if (any_visible_changed) notify();
+  return true;
+}
+
+bool NodeData::apply_delay_results(const nlohmann::json& payload, bool from_probe) {
   if (!payload.is_object() || !payload.contains("results") ||
       !payload["results"].is_array())
     return false;
-  int64_t now = hooks_.now_ms ? hooks_.now_ms() : 0;
-  int applied = 0;
+  if (payload.contains("fromProbe") && payload["fromProbe"].is_boolean()) {
+    from_probe = payload["fromProbe"].get<bool>();
+  }
+  std::vector<std::pair<std::string, int>> items;
+  items.reserve(payload["results"].size());
   for (const auto& item : payload["results"]) {
     // results: [[name, delay], ...]（← notification.rs Vec<(String, u32)>）
     if (!item.is_array() || item.size() < 2) continue;
-    std::string name = item[0].get<std::string>();
-    int delay = item[1].get<int>();
-    delay_cache_[name] = {delay, now};
-    ++applied;
+    items.emplace_back(item[0].get<std::string>(), item[1].get<int>());
   }
-  if (applied > 0) notify();  // 局部刷新：不重载列表
-  return applied > 0;
+  return apply_delay_results(items, from_probe);
 }
 
 void NodeData::set_delays_batch(const std::vector<std::string>& names, int delay) {
-  int64_t now = hooks_.now_ms ? hooks_.now_ms() : 0;
-  for (const auto& name : names) delay_cache_[name] = {delay, now};
-  if (!names.empty()) notify();
+  if (names.empty()) return;
+  const int64_t now = hooks_.now_ms ? hooks_.now_ms() : 0;
+  bool any_visible_changed = false;
+  for (const auto& name : names) {
+    if (name.empty()) continue;
+    const int before_vis = row_delay(name);
+    delay_cache_[name] = DelayCacheEntry{delay, now, kDelayCacheTtlMs};
+    if (row_delay(name) != before_vis) any_visible_changed = true;
+  }
+  if (any_visible_changed) notify();
 }
 
 void NodeData::set_delay(const std::string& name, int delay) {
-  int64_t now = hooks_.now_ms ? hooks_.now_ms() : 0;
-  delay_cache_[name] = {delay, now};
-  notify();
+  if (name.empty()) return;
+  const int64_t now = hooks_.now_ms ? hooks_.now_ms() : 0;
+  const int before_vis = row_delay(name);
+  delay_cache_[name] = DelayCacheEntry{delay, now, kDelayCacheTtlMs};
+  if (row_delay(name) != before_vis) notify();
+}
+
+NodeData::DelaySnapshotMap NodeData::snapshot_delays(
+    const std::vector<std::string>& names) const {
+  DelaySnapshotMap snaps;
+  for (const auto& name : names) {
+    if (name.empty()) continue;
+    auto it = delay_cache_.find(name);
+    if (it != delay_cache_.end()) {
+      snaps[name] = it->second;
+    } else {
+      snaps[name] = std::nullopt;
+    }
+  }
+  return snaps;
+}
+
+bool NodeData::restore_delays_for_still_pending(const DelaySnapshotMap& snaps) {
+  bool any_changed = false;
+  for (const auto& [name, snap] : snaps) {
+    auto it = delay_cache_.find(name);
+    if (it == delay_cache_.end() || it->second.delay != -2) continue;  // src: src/services/delay.ts:456
+    if (snap.has_value()) {
+      it->second = *snap;
+    } else {
+      delay_cache_.erase(it);
+    }
+    any_changed = true;
+  }
+  if (any_changed) notify();
+  return any_changed;
 }
 
 bool NodeData::select(const std::string& node) {
@@ -116,9 +181,20 @@ bool NodeData::select(const std::string& node) {
     CWLOG_WARN("NodeData: select_node 失败 → UI 回弹");
     return false;
   }
-  now_ = node;
-  notify();
+  if (now_ != node) {
+    now_ = node;
+    notify();
+  }
   return true;
+}
+
+std::string NodeData::set_now_optimistic(const std::string& node) {
+  std::string prev = now_;
+  if (now_ != node) {
+    now_ = node;
+    notify();
+  }
+  return prev;
 }
 
 bool NodeData::test_group() {
@@ -131,18 +207,31 @@ bool NodeData::test_group() {
 //   ← Mini proxy-groups.tsx:230-275 handleCheckAll
 //   视觉占位：先置 -2（testing）触发流光动画，再委托后端统一引擎
 bool NodeData::test_and_select(const std::vector<std::string>& nodes) {
-  // 视觉占位：立即将待测节点标记为「测速中」（← Mini setDelay(name, group, -2)）
-  bool need_batch = false;
-  for (const auto& n : nodes) {
-    auto it = delay_cache_.find(n);
-    if (it == delay_cache_.end() || it->second.first != -2) {
-      need_batch = true;
-      break;
+  std::vector<std::string> target_names = nodes;
+  if (target_names.empty()) {
+    target_names.reserve(rows_.size());
+    for (const auto& r : rows_) {
+      if (!r.name.empty() && !clashwin::util::is_dummy_node(r.name)) {
+        target_names.push_back(r.name);
+      }
     }
   }
-  if (need_batch) set_delays_batch(nodes, -2);
+  // BUG-321: 仅为当前尚未处于 -2 的节点建立快照（若 UI 线程已提前拍摄快照并置 -2，外层也会兜底恢复）
+  std::vector<std::string> non_pending;
+  non_pending.reserve(target_names.size());
+  for (const auto& n : target_names) {
+    auto it = delay_cache_.find(n);
+    if (it == delay_cache_.end() || it->second.delay != -2) {  // src: src/services/delay.ts:456
+      non_pending.push_back(n);
+    }
+  }
+  const DelaySnapshotMap internal_snaps = snapshot_delays(non_pending);
+  if (!non_pending.empty()) set_delays_batch(non_pending, -2);  // src: src/services/delay.ts:456
   last_batch_summary_ = BatchTestSummary{};
-  if (!hooks_.test_and_select) return false;
+  if (!hooks_.test_and_select) {
+    restore_delays_for_still_pending(internal_snaps);
+    return false;
+  }
   std::string fastest = hooks_.test_and_select(nodes);
   bool ok = !fastest.empty();
   if (hooks_.last_batch_summary) {
@@ -153,37 +242,41 @@ bool NodeData::test_and_select(const std::vector<std::string>& nodes) {
     last_batch_summary_.selected_node = fastest;
     last_batch_summary_.selected_delay_ms = ok ? row_delay(fastest) : -1;
   }
-
   auto anchor = self_;
   if (ok) {
     CWLOG_INFO("NodeData::test_and_select: 群测最优节点 = " + fastest +
                "，执行切换");
-    UiPostbox::instance().post([anchor, fastest] {
+    UiPostbox::instance().post([anchor, fastest, internal_snaps] {
       if (!anchor) return;
       NodeData* self = nullptr;
       {
         std::lock_guard<std::mutex> lk(anchor->mu);
         self = anchor->ptr;
       }
-      if (self) self->select(fastest);
+      if (self) {
+        self->restore_delays_for_still_pending(internal_snaps);
+        self->select(fastest);
+      }
     });
-  } else if (hooks_.fetch_group) {
+  } else {
     std::vector<std::string> all;
     std::string now;
-    if (hooks_.fetch_group(&all, &now)) {
-      UiPostbox::instance().post([anchor, now] {
-        if (!anchor) return;
-        NodeData* self = nullptr;
-        {
-          std::lock_guard<std::mutex> lk(anchor->mu);
-          self = anchor->ptr;
-        }
-        if (self) {
+    const bool fetched = hooks_.fetch_group && hooks_.fetch_group(&all, &now);
+    UiPostbox::instance().post([anchor, fetched, now, internal_snaps] {
+      if (!anchor) return;
+      NodeData* self = nullptr;
+      {
+        std::lock_guard<std::mutex> lk(anchor->mu);
+        self = anchor->ptr;
+      }
+      if (self) {
+        self->restore_delays_for_still_pending(internal_snaps);
+        if (fetched) {
           self->now_ = now;
           self->notify();
         }
-      });
-    }
+      }
+    });
   }
   return ok;
 }
@@ -204,8 +297,12 @@ bool parse_iso_time_ms(const std::string& s, int64_t* out) {
 int NodeData::row_delay(const std::string& name) const {
   int64_t now = hooks_.now_ms ? hooks_.now_ms() : 0;
   auto it = delay_cache_.find(name);
-  if (it != delay_cache_.end() && now - it->second.second <= kDelayCacheTtlMs)
-    return it->second.first;
+  if (it != delay_cache_.end()) {
+    // -2（测速中）永不按 TTL 惰性过期；完成或失败时由 apply_delay_results / restore_delays_for_still_pending 收敛
+    if (it->second.delay == -2) return -2;  // src: src/services/delay.ts:456
+    if (now - it->second.updated_at_ms <= it->second.ttl_ms)
+      return it->second.delay;
+  }
   // src: delay.ts:279-295 alive===false → 一律 0（Timeout），禁止陈旧 history 冒充当前延迟；
   //   否则回落内核 history 最后一条，过旧(>10min)按 0 判死
   auto h = proxy_history_.find(name);

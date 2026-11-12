@@ -53,6 +53,12 @@ struct AutoSelectHooks {
   std::function<bool()> wait_ready;
   // 读取指定组的全部节点名（node_names 缺省时全量测速用）
   std::function<std::vector<std::string>(const std::string& group)> group_nodes;
+  // BUG-322 / BUG-349: 读取持久化的 sortType（sort_type==0 时解析）
+  std::function<std::optional<int>(const std::string& uid)> saved_sort_type;
+  // BUG-344: 前端多节点子集测速时检查 PROXY__METRICS 节点历史是否均在 <30s 新鲜窗口内
+  std::function<std::optional<std::vector<std::pair<std::string, uint32_t>>>(
+      const std::vector<std::string>& nodes)>
+      fresh_metrics_subset;
 };
 
 class AutoSelect {
@@ -66,12 +72,17 @@ class AutoSelect {
     bool selected = false;
     bool busy = false;  // AUTO_SELECT_RUNNING 占用（返回繁忙）
     std::string selected_node;
+    DelayResultSource source = DelayResultSource::NotExecuted;
   };
 
   // ← trigger_backend_auto_select（含互斥/校验/择优/切换/回写全流程）
   Outcome trigger(const std::string& profile_uid,
                   std::optional<std::vector<std::string>> node_names,
                   int sort_type, bool select, bool skip_wait_ready = false);
+
+  // BUG-322 / BUG-349: 纯展示序排序（0ms 超时节点置底，绝不排在真实延迟之前）
+  static void sort_display_delays(
+      std::vector<std::pair<std::string, uint32_t>>& display, int sort_type);
 
   // 纯择优计算（测试直测；无锁副作用）：
   // candidates=[30,2000) → 失败服务器避让 → 最小延迟
@@ -96,6 +107,7 @@ class AutoSelect {
   // 唤醒静默测速（T16⑤）：5min 冷却 + 复用 trigger 互斥；T19 挂触发
   bool silent_test_on_wakeup(const std::string& profile_uid);
   int64_t wakeup_cooldown_remaining_ms() const;
+  bool is_running() const { return running_.load(); }
 
  private:
   AutoSelect() = default;

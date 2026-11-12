@@ -2,9 +2,17 @@
 // PrfItem 本地部分（← config/prfitem.rs：from_local/from_merge/from_script/
 // from_rules/from_proxies/read_file/save_file）；from_url 下载/解析链路
 // 属 T06/T15，此处仅接口占位。
+#include <optional>
+#include <string_view>
+
 #include "clashwin/config/models.h"
 
 namespace clashwin::config::prfitem {
+
+// ← prfitem.rs::normalize_custom_user_agent（BUG-362）：
+//   trim 后非空保留，空串/纯空白归一为 nullopt（即回退默认兼容 UA）
+[[nodiscard]] std::optional<std::string> normalize_custom_user_agent(
+    std::optional<std::string_view> ua);
 
 // uid 生成（← help.rs::get_uid：nanoid 11 位 + 前缀；T02 已提供 gen_uid）
 std::string gen_uid_prefixed(std::string_view prefix);

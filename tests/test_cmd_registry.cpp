@@ -16,6 +16,7 @@ const char* kLibRsCommands[] = {
     "open_core_dir", "restart_core", "get_running_mode", "install_service", "uninstall_service",
     "is_service_available", "get_clash_info", "patch_clash_config", "patch_clash_mode",
     "get_runtime_config", "get_proxy_addr", "save_proxy_head_state", "get_proxy_head_state",
+    "notify_node_switched",
     "get_clash_logs", "close_all_connections", "get_verge_config", "patch_verge_config",
     "get_auto_launch_status", "trigger_auto_select", "download_icon_cache", "get_profiles",
     "enhance_profiles", "patch_profiles_config", "view_profile", "patch_profile", "import_profile",

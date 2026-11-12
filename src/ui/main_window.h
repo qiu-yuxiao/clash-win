@@ -3,7 +3,7 @@
 // Widget 树宿主 + 几何持久化 + 断点/stealth/大尺寸模式。
 //
 // 分层：纯逻辑（可测）与 HWND 薄壳分离——
-// - clamp_sizing_top / minmax 数值：纯函数（← lib.rs:411-441 sizing_wndproc）
+// - clamp_sizing_top / minmax 数值：纯函数（src: src-tauri/src/utils/resolve/window.rs:351）
 // - StealthController：FEAT-003 标题栏 10s 空闲隐藏（← window-provider.tsx）
 // - LargeModeController：大尺寸 toggle + last-non-large-size 持久化
 // - MainWindow：HWND/WndProc/渲染泵/几何事件接线
@@ -46,7 +46,7 @@
 
 namespace clashwin::ui::win {
 
-// ---------- 纯逻辑：WM_SIZING 上缘钳制（← lib.rs:411-441 逐行） ----------
+// ---------- 纯逻辑：WM_SIZING 上缘钳制（src: src-tauri/src/utils/resolve/window.rs:351） ----------
 // 系统只钳尺寸不钳位置：上边缘缩放到最小高度后 Windows 继续增加 Y，
 // 窗口整体下移。WM_SIZING 在系统应用矩形之前给提议矩形，此处同时钳制。
 // side：WMSZ_*；rc：提议矩形（外框口径；本项目 outer==inner）；min_h_px：
@@ -60,6 +60,47 @@ inline bool clamp_sizing_top(uint32_t side, RECT& rc, int min_h_px) {
     return true;
   }
   return false;
+}
+
+// ---------- 纯逻辑：托盘左键点击是否应顺手收起前台窗口（BUG-361） ----------
+// src: src-tauri/src/core/tray/mod.rs:253
+inline bool compute_should_tray_click_hide(
+    bool in_lightweight_mode, bool visible, bool minimized,
+    bool foreground, uint64_t last_blur_ms, uint64_t now_ms) {
+  if (in_lightweight_mode || !visible || minimized) return false;
+  if (foreground) return true;
+  return last_blur_ms > 0 && now_ms >= last_blur_ms &&
+         (now_ms - last_blur_ms) <= 450;  // src: src-tauri/src/core/tray/mod.rs:257
+}
+
+// ---------- 纯逻辑：主页统一全局快捷键分类与守卫（BUG-355） ----------
+// src: src/utils/disable-webview-shortcuts.ts:35-77
+enum class GlobalShortcutAction {
+  None,
+  FocusFilter,
+  TestVisibleSubset,
+  TestFullGroup,
+};
+
+inline GlobalShortcutAction classify_global_shortcut(
+    uint32_t vk, bool ctrl, bool alt, bool shift,
+    bool ime_composing, bool is_repeat,
+    bool overlay_open, bool editable_focused) {
+  if (ime_composing || is_repeat || overlay_open || editable_focused) {
+    return GlobalShortcutAction::None;
+  }
+  if (ctrl && !alt && !shift && vk == 'F') {
+    return GlobalShortcutAction::FocusFilter;  // src: src/utils/disable-webview-shortcuts.ts:45
+  }
+  if (!ctrl && !alt && !shift) {
+    if (vk == VK_F4) {
+      return GlobalShortcutAction::TestVisibleSubset;  // src: src/utils/disable-webview-shortcuts.ts:61
+    }
+    if (vk == VK_F1) {
+      return GlobalShortcutAction::TestFullGroup;  // src: src/utils/disable-webview-shortcuts.ts:68
+    }
+  }
+  return GlobalShortcutAction::None;
 }
 
 // ---------- 纯逻辑：FEAT-003 标题栏 stealth（10s 空闲隐藏） ----------
@@ -211,6 +252,12 @@ class MainWindow : public app::ILifecycleWindow {
   void set_tray(system::Tray* tray) { tray_ = tray; }
   system::Tray* tray() const { return tray_; }
 
+  // BUG-361：托盘左键点击前采样主窗口可见/最小化/焦点/450ms 失焦窗口状态
+  bool should_tray_click_hide(bool in_lightweight_mode) const;
+  // BUG-355：是否有抽屉或弹窗覆盖主页 / 是否正聚焦在输入控件上
+  bool is_any_overlay_open() const;
+  bool is_editable_focused() const;
+
   HWND hwnd() const { return hwnd_; }
   Breakpoints& breakpoints() { return bp_; }
   StealthController& stealth() { return stealth_; }
@@ -227,7 +274,9 @@ class MainWindow : public app::ILifecycleWindow {
   void apply_geometry_restore();  // window_state.json 恢复（含脱屏居中）
 
   void reload_nodes();                             // NodeData 加载 + QuickBar 同步（失败 2s 重试）
-  void sync_quick_bar(bool empty_as_dash = false); // 同步活跃节点名/延迟/协议胶囊/地址到 QuickBar
+  void sync_quick_bar(bool empty_as_dash = false); // 同步活跃节点名/延迟/协议胶囊/异步地址到 QuickBar
+  void switch_node_optimistic_async(const std::string& target); // BUG-336/356：0ms 乐观切点 + 异步 IPC/回滚 + selected 持久化
+  void test_single_node_async(const std::string& node);         // BUG-321/357：单节点测速（QuickBar 胶囊与行右侧热区共用）
   void trigger_auto_select_and_refresh(const std::string& uid, bool user_initiated = false); // 1:1 对齐 Mini：全量并发测速择优+10s复核
   void update_ime_position();                      // IME 候选窗跟随光标与 Win32 原生 Caret 同步
   // 首启就绪轮询：只刷新 proxies/activeDelay，不触发组测速
@@ -270,6 +319,8 @@ class MainWindow : public app::ILifecycleWindow {
   uint64_t node_data_sub_ = 0;
   int node_retry_left_ = 0;  // 内核配置就绪竞态：取数重试剩余次数
   scene::QuickBar* quick_bar_ = nullptr;
+  std::string quick_bar_meta_node_;
+  std::wstring quick_bar_meta_addr_;
   bool pinned_ = false;  // QuickBar 图钉：窗口置顶开关
   scene::NodeList* node_list_ = nullptr;
   // T14 场景
@@ -297,6 +348,10 @@ class MainWindow : public app::ILifecycleWindow {
   uint64_t bus_sub_core_upgrade_ = 0;  // kCoreUpgradeProgress → CoreUpdateModal + 结果通知
   uint64_t postbox_sub_delay_ = 0;
   uint64_t postbox_sub_refresh_ = 0;
+  uint64_t net_health_sub_ = 0;                 // BUG-359：network_health::* 顶栏胶囊订阅
+  std::atomic<bool> self_heal_busy_{false};     // BUG-359：点击健康胶囊自愈重测防重入
+  std::atomic<uint64_t> switch_epoch_{0};       // BUG-356：异步切点并发代数守卫
+  std::atomic<uint64_t> last_blur_ms_{0};       // BUG-361：最近一次失焦时刻（GetTickCount64）
   std::atomic<bool> profile_importing_{false};  // ← _layout.tsx:839 isImportingRef 防重入锁
   int64_t aurora_tick_ms_ = 0;  // 极光动画自续帧节流（10fps；src: layout.scss:23）
 
@@ -338,3 +393,9 @@ class MainWindow : public app::ILifecycleWindow {
 };
 
 }  // namespace clashwin::ui::win
+
+namespace clashwin::ui {
+using win::classify_global_shortcut;
+using win::compute_should_tray_click_hide;
+using win::GlobalShortcutAction;
+}  // namespace clashwin::ui

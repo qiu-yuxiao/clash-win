@@ -2,6 +2,7 @@
 #include "test_util.h"
 
 #include <windows.h>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -176,10 +177,34 @@ UT_TEST(t24_core_updater_sha256_computation) {
 UT_TEST(t24_core_updater_progress_event_stream) {
   TempHomeGuard th;
 
-  // Prepare a valid STORE PKZIP with mini-mihomo.exe
+  // Prepare a valid STORE PKZIP with mini-mihomo.exe (valid x64 PE32+ >= 5 MiB for BUG-319)
+  auto make_minimal_valid_pe64 = []() -> std::string {
+    std::string img(5u * 1024u * 1024u, '\0');
+    img[0] = 'M';
+    img[1] = 'Z';
+    const uint32_t pe_off = 0x80;
+    std::memcpy(&img[0x3C], &pe_off, sizeof(pe_off));
+    img[pe_off + 0] = 'P';
+    img[pe_off + 1] = 'E';
+    img[pe_off + 2] = '\0';
+    img[pe_off + 3] = '\0';
+    const uint16_t machine = 0x8664;
+    const uint16_t num_sections = 1;
+    const uint16_t opt_hdr_size = 240;
+    const uint16_t characteristics = 0x0022;
+    std::memcpy(&img[pe_off + 4], &machine, 2);
+    std::memcpy(&img[pe_off + 6], &num_sections, 2);
+    std::memcpy(&img[pe_off + 20], &opt_hdr_size, 2);
+    std::memcpy(&img[pe_off + 22], &characteristics, 2);
+    const uint16_t magic = 0x020B;
+    std::memcpy(&img[pe_off + 24], &magic, 2);
+    const size_t sec_off = pe_off + 24 + opt_hdr_size;
+    std::memcpy(&img[sec_off], ".text\0\0\0", 8);
+    return img;
+  };
   std::filesystem::path zip_path = th.dir / "mock_archive.zip";
   std::vector<DiagnosticBundle::ZipEntry> zip_entries = {
-      {"mini-mihomo.exe", "MZ_MOCK_MIHOMO_EXECUTABLE_BINARY"}};
+      {"mini-mihomo.exe", make_minimal_valid_pe64()}};
   auto wz = DiagnosticBundle::write_zip_file(zip_path.wstring(), zip_entries);
   UT_CHECK(wz.is_ok());
 
@@ -354,9 +379,33 @@ UT_TEST(t24_core_updater_sha256_mismatch_rejection) {
 UT_TEST(t24_core_updater_proxy_group_snapshot_restore) {
   TempHomeGuard th;
 
+  auto make_minimal_valid_pe64 = []() -> std::string {
+    std::string img(5u * 1024u * 1024u, '\0');
+    img[0] = 'M';
+    img[1] = 'Z';
+    const uint32_t pe_off = 0x80;
+    std::memcpy(&img[0x3C], &pe_off, sizeof(pe_off));
+    img[pe_off + 0] = 'P';
+    img[pe_off + 1] = 'E';
+    img[pe_off + 2] = '\0';
+    img[pe_off + 3] = '\0';
+    const uint16_t machine = 0x8664;
+    const uint16_t num_sections = 1;
+    const uint16_t opt_hdr_size = 240;
+    const uint16_t characteristics = 0x0022;
+    std::memcpy(&img[pe_off + 4], &machine, 2);
+    std::memcpy(&img[pe_off + 6], &num_sections, 2);
+    std::memcpy(&img[pe_off + 20], &opt_hdr_size, 2);
+    std::memcpy(&img[pe_off + 22], &characteristics, 2);
+    const uint16_t magic = 0x020B;
+    std::memcpy(&img[pe_off + 24], &magic, 2);
+    const size_t sec_off = pe_off + 24 + opt_hdr_size;
+    std::memcpy(&img[sec_off], ".text\0\0\0", 8);
+    return img;
+  };
   std::filesystem::path zip_path = th.dir / "valid.zip";
   std::vector<DiagnosticBundle::ZipEntry> zip_entries = {
-      {"mini-mihomo.exe", "MIHOMO_EXECUTABLE"}};
+      {"mini-mihomo.exe", make_minimal_valid_pe64()}};
   DiagnosticBundle::write_zip_file(zip_path.wstring(), zip_entries);
 
   struct FastDownloader : ICoreUpdateDownloader {
@@ -384,6 +433,12 @@ UT_TEST(t24_core_updater_proxy_group_snapshot_restore) {
   MockApiClient mock_api;
   mock_api.active_node = "Japan-Tokyo-01";
   CoreUpdater::instance().set_core_api_client(&mock_api);
+  struct ApiClientResetGuard {
+    ~ApiClientResetGuard() {
+      CoreUpdater::instance().set_core_api_client(nullptr);
+      CoreUpdater::instance().reset_lifecycle_ops();
+    }
+  } api_reset_guard;
 
   CoreOps ops;
   ops.stop = []() -> Result<void> { return Result<void>::ok(); };

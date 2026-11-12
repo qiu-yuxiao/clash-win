@@ -49,6 +49,13 @@ bool ipv4_forbidden(uint32_t ip) {
 }
 
 bool ipv6_forbidden(const uint16_t segs[8]) {
+  // BUG-327：IPv4-mapped IPv6 ::ffff:a.b.c.d（前 80 bit 0 + 0xffff + 32-bit IPv4）
+  if (segs[0] == 0 && segs[1] == 0 && segs[2] == 0 && segs[3] == 0 &&
+      segs[4] == 0 && segs[5] == 0xffff) {
+    const uint32_t mapped_v4 =
+        (static_cast<uint32_t>(segs[6]) << 16) | static_cast<uint32_t>(segs[7]);
+    if (ipv4_forbidden(mapped_v4)) return true;
+  }
   // is_loopback ::1
   bool all_zero = true;
   for (int i = 0; i < 7; ++i) {
@@ -65,6 +72,48 @@ bool ipv6_forbidden(const uint16_t segs[8]) {
   if ((segs[0] & 0xffc0) == 0xfe80) return true;
   // 唯一本地 fc00::/7：(seg0 & 0xfe00) == 0xfc00
   if ((segs[0] & 0xfe00) == 0xfc00) return true;
+  return false;
+}
+
+bool ip_string_forbidden(const wchar_t* ip_wstr) {
+  if (!ip_wstr || ip_wstr[0] == L'\0') return false;
+  // WinHTTP CONNECTING_TO_SERVER 有时带括号或端口，先剥离首尾空白与括号
+  std::wstring clean(ip_wstr);
+  while (!clean.empty() && (clean.front() == L' ' || clean.front() == L'[')) {
+    clean.erase(clean.begin());
+  }
+  if (auto rb = clean.find(L']'); rb != std::wstring::npos) {
+    clean.resize(rb);
+  }
+  while (!clean.empty() && clean.back() == L' ') {
+    clean.pop_back();
+  }
+  in_addr v4{};
+  if (InetPtonW(AF_INET, clean.c_str(), &v4) == 1) {
+    return ipv4_forbidden(ntohl(v4.S_un.S_addr));
+  }
+  // 处理 IPv4:port（恰好含单个 ':'）
+  const size_t first_colon = clean.find(L':');
+  if (first_colon != std::wstring::npos &&
+      clean.find(L':', first_colon + 1) == std::wstring::npos) {
+    std::wstring host_only = clean.substr(0, first_colon);
+    if (InetPtonW(AF_INET, host_only.c_str(), &v4) == 1) {
+      return ipv4_forbidden(ntohl(v4.S_un.S_addr));
+    }
+  }
+  in6_addr v6{};
+  // 剥离 IPv6 %scope_id（若存在）
+  if (auto pct = clean.find(L'%'); pct != std::wstring::npos) {
+    clean.resize(pct);
+  }
+  if (InetPtonW(AF_INET6, clean.c_str(), &v6) == 1) {
+    uint16_t segs[8];
+    for (int i = 0; i < 8; ++i) {
+      segs[i] =
+          static_cast<uint16_t>((v6.u.Byte[i * 2] << 8) | v6.u.Byte[i * 2 + 1]);
+    }
+    return ipv6_forbidden(segs);
+  }
   return false;
 }
 
@@ -136,12 +185,24 @@ Result<void> validate_url_no_ssrf(const system::UrlParts& url) {
       }
     }
   } else {
-    // ← url::Host::Domain 分支
-    const std::string lower = util::to_lower(url.host);
-    if (lower == "localhost" || lower == "127.0.0.1" || lower == "::1" ||
-        lower == "0.0.0.0" || starts_with(lower, "169.254.")) {
+    // ← url::Host::Domain 分支（prfitem.rs:141-162，BUG-327）：
+    //   剥尾随 '.' 后拦截空域名、无 '.' 单标签内网名、localhost 及保留内网后缀
+    std::string lower = util::to_lower(url.host);
+    while (!lower.empty() && lower.back() == '.') {
+      lower.pop_back();
+    }
+    auto has_suffix = [&](std::string_view suf) {
+      return lower.size() >= suf.size() &&
+             std::string_view(lower).substr(lower.size() - suf.size()) == suf;
+    };
+    if (lower.empty() || lower.find('.') == std::string::npos ||
+        lower == "localhost" || has_suffix(".localhost") ||
+        has_suffix(".local") || has_suffix(".internal") ||
+        has_suffix(".lan") || has_suffix(".home.arpa") ||
+        lower == "127.0.0.1" || lower == "::1" || lower == "0.0.0.0" ||
+        starts_with(lower, "169.254.")) {
       return Result<void>::err(ssrf_err(
-          "cannot fetch subscription from localhost/loopback address"));
+          "cannot fetch subscription from localhost/internal address"));
     }
   }
 

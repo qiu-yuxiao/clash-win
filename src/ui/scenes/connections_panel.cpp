@@ -6,6 +6,7 @@
 
 #include "core/quick_routing.h"
 #include "events/event_bus.h"
+#include "events/notice.h"
 #include "ui/icon_w.h"
 #include "ui/theme/theme.h"
 #include "ui/soft_shadow.h"
@@ -433,18 +434,22 @@ void ConnectionsPanel::apply_quick_route(const ConnItem& item, int target_code) 
   if (target_code == 1) target = core::quick_routing::RuleTarget::Proxy;
   if (target_code == 2) target = core::quick_routing::RuleTarget::Reject;
 
+  core::quick_routing::QuickRouteResult res{false, "", ""};
   if (!item.metadata.host.empty()) {
-    core::quick_routing::add_quick_routing_rule(core::quick_routing::RuleType::Domain,
-                                                item.metadata.host, target);
+    res = core::quick_routing::add_quick_routing_rule(
+        core::quick_routing::RuleType::Domain, item.metadata.host, target);
   } else if (!item.metadata.destination_ip.empty()) {
-    core::quick_routing::add_quick_routing_rule(core::quick_routing::RuleType::Domain,
-                                                item.metadata.destination_ip, target);
+    res = core::quick_routing::add_quick_routing_rule(
+        core::quick_routing::RuleType::Domain, item.metadata.destination_ip, target);
   } else if (!item.metadata.process.empty()) {
-    core::quick_routing::add_quick_routing_rule(core::quick_routing::RuleType::Process,
-                                                item.metadata.process, target);
+    res = core::quick_routing::add_quick_routing_rule(
+        core::quick_routing::RuleType::Process, item.metadata.process, target);
   } else if (!item.host.empty()) {
-    core::quick_routing::add_quick_routing_rule(core::quick_routing::RuleType::Domain, item.host,
-                                                target);
+    res = core::quick_routing::add_quick_routing_rule(
+        core::quick_routing::RuleType::Domain, item.host, target);
+  }
+  if (!res.ok && !res.error.empty()) {
+    events::NoticeService::instance().push("error", res.error);
   }
 }
 

@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include <mutex>
+
 #include "clashwin/config/constants.h"
 #include "util/dirs.h"
 #include "util/str_utils.h"
@@ -611,6 +613,58 @@ std::string IVerge::get_valid_clash_core() const {
   return "win-mihomo";
 }
 
+namespace {
+
+struct TempTunFallbackSnapshot {
+  bool active = false;
+  std::optional<bool> enable_tun_mode;
+  std::optional<bool> enable_system_proxy;
+};
+
+std::mutex& temp_tun_fallback_mutex() {
+  static std::mutex mu;
+  return mu;
+}
+
+TempTunFallbackSnapshot& temp_tun_fallback_state() {
+  static TempTunFallbackSnapshot state;
+  return state;
+}
+
+}  // namespace
+
+void IVerge::enter_temp_tun_fallback(std::optional<bool> persisted_tun,
+                                     std::optional<bool> persisted_sysproxy) {
+  std::lock_guard<std::mutex> lk(temp_tun_fallback_mutex());
+  auto& s = temp_tun_fallback_state();
+  s.active = true;
+  s.enable_tun_mode = persisted_tun;
+  s.enable_system_proxy = persisted_sysproxy;
+}
+
+void IVerge::clear_temp_tun_fallback() {
+  std::lock_guard<std::mutex> lk(temp_tun_fallback_mutex());
+  auto& s = temp_tun_fallback_state();
+  s.active = false;
+  s.enable_tun_mode.reset();
+  s.enable_system_proxy.reset();
+}
+
+bool IVerge::has_temp_tun_fallback() {
+  std::lock_guard<std::mutex> lk(temp_tun_fallback_mutex());
+  return temp_tun_fallback_state().active;
+}
+
+IVerge IVerge::effective_for_disk() const {
+  std::lock_guard<std::mutex> lk(temp_tun_fallback_mutex());
+  const auto& s = temp_tun_fallback_state();
+  if (!s.active) return *this;
+  IVerge copy = *this;
+  copy.enable_tun_mode = s.enable_tun_mode;
+  copy.enable_system_proxy = s.enable_system_proxy;
+  return copy;
+}
+
 Result<void> IVerge::save_file() const { return verge::save_verge(*this); }
 
 }  // namespace clashwin::config
@@ -619,7 +673,8 @@ Result<void> IVerge::save_file() const { return verge::save_verge(*this); }
 namespace clashwin::config::verge {
 
 Result<void> save_verge(const IVerge& v) {
-  return serde::save_yaml_text(verge_path(), dump_verge(v),
+  const IVerge disk_cfg = v.effective_for_disk();
+  return serde::save_yaml_text(verge_path(), dump_verge(disk_cfg),
                                "# Clash Verge Config");
 }
 

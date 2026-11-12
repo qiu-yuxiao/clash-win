@@ -66,7 +66,8 @@ class EventBus {
   static void notify_profile_changed(const std::string& uid);
   static void notice_message(const char* status, const std::string& message);
   static void backend_delay_results(const std::string& group,
-                                    const std::vector<std::pair<std::string, uint32_t>>& results);
+                                    const std::vector<std::pair<std::string, uint32_t>>& results,
+                                    bool from_probe = true);
 
  private:
   struct Impl;

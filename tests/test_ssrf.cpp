@@ -201,6 +201,41 @@ UT_TEST(t06_ssrf_dns_resolution_second_check) {
   UT_CHECK(sockaddr_forbidden(&sa6));
   inet_pton(AF_INET6, "2001:db8::1", &sa6.sin6_addr);
   UT_CHECK(!sockaddr_forbidden(&sa6));
+
+  // BUG-327：IPv4-mapped IPv6 sockaddr 与宽字符 IP 字面量校验
+  inet_pton(AF_INET6, "::ffff:127.0.0.1", &sa6.sin6_addr);
+  UT_CHECK(sockaddr_forbidden(&sa6));
+  inet_pton(AF_INET6, "::ffff:10.0.0.1", &sa6.sin6_addr);
+  UT_CHECK(sockaddr_forbidden(&sa6));
+  inet_pton(AF_INET6, "::ffff:8.8.8.8", &sa6.sin6_addr);
+  UT_CHECK(!sockaddr_forbidden(&sa6));
+
+  UT_CHECK(ip_string_forbidden(L"127.0.0.1"));
+  UT_CHECK(ip_string_forbidden(L"127.0.0.1:9090"));
+  UT_CHECK(ip_string_forbidden(L"::1"));
+  UT_CHECK(ip_string_forbidden(L"[::ffff:192.168.1.1]"));
+  UT_CHECK(!ip_string_forbidden(L"1.1.1.1"));
+  UT_CHECK(!ip_string_forbidden(L"2606:4700:4700::1111"));
+}
+
+UT_TEST(t_bug327_ssrf_blocks_internal_domains_and_mapped_ipv6) {
+  // 对照 Mini test_validate_url_no_ssrf_blocks_internal_and_mapped_ips
+  UT_CHECK(rejects("http://localhost./sub"));
+  UT_CHECK(rejects("http://intranet/sub"));
+  UT_CHECK(rejects("http://intranet:8080/api"));
+  UT_CHECK(rejects("http://router.local/sub"));
+  UT_CHECK(rejects("http://nas.lan/sub"));
+  UT_CHECK(rejects("http://svc.internal/sub"));
+  UT_CHECK(rejects("http://box.home.arpa/sub"));
+  UT_CHECK(rejects("http://sub.localhost/config"));
+  UT_CHECK(rejects("http://[::ffff:127.0.0.1]:8080/sub"));
+  UT_CHECK(rejects("http://[::ffff:10.0.0.1]/sub"));
+  UT_CHECK(rejects("http://[::ffff:192.168.1.1]/sub"));
+  UT_CHECK(rejects("http://[::ffff:169.254.169.254]/latest/meta-data/"));
+
+  // 本地无法解析的公网域名必须放行，允许后续走本地 Clash 代理回退下载
+  UT_CHECK(allows("https://sub.nonexistent-airport-domain-test.example/api/v1"));
+  UT_CHECK(allows("https://1.1.1.1/sub"));
 }
 
 // ---------- from_url SSRF 集成已由 test_uri_list 覆盖 ----------

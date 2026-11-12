@@ -249,7 +249,8 @@ UT_TEST(t37_missing_tooltips_and_mouse_leave_cleanup) {
   qb.layout_tree({0, 0, 271, 30});
   UT_CHECK(qb.tooltip_text().empty());
 
-  // NodeRowWidget：左协议列显示协议，中名称列显示节点名（选中附当前节点），右延迟列为空
+  // NodeRowWidget：左协议列显示协议，中名称列显示节点名（选中附当前节点），
+  // 右延迟列非预设节点显示单点测速提示（BUG-357），预设节点右延迟列为空
   scene::NodeRowWidget row;
   row.bind("Trojan", "Tokyo-IPLC-01", 35, true);
   row.layout_tree({0, 0, 255, 26});
@@ -261,7 +262,12 @@ UT_TEST(t37_missing_tooltips_and_mouse_leave_cleanup) {
   UT_CHECK(row.tooltip_text().find(L"Tokyo-IPLC-01") != std::wstring::npos);
   MouseEvent mv_delay{MouseEventType::Move, {230.0f, 12.0f}};
   row.on_mouse(mv_delay);
-  UT_CHECK(row.tooltip_text().empty());
+  UT_CHECK(!row.tooltip_text().empty());
+  scene::NodeRowWidget preset_row;
+  preset_row.bind("Direct", "DIRECT", -1, false);
+  preset_row.layout_tree({0, 0, 255, 26});
+  preset_row.on_mouse(mv_delay);
+  UT_CHECK(preset_row.tooltip_text().empty());
 
   // clear_mouse_hover() 必须触发 Leave 并清空全局 hovered_widget()
   Widget root;

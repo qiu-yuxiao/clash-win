@@ -38,6 +38,8 @@ class TextField : public Widget {
   std::function<void()> on_submit;          // Enter
   std::function<void(PointF global)> on_context_menu;  // 右键（宿主建菜单）
   std::function<void()> on_focus_lost;
+  // BUG-360: 宿主按键拦截钩子（如 proxy-head.tsx:167 Escape 优先取消 700ms 待执行自动测速）
+  std::function<bool(const KeyEvent&)> on_key_intercept;
 
   // 剪贴板钩子（全局注入：生产由 MainWindow 接 Win32，测试注入桩）
   static void set_clipboard_hooks(
@@ -54,6 +56,10 @@ class TextField : public Widget {
   void set_clear_button(bool on, std::wstring tooltip = tr("shared.placeholders.resetInput"));
   bool clear_button() const { return clear_button_; }
   RectF clear_button_rect() const;  // 局部坐标（点击/悬停判定）
+  // BUG-360: 尾部加载旋转环（← src/components/proxy/proxy-head.tsx:250-263 11px warning.main）
+  void set_end_spinner(bool visible, std::wstring tooltip = {});
+  bool end_spinner_visible() const { return end_spinner_visible_; }
+  RectF end_spinner_rect() const;
   std::wstring tooltip_text() const override;
   std::optional<RectF> tooltip_anchor_rect() const override;
 
@@ -156,7 +162,10 @@ class TextField : public Widget {
   bool clear_button_ = false;
   bool clear_hover_ = false;
   bool enter_hover_ = false;
+  bool end_spinner_visible_ = false;
+  bool spinner_hover_ = false;
   std::wstring clear_tooltip_ = tr("shared.placeholders.resetInput");
+  std::wstring end_spinner_tooltip_;
 };
 
 }  // namespace clashwin::ui

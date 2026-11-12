@@ -267,13 +267,13 @@ class LogViewerModal : public Widget {
   void set_paused(bool p) { paused_ = p; invalidate(); }
 
   bool is_desc() const { return desc_; }
-  void set_desc(bool d) { desc_ = d; invalidate(); }
+  void set_desc(bool d);
 
   const std::string& level_filter() const { return level_filter_; }
-  void set_level_filter(const std::string& lvl) { level_filter_ = lvl; invalidate(); }
+  void set_level_filter(const std::string& lvl);
 
   const std::string& search_query() const { return search_query_; }
-  void set_search_query(const std::string& q) { search_query_ = q; invalidate(); }
+  void set_search_query(const std::string& q);
 
   std::function<void()> on_dismiss;
 
@@ -293,10 +293,16 @@ class LogViewerModal : public Widget {
   bool a11y_set_virtual_child_value(size_t idx, const std::wstring& v) override;
 
   RectF card_rect() const { return card_rect_; }
+  RectF log_area_rect() const { return log_area_rect_; }
   float scroll_y() const { return scroll_y_; }
+  void set_scroll_y(float y);
+  float max_scroll() const;
+  bool stick_to_bottom() const { return stick_to_bottom_; }
 
  private:
   bool matches_filter(const LogEntry& entry) const;
+  float measure_entry_height(const LogEntry& entry, float item_w) const;
+  void recompute_total_height();
 
   bool open_ = false;
   OverlayFade fade_;  // ← MUI Dialog 缺省 Fade（enter 225 / leave 195）
@@ -311,6 +317,8 @@ class LogViewerModal : public Widget {
   std::chrono::steady_clock::time_point last_flush_time_;
 
   float scroll_y_ = 0.0f;
+  float total_content_h_ = 0.0f;
+  bool stick_to_bottom_ = true;
   float line_height_ = 20.0f;
 
   RectF card_rect_;

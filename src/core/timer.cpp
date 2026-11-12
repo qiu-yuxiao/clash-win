@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <exception>
 
 #include "switching_lock.h"
 #include "util/log.h"
@@ -16,10 +17,22 @@ std::atomic<bool>& profile_switching_lock() {
   return lock;
 }
 
+ProfileTimer::ProfileTimer()
+    : now_ms_([] { return static_cast<int64_t>(GetTickCount64()); }) {}
+
 ProfileTimer& ProfileTimer::instance() {
   static ProfileTimer t;
-  t.now_ms_ = [] { return static_cast<int64_t>(GetTickCount64()); };
   return t;
+}
+
+void ProfileTimer::reset_for_test() {
+  stop();
+  std::lock_guard lk(mutex_);
+  tasks_.clear();
+  update_fn_ = [](const std::string&) { return false; };
+  now_ms_ = [] { return static_cast<int64_t>(GetTickCount64()); };
+  intervals_fn_ = nullptr;
+  event_emitter_ = nullptr;
 }
 
 void ProfileTimer::set_update_fn(std::function<bool(const std::string&)> fn) {
@@ -80,9 +93,15 @@ bool ProfileTimer::run_now(const std::string& uid) {
   if (it->second.running) return false;  // ← mark_task_running 防重入
   it->second.running = true;
   it->second.next_run_ms = 0;  // 摘除现有排程（key.take）
+  bool ok = false;
+  struct TaskFinishGuard {
+    ProfileTimer* self;
+    const std::string& task_uid;
+    bool& task_ok;
+    ~TaskFinishGuard() { self->finish_locked(task_uid, task_ok); }
+  } guard{this, uid, ok};
   // 同步执行（骨架：生产可改线程池）
-  bool ok = execute(uid);
-  finish_locked(uid, ok);
+  ok = execute(uid);
   return ok;
 }
 
@@ -97,13 +116,19 @@ int ProfileTimer::tick_for_test() {
     }
   }
   for (const auto& uid : expired) {
-    bool ok = execute(uid);
-    finish_locked(uid, ok);
+    bool ok = false;
+    struct TaskFinishGuard {
+      ProfileTimer* self;
+      const std::string& task_uid;
+      bool& task_ok;
+      ~TaskFinishGuard() { self->finish_locked(task_uid, task_ok); }
+    } guard{this, uid, ok};
+    ok = execute(uid);
   }
   return static_cast<int>(expired.size());
 }
 
-// ← async_task：CURRENT_SWITCHING_PROFILE CAS + 40s 超时 + 事件
+// ← async_task：CURRENT_SWITCHING_PROFILE CAS + RAII 释放保护（BUG-334）
 bool ProfileTimer::execute(const std::string& uid) {
   auto& lock = profile_switching_lock();
   bool expected = false;
@@ -112,11 +137,43 @@ bool ProfileTimer::execute(const std::string& uid) {
     CWLOG_INFO("ProfileTimer: 切换进行中，跳过定时更新 uid=" + uid);
     return false;
   }
+  struct SwitchingLockGuard {
+    std::atomic<bool>& lk;
+    ~SwitchingLockGuard() { lk.store(false, std::memory_order_release); }
+  } lock_guard{lock};
+
+  if (event_emitter_) {
+    try {
+      event_emitter_(uid, true);  // profile-update-started
+    } catch (const std::exception& ex) {
+      CWLOG_WARN(std::string("ProfileTimer: start event_emitter 异常: ") + ex.what());
+    } catch (...) {
+      CWLOG_WARN("ProfileTimer: start event_emitter 未知异常");
+    }
+  }
+
   bool success = false;
-  if (event_emitter_) event_emitter_(uid, true);   // profile-update-started
-  success = update_fn_(uid);
-  if (event_emitter_) event_emitter_(uid, false);  // profile-update-completed
-  lock.store(false);  // ← defer! store(false)
+  try {
+    if (update_fn_) {
+      success = update_fn_(uid);
+    }
+  } catch (const std::exception& ex) {
+    CWLOG_ERROR(std::string("ProfileTimer: update_fn 异常 uid=") + uid + ": " + ex.what());
+    success = false;
+  } catch (...) {
+    CWLOG_ERROR("ProfileTimer: update_fn 未知异常 uid=" + uid);
+    success = false;
+  }
+
+  if (event_emitter_) {
+    try {
+      event_emitter_(uid, false);  // profile-update-completed
+    } catch (const std::exception& ex) {
+      CWLOG_WARN(std::string("ProfileTimer: end event_emitter 异常: ") + ex.what());
+    } catch (...) {
+      CWLOG_WARN("ProfileTimer: end event_emitter 未知异常");
+    }
+  }
   return success;
 }
 
@@ -170,8 +227,14 @@ void ProfileTimer::scheduler_loop() {
       }
     }
     for (const auto& uid : expired) {
-      bool ok = execute(uid);
-      finish_locked(uid, ok);
+      bool ok = false;
+      struct TaskFinishGuard {
+        ProfileTimer* self;
+        const std::string& task_uid;
+        bool& task_ok;
+        ~TaskFinishGuard() { self->finish_locked(task_uid, task_ok); }
+      } guard{this, uid, ok};
+      ok = execute(uid);
     }
   }
 }

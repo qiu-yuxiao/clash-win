@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstring>
@@ -222,27 +223,34 @@ Result<void> PipeWebSocket::connect(const std::wstring& pipe_name, const std::st
                                     const std::string& secret, PipeWsCallbacks cbs,
                                     int open_timeout_ms) {
   if (open_.load()) return Result<void>::err(io_err("already connected"));
+  closing_.store(false, std::memory_order_release);
   cbs_ = std::move(cbs);
 
-  // ---- 打开管道（BUSY 重试 24×125ms，与 HTTP 层同语义） ----
+  // ---- 打开管道（WaitNamedPipeW 100ms + FALSE 时 80ms 退避，与 HTTP 层同语义，BUG-330/351） ----
+  const std::wstring name =
+      pipe_name.rfind(L"\\\\.\\pipe\\", 0) == 0 ? pipe_name
+                                                : L"\\\\.\\pipe\\" + pipe_name;
   HANDLE h = INVALID_HANDLE_VALUE;
   int busy_left = 24;
   int other_left = 3;
   while (true) {
-    h = CreateFileW(pipe_name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+    h = CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
                     FILE_FLAG_OVERLAPPED, nullptr);
     if (h != INVALID_HANDLE_VALUE) break;
     DWORD err = GetLastError();
     if (err == ERROR_PIPE_BUSY) {
-      if (busy_left-- == 0) {
+      if (busy_left-- <= 0) {
         Error e;
         e.code = static_cast<int>(HttpErrc::Busy);
         e.message = "Busy: Named pipe busy timeout exceeded";
         return Result<void>::err(e);
       }
-      WaitNamedPipeW(pipe_name.c_str(), 125);
+      BOOL waited = WaitNamedPipeW(name.c_str(), 100);
+      if (!waited) {
+        Sleep(80);
+      }
     } else {
-      if (other_left-- == 0) {
+      if (other_left-- <= 0) {
         HttpErrc cat = (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND)
                            ? HttpErrc::PipeNotFound
                            : HttpErrc::Other;
@@ -251,7 +259,7 @@ Result<void> PipeWebSocket::connect(const std::wstring& pipe_name, const std::st
         e.message = "open named pipe failed (win32=" + std::to_string(err) + ")";
         return Result<void>::err(e);
       }
-      Sleep(125);
+      Sleep(80);
     }
   }
   handle_ = h;
@@ -382,7 +390,8 @@ Result<void> PipeWebSocket::connect(const std::wstring& pipe_name, const std::st
   }
 }
 
-Result<void> PipeWebSocket::send_frame(int opcode, const std::string& payload) {
+Result<void> PipeWebSocket::send_frame(int opcode, const std::string& payload,
+                                       uint32_t write_timeout_ms) {
   if (!open_.load(std::memory_order_acquire) || !handle_) return Result<void>::ok();
   std::string frame;
   frame += static_cast<char>(0x80 | (opcode & 0x0F));  // FIN=1
@@ -409,7 +418,9 @@ Result<void> PipeWebSocket::send_frame(int opcode, const std::string& payload) {
   {
     const char* wp = frame.data();
     size_t wleft = frame.size();
-    auto wdeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(5000);
+    const uint32_t eff_ms = write_timeout_ms > 0 ? write_timeout_ms : 5000u;
+    auto wdeadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(eff_ms);
     bool done = false;
     while (!done) {
       long long remain = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -536,17 +547,24 @@ done:
   CancelIoEx(static_cast<HANDLE>(handle_), nullptr);
 }
 
-void PipeWebSocket::close(uint16_t code, const std::string& reason) {
+void PipeWebSocket::close(std::optional<uint32_t> force_timeout_ms) {
+  close(1000, "Disconnected by client", force_timeout_ms);
+}
+
+void PipeWebSocket::close(uint16_t code, const std::string& reason,
+                          std::optional<uint32_t> force_timeout_ms) {
   if (!handle_) return;
-  bool already = closing_.exchange(true);
-  if (!already && open_.load()) {
+  bool already = closing_.exchange(true, std::memory_order_acq_rel);
+  if (!already && open_.load(std::memory_order_acquire)) {
+    // BUG-325: 严格限制 close 帧写超时上限（force_timeout.unwrap_or(1000).max(500)），
+    // 且必须在置位 stop_event_ / CancelIoEx 之前发送，杜绝管道满缓冲时无限阻塞或自取消。
+    const uint32_t close_timeout_ms =
+        (std::max)(force_timeout_ms.value_or(1000u), 500u);
     std::string body;
     body += static_cast<char>((code >> 8) & 0xFF);
     body += static_cast<char>(code & 0xFF);
     body += reason;
-    send_frame(0x8, body);
-    // 给服务端一点时间收 close
-    Sleep(50);
+    send_frame(0x8, body, close_timeout_ms);
   }
   if (stop_event_) SetEvent(static_cast<HANDLE>(stop_event_));
   // 取消未决 I/O 使读循环尽快退出，然后 join（禁止在回调内调用 close：会自 join 死锁）
@@ -554,9 +572,9 @@ void PipeWebSocket::close(uint16_t code, const std::string& reason) {
   if (h) CancelIoEx(static_cast<HANDLE>(h), nullptr);
   if (reader_.joinable()) reader_.join();
   handle_ = nullptr;
-  if (h) CloseHandle(h);
+  if (h) CloseHandle(static_cast<HANDLE>(h));
   if (stop_event_) {
-    CloseHandle(stop_event_);
+    CloseHandle(static_cast<HANDLE>(stop_event_));
     stop_event_ = nullptr;
   }
   open_.store(false, std::memory_order_release);

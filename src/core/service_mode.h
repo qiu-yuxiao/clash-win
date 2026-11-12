@@ -14,6 +14,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <mutex>
 #include <string>
 
 namespace clashwin::core::service_mode {
@@ -56,6 +57,18 @@ class ServiceIpcAdapter : public IServiceIpc {
 };
 
 // ---------- SCM（← service.rs:137-179，替代 sc.exe 子进程） ----------
+// BUG-352: 串行化服务变更操作（install / uninstall / start / stop），递归锁支持内部委托重入
+std::recursive_mutex& service_operation_mutex();
+
+// BUG-328: SCM 注册状态三态（区分未装 / Start=4 禁用或 ImagePath 损坏 / 已装且启用）
+enum class ScmServiceRegistration {
+  NotInstalled,
+  DisabledOrBroken,
+  InstalledAndEnabled,
+};
+std::wstring extract_service_exe_from_image_path(const std::wstring& raw);
+ScmServiceRegistration inspect_service_registration();
+
 // OpenService 探测（服务是否存在）
 bool is_service_installed();
 // QueryServiceStatus == SERVICE_RUNNING

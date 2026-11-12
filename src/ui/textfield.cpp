@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <utility>
 
@@ -62,11 +63,12 @@ void TextField::set_clipboard_hooks(std::function<std::wstring()> get_fn,
 }
 
 void TextField::set_text(const std::wstring& t) {
+  const bool changed = (text_ != t);
   text_ = t;
   cursor_ = anchor_ = static_cast<int>(t.size());
   scroll_x_ = 0;
   invalidate();
-  if (on_text_changed) on_text_changed(text_);
+  if (changed && on_text_changed) on_text_changed(text_);
 }
 
 void TextField::set_text_silent(const std::wstring& t) {
@@ -96,22 +98,45 @@ void TextField::set_clear_button(bool on, std::wstring tooltip) {
 }
 
 RectF TextField::clear_button_rect() const {
-  constexpr float kBox = 24.0f;  // src: base-search-box.tsx:126-136 IconButton small 24
-  return {bounds().w - 4.0f - kBox, (bounds().h - kBox) * 0.5f, kBox, kBox};
+  constexpr float kBox = 24.0f;  // src: src/components/base/base-search-box.tsx:126
+  return {bounds().w - 4.0f - kBox, (bounds().h - kBox) * 0.5f, kBox, kBox};  // src: src/components/base/base-search-box.tsx:126
+}
+
+void TextField::set_end_spinner(bool visible, std::wstring tooltip) {
+  if (end_spinner_visible_ == visible && end_spinner_tooltip_ == tooltip) return;
+  end_spinner_visible_ = visible;
+  end_spinner_tooltip_ = std::move(tooltip);
+  if (!visible) spinner_hover_ = false;
+  clamp_scroll();
+  invalidate();
+}
+
+RectF TextField::end_spinner_rect() const {
+  constexpr float kSpin = 11.0f;  // src: src/components/proxy/proxy-head.tsx:260
+  const float right_edge = clear_button_ ? clear_button_rect().x : (bounds().w - 4.0f);  // src: src/components/proxy/proxy-head.tsx:257
+  return {right_edge - 2.0f - kSpin, (bounds().h - kSpin) * 0.5f, kSpin, kSpin};  // src: src/components/proxy/proxy-head.tsx:257
 }
 
 float TextField::text_right_pad() const {
-  // 清空按钮 24 + 右内距 4 + 文本右内距 4 ≈ 32（src: base-search-box.tsx:123 pr 4）
-  return std::max(clear_button_ ? 32.0f : 8.0f, right_pad_);  // src: base-search-box.tsx:123 pr 4
+  float base = clear_button_ ? 32.0f : 8.0f;  // src: src/components/base/base-search-box.tsx:123
+  if (end_spinner_visible_) base += 15.0f;  // src: src/components/proxy/proxy-head.tsx:257
+  return std::max(base, right_pad_);
 }
 
 std::wstring TextField::tooltip_text() const {
-  // 仅悬停在 ✕ 上时给 resetInput 提示（src: base-search-box.tsx:126）
+  if (end_spinner_visible_ && spinner_hover_ && !end_spinner_tooltip_.empty()) {
+    return end_spinner_tooltip_;
+  }
   if (clear_button_ && clear_hover_) return clear_tooltip_;
   return Widget::tooltip_text();
 }
 
 std::optional<RectF> TextField::tooltip_anchor_rect() const {
+  if (end_spinner_visible_ && spinner_hover_) {
+    const RectF g = global_bounds();
+    const RectF s = end_spinner_rect();
+    return RectF{g.x + s.x, g.y + s.y, s.w, s.h};
+  }
   if (clear_button_ && clear_hover_) {
     const RectF g = global_bounds();
     const RectF c = clear_button_rect();
@@ -166,6 +191,7 @@ SizeF TextField::on_measure(float max_w, float max_h) {
 
 // ---- 键盘 ----
 bool TextField::on_key(const KeyEvent& e) {
+  if (on_key_intercept && on_key_intercept(e)) return true;
   if (e.type == KeyEventType::Char) {
     if (e.ctrl) return false;  // Ctrl 组合键非字符输入
     if (e.ch >= 0x20) {
@@ -327,6 +353,13 @@ bool TextField::on_mouse(const MouseEvent& e) {
       invalidate();
       return true;
     }
+    if (end_spinner_visible_) {
+      bool sh = end_spinner_rect().contains(e.pos.x, e.pos.y);
+      if (sh != spinner_hover_) {
+        spinner_hover_ = sh;
+        invalidate();
+      }
+    }
     if (clear_button_) {
       bool h = !text_.empty() && clear_button_rect().contains(e.pos.x, e.pos.y);
       if (h != clear_hover_) {
@@ -338,6 +371,10 @@ bool TextField::on_mouse(const MouseEvent& e) {
   }
   if (e.type == MouseEventType::Leave) {
     if (enter_hover_) { enter_hover_ = false; invalidate(); }
+    if (spinner_hover_) {
+      spinner_hover_ = false;
+      invalidate();
+    }
     if (clear_hover_) {
       clear_hover_ = false;
       invalidate();
@@ -606,6 +643,31 @@ void TextField::on_paint(IRenderTarget& rt) {
       }
     }
     rt.fill_rect({cx, cy, 1.5f, line_h}, Brush{caret_color_});
+  }
+
+  // BUG-360: 尾部加载旋转环（src: src/components/proxy/proxy-head.tsx:250-263）
+  if (end_spinner_visible_) {
+    const RectF sr = end_spinner_rect();
+    const float cx = sr.x + sr.w * 0.5f;
+    const float cy = sr.y + sr.h * 0.5f;
+    const double ms = std::chrono::duration<double, std::milli>(
+                          std::chrono::steady_clock::now().time_since_epoch())
+                          .count();
+    const double phase = std::fmod(ms / 1400.0, 1.0);  // src: src/components/proxy/proxy-head.tsx:260
+    const Color4f warn = theme::ThemeService::instance().palette().warning_color;  // src: src/components/proxy/proxy-head.tsx:256
+    for (int i = 0; i < 8; ++i) {  // src: src/components/proxy/proxy-head.tsx:260
+      const double ang = (phase + static_cast<double>(i) / 8.0) * 6.283185307;  // src: src/components/proxy/proxy-head.tsx:260
+      constexpr float kDot = 1.8f;  // src: src/components/proxy/proxy-head.tsx:260
+      constexpr float kRad = 4.2f;  // src: src/components/proxy/proxy-head.tsx:260
+      Color4f ink = warn;
+      ink.a = 0.9f * (1.0f - static_cast<float>(i) / 8.0f);  // src: src/components/proxy/proxy-head.tsx:260
+      Brush db{ink};
+      rt.round_rect({cx + static_cast<float>(std::cos(ang)) * kRad - kDot * 0.5f,
+                     cy + static_cast<float>(std::sin(ang)) * kRad - kDot * 0.5f,
+                     kDot, kDot},
+                    kDot * 0.5f, Pen{ink, 0.0f}, &db);  // src: src/components/proxy/proxy-head.tsx:260
+    }
+    invalidate();
   }
 
   // ✕ 清空按钮：空值 opacity .5（disabled），非空 1.0，悬停提亮

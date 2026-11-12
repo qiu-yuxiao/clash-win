@@ -141,6 +141,7 @@ struct RestoreTimings {
 struct CoreOps {
   std::function<Result<void>()> start;
   std::function<Result<void>()> stop;
+  std::function<bool(uint32_t max_wait_ms)> wait_cores_exit;
 };
 
 // 告警通知回调（T09 事件总线接入前降级为日志；BUG-298 铁律：回退必须留痕不静默）
@@ -156,6 +157,8 @@ class CoreManager {
   static CoreManager& instance();
 
   RunningMode running_mode() const;
+  // BUG-331: 无锁服务模式探测（供退出路径与信号回调绕开 lifecycle_ 互斥锁）
+  bool is_in_service_mode() const;
 
   // ---- Sidecar 模式（← state.rs::start_core_by_sidecar / stop_core_by_sidecar） ----
   // 启动：kill_all 清残留 → 定位内核 → CreateProcessW（含 Go 三环境变量 + 管道重定向）
@@ -171,6 +174,15 @@ class CoreManager {
                           const std::wstring& ipc_pipe = {});
   // 停止：TerminateProcess → 等待 ≤2s → kill_all 兜底；Service 模式走 clash_stop
   Result<void> stop();
+
+  // BUG-326 / BUG-331 / BUG-346: 本应用作用域内 win-mihomo 进程存活检测与退出等待
+  bool are_win_cores_running() const;
+  bool wait_for_win_cores_exit(uint32_t max_wait_ms) const;
+  // BUG-331: 直连 service IPC 停核后的本地运行态清零（非阻塞 try_lock，防退出死锁）
+  void cleanup_local_state_after_service_stop();
+
+  // BUG-328: TUN 服务不可用时回退为系统代理（persist_to_disk=false 仅内存临时回退，保护盘上 TUN 意图）
+  void fallback_to_system_proxy(bool persist_to_disk);
 
   uint32_t sidecar_pid() const { return pid_; }
   // 子进程是否仍在运行（测试用）
@@ -191,6 +203,9 @@ class CoreManager {
 
   // ---- 快照/恢复（公开供 T24 core_updater 复用，← lifecycle.rs:282-416） ----
   std::optional<std::string> snapshot_proxy_group_now(ICoreApiClient& api);
+  // BUG-335: 从当前 profile 持久化 selected 列表读取指定组非伪节点选择（快照缺失时统一保底）
+  std::optional<std::string> read_persisted_proxy_selection(
+      const std::string& group = "PROXY") const;
   void restore_proxy_group_now(ICoreApiClient& api, const std::string& node,
                                const RestoreTimings& t = {});
 
@@ -205,6 +220,19 @@ class CoreManager {
   void mark_reattached_existing_core();
   bool take_reattached_existing_core();
 
+  // ---- 单测隔离钩子（生产勿调：零真实进程创建 / 零 UAC / 零等待阻塞） ----
+  struct StartAutoTestHooks {
+    std::function<bool()> is_admin_fn;
+    std::function<Result<void>(const std::wstring& config_file)> start_service_fn;
+    std::function<Result<void>(const std::wstring& config_file, const std::wstring& ipc_pipe)>
+        start_sidecar_fn;
+    int service_ready_wait_ms = consts::kServiceWaitMaxMs;
+  };
+  void set_proc_enumerator_for_test(ProcEnumerator fn);
+  void reset_proc_enumerator_for_test();
+  void set_start_auto_test_hooks(StartAutoTestHooks hooks);
+  void reset_start_auto_test_hooks();
+
  private:
   Result<void> stop_sidecar_locked();
   // 调用方须已持有 lifecycle_（start_auto 内部先决策再分派）
@@ -216,6 +244,9 @@ class CoreManager {
   std::atomic<RunningMode> mode_{RunningMode::NotRunning};
   std::atomic<bool> reattached_existing_core_{false};
   std::mutex lifecycle_;           // ← manager/mod.rs lifecycle_lock（串行化启停）
+  mutable std::mutex test_hooks_mu_;
+  ProcEnumerator proc_enumerator_;
+  std::optional<StartAutoTestHooks> start_auto_test_hooks_;
   void* child_ = nullptr;          // HANDLE（避免头文件引入 windows.h）
   uint32_t pid_ = 0;
   void* stdout_read_ = nullptr;    // 管道读端 HANDLE

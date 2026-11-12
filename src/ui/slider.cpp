@@ -91,9 +91,12 @@ bool Slider::on_mouse(const MouseEvent& e) {
         return true;
       }
       return false;
-    case MouseEventType::Up:
+    case MouseEventType::Up: {
+      const bool was_dragging = dragging_;
       dragging_ = false;
+      if (was_dragging && enabled() && on_commit) on_commit(value_);
       return true;
+    }
     case MouseEventType::Leave:
       has_mouse_ = false;
       thumb_hovered_ = false;
@@ -145,6 +148,7 @@ bool Slider::on_key(const KeyEvent& e) {
   }
   key_focused_ = true;
   set_value(target, true);
+  if (on_commit) on_commit(value_);
   invalidate();
   return true;
 }

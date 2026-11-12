@@ -20,12 +20,16 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace clashwin::mihomo {
 
 using WsHandler = std::function<void(const std::string& payload)>;
+
+// BUG-347: 指数退避 + ±20% 抖动，严格保证上界 <= 15000ms（attempt 钳制 0..4，rand01 钳制 [0, 1]）。
+uint32_t compute_ws_reconnect_delay_ms(uint32_t attempt, double rand01);
 
 class WsManager {
  public:
@@ -45,11 +49,16 @@ class WsManager {
   // 退订（任意通道通用）；通道订阅归零后底层 WS 随之关闭
   void unsubscribe(uint64_t sub_id);
 
-  // ws_disconnect 语义：立即断开全部底层 WS；订阅保留、自动重连
-  void disconnect_all();
+  // ws_disconnect 语义：立即断开全部底层 WS（有界写超时 BUG-325）；订阅保留、自动重连
+  void disconnect_all(std::optional<uint32_t> force_timeout_ms = std::nullopt);
+
+  // BUG-347: 内核重启/配置重载（verge://refresh-clash-config）时清零全部通道退避计数，
+  // 主动关闭陈旧半死句柄并第 0ms 唤醒重连守护线程。
+  void flush_reconnect_backoff();
 
   // 观测（测试用）：通道当前是否有活跃底层连接
   bool channel_connected(const std::string& channel_key);
+  uint32_t channel_reconnect_attempt_for_test(const std::string& channel_key);
 
   static constexpr const char* kTraffic = "traffic";
   static constexpr const char* kMemory = "memory";
@@ -72,6 +81,7 @@ class WsManager {
   std::string secret_;
   std::atomic<uint64_t> next_sub_id_{1};
   std::atomic<bool> stopping_{false};
+  uint64_t refresh_clash_sub_id_ = 0;
 };
 
 }  // namespace clashwin::mihomo

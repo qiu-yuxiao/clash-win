@@ -11,6 +11,7 @@
 #include "cmd/command_service.h"
 #include "config/config.h"
 #include "config/proxy_head_state.h"
+#include "core/monitor.h"
 #include "enhance/enhance.h"
 #include "system/network_info.h"
 #include "system/sysproxy.h"
@@ -190,6 +191,15 @@ void install_cmd_proxy(CommandService& svc) {
          auto r = config::proxy_head_state::save(args);
          if (r.is_err()) return CmdResult::err(r.error());
          return CmdResult::ok(Json::object());
+       },
+       consts::kTimeoutProbe});
+
+  // ---- notify_node_switched（← proxy.rs:53-56，BUG-336 手动切节点即时刷新宽限期）----
+  svc.register_command(
+      "notify_node_switched",
+      {[](const Json&) -> CmdResult {
+         core::CoreMonitor::instance().notify_manual_node_switched();
+         return CmdResult::ok(nullptr);
        },
        consts::kTimeoutProbe});
 }

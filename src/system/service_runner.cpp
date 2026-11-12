@@ -82,6 +82,7 @@ Result<void> run_elevated(const std::wstring& exe, const char* label) {
 }  // namespace
 
 Result<void> DefaultServiceCommandRunner::run_installer(bool install) {
+  std::lock_guard<std::recursive_mutex> op_lock(core::service_mode::service_operation_mutex());
   // ← Mini: src-tauri/src/core/service.rs:76-121 install_service()
   //   （非管理员走 RunasCommand 提权；管理员直跑）。我方向来只用 UAC 一支。
   // 【服务名】clash_verge_service 为与 Clash Mini 共用的特权服务，安装前校验名称唯一。
@@ -104,6 +105,7 @@ Result<void> DefaultServiceCommandRunner::run_installer(bool install) {
 }
 
 Result<void> DefaultServiceCommandRunner::run_uninstaller() {
+  std::lock_guard<std::recursive_mutex> op_lock(core::service_mode::service_operation_mutex());
   // ← Mini: src-tauri/src/core/service.rs:44-74 uninstall_service()
   //   卸载器缺失 → 直接报错（Mini:54-56 bail）；退出码非 0 → 报错（Mini:66-71）。
   const std::wstring exe = find_companion_exe(L"\\clash-verge-service-uninstall.exe");
@@ -123,6 +125,20 @@ bool IServiceCommandRunner::is_binary_valid() {
   return core::service_mode::is_service_binary_valid();
 }
 
+core::service_mode::ScmServiceRegistration IServiceCommandRunner::inspect_registration() {
+  if (!is_installed()) {
+    return core::service_mode::ScmServiceRegistration::NotInstalled;
+  }
+  if (!is_binary_valid()) {
+    return core::service_mode::ScmServiceRegistration::DisabledOrBroken;
+  }
+  return core::service_mode::ScmServiceRegistration::InstalledAndEnabled;
+}
+
+core::service_mode::ScmServiceRegistration DefaultServiceCommandRunner::inspect_registration() {
+  return core::service_mode::inspect_service_registration();
+}
+
 bool IServiceCommandRunner::is_image_own() {
   return coexist::service_image_is_own();
 }
@@ -132,10 +148,12 @@ bool IServiceCommandRunner::is_image_upstream_baseline() {
 }
 
 Result<void> DefaultServiceCommandRunner::stop_service() {
+  std::lock_guard<std::recursive_mutex> op_lock(core::service_mode::service_operation_mutex());
   return core::service_mode::stop_service();
 }
 
 Result<void> DefaultServiceCommandRunner::start_service() {
+  std::lock_guard<std::recursive_mutex> op_lock(core::service_mode::service_operation_mutex());
   return core::service_mode::start_service();
 }
 

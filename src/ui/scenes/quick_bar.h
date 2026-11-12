@@ -21,10 +21,15 @@
 
 namespace clashwin::ui::scene {
 
+// BUG-359: 后台监测器网络健康态势胶囊状态（← src/pages/_layout/components/active-node-card.tsx:455-481）
+enum class NetworkHealthIssue { None, Offline, AllDead };
+
 class MainWindow;  // main_window.h（回调宿主）
 
 class QuickBar : public Row {
  public:
+  using NetworkHealthIssue = scene::NetworkHealthIssue;
+
   explicit QuickBar(Widget* parent = nullptr);
   ~QuickBar() override;
 
@@ -37,21 +42,39 @@ class QuickBar : public Row {
   void set_badge(int delay, bool has_node = true);
   // 延迟 Chip 命中区（on_arrange 计算；测试/宿主查点击位置用）
   const RectF& chip_rect() const { return chip_rect_; }
+  // BUG-359: 网络健康告警胶囊（物理断网 / 节点全灭）
+  void set_network_health(NetworkHealthIssue issue);
+  NetworkHealthIssue network_health() const { return network_health_; }
+  void set_self_heal_testing(bool testing);
+  bool self_heal_testing() const { return self_heal_testing_; }
+  const RectF& health_pill_rect() const { return health_pill_rect_; }
   void set_pinned(bool p);    // 图钉激活态（深棕色）
   SizeF on_measure(float max_w, float max_h) override;  // 固定高 30
   // 卡片内容：标签/协议/名称/延迟/地址，窄窗按 580/480/400 断点隐藏
   void on_arrange(const RectF& area) override;
   // 节点名 hover/active 着色 + 点击轮换（src: active-node-card.tsx:284-301）
   bool on_mouse(const MouseEvent& e) override;
+  HCURSOR cursor(const PointF& local) const override;
   void on_paint(IRenderTarget& rt) override;  // 渐变卡/协议胶囊/徽章胶囊/钮底
 
-  // src: active-node-card.tsx:281 仅节点名文本区域显示 rotateNodeTooltip
+  // src: src/pages/_layout/components/active-node-card.tsx:380,456 节点名 / 健康胶囊 Tooltip
   std::wstring tooltip_text() const override {
+    if (health_pill_hover_ && network_health_ != NetworkHealthIssue::None) {
+      return network_health_ == NetworkHealthIssue::Offline
+                 ? std::wstring(tr("settings.mini.networkOfflineTooltip"))
+                 : std::wstring(tr("settings.mini.allNodesTimeoutTooltip"));
+    }
     return (node_hover_ && node_label_ && !node_label_->text.empty())
                ? std::wstring(tr("settings.mini.rotateNodeTooltip"))
                : std::wstring();
   }
   std::optional<RectF> tooltip_anchor_rect() const override {
+    if (health_pill_hover_ && network_health_ != NetworkHealthIssue::None &&
+        health_pill_rect_.w > 0.0f) {
+      const RectF g = global_bounds();
+      return RectF{g.x + health_pill_rect_.x, g.y + health_pill_rect_.y,
+                   health_pill_rect_.w, health_pill_rect_.h};
+    }
     if (node_hover_ && node_label_) return node_label_->global_bounds();
     return std::nullopt;
   }
@@ -66,6 +89,8 @@ class QuickBar : public Row {
   std::function<void()> on_cycle_node;    // 点击节点名 → 轮换下一个
   // 点击延迟 Chip → 单点测速（src: active-node-card.tsx:311-344 onClick={handleTestDelay}）
   std::function<void()> on_test_delay;
+  // BUG-359: 点击网络健康告警胶囊 → 立即全量自愈重测优选（src: src/pages/_layout/components/active-node-card.tsx:471）
+  std::function<void()> on_self_heal_retest;
 
  private:
   Label* node_label_ = nullptr;
@@ -81,6 +106,11 @@ class QuickBar : public Row {
   bool node_pressed_ = false;  // 节点名按下（src: :299-301）
   bool chip_pressed_ = false;  // 延迟 Chip 按下（可点测速）
   RectF chip_rect_{};          // 延迟 Chip 命中区（on_arrange 记录）
+  NetworkHealthIssue network_health_ = NetworkHealthIssue::None;
+  bool self_heal_testing_ = false;
+  bool health_pill_hover_ = false;
+  bool health_pill_pressed_ = false;
+  RectF health_pill_rect_{};
   int delay_ = -1;  // 当前延迟（Chip 五档色/文本）
   bool pinned_ = false;
   bool has_proto_ = false;  // 有协议类型 → 胶囊可见

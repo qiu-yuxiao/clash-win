@@ -20,11 +20,13 @@
 namespace clashwin::ui::scene {
 
 // ← services/delay.ts:13-32（单一真源，严禁漂移）
-inline constexpr int kNodeDelayMinMs = 30;       // 机场伪造低延迟过滤下限
-inline constexpr int kNodeDelayMaxMs = 5000;     // 判死阈值（探针超时同值，BUG-304）
-inline constexpr int64_t kDelayCacheTtlMs = 30 * 60 * 1000;  // CACHE_TTL
-// src: services/delay.ts:22 HISTORY_FALLBACK_MAX_AGE_MS = 10 * 60 * 1000
-inline constexpr int64_t kHistoryFallbackMaxAgeMs = 10 * 60 * 1000;
+inline constexpr int kNodeDelayMinMs = 30;       // src: src/services/delay.ts:13
+inline constexpr int kNodeDelayMaxMs = 5000;     // src: src/services/delay.ts:14
+inline constexpr int64_t kDelayCacheTtlMs = 30 * 60 * 1000;  // src: src/services/delay.ts:12
+// BUG-344: 后台复用缓存指标的最大前端保鲜期（30s），防止即将过期旧缓存被续命为 30min
+inline constexpr int64_t kReusedMetricsMaxTtlMs = 30 * 1000;  // src: src/services/delay.ts:15
+// src: src/services/delay.ts:22 HISTORY_FALLBACK_MAX_AGE_MS = 10 * 60 * 1000
+inline constexpr int64_t kHistoryFallbackMaxAgeMs = 10 * 60 * 1000;  // src: src/services/delay.ts:22
 
 // ← formatDelayColor 五档（250/400/5000 分界，BUG-304）
 enum class DelayTier { Unknown, Success, Mid, Slow, Timeout };
@@ -76,6 +78,13 @@ struct DataHooks {
 
 class NodeData {
  public:
+  struct DelayCacheEntry {
+    int delay = -1;
+    int64_t updated_at_ms = 0;
+    int64_t ttl_ms = kDelayCacheTtlMs;
+  };
+  using DelaySnapshotMap = std::map<std::string, std::optional<DelayCacheEntry>>;
+
   explicit NodeData(DataHooks hooks)
       : hooks_(std::move(hooks)), self_(std::make_shared<SelfAnchor>()) {
     self_->ptr = this;
@@ -128,21 +137,30 @@ class NodeData {
   // 全量加载（组 + 细节合并）；失败返回 false（内容保持上次状态）
   bool load();
 
-  // ← backend-delay-results 事件：{"group","results":[[name,delay],...]}
+  // ← backend-delay-results 事件：{"group","results":[[name,delay],...],"fromProbe":bool}
   // 局部刷新：只更新延迟缓存与对应行，不触发全量重载（use-proxies 语义）
-  bool apply_delay_results(const nlohmann::json& payload);
+  // BUG-344: from_probe=false 时将缓存保鲜期上限钳制在 30s（kReusedMetricsMaxTtlMs）
+  bool apply_delay_results(const nlohmann::json& payload, bool from_probe = true);
+  bool apply_delay_results(const std::vector<std::pair<std::string, int>>& items,
+                           bool from_probe = true);
 
   // 单点写入（手动单节点测速完成时）
   void set_delay(const std::string& name, int delay);
   void set_delays_batch(const std::vector<std::string>& names, int delay);
+  // BUG-321: 测速前拍摄延迟缓存快照，异常/繁忙/空结果结束时将仍处于 -2 的节点回滚原值
+  DelaySnapshotMap snapshot_delays(const std::vector<std::string>& names) const;
+  bool restore_delays_for_still_pending(const DelaySnapshotMap& snaps);
   // 切换订阅时清空内存延迟缓存（← _layout.tsx:921 delayManager.clearCache()）
   void clear_delay_cache() {
+    if (delay_cache_.empty()) return;
     delay_cache_.clear();
     notify();
   }
 
   // 切换节点：select_node 成功后更新 now_（失败返回 false，UI 回弹）
   bool select(const std::string& node);
+  // BUG-356: 0ms 乐观切换活跃节点（立即刷新 UI，返回切换前节点名供 IPC 失败回滚）
+  std::string set_now_optimistic(const std::string& node);
 
   // 触发组测速
   bool test_group();
@@ -181,8 +199,8 @@ class NodeData {
   std::vector<NodeRow> rows_;
   std::string now_;
   std::string group_ = "PROXY";
-  // 延迟缓存：name → (delay, updated_at_ms)
-  std::map<std::string, std::pair<int, int64_t>> delay_cache_;
+  // 延迟缓存：name → (delay, updated_at_ms, ttl_ms)
+  std::map<std::string, DelayCacheEntry> delay_cache_;
   // src: services/delay.ts:268-298 getDelayFix：缓存过期后回落内核 history
   struct ProxyHistory {
     bool alive = true;    // ★ 内核 alive 真源（← delay.ts:279-281）；false → 一律 Timeout(0)

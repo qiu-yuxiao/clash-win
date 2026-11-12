@@ -76,14 +76,21 @@ Result<UrlParts> parse_http_url(const std::string& url);
 struct HttpOptions {
   ProxyType proxy_type = ProxyType::None;
   std::optional<uint64_t> timeout_seconds;  // nullopt → 20（kProfileTimeoutSeconds）
-  std::optional<std::string> user_agent;    // nullopt → kSubscriptionCompatUserAgent（"clash-verge/v2.5.10"）
+  std::optional<std::string> user_agent;    // nullopt/空空白 → kSubscriptionCompatUserAgent（"clash-verge/v2.5.10"）
   bool accept_invalid_certs = false;        // ← danger_accept_invalid_certs
+  bool ssrf_guard = false;                  // ← BUG-327：逐跳 30x URL 校验 + 直连 connect 期 DNS 重绑定拦截
+  bool ssrf_connect_only_for_test = false;  // 单测钩子：跳过预检以专门验证 WinHTTP 连接期重绑定拦截
   size_t max_response_bytes = 50u << 20;    // 50MB
   int max_redirects = 10;                   // ← redirect::Policy::limited(10)
   HANDLE cancel_event = nullptr;            // 有信号 → 中止（阶段边界检查）
   // ProxyType::Localhost 的 mixed-port 来源（prfitem 注入 verge→clash 回退链）
   std::function<std::optional<uint16_t>()> localhost_mixed_port;
 };
+
+// ← network.rs::resolve_effective_user_agent（BUG-362）：
+//   trim 后非空则采用自定义 UA，否则回退 kSubscriptionCompatUserAgent
+[[nodiscard]] std::string resolve_effective_user_agent(
+    std::optional<std::string_view> custom_ua);
 
 // ← NetworkManager::get_with_interrupt（同步化；WinHTTP 恒用平台证书库，
 // Rust 的 static webpki roots 回退不适用）

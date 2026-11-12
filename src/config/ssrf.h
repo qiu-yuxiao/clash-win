@@ -23,9 +23,11 @@ Result<void> validate_url_no_ssrf(const system::UrlParts& url);
 
 // Rust Ipv4Addr::{is_loopback, is_private, is_unspecified, is_link_local}
 bool ipv4_forbidden(uint32_t ip);
-// Rust Ipv6Addr：is_loopback/is_unspecified + fe80::/10 + fc00::/7
+// Rust Ipv6Addr：is_loopback/is_unspecified + fe80::/10 + fc00::/7 + ::ffff:a.b.c.d
 bool ipv6_forbidden(const uint16_t segs[8]);
-// 对已解析的 sockaddr（getaddrinfo 产物）复查
+// 对已解析的 sockaddr（getaddrinfo / WINHTTP_CONNECTION_INFO 产物）复查
 bool sockaddr_forbidden(const void* sa);
+// 对 WinHTTP 状态回调传入的宽字符 IP 字面量（如 L"127.0.0.1" / L"::ffff:10.0.0.1"）复查
+bool ip_string_forbidden(const wchar_t* ip_wstr);
 
 }  // namespace clashwin::config::ssrf

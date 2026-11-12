@@ -20,12 +20,17 @@ class Label : public Widget {
 
   SizeF on_measure(float max_w, float max_h) override;
   void on_paint(IRenderTarget& rt) override;
-  // 文本不吞鼠标：让 Click/悬停落到父级按钮/段选/输入框
-  // （否则点段选文字时命中 Label，父控件收不到 Up，表现为“点了没反应”）
-  bool hit_self(PointF) const override { return false; }
+  // 文本缺省不吞鼠标：让 Click/悬停落到父级按钮/段选/输入框
+  // （否则点段选文字时命中 Label，父控件收不到 Up，表现为“点了没反应”）；
+  // BUG-341：需要独立悬停 Tooltip 的截断标签（如 BasicCard 开关标签）可显式开启 hit_self。
+  void set_hit_self(bool hit) { hit_self_ = hit; }
+  bool hit_self(PointF p) const override { return hit_self_ && Widget::hit_self(p); }
 
   A11yRole a11y_default_role() const override { return A11yRole::Text; }
   std::wstring a11y_default_name() const override { return text; }
+
+ private:
+  bool hit_self_ = false;
 };
 
 }  // namespace clashwin::ui

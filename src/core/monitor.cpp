@@ -15,6 +15,7 @@
 #include <future>
 
 #include "core/core_manager.h"
+#include "events/event_bus.h"
 #include "util/log.h"
 #include "util/dirs.h"
 #include "yaml-cpp/yaml.h"
@@ -25,13 +26,17 @@ namespace clashwin::core {
 
 namespace {
 
-bool tcp_connect_ipv4_ms(const char* ip, uint16_t port, int timeout_ms) {
-  if (!ip || timeout_ms <= 0) return false;
+bool ensure_wsa_started() {
   static bool wsa_ok = [] {
     WSADATA w{};
     return WSAStartup(MAKEWORD(2, 2), &w) == 0;
   }();
-  (void)wsa_ok;
+  return wsa_ok;
+}
+
+bool tcp_connect_ipv4_ms(const char* ip, uint16_t port, int timeout_ms) {
+  if (!ip || timeout_ms <= 0) return false;
+  (void)ensure_wsa_started();
 
   SOCKET s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (s == INVALID_SOCKET) return false;
@@ -85,11 +90,7 @@ bool tcp_connect_ipv4_ms(const char* ip, uint16_t port, int timeout_ms) {
 bool dns_lookup_with_timeout_ms(const std::string& host, uint16_t port,
                                 int timeout_ms) {
   if (host.empty() || timeout_ms <= 0) return false;
-  static bool wsa_ok = [] {
-    WSADATA w{};
-    return WSAStartup(MAKEWORD(2, 2), &w) == 0;
-  }();
-  (void)wsa_ok;
+  (void)ensure_wsa_started();
 
   auto prom = std::make_shared<std::promise<bool>>();
   auto fut = prom->get_future();
@@ -118,6 +119,91 @@ bool dns_lookup_with_timeout_ms(const std::string& host, uint16_t port,
 
 }  // namespace
 
+bool CoreMonitor::tcp_race_connect_ipv4(const std::vector<const char*>& ips,
+                                        uint16_t port, int timeout_ms) {
+  if (ips.empty() || timeout_ms <= 0) return false;
+  (void)ensure_wsa_started();
+
+  std::vector<SOCKET> pending;
+  pending.reserve(ips.size());
+  struct SocketCleanup {
+    std::vector<SOCKET>& socks;
+    ~SocketCleanup() {
+      for (SOCKET s : socks) {
+        if (s != INVALID_SOCKET) ::closesocket(s);
+      }
+    }
+  } cleanup{pending};
+
+  for (const char* ip : ips) {
+    if (!ip || *ip == '\0') continue;
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    if (::inet_pton(AF_INET, ip, &addr.sin_addr) != 1) continue;
+
+    SOCKET s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s == INVALID_SOCKET) continue;
+
+    u_long nonblock = 1;
+    ::ioctlsocket(s, FIONBIO, &nonblock);
+
+    if (::connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
+      ::closesocket(s);
+      return true;
+    }
+    if (::WSAGetLastError() == WSAEWOULDBLOCK) {
+      pending.push_back(s);
+    } else {
+      ::closesocket(s);
+    }
+  }
+
+  if (pending.empty()) return false;
+
+  const uint64_t deadline = ::GetTickCount64() + static_cast<uint64_t>(timeout_ms);
+  while (!pending.empty()) {
+    const uint64_t now = ::GetTickCount64();
+    if (now >= deadline) break;
+    const uint64_t rem_ms = deadline - now;
+
+    fd_set wset, eset;
+    FD_ZERO(&wset);
+    FD_ZERO(&eset);
+    for (SOCKET s : pending) {
+      FD_SET(s, &wset);
+      FD_SET(s, &eset);
+    }
+    timeval tv{};
+    tv.tv_sec = static_cast<long>(rem_ms / 1000);
+    tv.tv_usec = static_cast<long>((rem_ms % 1000) * 1000);
+
+    const int ready = ::select(0, nullptr, &wset, &eset, &tv);
+    if (ready <= 0) break;
+
+    for (auto it = pending.begin(); it != pending.end();) {
+      SOCKET s = *it;
+      const bool writable = FD_ISSET(s, &wset) != 0;
+      const bool errored = FD_ISSET(s, &eset) != 0;
+      if (!writable && !errored) {
+        ++it;
+        continue;
+      }
+      int so_err = 0;
+      int len = sizeof(so_err);
+      const bool ok =
+          writable && !errored &&
+          (::getsockopt(s, SOL_SOCKET, SO_ERROR,
+                        reinterpret_cast<char*>(&so_err), &len) == 0 &&
+           so_err == 0);
+      ::closesocket(s);
+      it = pending.erase(it);
+      if (ok) return true;
+    }
+  }
+  return false;
+}
+
 CoreMonitor& CoreMonitor::instance() {
   static CoreMonitor s;
   return s;
@@ -144,53 +230,122 @@ int CoreMonitor::current_interval_secs() const {
   return params_.normal_interval_secs;
 }
 
+void CoreMonitor::run_supervised_daemon(
+    const char* task_name, const std::function<bool()>& is_stopping,
+    const std::function<void(uint32_t)>& backoff_sleep_ms,
+    const std::function<void()>& on_reset,
+    const std::function<void()>& daemon_body) {
+  const char* label = (task_name && *task_name) ? task_name : "CoreMonitor";
+  while (!is_stopping || !is_stopping()) {
+    try {
+      if (daemon_body) daemon_body();
+      break;
+    } catch (const std::exception& ex) {
+      CWLOG_ERROR(std::format(
+          "{}: [后台监测] 守护循环未预期异常（{}），重置状态并于 {}ms 后拉起恢复",
+          label, ex.what(), kSupervisorRestartDelayMs));
+    } catch (...) {
+      CWLOG_ERROR(std::format(
+          "{}: [后台监测] 守护循环未知异常，重置状态并于 {}ms 后拉起恢复",
+          label, kSupervisorRestartDelayMs));
+    }
+    if (on_reset) on_reset();
+    if (is_stopping && is_stopping()) break;
+    if (backoff_sleep_ms) {
+      backoff_sleep_ms(kSupervisorRestartDelayMs);
+    } else {
+      std::this_thread::sleep_for(
+          std::chrono::milliseconds(kSupervisorRestartDelayMs));
+    }
+  }
+}
+
+void CoreMonitor::reset_runtime_loop_state() {
+  api_fail_count_.store(0);
+  node_fail_count_.store(0);
+  auto_select_fail_count_.store(0);
+  api_dead_heal_fail_count_.store(0);
+  was_offline_.store(false);
+  last_heal_ms_.store(0);
+  last_tick_ms_.store(0);
+  last_node_change_ms_.store(0);
+  has_node_change_.store(false);
+  manual_switch_wake_.store(false);
+  manual_grace_unmatched_.store(false);
+  {
+    std::lock_guard<std::mutex> lock(manual_m_);
+    pending_manual_switch_ms_ = -1;
+  }
+  {
+    std::lock_guard<std::mutex> lock(last_node_m_);
+    last_active_node_.clear();
+  }
+  {
+    std::lock_guard<std::mutex> lock(health_m_);
+    last_notified_health_ = "network_health::ok";
+  }
+}
+
 void CoreMonitor::start() {
   if (running_.exchange(true)) return;
   worker_ = std::thread([this] {
     bool is_first_run = true;
-    while (running_.load()) {
-      if (is_first_run) {
-        is_first_run = false;
-        // 首次启动时等待内核就绪
-        for (int i = 0; i < 50 && running_.load(); ++i) {
-          if (hooks_.api_alive && hooks_.api_alive()) break;
-          std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        }
-        // 若无窗口可见（托盘启动），执行一次初始化自动选点
-        // （← monitor.rs:1236-1247 v3.2.5 BUG-316：若系看门狗无感挂载存活服务内核，
-        //  跳过启动自动重选，避免打断用户正在进行的下载/通话）
-        if (hooks_.is_headless && hooks_.is_headless()) {
-          if (CoreManager::instance().take_reattached_existing_core()) {
-            CWLOG_INFO(
-                "CoreMonitor: [后台监测] 伴生看门狗已无感挂载运行中内核，延续现有出口节点健康守护");
-          } else {
-            std::string uid = hooks_.current_uid ? hooks_.current_uid() : "";
-            if (!uid.empty() && hooks_.auto_select_trigger) {
-              hooks_.auto_select_trigger();
+    run_supervised_daemon(
+        "CoreMonitor",
+        [this] { return !running_.load(); },
+        [this](uint32_t ms) {
+          std::unique_lock<std::mutex> lock(m_);
+          cv_.wait_for(lock, std::chrono::milliseconds(ms),
+                       [this] { return !running_.load(); });
+        },
+        [this] { reset_runtime_loop_state(); },
+        [this, &is_first_run] {
+          while (running_.load()) {
+            if (is_first_run) {
+              is_first_run = false;
+              // 首次启动时等待内核就绪
+              for (int i = 0; i < 50 && running_.load(); ++i) {
+                if (hooks_.api_alive && hooks_.api_alive()) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+              }
+              // 若无窗口可见（托盘启动），执行一次初始化自动选点
+              // （← monitor.rs:1236-1247 v3.2.5 BUG-316：若系看门狗无感挂载存活服务内核，
+              //  跳过启动自动重选，避免打断用户正在进行的下载/通话）
+              if (hooks_.is_headless && hooks_.is_headless()) {
+                if (CoreManager::instance().take_reattached_existing_core()) {
+                  CWLOG_INFO(
+                      "CoreMonitor: [后台监测] 伴生看门狗已无感挂载运行中内核，延续现有出口节点健康守护");
+                } else {
+                  std::string uid =
+                      hooks_.current_uid ? hooks_.current_uid() : "";
+                  if (!uid.empty() && hooks_.auto_select_trigger) {
+                    hooks_.auto_select_trigger();
+                  }
+                }
+              }
             }
+            int interval = current_interval_secs();
+            // 分片等待（stop/kick 即时退出；manual_switch_wake 仅吸收宽限期时间戳后继续休眠）
+            for (int waited = 0; running_.load() && waited < interval;
+                 waited += 1) {
+              std::unique_lock<std::mutex> lock(m_);
+              cv_.wait_for(lock, std::chrono::seconds(1), [this] {
+                return !running_.load() || kick_.load() ||
+                       manual_switch_wake_.load();
+              });
+              if (!running_.load()) break;
+              if (manual_switch_wake_.exchange(false)) {
+                const int64_t now =
+                    hooks_.now_ms ? hooks_.now_ms()
+                                  : static_cast<int64_t>(GetTickCount64());
+                absorb_pending_manual_switch(now);
+              }
+              if (kick_.exchange(false)) break;
+            }
+            if (!running_.load()) break;
+            tick_once();
           }
-        }
-      }
-      int interval = current_interval_secs();
-      // 分片等待（stop/kick 即时退出）
-      for (int waited = 0; running_.load() && waited < interval; waited += 1) {
-        std::unique_lock<std::mutex> lock(m_);
-        cv_.wait_for(lock, std::chrono::seconds(1),
-                     [this] { return !running_.load() || kick_.load(); });
-        if (kick_.exchange(false)) break;
-      }
-      if (!running_.load()) break;
-      // 守护线程绝不能因异常逃逸而 terminate：restart_core 钩子会同步执行
-      // enhance pipeline / 内核拉起，任一环节抛出 yaml/文件异常都会让整个进程
-      // 以 0xC0000409 abort。这里兜住并记录，下一轮继续自愈。
-      try {
-        tick_once();
-      } catch (const std::exception& ex) {
-        CWLOG_ERROR(std::string("CoreMonitor: tick 异常（已兜住继续运行）: ") + ex.what());
-      } catch (...) {
-        CWLOG_ERROR("CoreMonitor: tick 未知异常（已兜住继续运行）");
-      }
-    }
+        });
   });
 }
 
@@ -203,6 +358,53 @@ void CoreMonitor::stop() {
 void CoreMonitor::kick() {
   kick_.store(true);
   cv_.notify_all();
+}
+
+void CoreMonitor::notify_manual_node_switched() {
+  int64_t now = 0;
+  {
+    std::lock_guard<std::mutex> lock(m_);
+    now = hooks_.now_ms ? hooks_.now_ms()
+                        : static_cast<int64_t>(GetTickCount64());
+  }
+  {
+    std::lock_guard<std::mutex> lock(manual_m_);
+    pending_manual_switch_ms_ = now;
+  }
+  manual_switch_wake_.store(true);
+  cv_.notify_all();
+}
+
+void CoreMonitor::absorb_pending_manual_switch(int64_t fallback_now_ms) {
+  int64_t ts = -1;
+  {
+    std::lock_guard<std::mutex> lock(manual_m_);
+    ts = pending_manual_switch_ms_;
+    pending_manual_switch_ms_ = -1;
+  }
+  if (ts < 0) return;
+  const int64_t effective_ts = (ts >= 0) ? ts : fallback_now_ms;
+  last_node_change_ms_.store(effective_ts);
+  has_node_change_.store(true);
+  manual_grace_unmatched_.store(true);
+  node_fail_count_.store(0);
+  CWLOG_INFO("CoreMonitor: 吸收前端手动节点切换事件，立即刷新 20s 切换宽限期");
+}
+
+void CoreMonitor::emit_network_health_notice(const std::string& health_msg) {
+  {
+    std::lock_guard<std::mutex> lock(health_m_);
+    if (last_notified_health_ == health_msg) return;
+    last_notified_health_ = health_msg;
+  }
+  const char* status =
+      (health_msg == "network_health::ok") ? "info" : "warning";
+  events::EventBus::notice_message(status, health_msg);
+}
+
+std::string CoreMonitor::last_notified_health_for_test() const {
+  std::lock_guard<std::mutex> lock(health_m_);
+  return last_notified_health_;
 }
 
 void CoreMonitor::record_server_failure(const std::string& server) {
@@ -258,52 +460,122 @@ std::vector<std::string> CoreMonitor::snapshot_failed_servers() {
   return out;
 }
 
+CoreMonitor::SelfHealAction CoreMonitor::evaluate_self_heal_counters(
+    int& auto_select_fail_count, int& api_dead_heal_fail_count,
+    bool api_alive, int restart_threshold, int alert_threshold) {
+  if (auto_select_fail_count >= alert_threshold) {
+    auto_select_fail_count = 0;
+    api_dead_heal_fail_count = 0;
+    return SelfHealAction::FireAlert;
+  }
+  if (api_dead_heal_fail_count >= restart_threshold) {
+    api_dead_heal_fail_count = 0;
+    if (!api_alive) {
+      return SelfHealAction::RestartCore;
+    }
+  }
+  return SelfHealAction::None;
+}
+
+CoreMonitor::SelfHealAction CoreMonitor::complete_restart_core_attempt(
+    bool restart_ok, int& auto_select_fail_count,
+    int& api_dead_heal_fail_count) {
+  if (restart_ok) {
+    return SelfHealAction::None;
+  }
+  auto_select_fail_count = 0;
+  api_dead_heal_fail_count = 0;
+  return SelfHealAction::FireAlert;
+}
+
 CoreMonitor::Action CoreMonitor::heal(const std::string& uid) {
-  int64_t now = hooks_.now_ms ? hooks_.now_ms()
-                              : static_cast<int64_t>(GetTickCount64());
+  Hooks h;
+  Params p;
+  {
+    std::lock_guard<std::mutex> lock(m_);
+    h = hooks_;
+    p = params_;
+  }
+  int64_t now = h.now_ms ? h.now_ms()
+                         : static_cast<int64_t>(GetTickCount64());
   int64_t last = last_heal_ms_.load();
-  if (last != 0 && now - last < params_.heal_cooldown_ms) {
+  if (last != 0 && now - last < p.heal_cooldown_ms) {
     CWLOG_INFO(std::format(
         "CoreMonitor: 自愈选点在 {} 秒冷却中（已过 {} 秒），跳过本次",
-        params_.heal_cooldown_ms / 1000, (now - last) / 1000));
+        p.heal_cooldown_ms / 1000, (now - last) / 1000));
     return Action::Idle;
   }
   last_heal_ms_.store(now);
-  if (!hooks_.auto_select_trigger || uid.empty()) return Action::Idle;
+  if (!h.auto_select_trigger || uid.empty()) return Action::Idle;
 
-  auto r = hooks_.auto_select_trigger();
+  auto r = h.auto_select_trigger();
   if (r.is_ok() && r.value()) {
-    // 自愈成功：清零计数
+    // 自愈成功：清零双计数并广播恢复健康（BUG-318 / BUG-359）
     api_fail_count_.store(0);
     node_fail_count_.store(0);
-    heal_fail_count_.store(0);
+    auto_select_fail_count_.store(0);
+    api_dead_heal_fail_count_.store(0);
+    emit_network_health_notice("network_health::ok");
     return Action::Healed;
   }
-  if (r.is_ok() && !r.value()) {
-    // BUSY（AutoSelect 占用）→ 不计入失败、回退冷却时间戳允许下次重试（monitor.rs:1568）
+  if ((r.is_ok() && !r.value()) ||
+      (r.is_err() && r.error().message == "AUTO_SELECT_BUSY")) {
+    // BUSY（AutoSelect 占用）→ 不计入失败、回退冷却时间戳允许下次重试
     last_heal_ms_.store(last);
     return Action::Idle;
   }
 
-  // 自愈失败计数累计
-  int fails = heal_fail_count_.fetch_add(1) + 1;
+  // 自愈失败：递增双计数器 + 发射全节点不可达通知（BUG-318 / BUG-359）
+  int auto_fails = auto_select_fail_count_.fetch_add(1) + 1;
+  int api_dead_fails = api_dead_heal_fail_count_.fetch_add(1) + 1;
+  emit_network_health_notice("network_health::all_dead");
 
-  // ★ §5.3 自愈告警「3 次归零」（用户裁决 2026-11-09，对齐 Mini 现行 monitor.rs:1594-1621）：
-  //   连续 3 次自愈选点失败 → 归零计数 → 仅当「内核 API 不可达 → 重启内核 → 重启仍失败」
-  //   才弹窗；API 可达（节点侧问题）仅记日志、不重启、不弹窗。Mini 无独立的「5 次直接弹窗」。
-  if (fails >= params_.heal_fail_threshold) {
-    heal_fail_count_.store(0);  // ★ 与 Mini 一致：达 3 即归零（monitor.rs:1595）
-    bool api_ok = hooks_.api_alive ? hooks_.api_alive() : true;
-    if (api_ok) {
-      CWLOG_INFO("CoreMonitor: 连续 3 次自愈选点失败但内核 API 可达（节点侧问题），跳过内核重启，等待恢复");
-      return Action::Idle;
+  const bool need_api_check =
+      (auto_fails < p.alert_fail_threshold &&
+       api_dead_fails >= p.heal_fail_threshold);
+  const bool api_ok =
+      need_api_check ? (h.api_alive ? h.api_alive() : true) : true;
+  if (need_api_check && api_ok) {
+    CWLOG_WARN(std::format(
+        "CoreMonitor: 连续 {} 次自愈选点失败但内核 API 可达（保留告警计数={}），跳过内核重启",
+        api_dead_fails, auto_fails));
+  }
+
+  const SelfHealAction decision = evaluate_self_heal_counters(
+      auto_fails, api_dead_fails, api_ok, p.heal_fail_threshold,
+      p.alert_fail_threshold);
+  auto_select_fail_count_.store(auto_fails);
+  api_dead_heal_fail_count_.store(api_dead_fails);
+
+  if (decision == SelfHealAction::FireAlert) {
+    CWLOG_WARN("CoreMonitor: 连续 5 次自愈选点失败，触发系统网络警报");
+    if (h.alert) {
+      h.alert(
+          L"Clash Win - 网络警报",
+          L"后台自动优选节点连续 5 次失败，当前所有代理节点均已失效，无法正常连接网络。\n\n请检查您的网络连接或节点订阅状态。");
     }
-    CWLOG_WARN("CoreMonitor: 连续 3 次自愈选点失败且内核 API 不可达，重启内核以恢复 API 通道");
-    if (hooks_.restart_core && hooks_.restart_core().is_ok()) {
+    return Action::Alerted;
+  }
+
+  if (decision == SelfHealAction::RestartCore) {
+    CWLOG_WARN(std::format(
+        "CoreMonitor: 连续 {} 次自愈选点失败且内核 API 不可达，尝试重启内核（当前告警计数={}）",
+        p.heal_fail_threshold, auto_fails));
+    const bool restart_ok = h.restart_core && h.restart_core().is_ok();
+    const SelfHealAction post = complete_restart_core_attempt(
+        restart_ok, auto_fails, api_dead_fails);
+    auto_select_fail_count_.store(auto_fails);
+    api_dead_heal_fail_count_.store(api_dead_fails);
+    if (restart_ok) {
       return Action::RestartedOnHealFail;
     }
-    if (hooks_.alert) {
-      hooks_.alert(L"Clash Win", L"内核守护自愈连续失败，已尝试重启内核仍未恢复，请检查内核状态。");
+    if (post == SelfHealAction::FireAlert) {
+      CWLOG_ERROR("CoreMonitor: 重启内核失败，立即升级为终态告警并重置本轮计数");
+      if (h.alert) {
+        h.alert(
+            L"Clash Win - 网络警报",
+            L"后台检测到代理内核通信异常且自动重启内核失败，当前无法正常恢复代理连接。\n\n请检查系统服务权限或手动重启 Clash Win。");
+      }
       return Action::Alerted;
     }
   }
@@ -312,18 +584,7 @@ CoreMonitor::Action CoreMonitor::heal(const std::string& uid) {
 }
 
 void CoreMonitor::reset_state() {
-  api_fail_count_.store(0);
-  node_fail_count_.store(0);
-  heal_fail_count_.store(0);
-  was_offline_.store(false);
-  last_heal_ms_.store(0);
-  last_tick_ms_.store(0);
-  last_node_change_ms_.store(0);
-  has_node_change_.store(false);
-  {
-    std::lock_guard<std::mutex> lock(last_node_m_);
-    last_active_node_.clear();
-  }
+  reset_runtime_loop_state();
   std::lock_guard<std::mutex> lock(failed_m_);
   failed_servers_.clear();
 }
@@ -344,8 +605,6 @@ bool CoreMonitor::in_switch_grace() const {
 }
 
 CoreMonitor::Action CoreMonitor::tick_once() {
-  last_tick_ms_.store(hooks_.now_ms ? hooks_.now_ms()
-                                    : static_cast<int64_t>(GetTickCount64()));
   Hooks h;
   Params p;
   {
@@ -353,6 +612,13 @@ CoreMonitor::Action CoreMonitor::tick_once() {
     h = hooks_;
     p = params_;
   }
+  const auto now_fn = [&]() -> int64_t {
+    return h.now_ms ? h.now_ms() : static_cast<int64_t>(GetTickCount64());
+  };
+  last_tick_ms_.store(now_fn());
+
+  // BUG-336 Checkpoint #1：任何提前返回（进程未跑 / 物理断网 / API 失败）前先吸收手动切换信号
+  absorb_pending_manual_switch(now_fn());
 
   // 1. 进程级直检：进程死 → 立即重启
   if (h.core_alive && !h.core_alive()) {
@@ -361,10 +627,11 @@ CoreMonitor::Action CoreMonitor::tick_once() {
     return Action::Idle;
   }
 
-  // 2. 物理网络离线：跳过检测
+  // 2. 物理网络离线：跳过检测并通知前端离线横幅（BUG-359）
   bool online = h.network_online ? h.network_online() : true;
   if (!online) {
     was_offline_.store(true);
+    emit_network_health_notice("network_health::offline");
     return Action::Idle;
   }
   // 离线 → 在线转移：清零计数并自愈
@@ -373,6 +640,7 @@ CoreMonitor::Action CoreMonitor::tick_once() {
     node_fail_count_.store(0);
     std::string uid = h.current_uid ? h.current_uid() : std::string();
     if (!uid.empty()) return heal(uid);
+    emit_network_health_notice("network_health::ok");
     return Action::Idle;
   }
 
@@ -389,9 +657,11 @@ CoreMonitor::Action CoreMonitor::tick_once() {
   }
   api_fail_count_.store(0);
 
+  // BUG-336 Checkpoint #2：观测 active_node_name 前再次吸收，若已被手动切换精确标记，
+  // 后续观测到节点名变化时保留真实点击时间戳而不二次顺延宽限期。
+  absorb_pending_manual_switch(now_fn());
+
   // ★ §5.1 活跃节点切换检测（← Mini monitor.rs:1358-1370）
-  //   节点发生变化（含自动选点与手动切换）→ 记录切换时刻、起算 20s 宽限期，
-  //   并立即清零连续失败计数与重试模式（Mini 同语义）。
   if (h.active_node_name) {
     const std::string active = h.active_node_name();
     bool changed = false;
@@ -403,9 +673,12 @@ CoreMonitor::Action CoreMonitor::tick_once() {
       }
     }
     if (changed) {
-      last_node_change_ms_.store(
-          h.now_ms ? h.now_ms() : static_cast<int64_t>(GetTickCount64()));
-      has_node_change_.store(true);
+      const bool had_manual_grace =
+          manual_grace_unmatched_.exchange(false) && in_switch_grace();
+      if (!had_manual_grace) {
+        last_node_change_ms_.store(now_fn());
+        has_node_change_.store(true);
+      }
       node_fail_count_.store(0);
       CWLOG_INFO(std::format(
           "CoreMonitor: 活跃节点发生变化，起算 {}s 切换宽限期",
@@ -414,12 +687,9 @@ CoreMonitor::Action CoreMonitor::tick_once() {
   }
 
   // ★ §5.4 第 3 道铁锁：假/广告节点 → 直接判需重选（← Mini monitor.rs:663-666）
-  //   「内核重载默认选中伪节点 → 后台自愈切回真节点 → 重载再次切回伪节点」死循环防线。
-  //   注意：此处必须走「假节点 = 需切换」而非「健康」——与 Mini 语义完全一致。
   if (h.is_dummy_active) {
     if (h.is_dummy_active()) {
       CWLOG_WARN("CoreMonitor: 活跃节点是伪节点（广告/公告节点），触发重选");
-      // 伪节点属于「明确异常」，不适用切换宽限期的宽松判定
       node_fail_count_.store(0);
       std::string uid = h.current_uid ? h.current_uid() : std::string();
       if (!uid.empty()) return heal(uid);
@@ -428,10 +698,6 @@ CoreMonitor::Action CoreMonitor::tick_once() {
   }
 
   // ★ §5.8 测速失真复核（← Mini monitor.rs:685-703）
-  //   拨测链路整体失败（主/备双地址均失败）= 测速链路不可用，
-  //   **不可据此判定节点已死** → 本轮 NoAction，等下一周期重试。
-  //   （2026-10-18 实测：机场劫持 HTTP 测速地址期间内核返回 all proxies timeout，
-  //     app 误判「所有节点不可达」→ 连续多轮自愈全部落空。）
   if (h.probe_metrics_with_fallback) {
     if (!h.probe_metrics_with_fallback()) {
       CWLOG_WARN(
@@ -444,8 +710,8 @@ CoreMonitor::Action CoreMonitor::tick_once() {
   // 4. 节点健康：连续 2 次判死 → 自愈
   bool node_ok = h.node_healthy ? h.node_healthy() : true;
   if (!node_ok) {
-    // ★ §5.1 切换宽限期：切到新节点后 20s 内失败判定可接受，
-    //   不累计连续失败次数（防乒乓震荡）——← Mini monitor.rs:1383-1396
+    // BUG-336 Checkpoint #3：耗时拨测返回后立即吸收拨测期间发生的手动切节点信号
+    absorb_pending_manual_switch(now_fn());
     if (in_switch_grace()) {
       CWLOG_INFO(
           "CoreMonitor: 活跃节点检测异常，当前处于切换宽限期，不计入连续失败");
@@ -472,13 +738,13 @@ CoreMonitor::Action CoreMonitor::tick_once() {
     }
     return Action::Idle;
   }
-  // ← monitor.rs:1399-1406（v3.2.5 BUG-316）：重试恢复闭环日志
   const int prev_fails = node_fail_count_.exchange(0);
   if (prev_fails > 0) {
     CWLOG_INFO(std::format(
         "CoreMonitor: 活跃节点复检恢复正常（此前连续失败 {} 次），解除重试状态",
         prev_fails));
   }
+  emit_network_health_notice("network_health::ok");
   return Action::Idle;
 }
 
@@ -563,8 +829,10 @@ std::pair<std::string, uint16_t> CoreMonitor::resolve_probe_target(
 bool CoreMonitor::probe_physical_network_with(uint64_t timeout_secs,
                                               const std::string& test_url,
                                               const PhysicalNetProbeOps& ops) {
-  const int64_t budget_ms =
-      static_cast<int64_t>(std::max<uint64_t>(timeout_secs, 1) * 1000);
+  // BUG-317 / BUG-345：总预算保底 >= 2s；优先 3 路 TCP:53 并发竞速（上限 600ms），
+  // 为局域网封禁 53 端口时的 DNS 解析兜底保留 >= 1400ms 充裕预算。
+  const int64_t budget_ms = static_cast<int64_t>(
+      std::max<uint64_t>(timeout_secs, kMinProbeBudgetSecs) * 1000);
   auto now_fn = [&]() -> int64_t {
     return ops.now_ms ? ops.now_ms() : static_cast<int64_t>(GetTickCount64());
   };
@@ -573,15 +841,23 @@ bool CoreMonitor::probe_physical_network_with(uint64_t timeout_secs,
     return budget_ms - (now_fn() - start_ms);
   };
 
-  // ← monitor.rs:293-301：优先直连公网高可用 DNS IP (TCP:53)，
-  //   避开域名解析和代理环路，毫秒级快速确认物理网卡状态。
   static constexpr const char* kPublicDnsIps[] = {
       "223.5.5.5",
       "119.29.29.29",
       "1.1.1.1",
   };
-  const int64_t per_ip_cap = std::max<int64_t>(250, budget_ms / 4);
-  if (ops.tcp_connect) {
+  if (ops.tcp_race_connect) {
+    const int64_t rem = remaining_ms();
+    if (rem <= 0) return false;
+    const int race_ms =
+        static_cast<int>(std::min<int64_t>(rem, kTcp53RaceTimeoutMs));
+    const std::vector<const char*> ips(std::begin(kPublicDnsIps),
+                                       std::end(kPublicDnsIps));
+    if (ops.tcp_race_connect(ips, 53, race_ms)) {
+      return true;
+    }
+  } else if (ops.tcp_connect) {
+    const int64_t per_ip_cap = std::max<int64_t>(250, budget_ms / 4);
     for (const char* ip : kPublicDnsIps) {
       const int64_t rem = remaining_ms();
       if (rem <= 0) return false;
@@ -592,7 +868,7 @@ bool CoreMonitor::probe_physical_network_with(uint64_t timeout_secs,
     }
   }
 
-  // ← monitor.rs:302-305：兜底——若特定局域网封禁出站 53 端口，回退至域名 DNS 查询
+  // ← monitor.rs:302-307：兜底——若特定局域网封禁出站 53 端口，回退至域名 DNS 查询
   const int64_t rem = remaining_ms();
   if (rem <= 0 || !ops.dns_lookup) return false;
   const auto [host, port] = resolve_probe_target(test_url);
@@ -602,6 +878,7 @@ bool CoreMonitor::probe_physical_network_with(uint64_t timeout_secs,
 bool CoreMonitor::is_physical_network_online(uint64_t timeout_secs,
                                              const std::string& test_url) {
   PhysicalNetProbeOps ops;
+  ops.tcp_race_connect = tcp_race_connect_ipv4;
   ops.tcp_connect = tcp_connect_ipv4_ms;
   ops.dns_lookup = dns_lookup_with_timeout_ms;
   ops.now_ms = [] { return static_cast<int64_t>(GetTickCount64()); };

@@ -222,10 +222,12 @@ UT_TEST(t17_theme_card_skin_mode_sliders) {
   drawer.theme_card()->vibrancy_slider_->set_value(1.2f, true);
   UT_CHECK(near_f(svc.vibrancy_factor(), 1.2f));
   UT_CHECK(drawer.theme_card()->vibrancy_value_->text == L"1.2");
-  // 持久化
+  // 持久化（BUG-358: 拖动期延迟冲刷，提交/冲刷后落盘）
+  drawer.flush_pending_skin_prefs();
   SkinPrefs p2 = load_skin_prefs();
-  UT_CHECK(near_f(p2.depth, 0.6f));
-  UT_CHECK(near_f(p2.vibrancy, 1.2f));
+  auto [d2, v2] = skin_factors(p2, "original");
+  UT_CHECK(near_f(d2, 0.6f));
+  UT_CHECK(near_f(v2, 1.2f));
 }
 
 UT_TEST(t17_skin_bar_hidden_below_830) {

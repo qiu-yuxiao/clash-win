@@ -101,19 +101,29 @@ std::wstring strip_six_digit_suffix(std::wstring text) {
   }
   return text;
 }
-// src: use-proxy-delay-state.ts:61 PRESET_PROXY_NAMES 的延迟列不渲染
-bool is_preset_proxy(const std::string& name) {
-  return name == "DIRECT" || name == "REJECT" || name == "GLOBAL";
-}
 }  // namespace
+
+// src: src/components/proxy/use-proxy-delay-state.ts:61 PRESET_PROXY_NAMES 的延迟列不渲染
+bool is_preset_proxy(const std::string& name) {
+  return name == "DIRECT" || name == "REJECT" || name == "REJECT-DROP" ||
+         name == "PASS" || name == "COMPATIBLE" || name == "GLOBAL";
+}
 
 std::string clean_node_display_name(const std::string& raw) {
   return utf::utf16_to_utf8(strip_six_digit_suffix(utf::utf8_to_utf16(raw)));
 }
 
 // ---------- NodeRowWidget ----------
+bool NodeRowWidget::in_delay_zone(float local_x) const {
+  return !is_preset_proxy(name_) && bounds().w > kNodeDelayColW &&
+         local_x >= bounds().w - kNodeDelayColW;
+}
+
 void NodeRowWidget::bind(const std::string& type, const std::string& name,
                          int delay, bool selected) {
+  if (type_ == type && name_ == name && delay_ == delay && selected_ == selected) {
+    return;
+  }
   type_ = type;
   name_ = name;
   delay_ = delay;
@@ -246,15 +256,25 @@ void NodeRowWidget::on_paint(IRenderTarget& rt) {
       // 动画期间自续帧（30fps 帧泵在下一 tick 重绘本行脏区）
       invalidate();
     } else {
-      // src: proxy-item.tsx:28-31 延迟 Widget padding '1px 3px' / height 22 / 圆角 3
+      // src: src/components/proxy/proxy-item.tsx:255-280 延迟列文本与悬停下划线
       TextStyle ds;
-      ds.size = 11;
-      ds.weight = 600;
+      ds.size = 11;    // src: src/components/proxy/proxy-item.tsx:260
+      ds.weight = 600; // src: src/components/proxy/proxy-item.tsx:274
       ds.color = delay_tier_color(delay_tier(delay_));
       ds.align_h = AlignH::Center;
       ds.align_v = AlignV::Center;
-      rt.draw_text(format_delay(delay_),
-                   {delay_r.x + 3, delay_r.y, delay_r.w - 6, r.h - kNodeBorderW}, ds);  // src: proxy-item.tsx:28-31
+      const std::wstring dtxt = format_delay(delay_);
+      rt.draw_text(dtxt,
+                   {delay_r.x + 3, delay_r.y, delay_r.w - 6, r.h - kNodeBorderW}, ds);  // src: src/components/proxy/proxy-item.tsx:256
+      if (hover_ && in_delay_zone(hover_x_)) {
+        float tw = 12.0f;  // src: src/components/proxy/proxy-item.tsx:244
+        if (ITextEngine* eng = text_engine()) {
+          tw = std::min(delay_r.w - 6.0f, eng->measure_text(dtxt, ds, 0).w);  // src: src/components/proxy/proxy-item.tsx:244
+        }
+        const float ux = delay_r.x + (delay_r.w - tw) * 0.5f;
+        const float uy = delay_r.y + (r.h - kNodeBorderW) * 0.5f + 6.5f;  // src: src/components/proxy/proxy-item.tsx:244
+        rt.fill_rect({ux, uy, std::max(0.0f, tw), 1.0f}, Brush{ds.color});  // src: src/components/proxy/proxy-item.tsx:244
+      }
     }
   }
 
@@ -262,21 +282,46 @@ void NodeRowWidget::on_paint(IRenderTarget& rt) {
   rt.fill_rect({r.x, r.bottom() - kNodeBorderW, r.w, kNodeBorderW}, divider);
 }
 
+HCURSOR NodeRowWidget::cursor(const PointF& local) const {
+  if (in_delay_zone(local.x)) {
+    return LoadCursorW(nullptr, delay_ == -2 ? IDC_WAIT : IDC_HAND);  // src: src/components/proxy/proxy-item.tsx:242
+  }
+  return LoadCursorW(nullptr, IDC_HAND);
+}
+
 bool NodeRowWidget::on_mouse(const MouseEvent& e) {
   if (e.type == MouseEventType::Move || e.type == MouseEventType::Enter) {
+    const bool prev_hover = hover_;
+    const bool prev_in_delay = hover_ && in_delay_zone(hover_x_);
     hover_ = true;
     hover_x_ = e.pos.x;
+    if (!prev_hover || prev_in_delay != in_delay_zone(hover_x_)) {
+      invalidate();
+    }
     return true;
   }
   if (e.type == MouseEventType::Leave) {
     hover_ = false;
+    down_in_delay_zone_ = false;
     invalidate();
     return true;
   }
-  // 【CLICKFIX】Down 必须返回 true 拿到 capture，否则 Up 会被祖先控件截走、
-  // 行的 on_click 永不触发（实机表现为点节点无反应）。
-  if (e.type == MouseEventType::Down) return true;
+  // 【CLICKFIX】Down 必须返回 true 拿到 capture，否则 Up 会被祖先控件截走
+  if (e.type == MouseEventType::Down) {
+    down_in_delay_zone_ = in_delay_zone(e.pos.x);
+    return true;
+  }
   if (e.type == MouseEventType::Up) {
+    const bool up_in_delay = in_delay_zone(e.pos.x);
+    const bool was_down_in_delay = down_in_delay_zone_;
+    down_in_delay_zone_ = false;
+    // BUG-357: 右侧 65px 延迟热区点击触发单节点测速（stopPropagation 不切节点）
+    if (was_down_in_delay || up_in_delay) {
+      if (was_down_in_delay && up_in_delay && delay_ != -2 && on_test_single) {  // src: src/components/proxy/proxy-item.tsx:233
+        on_test_single();
+      }
+      return true;
+    }
     if (on_click) on_click();
     return true;
   }
@@ -285,17 +330,38 @@ bool NodeRowWidget::on_mouse(const MouseEvent& e) {
 
 std::wstring NodeRowWidget::tooltip_text() const {
   if (!hover_) return {};
-  // src: proxy-item.tsx:160 左侧协议列悬停显示协议类型
+  // src: src/components/proxy/proxy-item.tsx:160 左侧协议列悬停显示协议类型
   if (hover_x_ < kNodeTypeColW) {
     return clashwin::utf::utf8_to_utf16(type_);
   }
-  // src: proxy-item.tsx:128-132 名称列悬停显示完整名称（选中项附「 - 当前节点」）
+  // src: src/components/proxy/proxy-item.tsx:180 名称列悬停显示完整名称（选中项附「 - 当前节点」）
   if (hover_x_ < bounds().w - kNodeDelayColW) {
     std::wstring tip = clashwin::utf::utf8_to_utf16(name_);
     if (selected_) tip += L" - " + tr("proxies.components.item.currentNode");
     return tip;
   }
+  // BUG-357: 右侧 65px 延迟列悬停提示单节点测速（预设节点除外）
+  if (!is_preset_proxy(name_)) {
+    return tr("settings.mini.testSingleNodeTooltip");
+  }
   return {};
+}
+
+std::optional<RectF> NodeRowWidget::tooltip_anchor_rect() const {
+  if (!hover_ || bounds().w <= 0.0f) return std::nullopt;
+  const RectF g = global_bounds();
+  if (hover_x_ < kNodeTypeColW) {
+    return RectF{g.x, g.y, std::min(kNodeTypeColW, g.w), g.h};
+  }
+  if (hover_x_ < bounds().w - kNodeDelayColW) {
+    const float nx = std::min(kNodeTypeColW, g.w);
+    const float nw = std::max(0.0f, g.w - kNodeDelayColW - nx);
+    return RectF{g.x + nx, g.y, nw, g.h};
+  }
+  if (!is_preset_proxy(name_)) {
+    return RectF{g.x + g.w - kNodeDelayColW, g.y, kNodeDelayColW, g.h};
+  }
+  return std::nullopt;
 }
 
 std::wstring NodeRowWidget::a11y_default_name() const {
@@ -333,11 +399,33 @@ void NodeGridRowWidget::set_cards(const std::vector<GridCardItem>& items, int co
     card->on_click = [this, name = it.name]() {
       if (on_select) on_select(name);
     };
+    card->on_test_single = [this, name = it.name]() {
+      if (on_test_single) on_test_single(name);
+    };
     NodeRowWidget* raw = card.get();
     add_child(std::move(card));
     cards_.push_back(raw);
   }
   invalidate();
+}
+
+void NodeGridRowWidget::update_cards_in_place(const std::vector<GridCardItem>& items) {
+  const size_t n = std::min(cards_.size(), items.size());
+  for (size_t i = 0; i < n; ++i) {
+    NodeRowWidget* card = cards_[i];
+    if (!card) continue;
+    const auto& it = items[i];
+    card->index_in_group = it.index;
+    card->pos_in_set = it.pos_in_set;
+    card->set_size = it.set_size;
+    card->on_click = [this, name = it.name]() {
+      if (on_select) on_select(name);
+    };
+    card->on_test_single = [this, name = it.name]() {
+      if (on_test_single) on_test_single(name);
+    };
+    card->bind(it.type, it.name, it.delay, it.selected);
+  }
 }
 
 void NodeGridRowWidget::on_arrange(const RectF& area) {
@@ -469,7 +557,6 @@ Widget* ScrollTopButton::hit_test(PointF global) {
 // ---------- NodeList ----------
 NodeList::NodeList(Widget* parent) : Widget(parent) {
   const auto& pal = ThemeService::instance().palette();
-  const bool light = ThemeService::instance().is_light();
 
   // 工具条：src: proxy-head.tsx:70-79（flex / gap 1=8 / borderBottom 1px divider
   //   / pb 0.5=4 / mb 0.5=4）+ proxy-groups.tsx:395-397（px 2=16 / py 0.5=4）
@@ -504,22 +591,26 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
       if (i < 0 || static_cast<size_t>(i) >= rows.size()) continue;
       names.push_back(rows[static_cast<size_t>(i)].name);
     }
-    // src: proxy-groups.tsx:256-258 视觉占位：UI 线程立即置 -2 触发 BaseLoading 脉冲
-    data_->set_delays_batch(names, -2);
+    if (names.empty()) return;
+    // BUG-321: 置 -2 前先拍摄延迟快照，异常/繁忙/空结果结束时立即回滚仍处于 -2 的节点
+    const auto snaps = data_->snapshot_delays(names);
+    data_->set_delays_batch(names, -2);  // src: src/services/delay.ts:456
+    set_testing(true);
     invalidate();
-    const uint64_t wait_id =
-        (!names.empty() && on_batch_test_begin) ? on_batch_test_begin() : 0;
+    const uint64_t wait_id = on_batch_test_begin ? on_batch_test_begin() : 0;
     auto end_cb = on_batch_test_end;
-    // src: proxy-groups.tsx:263 异步后台线程执行测速，保障 UI 线程 60fps 脉冲动画
     auto* data_ptr = data_;
-    std::thread([data_ptr, names, wait_id, end_cb] {
+    auto alive = alive_;
+    std::thread([this, alive, data_ptr, names, snaps, wait_id, end_cb] {
       data_ptr->test_and_select(names);
-      if (end_cb && !names.empty()) {
-        const BatchTestSummary sum = data_ptr->last_batch_summary();
-        UiPostbox::instance().post([end_cb, wait_id, sum] {
-          end_cb(wait_id, sum);
-        });
-      }
+      const BatchTestSummary sum = data_ptr->last_batch_summary();
+      UiPostbox::instance().post([this, alive, data_ptr, snaps, end_cb, wait_id, sum] {
+        if (alive && alive->load()) {
+          data_ptr->restore_delays_for_still_pending(snaps);
+          set_testing(false);
+        }
+        if (end_cb) end_cb(wait_id, sum);
+      });
     }).detach();
   };
   bar_p->add_child(std::move(bolt));
@@ -564,32 +655,32 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   search_->height_ = 26;
   // 清空按钮（opt-in）：src: base-search-box.tsx:121-140
   //   ClearRounded 18 / pr 4 / 空值 opacity .5 + disabled / Tooltip resetInput
-  search_->set_clear_button(true, tr("shared.placeholders.resetInput"));  // src: locales/zh/shared.json:63
+  search_->set_clear_button(true, tr("shared.placeholders.resetInput"));  // src: src/components/base/base-search-box.tsx:126
+  // BUG-360: Escape 键在自动测速倒计时挂起期间优先取消倒计时，保留过滤词与列表
+  search_->on_key_intercept = [this](const KeyEvent& ke) {
+    if (ke.type == KeyEventType::Down && ke.key == VK_ESCAPE) {
+      if (cancel_pending_filter_auto_test()) return true;
+    }
+    return false;
+  };
   search_->on_text_changed = [this](const std::wstring& t) {
     set_filter(clashwin::utf::utf16_to_utf8(t));
-    if (filter_.empty() || visible_.empty()) return;
-    // 输入完成后防抖 700ms 自动触发多路测速择优（使满足条件的节点自动成为当前活跃节点）
-    // G1: 800→700ms（← Mini proxy-head.tsx setTimeout(..., 700)，v3.2.3）
-    uint64_t seq = ++filter_change_seq_;
-    std::thread([this, seq] {
-      std::this_thread::sleep_for(std::chrono::milliseconds(700));
-      if (filter_change_seq_.load() == seq) {
-        UiPostbox::instance().post([this, seq] {
-          if (filter_change_seq_.load() == seq && !filter_.empty()) {
-            // G4: 同过滤词不重复触发（← Mini proxy-head.tsx lastTriggeredFilterRef）
-            if (filter_ != last_auto_select_filter_) {
-              last_auto_select_filter_ = filter_;
-              trigger_auto_select_visible();
-            }
-          }
-        });
-      }
-    }).detach();
+    ++filter_change_seq_;
+    if (filter_.empty() || visible_.empty() || filter_ == last_auto_select_filter_) {
+      cancel_pending_filter_auto_test();
+      return;
+    }
+    // BUG-360: 使用可取消的 700ms 宿主定时器替代后台游离 sleep 线程
+    pending_auto_test_ = true;
+    refresh_filter_spinner();
+    if (on_arm_filter_auto_test_timer) {
+      on_arm_filter_auto_test_timer(700);  // src: src/components/proxy/proxy-head.tsx:148
+    }
   };
   search_->on_submit = [this] {
-    ++filter_change_seq_;  // 回车确认输入完成：立即触发
+    cancel_pending_filter_auto_test();
     // G4: 同过滤词不重复触发（← Mini proxy-head.tsx lastTriggeredFilterRef）
-    if (filter_ != last_auto_select_filter_) {
+    if (!filter_.empty() && !visible_.empty() && filter_ != last_auto_select_filter_) {
       last_auto_select_filter_ = filter_;
       trigger_auto_select_visible();
     }
@@ -651,7 +742,46 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   }
 }
 
-NodeList::~NodeList() = default;
+NodeList::~NodeList() {
+  if (alive_) alive_->store(false);
+  if (on_cancel_filter_auto_test_timer) on_cancel_filter_auto_test_timer();
+}
+
+void NodeList::focus_filter_input() {
+  if (search_) search_->select_all();
+}
+
+void NodeList::refresh_filter_spinner() {
+  if (!search_) return;
+  const bool show = pending_auto_test_ || is_testing_;
+  search_->set_end_spinner(
+      show, show ? tr("settings.mini.filterAutoTestingTooltip") : std::wstring{});
+}
+
+void NodeList::set_testing(bool testing) {
+  if (is_testing_ == testing) return;
+  is_testing_ = testing;
+  refresh_filter_spinner();
+}
+
+bool NodeList::cancel_pending_filter_auto_test() {
+  if (!pending_auto_test_) return false;
+  ++filter_change_seq_;
+  pending_auto_test_ = false;
+  if (on_cancel_filter_auto_test_timer) on_cancel_filter_auto_test_timer();
+  refresh_filter_spinner();
+  return true;
+}
+
+void NodeList::fire_filter_auto_test_timer() {
+  if (!pending_auto_test_) return;
+  pending_auto_test_ = false;
+  refresh_filter_spinner();
+  if (!filter_.empty() && !visible_.empty() && filter_ != last_auto_select_filter_) {
+    last_auto_select_filter_ = filter_;
+    trigger_auto_select_visible();
+  }
+}
 
 void NodeList::bind(NodeData* data) {
   data_ = data;
@@ -736,6 +866,18 @@ void NodeList::set_filter(const std::string& text) {
     lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
   if (filter_ == lower) return;
   filter_ = lower;
+  if (search_) {
+    std::string cur_s = utf::utf16_to_utf8(search_->text());
+    cur_s.erase(0, cur_s.find_first_not_of(" \t\r\n"));
+    cur_s.erase(cur_s.find_last_not_of(" \t\r\n") + 1);
+    std::string cur_lower;
+    cur_lower.reserve(cur_s.size());
+    for (char c : cur_s)
+      cur_lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (cur_lower != lower) {
+      search_->set_text_silent(utf::utf8_to_utf16(trimmed));
+    }
+  }
   // G4: 过滤词清空时重置去重记录，保证清空后重输同一词仍可触发
   if (filter_.empty()) last_auto_select_filter_.clear();
   try {
@@ -820,23 +962,27 @@ void NodeList::trigger_auto_select_visible() {
   }
   if (names.empty()) return;
 
-  // 视觉占位：UI 线程立即置 -2 触发 BaseLoading 脉冲
-  data_->set_delays_batch(names, -2);
+  // BUG-321: 置 -2 前先拍摄延迟快照，异常/繁忙/空结果结束时立即回滚仍处于 -2 的节点
+  const auto snaps = data_->snapshot_delays(names);
+  data_->set_delays_batch(names, -2);  // src: src/services/delay.ts:456
+  set_testing(true);
   invalidate();
 
   const uint64_t wait_id = on_batch_test_begin ? on_batch_test_begin() : 0;
   auto end_cb = on_batch_test_end;
 
-  // 异步后台线程执行多路测速与择优切换
   auto* data_ptr = data_;
-  std::thread([data_ptr, names, wait_id, end_cb] {
+  auto alive = alive_;
+  std::thread([this, alive, data_ptr, names, snaps, wait_id, end_cb] {
     data_ptr->test_and_select(names);
-    if (end_cb) {
-      const BatchTestSummary sum = data_ptr->last_batch_summary();
-      UiPostbox::instance().post([end_cb, wait_id, sum] {
-        end_cb(wait_id, sum);
-      });
-    }
+    const BatchTestSummary sum = data_ptr->last_batch_summary();
+    UiPostbox::instance().post([this, alive, data_ptr, snaps, end_cb, wait_id, sum] {
+      if (alive && alive->load()) {
+        data_ptr->restore_delays_for_still_pending(snaps);
+        set_testing(false);
+      }
+      if (end_cb) end_cb(wait_id, sum);
+    });
   }).detach();
 }
 
@@ -899,40 +1045,66 @@ void NodeList::sync_list() {
   auto* nd = data_;
   auto* self = this;
   const int cols = cols_ > 0 ? cols_ : 1;
-  // ★ ❌1 每行最多 cols 张卡片（宽窗 3 / 窄窗 1）；网格行数 = ceil(n/cols)
   const int grid_rows =
       (static_cast<int>(visible_.size()) + cols - 1) / cols;
+
+  auto build_row_items = [nd, self, cols](int index) {
+    std::vector<GridCardItem> items;
+    const int base = index * cols;
+    const int total_vis = static_cast<int>(self->visible_.size());
+    for (int c = 0; c < cols; ++c) {
+      const int vi = base + c;
+      if (vi >= total_vis) break;
+      const int ri = self->visible_[vi];
+      const auto& r = nd->rows()[static_cast<size_t>(ri)];
+      items.push_back({r.type, r.name, nd->row_delay(r.name),
+                       r.name == nd->now(), ri, vi + 1, total_vis});
+    }
+    return items;
+  };
+
+  std::vector<std::string> cur_names = visible_node_names();
+  // BUG-339: 可见节点序列与列数未发生变化时，原地更新已物化卡片，不销毁重建子组件
+  if (cols == last_synced_cols_ && cur_names == last_synced_names_ &&
+      list_->item_count() == grid_rows) {
+    for (int row_idx : list_->materialized_indices()) {
+      if (auto* grid_row = dynamic_cast<NodeGridRowWidget*>(
+              list_->materialized_row(row_idx))) {
+        grid_row->update_cards_in_place(build_row_items(row_idx));
+      }
+    }
+    const bool empty = visible_.empty();
+    if (empty_icon_ && empty_icon_->visible() != empty) empty_icon_->set_visible(empty);
+    if (empty_label_ && empty_label_->visible() != empty)
+      empty_label_->set_visible(empty);
+    list_->invalidate();
+    if (scroll_top_) scroll_top_->set_shown(list_->scroll_offset() > kScrollTopShowPx);
+    return;
+  }
+
+  last_synced_cols_ = cols;
+  last_synced_names_ = std::move(cur_names);
+  ++sync_rebuild_count_;
+
   list_->set_content(
       grid_rows, kNodeRowH,
-      [nd, self, cols](int index) {
+      [self, cols, build_row_items](int index) {
         auto row = std::make_unique<NodeGridRowWidget>();
-        std::vector<GridCardItem> items;
-        const int base = index * cols;
-        const int total_vis = static_cast<int>(self->visible_.size());
-        for (int c = 0; c < cols; ++c) {
-          const int vi = base + c;
-          if (vi >= total_vis) break;
-          const int ri = self->visible_[vi];
-          const auto& r = nd->rows()[static_cast<size_t>(ri)];
-          items.push_back({r.type, r.name, nd->row_delay(r.name),
-                           r.name == nd->now(), ri, vi + 1, total_vis});
-        }
         row->on_select = [self](const std::string& name) {
-          // 失败回弹：select 返回 false 时不更新选中（NodeData.now_ 未变）
           if (self->select_node) self->select_node(name);
         };
-        row->set_cards(items, cols);
+        row->on_test_single = [self](const std::string& name) {
+          if (self->on_test_single) self->on_test_single(name);
+        };
+        row->set_cards(build_row_items(index), cols);
         return row;
       },
-      15);  // src: proxy-groups.tsx:105「overscan: 15」
-  // 空态显隐：无代理（含过滤后为空）→ Inbox + "No Proxies"
-  // src: proxy-render.tsx:63-78
+      15);  // src: src/components/proxy/proxy-groups.tsx:105
   const bool empty = visible_.empty();
   if (empty_icon_ && empty_icon_->visible() != empty) empty_icon_->set_visible(empty);
   if (empty_label_ && empty_label_->visible() != empty)
     empty_label_->set_visible(empty);
   list_->on_arrange(list_->bounds());
-  // 内容变短后 offset 会被 clamp，显隐需随之回算（Mini scroll 事件同样会触发）
   if (scroll_top_) scroll_top_->set_shown(list_->scroll_offset() > kScrollTopShowPx);
 }
 

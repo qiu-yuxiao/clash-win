@@ -5,16 +5,20 @@
 #include <windows.h>
 #include <tlhelp32.h>
 
+#include "clashwin/config/constants.h"
 #include "config/config.h"
 #include "config/proxy_head_state.h"
 #include "core/service_mode.h"
 #include "core/core_updater.h"
+#include "events/event_bus.h"
 #include "mihomo/service_ipc.h"
 #include "system/service_runner.h"
+#include "system/sysproxy.h"
 #include "util/dirs.h"
 #include "util/log.h"
 #include "util/node.h"
 #include "util/utf.h"
+#include "yaml-cpp/yaml.h"
 
 #include <algorithm>
 #include <chrono>
@@ -143,9 +147,11 @@ const char* to_string(RunningMode mode) {
 }
 
 std::wstring locate_core_path() {
-  // ← state.rs:36-37 / service.rs:216-228：<home>\cores\win-mihomo.exe 优先（热升级内核）
-  std::wstring custom = util::dirs::cores_dir() + L"\\win-mihomo.exe";
-  if (fs::exists(custom)) return custom;
+  // ← state.rs:36-37 / service.rs:216-228 / BUG-319：
+  // 优先校验热升级内核 <home>\cores\win-mihomo.exe 的 PE64 完整性（损坏则清理回退，I/O 暂忙则保留文件回退）
+  if (auto custom = CoreUpdater::resolve_usable_custom_core(util::dirs::cores_dir())) {
+    return *custom;
+  }
   // 兜底 exe 同级 sidecar（← current_exe().with_file_name("win-mihomo.exe")）
   std::wstring sidecar = util::dirs::sidecar_core_path();
   if (fs::exists(sidecar)) return sidecar;
@@ -172,6 +178,7 @@ Result<void> try_recover_core() {
   CoreOps noop;
   noop.stop = []() -> Result<void> { return Result<void>::ok(); };
   noop.start = []() -> Result<void> { return Result<void>::ok(); };
+  noop.wait_cores_exit = [](uint32_t) -> bool { return true; };
   updater.set_lifecycle_ops(noop);
 
   CWLOG_WARN("core binary missing; attempting runtime recovery (download win-mihomo from GitHub)");
@@ -255,9 +262,9 @@ std::vector<ProcInfo> enumerate_all_processes() {
       info.pid = pe.th32ProcessID;
       info.name = pe.szExeFile;
       if (info.name.find(consts::kCoreProcessToken) != std::wstring::npos) {
-        // 只有同名进程才花代价查路径（select 规则要求 path_ok）
-        HANDLE h = ::OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
-                                 info.pid);
+        // BUG-331: 仅请求 PROCESS_QUERY_LIMITED_INFORMATION，使非提权进程也能识别出
+        // Session 0 SYSTEM 服务持有的本应用作用域 win-mihomo.exe 路径！
+        HANDLE h = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, info.pid);
         if (h) {
           wchar_t path[MAX_PATH] = {};
           DWORD len = MAX_PATH;
@@ -276,13 +283,29 @@ std::vector<ProcInfo> enumerate_all_processes() {
 }
 
 namespace {
-bool terminate_pid(uint32_t pid) {
+
+enum class TerminateOutcome {
+  Killed,
+  AlreadyExited,
+  AccessDenied,
+  Failed,
+};
+
+TerminateOutcome terminate_pid(uint32_t pid) {
   HANDLE h = ::OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid);
-  if (!h) return false;
+  if (!h) {
+    const DWORD gle = ::GetLastError();
+    if (gle == ERROR_ACCESS_DENIED) return TerminateOutcome::AccessDenied;
+    if (gle == ERROR_INVALID_PARAMETER) return TerminateOutcome::AlreadyExited;
+    return TerminateOutcome::Failed;
+  }
   BOOL ok = ::TerminateProcess(h, 1);
+  const DWORD term_gle = ok ? 0 : ::GetLastError();
   if (ok) ::WaitForSingleObject(h, 3000);
   ::CloseHandle(h);
-  return ok != FALSE;
+  if (ok) return TerminateOutcome::Killed;
+  if (term_gle == ERROR_ACCESS_DENIED) return TerminateOutcome::AccessDenied;
+  return TerminateOutcome::Failed;
 }
 
 // TerminateProcess 打不开时的兜底（对照任务卡 "toolhelp32 枚举 + taskkill"）
@@ -306,10 +329,16 @@ std::vector<uint32_t> kill_all_mini_cores(const std::set<uint32_t>& exclude_pids
   auto targets = select_stale_core_pids(procs, exclude_pids, scope);
   std::vector<uint32_t> killed;
   for (uint32_t pid : targets) {
-    if (terminate_pid(pid)) {
+    const auto res = terminate_pid(pid);
+    if (res == TerminateOutcome::Killed) {
       killed.push_back(pid);
       CWLOG_WARN("killed leftover win-mihomo pid=" + std::to_string(pid));
-    } else {
+    } else if (res == TerminateOutcome::AccessDenied) {
+      // BUG-331: SYSTEM/提权内核对普通用户拒绝 PROCESS_TERMINATE，非提权 taskkill.exe 同样必败且白等 3s；
+      // 跳过无意义的 taskkill 子进程，交由 service_ipc::clash_stop 通道处理。
+      CWLOG_WARN("skip futile taskkill fallback for elevated/service win-mihomo pid=" +
+                 std::to_string(pid) + " (ERROR_ACCESS_DENIED)");
+    } else if (res == TerminateOutcome::Failed) {
       taskkill_pid(pid);
       killed.push_back(pid);
       CWLOG_WARN("taskkill fallback for win-mihomo pid=" + std::to_string(pid));
@@ -422,7 +451,145 @@ CoreManager& CoreManager::instance() {
   return m;
 }
 
-RunningMode CoreManager::running_mode() const { return mode_.load(); }
+RunningMode CoreManager::running_mode() const { return mode_.load(std::memory_order_acquire); }
+
+bool CoreManager::is_in_service_mode() const {
+  return mode_.load(std::memory_order_acquire) == RunningMode::Service;
+}
+
+void CoreManager::set_proc_enumerator_for_test(ProcEnumerator fn) {
+  std::lock_guard<std::mutex> lk(test_hooks_mu_);
+  proc_enumerator_ = std::move(fn);
+}
+
+void CoreManager::reset_proc_enumerator_for_test() {
+  std::lock_guard<std::mutex> lk(test_hooks_mu_);
+  proc_enumerator_ = nullptr;
+}
+
+void CoreManager::set_start_auto_test_hooks(StartAutoTestHooks hooks) {
+  std::lock_guard<std::mutex> lk(test_hooks_mu_);
+  start_auto_test_hooks_ = std::move(hooks);
+}
+
+void CoreManager::reset_start_auto_test_hooks() {
+  std::lock_guard<std::mutex> lk(test_hooks_mu_);
+  start_auto_test_hooks_.reset();
+}
+
+bool CoreManager::are_win_cores_running() const {
+  ProcEnumerator enum_fn;
+  {
+    std::lock_guard<std::mutex> lk(test_hooks_mu_);
+    enum_fn = proc_enumerator_;
+  }
+  const auto procs = enum_fn ? enum_fn() : enumerate_all_processes();
+  const std::set<uint32_t> exclude = {::GetCurrentProcessId()};
+  const std::vector<std::wstring> scope = {util::dirs::cores_dir(), util::dirs::exe_dir()};
+  return !select_stale_core_pids(procs, exclude, scope).empty();
+}
+
+bool CoreManager::wait_for_win_cores_exit(uint32_t max_wait_ms) const {
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(max_wait_ms);
+  for (;;) {
+    if (!are_win_cores_running()) return true;
+    if (std::chrono::steady_clock::now() >= deadline) {
+      CWLOG_WARN("wait_for_win_cores_exit timed out after " +
+                 std::to_string(max_wait_ms) + "ms; win-mihomo still active");
+      return false;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+}
+
+void CoreManager::cleanup_local_state_after_service_stop() {
+  mode_.store(RunningMode::NotRunning, std::memory_order_release);
+  log_run_.store(false, std::memory_order_release);
+  std::unique_lock<std::mutex> lk(lifecycle_, std::try_to_lock);
+  if (lk.owns_lock()) {
+    pid_ = 0;
+  }
+}
+
+namespace {
+
+void disable_tun_in_runtime_yaml(const std::wstring& config_file) {
+  if (config_file.empty()) return;
+  try {
+    std::ifstream fin(config_file, std::ios::binary);
+    if (!fin.is_open()) return;
+    std::string content((std::istreambuf_iterator<char>(fin)),
+                        std::istreambuf_iterator<char>());
+    fin.close();
+    YAML::Node root = YAML::Load(content);
+    if (root && root.IsMap() && root["tun"] && root["tun"].IsMap()) {
+      root["tun"]["enable"] = false;
+      YAML::Emitter em;
+      em << root;
+      if (em.good()) {
+        std::ofstream fout(config_file, std::ios::binary | std::ios::trunc);
+        if (fout.is_open()) {
+          fout << em.c_str() << "\n";
+        }
+      }
+    }
+  } catch (...) {
+  }
+}
+
+}  // namespace
+
+void CoreManager::fallback_to_system_proxy(bool persist_to_disk) {
+  auto& verge_draft = config::Config::instance().verge();
+  auto current = verge_draft.latest_arc();
+  const std::optional<bool> orig_tun = current ? current->enable_tun_mode : std::nullopt;
+  const std::optional<bool> orig_sys = current ? current->enable_system_proxy : std::nullopt;
+
+  if (!persist_to_disk) {
+    if (!config::IVerge::has_temp_tun_fallback()) {
+      config::IVerge::enter_temp_tun_fallback(orig_tun, orig_sys);
+    }
+  } else {
+    config::IVerge::clear_temp_tun_fallback();
+  }
+
+  verge_draft.edit_draft([](config::IVerge& d) {
+    d.enable_tun_mode = false;
+    d.enable_system_proxy = true;
+  });
+  verge_draft.apply();
+
+  if (persist_to_disk) {
+    if (auto sv = verge_draft.data_arc()->save_file(); sv.is_err()) {
+      CWLOG_WARN("fallback_to_system_proxy: save verge.yaml failed: " + sv.error().message);
+    }
+  }
+
+  uint16_t clash_port = 0;
+  if (auto arc = config::Config::instance().clash().latest_arc()) {
+    try {
+      const auto& m = arc->mapping();
+      if (m.IsMap() && m["mixed-port"]) {
+        clash_port = static_cast<uint16_t>(m["mixed-port"].as<int>());
+      }
+    } catch (...) {
+      clash_port = 0;
+    }
+  }
+  if (auto updated = verge_draft.latest_arc()) {
+    auto view = system::make_verge_view(*updated, clash_port, config::consts::kSingletonPort);
+    auto& sysopt = system::Sysopt::instance();
+    if (sysopt.access() != nullptr) {
+      auto sr = sysopt.update_sysproxy(view);
+      if (sr.is_err()) {
+        CWLOG_WARN("fallback_to_system_proxy: update_sysproxy failed: " + sr.error().message);
+      }
+      sysopt.refresh_guard(view);
+    }
+  }
+  events::EventBus::refresh_verge();
+}
 
 void CoreManager::notify(const char* status, const std::string& message) {
   if (notifier_) {
@@ -595,13 +762,38 @@ Result<void> CoreManager::start_auto(const std::wstring& config_file,
     CWLOG_INFO("start_auto called while a core is running; treated as no-op");
     return Result<void>::ok();
   }
+
+  std::optional<StartAutoTestHooks> test_hooks;
+  {
+    std::lock_guard<std::mutex> hlk(test_hooks_mu_);
+    test_hooks = start_auto_test_hooks_;
+  }
+  auto do_start_service = [&](const std::wstring& cfg) -> Result<void> {
+    if (test_hooks.has_value() && test_hooks->start_service_fn) {
+      auto r = test_hooks->start_service_fn(cfg);
+      if (r.is_ok()) mode_.store(RunningMode::Service);
+      return r;
+    }
+    return start_service_locked(cfg);
+  };
+  auto do_start_sidecar = [&](const std::wstring& cfg, const std::wstring& pipe) -> Result<void> {
+    if (test_hooks.has_value() && test_hooks->start_sidecar_fn) {
+      auto r = test_hooks->start_sidecar_fn(cfg, pipe);
+      if (r.is_ok()) mode_.store(RunningMode::Sidecar);
+      return r;
+    }
+    return start_sidecar_locked(cfg, pipe);
+  };
+
   bool needs_tun = false;
   if (auto v = config::Config::instance().verge().latest_arc()) {
     needs_tun = v->enable_tun_mode.value_or(false);
   }
-  const bool is_admin_user = config::Config::instance().is_admin();
+  const bool is_admin_user = (test_hooks.has_value() && test_hooks->is_admin_fn)
+                                 ? test_hooks->is_admin_fn()
+                                 : config::Config::instance().is_admin();
   auto runner = system::get_service_runner();
-  const bool service_ready = runner->is_available();
+  const bool service_ready = runner ? runner->is_available() : false;
   auto decision = service_mode::decide_startup_mode(needs_tun, is_admin_user,
                                                     service_ready);
   CWLOG_INFO(std::string("core start decision: needs_tun=") + (needs_tun ? "1" : "0") +
@@ -609,20 +801,52 @@ Result<void> CoreManager::start_auto(const std::wstring& config_file,
              " service_ready=" + (service_ready ? "1" : "0") + " → " +
              (decision.use_service ? "Service" : "Sidecar"));
 
-  if (!decision.use_service) {
-    // TUN 请求 + 非管理员：即使 service 当下不可用，也先走安装/启动流程；
-    // 仍失败则明确告警（BUG-298 铁律：禁止静默降级）
-    if (needs_tun && !is_admin_user) {
-      auto r = start_service_locked(config_file);
-      if (r.is_ok()) return r;
-      CWLOG_WARN("TUN requested but service unavailable: " + r.error().message);
-      notify("service_unavailable",
-             "clash_verge_service 不可用，TUN 无法启用: " + r.error().message);
-      return Result<void>::err({2302, "TUN 模式需要特权服务 clash_verge_service，服务启动失败: " + r.error().message});
+  if (needs_tun && !is_admin_user) {
+    // BUG-328: TUN + 非管理员统一优先拉起服务；若失败则按 SCM 三态注册表判定：
+    //   - InstalledAndEnabled（单次启动瞬态超时/忙）→ 仅内存临时回退系统代理（persist_to_disk=false），
+    //     保护 verge.yaml 中 enable_tun_mode=true，下次启动自动恢复 TUN；
+    //   - NotInstalled / DisabledOrBroken（未装、UAC 取消、Start=4 禁用或路径损坏）→ 永久回退落盘
+    //     （persist_to_disk=true），避免每次启动重复失败弹窗；
+    //   两分支随后均以 Sidecar 模式拉起内核，保证本会话不断网！
+    auto r = do_start_service(config_file);
+    if (r.is_ok()) return r;
+
+    const auto reg = runner ? runner->inspect_registration()
+                            : service_mode::ScmServiceRegistration::NotInstalled;
+    const bool persist_to_disk =
+        (reg != service_mode::ScmServiceRegistration::InstalledAndEnabled);
+    CWLOG_WARN(std::string("TUN service startup failed (") + r.error().message +
+               "), fallback_to_system_proxy(persist_to_disk=" +
+               (persist_to_disk ? "true" : "false") + ")");
+    if (!persist_to_disk) {
+      const std::string msg =
+          "系统服务响应超时，本次会话已临时回退至系统代理模式（下次启动将自动恢复 TUN）：" +
+          r.error().message;
+      notify("tun_fallback_temporary", msg);
+      events::EventBus::notice_message("warning", msg);
+    } else {
+      const std::string msg =
+          "clash_verge_service 未安装或已被禁用，已回退至系统代理模式：" +
+          r.error().message;
+      notify("service_unavailable", msg);
+      events::EventBus::notice_message("warning", msg);
     }
-    return start_sidecar_locked(config_file, ipc_pipe);
+    fallback_to_system_proxy(persist_to_disk);
+    disable_tun_in_runtime_yaml(config_file);
+    return do_start_sidecar(config_file, ipc_pipe);
   }
-  return start_service_locked(config_file);
+
+  if (decision.use_service) {
+    auto r = do_start_service(config_file);
+    if (r.is_ok()) return r;
+    if (is_admin_user) {
+      CWLOG_WARN("Service start failed under admin privileges (" + r.error().message +
+                 "), falling back to elevated Sidecar");
+      return do_start_sidecar(config_file, ipc_pipe);
+    }
+    return r;
+  }
+  return do_start_sidecar(config_file, ipc_pipe);
 }
 
 Result<void> CoreManager::start_service_locked(const std::wstring& config_file) {
@@ -630,45 +854,65 @@ Result<void> CoreManager::start_service_locked(const std::wstring& config_file) 
     return Result<void>::err({2301, "config file path is empty"});
   }
   // ← Mini: src-tauri/src/core/manager/lifecycle.rs:151-176 prepare_startup_mode()
-  //          + :183-235 wait_for_service_ready()（含 installer UAC）
-  //   链路：未安装 / ImagePath 失效 → UAC 安装 → 复核注册 → 启动 → IPC 就绪 → 起内核。
+  //          + :183-235 wait_for_service_ready()（含 installer UAC，BUG-328 30s 等待）
   // 先清用户态残留（服务侧 start_clash 内部也会 stop_clash）
   std::set<uint32_t> exclude = {::GetCurrentProcessId()};
   kill_all_mini_cores(exclude);
 
-  auto runner = system::get_service_runner();
-  // 服务缺失 / 已注册但 ImagePath 失效（Mini 卸载后的残壳）→ 安装流程（唯一名 clash_verge_service，需 UAC）
-  const bool installed = runner->is_installed();
-  const bool binary_ok = installed && service_mode::is_service_binary_valid();
-  if (!installed || !binary_ok) {
-    CWLOG_WARN(installed ? "clash_verge_service ImagePath 失效 → 启动安装流程（唯一服务名）"
-                         : "clash_verge_service 未安装 → 启动安装流程（唯一服务名）");
-    notify("service_missing", installed
-                                  ? "clash_verge_service 的 ImagePath 已失效（Clash Mini 可能已卸载），正在安装共用服务（需要 UAC 确认）"
-                                  : "clash_verge_service 未安装，正在启动安装程序（需要 UAC 确认）");
-    auto ir = runner->run_installer(true);
-    if (ir.is_err()) {
-      notify("service_install_error", "安装共用服务 clash_verge_service 失败（UAC 取消或安装器错误）：" +
-                                          ir.error().message);
-      return ir;
-    }
-    if (!runner->is_installed()) {
-      notify("service_install_error", "安装器已执行但 clash_verge_service 仍未注册，请重试或先通过 Clash Mini 安装");
-      return Result<void>::err({2316, "installer ran but clash_verge_service is still not registered"});
+  int service_ready_wait_ms = consts::kServiceWaitMaxMs;
+  {
+    std::lock_guard<std::mutex> hlk(test_hooks_mu_);
+    if (start_auto_test_hooks_.has_value()) {
+      service_ready_wait_ms = start_auto_test_hooks_->service_ready_wait_ms;
     }
   }
+
+  auto runner = system::get_service_runner();
+  if (!runner) {
+    return Result<void>::err({2316, "service runner not configured"});
+  }
+
   if (!runner->is_available()) {
-    auto sr = runner->start_service();
-    if (sr.is_err()) {
-      notify("service_start_error", "clash_verge_service 启动失败（可能需要 UAC）：" + sr.error().message);
-      return sr;
+    const auto reg = runner->inspect_registration();
+    if (reg != service_mode::ScmServiceRegistration::InstalledAndEnabled) {
+      const bool was_installed = (reg != service_mode::ScmServiceRegistration::NotInstalled);
+      CWLOG_WARN(was_installed
+                     ? "clash_verge_service 已禁用或 ImagePath 失效 → 启动安装修复流程（唯一服务名）"
+                     : "clash_verge_service 未安装 → 启动安装流程（唯一服务名）");
+      notify("service_missing",
+             was_installed
+                 ? "clash_verge_service 已禁用或 ImagePath 已失效，正在安装修复共用服务（需要 UAC 确认）"
+                 : "clash_verge_service 未安装，正在启动安装程序（需要 UAC 确认）");
+      auto ir = runner->run_installer(true);
+      if (ir.is_err()) {
+        notify("service_install_error",
+               "安装共用服务 clash_verge_service 失败（UAC 取消或安装器错误）：" +
+                   ir.error().message);
+        return ir;
+      }
+      if (!runner->is_installed()) {
+        notify("service_install_error",
+               "安装器已执行但 clash_verge_service 仍未注册，请重试");
+        return Result<void>::err(
+            {2316, "installer ran but clash_verge_service is still not registered"});
+      }
     }
-    constexpr int kServiceReadyWaitMs = 5000;  // ← service.rs wait_for_ready 上限
-    if (!runner->wait_for_ready(kServiceReadyWaitMs)) {
-      notify("service_start_error",
-             "clash_verge_service 已启动但 IPC 未就绪（5s 超时）；请确认服务以 SYSTEM 运行后重试");
-      return Result<void>::err(
-          {2317, "clash_verge_service not ready after start (IPC probe timeout)"});
+
+    if (!runner->is_available()) {
+      auto sr = runner->start_service();
+      if (sr.is_err()) {
+        notify("service_start_error",
+               "clash_verge_service 启动失败（可能需要 UAC）：" + sr.error().message);
+        return sr;
+      }
+      if (!runner->wait_for_ready(service_ready_wait_ms)) {
+        notify("service_start_error",
+               "clash_verge_service 已启动但 IPC 未就绪（" +
+                   std::to_string(service_ready_wait_ms / 1000) +
+                   "s 超时）；请确认服务以 SYSTEM 运行后重试");
+        return Result<void>::err(
+            {2317, "clash_verge_service not ready after start (IPC probe timeout)"});
+      }
     }
   }
 
@@ -722,12 +966,18 @@ Result<void> CoreManager::start_service_locked(const std::wstring& config_file) 
 }
 
 Result<void> CoreManager::stop_sidecar_locked() {
-  // ← state.rs:126-154
+  // ← state.rs:126-154 + BUG-326 超时留痕
   if (child_) {
     HANDLE h = child_;
+    const uint32_t stopped_pid = pid_;
     child_ = nullptr;
     ::TerminateProcess(h, 0);
-    ::WaitForSingleObject(h, consts::kSidecarStopWaitMs);
+    const DWORD wait_rc = ::WaitForSingleObject(h, consts::kSidecarStopWaitMs);
+    if (wait_rc == WAIT_TIMEOUT) {
+      CWLOG_WARN("stop_sidecar_locked: WaitForSingleObject timed out (" +
+                 std::to_string(consts::kSidecarStopWaitMs) + "ms) for pid=" +
+                 std::to_string(stopped_pid) + ", falling back to kill_all_mini_cores");
+    }
     ::CloseHandle(h);
     pid_ = 0;
   }
@@ -769,25 +1019,28 @@ Result<void> CoreManager::stop() {
   return Result<void>::ok();
 }
 
-Result<void> CoreManager::restart_with_restore(ICoreApiClient& api, const CoreOps& ops,
-                                               const RestoreTimings& t) {
-  // ← lifecycle.rs:108-136：快照 → 停 → 启 → 恢复
-  auto saved = snapshot_proxy_group_now(api);
-  if (!saved.has_value()) {
-    // 进程可能已被杀死，从持久化配置中读取选定节点作为保底
-    auto profiles = config::Config::instance().profiles().latest_arc();
-    if (profiles && profiles->current) {
-      if (const auto* item = profiles->get_item(*profiles->current)) {
-        if (item->selected) {
-          for (const auto& s : *item->selected) {
-            if (s.name.value_or("") == "PROXY" && s.now && !s.now->empty()) {
-              saved = *s.now;
-              break;
-            }
-          }
-        }
+std::optional<std::string> CoreManager::read_persisted_proxy_selection(
+    const std::string& group) const {
+  auto profiles = config::Config::instance().profiles().latest_arc();
+  if (!profiles || !profiles->current) return std::nullopt;
+  const auto* item = profiles->get_item(*profiles->current);
+  if (!item || !item->selected) return std::nullopt;
+  for (const auto& s : *item->selected) {
+    if (s.name.value_or("") == group && s.now.has_value() && !s.now->empty()) {
+      if (!util::is_dummy_node(*s.now)) {
+        return *s.now;
       }
     }
+  }
+  return std::nullopt;
+}
+
+Result<void> CoreManager::restart_with_restore(ICoreApiClient& api, const CoreOps& ops,
+                                               const RestoreTimings& t) {
+  // ← lifecycle.rs:108-136 + BUG-335：快照 → 持久化保底 → 停 → 启 → 恢复
+  auto saved = snapshot_proxy_group_now(api);
+  if (!saved.has_value()) {
+    saved = read_persisted_proxy_selection("PROXY");
   }
   auto st = ops.stop();
   if (st.is_err()) return st;
@@ -809,14 +1062,14 @@ Result<void> CoreManager::restart_with_restore(ICoreApiClient& api, const CoreOp
 }
 
 std::optional<std::string> CoreManager::snapshot_proxy_group_now(ICoreApiClient& api) {
-  // ← lifecycle.rs:284-302：读取失败/now 空 → 无需恢复
+  // ← lifecycle.rs:284-302 + BUG-335：读取失败 / now 空 / 伪节点 → 交由持久化保底或子集恢复
   auto group = api.get_group_by_name("PROXY");
   if (group.is_err()) {
     CWLOG_WARN("snapshot PROXY group failed (ignored, no restore): " + group.error().message);
     return std::nullopt;
   }
   const auto& now = group.value().now;
-  if (now.has_value() && !now->empty()) {
+  if (now.has_value() && !now->empty() && !util::is_dummy_node(*now)) {
     CWLOG_INFO("snapshot PROXY group now: " + *now);
     return *now;
   }
@@ -885,23 +1138,26 @@ void CoreManager::restore_proxy_group_now(ICoreApiClient& api, const std::string
 
 Result<void> CoreManager::apply_config(ICoreApiClient& api, const std::string& config_path,
                                        const CoreOps& ops, const RestoreTimings& t) {
-  // ← manager/config.rs:121-167：snapshot → reload(force) → restore；失败整核重启兜底
+  // ← manager/config.rs:121-167 + BUG-335：snapshot → 持久化保底 → reload(force) → restore；失败整核重启兜底
   auto saved = snapshot_proxy_group_now(api);
+  if (!saved.has_value()) {
+    saved = read_persisted_proxy_selection("PROXY");
+  }
   auto reload = api.reload_config(true, config_path);
   if (reload.is_ok()) {
     CWLOG_INFO("Configuration applied");
     if (saved.has_value()) {
-    restore_proxy_group_now(api, *saved, t);
-  } else {
-    // 进程冷启动 / 无历史 snapshot 时，自动在 filterText 子集内兜底选点，
-    // 避免 Selector 落回首个广告/假节点（← lifecycle.rs:354-416 兜底防线）
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(t.api_ready_budget_ms);
-    while (std::chrono::steady_clock::now() < deadline) {
-      if (api.get_base_config().is_ok()) break;
-      std::this_thread::sleep_for(std::chrono::milliseconds(t.api_ready_poll_ms));
+      restore_proxy_group_now(api, *saved, t);
+    } else {
+      // 进程冷启动 / 无历史 snapshot 时，自动在 filterText 子集内兜底选点，
+      // 避免 Selector 落回首个广告/假节点（← lifecycle.rs:354-416 兜底防线）
+      auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(t.api_ready_budget_ms);
+      while (std::chrono::steady_clock::now() < deadline) {
+        if (api.get_base_config().is_ok()) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(t.api_ready_poll_ms));
+      }
+      select_fallback_in_subset(api, read_filter_text_lower());
     }
-    select_fallback_in_subset(api, read_filter_text_lower());
-  }
     return Result<void>::ok();
   }
   CWLOG_WARN("Failed to apply config via mihomo api (" + reload.error().message +

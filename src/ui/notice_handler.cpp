@@ -1,6 +1,8 @@
 // 通知状态映射实现（← pages/_layout/utils/notification-handlers.ts 全表）
 #include "ui/notice_handler.h"
 
+#include <algorithm>
+#include <mutex>
 #include <optional>
 #include <vector>
 
@@ -109,13 +111,15 @@ constexpr NoticeRule kRules[] = {
     {"reinstall_service::error", "error", nullptr, nullptr, 0},
     // ← core/manager/lifecycle.rs:237 Handle::notice_message("warning", ...)
     {"warning", "warning", nullptr, nullptr, 0},
-    // ← utils/quick-routing.ts:105-109：success(key, raw, 2500)
-    //   msg 非空时已为完整规则生效说明句，直接显示不重复拼接「配置已切换」前缀
+    // BUG-342: 快速路由规则置顶生效提示（← src/utils/quick-routing.ts:106）
+    {"quick_rule_added", "success",
+     "profiles.page.feedback.notifications.quickRuleAdded", "rule", 2500},  // src: src/utils/quick-routing.ts:106
+    // src: src/utils/quick-routing.ts:106 兼容历史 status 串
     {"profile_switched", "success",
-     "profiles.page.feedback.notifications.profileSwitched", nullptr, 2500, true},
+     "profiles.page.feedback.notifications.quickRuleAdded", "rule", 2500},  // src: src/utils/quick-routing.ts:106
     // ← _layout.tsx:929-932：切换订阅配置成功提示
     {"profile_switched::ok", "success",
-     "profiles.page.feedback.notifications.profileSwitched", nullptr, 2500},
+     "profiles.page.feedback.notifications.profileSwitched", nullptr, 2500},  // src: src/pages/_layout.tsx:930
     // ← _layout.tsx:938-952：更新订阅 info → success
     {"update_subscription::info", "info", "layout.notices.updatingSubscription", nullptr, 0},
     {"update_subscription::ok", "success", "layout.notices.subscriptionUpdated", nullptr, 0},
@@ -143,9 +147,77 @@ const NoticeRule* find_rule(const char* status) {
 
 uint64_t g_sub_id = 0;
 
+struct HealthSub {
+  uint64_t id;
+  std::function<void(NetworkHealthIssue)> cb;
+};
+std::mutex g_health_mu;
+NetworkHealthIssue g_latest_health = NetworkHealthIssue::None;
+uint64_t g_next_health_id = 1;
+std::vector<HealthSub> g_health_subs;
+
+bool try_consume_network_health(const char* status, const std::string& message) {
+  const std::string s = status ? status : "";
+  constexpr const char* kPrefix = "network_health::";
+  std::string token;
+  if (message.rfind(kPrefix, 0) == 0) {
+    token = message;
+  } else if (s.rfind(kPrefix, 0) == 0) {
+    token = s;
+  } else {
+    return false;
+  }
+  if (token == "network_health::ok") {
+    set_latest_network_health(NetworkHealthIssue::None);
+  } else if (token == "network_health::offline") {
+    set_latest_network_health(NetworkHealthIssue::Offline);
+  } else if (token == "network_health::all_dead") {
+    set_latest_network_health(NetworkHealthIssue::AllDead);
+  }
+  return true;
+}
+
 }  // namespace
 
+NetworkHealthIssue latest_network_health() {
+  std::lock_guard<std::mutex> lk(g_health_mu);
+  return g_latest_health;
+}
+
+void set_latest_network_health(NetworkHealthIssue issue) {
+  std::vector<std::function<void(NetworkHealthIssue)>> cbs;
+  {
+    std::lock_guard<std::mutex> lk(g_health_mu);
+    g_latest_health = issue;
+    cbs.reserve(g_health_subs.size());
+    for (const auto& sub : g_health_subs) {
+      if (sub.cb) cbs.push_back(sub.cb);
+    }
+  }
+  for (const auto& cb : cbs) cb(issue);
+}
+
+uint64_t subscribe_network_health(std::function<void(NetworkHealthIssue)> cb) {
+  std::lock_guard<std::mutex> lk(g_health_mu);
+  const uint64_t id = g_next_health_id++;
+  g_health_subs.push_back({id, std::move(cb)});
+  return id;
+}
+
+void unsubscribe_network_health(uint64_t id) {
+  std::lock_guard<std::mutex> lk(g_health_mu);
+  g_health_subs.erase(
+      std::remove_if(g_health_subs.begin(), g_health_subs.end(),
+                     [id](const HealthSub& s) { return s.id == id; }),
+      g_health_subs.end());
+}
+
 bool dispatch_notice(const char* status, const std::string& message) {
+  // BUG-359: 优先拦截 network_health::* 内部状态广播，绝不弹底部 Toast
+  if (try_consume_network_health(status, message)) {
+    return true;
+  }
+
   const NoticeRule* rule = find_rule(status);
   if (!rule) {
     // ← notification-handlers.ts:93 console.warn(`未处理的通知状态: ${status}`)
@@ -155,15 +227,24 @@ bool dispatch_notice(const char* status, const std::string& message) {
 
   ensure_i18n();
   auto& i18n = clashwin::i18n::I18n::instance();
+  std::string msg_arg = message;
+  // BUG-342: 若后端 quick_routing.cpp 传入带中文前缀的串，剥离前缀仅保留规则体插值 {{rule}}
+  constexpr const char* kLegacyQuickPrefix = "手动路径控制规则已置顶生效: ";
+  if (status && std::string(status) == "profile_switched" &&
+      msg_arg.rfind(kLegacyQuickPrefix, 0) == 0) {
+    msg_arg = msg_arg.substr(std::char_traits<char>::length(kLegacyQuickPrefix));
+  }
+
   std::string text;
-  if (!rule->key || (rule->prefer_raw_when_nonempty && !message.empty())) {
-    text = message;  // 原文（或完整状态句不重复拼接译文前缀）
-  } else if (rule->param && !message.empty()) {
-    text = i18n.t(rule->key, {{rule->param, message}});
+  if (!rule->key || (rule->prefer_raw_when_nonempty && !msg_arg.empty())) {
+    text = msg_arg;  // 原文（或完整状态句不重复拼接译文前缀）
+  } else if (rule->param && !msg_arg.empty()) {
+    text = i18n.t(rule->key, {{rule->param, msg_arg}});
+    if (text == rule->key) text = message;
   } else {
     text = i18n.t(rule->key);
     // prefixedRaw：译文 + 空格 + 明细
-    if (!message.empty()) text += " " + message;
+    if (!msg_arg.empty()) text += " " + msg_arg;
   }
   if (text.empty()) return true;  // 空文案不弹（避免空白 Alert）
 

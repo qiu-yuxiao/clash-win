@@ -4,7 +4,9 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <limits>
 
+#include "core/monitor.h"
 #include "switching_lock.h"
 #include "events/event_bus.h"
 #include "events/notice.h"
@@ -26,6 +28,28 @@ std::string to_lower(std::string s) {
   return s;
 }
 }  // namespace
+
+void AutoSelect::sort_display_delays(
+    std::vector<std::pair<std::string, uint32_t>>& display, int sort_type) {
+  if (sort_type == 2) {
+    std::stable_sort(display.begin(), display.end(),
+                     [](const auto& a, const auto& b) {
+                       return a.first < b.first;
+                     });
+    return;
+  }
+  // BUG-322 / BUG-349: 0ms 代表测速超时（Timeout），按延迟升序排列时必须排在所有真实延迟之后
+  std::stable_sort(display.begin(), display.end(),
+                   [](const auto& a, const auto& b) {
+                     const uint32_t ka =
+                         (a.second == 0) ? (std::numeric_limits<uint32_t>::max)()
+                                         : a.second;
+                     const uint32_t kb =
+                         (b.second == 0) ? (std::numeric_limits<uint32_t>::max)()
+                                         : b.second;
+                     return ka < kb;
+                   });
+}
 
 // 纯择优：candidates=[30,5000) → 失败服务器避让（安全阀：全候选在失败
 // 服务器上则放弃避让）→ 最小延迟（← monitor.rs:1000-1064）
@@ -137,8 +161,9 @@ AutoSelect::Outcome AutoSelect::trigger(
 
   // 1. 节点子集确定（← :826-844）：显式子集剔除 dummy；全量走组信息+filter
   //    （组信息读取由调用方经 node_names 传入——本层不做 IO，保持可测）
+  const bool is_frontend_subset = node_names.has_value() && !node_names->empty();
   std::vector<std::string> nodes;
-  if (node_names && !node_names->empty()) {
+  if (is_frontend_subset) {
     for (const auto& n : *node_names)
       if (!hooks_.is_dummy || !hooks_.is_dummy(n)) nodes.push_back(n);
   } else if (hooks_.group_nodes) {
@@ -156,36 +181,42 @@ AutoSelect::Outcome AutoSelect::trigger(
   }
   if (nodes.empty()) {
     out.display = {};
+    out.source = DelayResultSource::NotExecuted;
     return out;
   }
 
-  // 2. 群测（DelayManager：testing 中间态 → 测量组 → 注入）
+  // 2. 群测（BUG-344：< 30s 新鲜度门控复用 vs 实测拨测；严禁未执行伪造 0ms）
+  const bool allow_cache_reuse = is_frontend_subset && nodes.size() > 1;
+  std::optional<std::vector<std::pair<std::string, uint32_t>>> cached_subset;
+  if (allow_cache_reuse && hooks_.fresh_metrics_subset) {
+    cached_subset = hooks_.fresh_metrics_subset(nodes);
+  }
   auto& dm = DelayManager::instance();
-  auto outcome = dm.test_group("PROXY", nodes, /*allow_cache_reuse=*/true);
-  if (!outcome.injected && nodes.size() == 1) {
-    // 单点未执行 → 空 display（严禁伪造 Timeout）
+  auto outcome = dm.test_group("PROXY", nodes, allow_cache_reuse, cached_subset);
+  out.source = outcome.source;
+  if (!outcome.injected) {
+    // 拨测未执行 → 空 display（严禁伪造 Timeout 0ms）
+    if (select) events::EventBus::refresh_proxies();
     return out;
   }
   out.display = outcome.display;
 
-  // 3. sort_type 仅影响展示序（0=head state 由调用方换算；1=延迟 2=名称）
-  if (sort_type == 2) {
-    std::sort(out.display.begin(), out.display.end(),
-              [](const auto& a, const auto& b) { return a.first < b.first; });
-  } else {
-    std::stable_sort(out.display.begin(), out.display.end(),
-                     [](const auto& a, const auto& b) {
-                       return a.second < b.second;
-                     });
+  // 3. sort_type 仅影响展示序（0=读取持久配置或默认按延迟；1=延迟升序且 0ms 垫底；2=名称）
+  int effective_sort = sort_type;
+  if (effective_sort == 0) {
+    effective_sort =
+        (hooks_.saved_sort_type ? hooks_.saved_sort_type(profile_uid)
+                                : std::nullopt)
+            .value_or(1);
+    if (effective_sort <= 0) effective_sort = 1;
   }
+  sort_display_delays(out.display, effective_sort);
 
   // 4. select：双重校验 current_uid → 择优 → 切换 → 回写（子集校验）
   if (select) {
     auto fastest = pick_fastest(
         out.display, hooks_.failed_servers, hooks_.node_server_map);
     if (!fastest) {
-      // ★ ❌3：无候选（全节点不可达）同样广播 refresh_proxies，刷新前端代理缓存，
-      //   避免 UI 延迟/存活展示停在陈旧值（← Mini monitor.rs:1131-1139 无候选/切换失败同样刷新）
       events::EventBus::refresh_proxies();
       return out;
     }
@@ -198,6 +229,7 @@ AutoSelect::Outcome AutoSelect::trigger(
     if (hooks_.select_node && hooks_.select_node("PROXY", *fastest)) {
       out.selected = true;
       out.selected_node = *fastest;
+      CoreMonitor::instance().emit_network_health_notice("network_health::ok");
       // 【关键修复】回写 profile.selected（filterText 子集校验 ← :1080-1096）
       std::string filter = hooks_.filter_text ? to_lower(hooks_.filter_text())
                                               : "";
@@ -207,6 +239,16 @@ AutoSelect::Outcome AutoSelect::trigger(
         CWLOG_WARN("AutoSelect: 最快节点越界 filterText 子集，不写回 selected");
       }
       events::EventBus::refresh_proxies();
+    }
+  } else {
+    // 仅测速模式（如前端闪电测速 / 唤醒静默测速）：存在任一有效延迟即解除断网/全死横幅（BUG-359）
+    for (const auto& [name, d] : out.display) {
+      (void)name;
+      if (d > 0 && d < kNodeDelayMaxMs) {
+        CoreMonitor::instance().emit_network_health_notice(
+            "network_health::ok");
+        break;
+      }
     }
   }
   return out;

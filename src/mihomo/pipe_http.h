@@ -29,11 +29,12 @@ struct PipeHttpConfig {
   int max_connections = 16;             // 并发上限
   int idle_timeout_s = 30;              // 空闲回收阈值
   int health_check_interval_s = 60;     // 后台清理周期
-  int pool_wait_timeout_ms = 5000;      // 拒绝策略 Timeout(5s)
+  int pool_wait_timeout_ms = 2000;      // 拒绝策略 Timeout(2s < 5s 请求超时，BUG-324)
   int busy_retry_count = 24;            // ERROR_PIPE_BUSY 重试次数（BUG-171/172，勿减）
-  int busy_retry_delay_ms = 125;        // BUSY 重试间隔
+  int pipe_wait_ms = 100;               // WaitNamedPipeW 单步等待上限（BUG-330/351）
+  int busy_retry_delay_ms = 80;         // WaitNamedPipeW 返回 FALSE 时的退避间隔（BUG-330/351）
   int open_retry_count = 3;             // 非 BUSY 打开失败重试次数
-  int default_timeout_ms = 3000;        // ← mihomo DEFAULT_REQUEST_TIMEOUT
+  int default_timeout_ms = 5000;        // ← mihomo DEFAULT_REQUEST_TIMEOUT (BUG-324: 5s)
   // clash-verge-service 的 kode_bridge 服务端不接受空 body 的 Content-Length 与
   // keep-alive（会直接 EOF）；ServiceIpc 构造时打开这两项以改用 close 语义。
   bool omit_content_length_when_empty = false;
@@ -76,7 +77,8 @@ class PipeHttpClient {
     std::chrono::steady_clock::time_point last_used{};
   };
 
-  Result<void*> open_pipe_locked();                 // BUSY/NotFound 重试
+  static Result<void*> open_pipe(const std::wstring& raw_pipe_name,
+                                 const PipeHttpConfig& cfg);  // 锁外 BUSY/NotFound 重试（BUG-330/351）
   static void close_handle(void* h);
   static bool pipe_peek_valid(void* h);             // PeekNamedPipe 活性
   Result<HttpResponse> do_send(Conn& conn, const std::string& method,

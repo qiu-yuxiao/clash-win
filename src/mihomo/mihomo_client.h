@@ -119,7 +119,7 @@ class MihomoClient {
 
   PipeHttpClient& http() { return http_; }
 
-  static constexpr int kDefaultTimeout = 3000;  // ← DEFAULT_REQUEST_TIMEOUT
+  static constexpr int kDefaultTimeout = 5000;  // ← DEFAULT_REQUEST_TIMEOUT (BUG-324: 5s > pool 2s)
 
  private:
   // 统一请求入口：附带 Host/Content-Type/Bearer；非 2xx → MihomoErrc + {"message"}

@@ -67,6 +67,14 @@ struct QuitHooks {
   std::function<void()> flush_logs = nullptr;
   std::function<bool(const std::wstring& exe, const std::wstring& cmd)> launch_process = nullptr;
   std::function<void(int exit_code)> exit_process = nullptr;
+  // BUG-331: 无锁服务优先停核与模式漂移兜底钩子（reset_hooks 装配生产实现；
+  // 旧测试默认 QuitHooks{} 保持 nullptr 以沿用传统 stop_core 2000ms 分支）
+  std::function<bool()> is_service_or_tun_mode = nullptr;
+  std::function<Result<void>()> stop_core_by_service_direct = nullptr;
+  std::function<bool(uint32_t max_wait_ms)> wait_cores_exit = nullptr;
+  std::function<bool()> are_cores_running = nullptr;
+  std::function<bool()> is_service_installed = nullptr;
+  std::function<void()> cleanup_after_service_stop = nullptr;
   uint32_t grace_sleep_ms = 200;
 };
 

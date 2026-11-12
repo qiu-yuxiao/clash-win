@@ -68,6 +68,22 @@ struct ICoreUpdateDownloader {
       std::function<void(uint64_t downloaded, uint64_t total)> on_progress) = 0;
 };
 
+// BUG-319 / BUG-346: Mihomo x64 PE 二进制完整性校验最小尺寸与三态判定
+inline constexpr uint64_t kMinValidCoreBytes = 5ULL * 1024 * 1024;
+
+enum class CoreBinaryValidationKind {
+  Valid,
+  Corrupted,
+  IoUnavailable,
+};
+
+struct CoreBinaryValidation {
+  CoreBinaryValidationKind kind = CoreBinaryValidationKind::Corrupted;
+  std::string reason;
+
+  bool is_valid() const { return kind == CoreBinaryValidationKind::Valid; }
+};
+
 class CoreUpdater {
  public:
   static CoreUpdater& instance();
@@ -88,6 +104,9 @@ class CoreUpdater {
   static std::optional<std::string> parse_checksum_for_asset(const std::string& checksum_text,
                                                             const std::string& asset_name);
   static Result<std::string> compute_file_sha256(const std::wstring& file_path);
+  static CoreBinaryValidation inspect_mihomo_pe_binary(const std::wstring& file_path);
+  static Result<void> validate_mihomo_pe_binary(const std::wstring& file_path);
+  static std::optional<std::wstring> resolve_usable_custom_core(const std::wstring& cores_dir);
   static Result<void> extract_core_binary(const std::wstring& archive_path,
                                          const std::wstring& target_exe_path);
 

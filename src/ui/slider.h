@@ -24,6 +24,8 @@ class Slider : public Widget {
   bool key_focused() const { return key_focused_; }
 
   std::function<void(float)> on_change;
+  // BUG-358: MUI Slider onChangeCommitted 等价回调（松手或键盘单步调节完成时触发）
+  std::function<void(float)> on_commit;
 
   void set_value(float v, bool fire = true);
 
@@ -48,6 +50,7 @@ class Slider : public Widget {
   bool a11y_set_range(double v) override {
     if (!enabled()) return false;
     set_value(static_cast<float>(v), true);
+    if (on_commit) on_commit(value_);
     return true;
   }
 

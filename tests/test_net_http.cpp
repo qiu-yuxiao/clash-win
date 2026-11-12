@@ -10,10 +10,15 @@
 #include <thread>
 #include <vector>
 
+#include <fstream>
+
 #include "clashwin/config/constants.h"
+#include "config/prfitem.h"
+#include "config/profiles.h"
 #include "system/net_http.h"
 #include "test_util.h"
 #include "util/str_utils.h"
+#include "util/utf.h"
 
 using namespace clashwin;
 using namespace clashwin::system;
@@ -402,6 +407,149 @@ UT_TEST(t06_net_http_invalid_url) {
   UT_CHECK(!http_get("ftp://example.com/", opts).is_ok());
   UT_CHECK(!http_get("not a url", opts).is_ok());
   UT_CHECK(!http_get("http:///", opts).is_ok());
+}
+
+// ---------- BUG-327 + BUG-362：SSRF 逐跳/连接期拦截与 User-Agent 归一化 ----------
+
+UT_TEST(t_bug362_resolve_effective_user_agent_and_whitespace_fallback) {
+  UT_CHECK_EQ(resolve_effective_user_agent(std::nullopt),
+              std::string(config::consts::kSubscriptionCompatUserAgent));
+  UT_CHECK_EQ(resolve_effective_user_agent(""),
+              std::string(config::consts::kSubscriptionCompatUserAgent));
+  UT_CHECK_EQ(resolve_effective_user_agent("   \t\r\n  "),
+              std::string(config::consts::kSubscriptionCompatUserAgent));
+  UT_CHECK_EQ(resolve_effective_user_agent("  CustomAirportUA/2.1  "),
+              "CustomAirportUA/2.1");
+
+  // 单 token 纯净性与版本解耦断言
+  const std::string compat(config::consts::kSubscriptionCompatUserAgent);
+  UT_CHECK(compat.find(' ') == std::string::npos);
+  UT_CHECK(compat != std::string("clash-verge/v") + config::consts::kAppVersion);
+
+  MockHttp srv;
+  UT_CHECK(srv.start({
+      "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok",
+      "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok",
+  }));
+  const std::string base = "http://127.0.0.1:" + std::to_string(srv.port) + "/sub";
+
+  HttpOptions blank_ua;
+  blank_ua.user_agent = "   \t  ";
+  auto r1 = http_get(base, blank_ua);
+  UT_CHECK(r1.is_ok());
+
+  HttpOptions padded_ua;
+  padded_ua.user_agent = "  MyCustomUA/3.0  ";
+  auto r2 = http_get(base, padded_ua);
+  UT_CHECK(r2.is_ok());
+  srv.stop();
+
+  UT_CHECK(srv.request_contains_ci(
+      0, std::string("User-Agent: ") +
+             config::consts::kSubscriptionCompatUserAgent + "\r\n"));
+  UT_CHECK(srv.request_contains_ci(1, "User-Agent: MyCustomUA/3.0\r\n"));
+}
+
+UT_TEST(t_bug327_ssrf_guard_blocks_302_redirect_and_connect_rebinding) {
+  // 1) 直连 ssrf_guard 拦截回环
+  HttpOptions direct_guard;
+  direct_guard.ssrf_guard = true;
+  direct_guard.timeout_seconds = 3;
+  auto rd = http_get("http://localhost:9/sub", direct_guard);
+  UT_CHECK(!rd.is_ok());
+  UT_CHECK(rd.error().message.find("cannot fetch") != std::string::npos);
+
+  // 2) 经代理请求公网 URL 时服务端返回 302 Location: http://127.0.0.1:<secret>/configs →
+  //    逐跳 SSRF 校验必须在第二跳发出前立即阻断，secret_srv 收到 0 个连接！
+  MockHttp secret_srv;
+  UT_CHECK(secret_srv.start({"HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nsecret"}));
+
+  MockHttp proxy_srv;
+  const std::string redir_resp =
+      "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:" +
+      std::to_string(secret_srv.port) + "/configs\r\nContent-Length: 0\r\n\r\n";
+  UT_CHECK(proxy_srv.start({redir_resp}));
+
+  HttpOptions proxy_guard;
+  proxy_guard.proxy_type = ProxyType::Localhost;
+  proxy_guard.ssrf_guard = true;
+  proxy_guard.timeout_seconds = 5;
+  proxy_guard.localhost_mixed_port = [&]() -> std::optional<uint16_t> {
+    return proxy_srv.port;
+  };
+
+  auto rp = http_get("http://1.1.1.1/sub", proxy_guard);
+  proxy_srv.stop();
+  secret_srv.stop();
+
+  UT_CHECK(!rp.is_ok());
+  UT_CHECK(rp.error().message.find("cannot fetch") != std::string::npos);
+  UT_CHECK_EQ(secret_srv.first_line(0), "<none>");  // 第二跳从未触达内网目标！
+
+  // 3) WinHTTP 直连 connect 期 DNS Rebinding 回调拦截：
+  //    跳过预检模拟预检时返回公网 IP、实际连接瞬间解析落到 127.0.0.1 的 TOCTOU 攻击
+  MockHttp rebind_target;
+  UT_CHECK(rebind_target.start({"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nleak"}));
+
+  HttpOptions rebind_opts;
+  rebind_opts.ssrf_connect_only_for_test = true;
+  rebind_opts.timeout_seconds = 3;
+  const std::string rebind_url =
+      "http://127.0.0.1:" + std::to_string(rebind_target.port) + "/steal";
+  auto rr = http_get(rebind_url, rebind_opts);
+  rebind_target.stop();
+
+  UT_CHECK(!rr.is_ok());
+  UT_CHECK(rr.error().message.find("cannot fetch") != std::string::npos);
+  // 在 CONNECTING_TO_SERVER 阶段已被关闭句柄，目标端口未收到任何 HTTP 请求报文
+  UT_CHECK(rebind_target.first_line(0) == "<none>" ||
+           rebind_target.first_line(0).empty());
+}
+
+UT_TEST(t_bug362_prfitem_from_url_persists_custom_user_agent) {
+  wchar_t tmp[MAX_PATH];
+  GetTempPathW(MAX_PATH, tmp);
+  std::wstring root = std::wstring(tmp) + L"clashwin_t06_ua_persist";
+  CreateDirectoryW(root.c_str(), nullptr);
+  CreateDirectoryW((root + L"\\profiles").c_str(), nullptr);
+  DeleteFileW((root + L"\\profiles.yaml").c_str());
+
+  const std::string sub_yaml =
+      "proxies:\n  - name: HK-1\n    type: ss\n    server: 1.2.3.4\n    port: 8388\n    cipher: aes-256-gcm\n    password: pw\n";
+  const std::string http_resp =
+      "HTTP/1.1 200 OK\r\nContent-Type: text/yaml\r\nContent-Length: " +
+      std::to_string(sub_yaml.size()) + "\r\n\r\n" + sub_yaml;
+
+  MockHttp proxy_srv;
+  UT_CHECK(proxy_srv.start({http_resp}));
+
+  {
+    std::ofstream vf(root + L"\\verge.yaml", std::ios::binary | std::ios::trunc);
+    vf << "verge_mixed_port: " << proxy_srv.port << "\n";
+  }
+  _wputenv_s(L"CLASHWIN_HOME_OVERRIDE", root.c_str());
+
+  config::profiles::set_profiles_instance(nullptr);
+  config::IProfiles p = config::profiles::load();
+  config::profiles::set_profiles_instance(&p);
+
+  config::PrfOption opt;
+  opt.self_proxy = true;
+  opt.user_agent = "  AirportCustomUA/5.0  ";
+
+  auto res = config::PrfItem::from_url(
+      "http://sub.nonexistent-airport-domain-test.example/api/v1",
+      std::string("TestSub"), std::nullopt, opt);
+  proxy_srv.stop();
+  config::profiles::set_profiles_instance(nullptr);
+
+  UT_CHECK(res.is_ok());
+  if (res.is_ok()) {
+    UT_CHECK(res.value().option.has_value());
+    UT_CHECK(res.value().option->user_agent.has_value() &&
+             *res.value().option->user_agent == "AirportCustomUA/5.0");
+  }
+  UT_CHECK(proxy_srv.request_contains_ci(0, "User-Agent: AirportCustomUA/5.0\r\n"));
 }
 
 // ---------- 真实网络（沙箱无网 → SKIP） ----------

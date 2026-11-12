@@ -471,3 +471,46 @@ UT_TEST(t19_host_safety_and_no_port_conflict) {
   mock.delete_icon(dummy, 1);
   UT_CHECK_EQ(mock.delete_calls.size(), 1u);
 }
+
+// =========================================================================
+// 10. BUG-323：深层链接编码/未编码嵌套查询参数与外层参数剥离
+// =========================================================================
+UT_TEST(t19_deep_link_bug323_outer_params_and_nested_query) {
+  // ① 百分号编码 URL + &name=MyAirport
+  auto r1 = parse_deep_link(
+      "clash://install-config?url=https%3A%2F%2Fexample.com%2Fsub%3Ftoken%3Dabc%26flag%3Dclash&name=MyAirport");
+  UT_CHECK(r1.is_ok());
+  if (r1.is_ok()) {
+    UT_CHECK_EQ(r1.value().url, "https://example.com/sub?token=abc&flag=clash");
+    UT_CHECK(r1.value().name.has_value() && *r1.value().name == "MyAirport");
+  }
+
+  // ② 未编码嵌套查询串 URL + &name=PlainSub
+  auto r2 = parse_deep_link(
+      "clash-verge://install-config?url=https://example.com/subscribe?token=xyz&flag=meta&name=PlainSub");
+  UT_CHECK(r2.is_ok());
+  if (r2.is_ok()) {
+    UT_CHECK_EQ(r2.value().url, "https://example.com/subscribe?token=xyz&flag=meta");
+    UT_CHECK(r2.value().name.has_value() && *r2.value().name == "PlainSub");
+  }
+
+  // ③ name 在前、url 在后且尾部带 &silent=true / #fragment：绝不可把 &silent=true 拼入 url
+  auto r3 = parse_deep_link(
+      "clash-mini://install-config?name=PreName&url=https%3A%2F%2Fexample.com%2Fapi%3Fk%3D1&silent=true&utm=panel#frag");
+  UT_CHECK(r3.is_ok());
+  if (r3.is_ok()) {
+    UT_CHECK_EQ(r3.value().url, "https://example.com/api?k=1");
+    UT_CHECK(r3.value().name.has_value() && *r3.value().name == "PreName");
+  }
+
+  // ④ 未编码嵌套查询串 + &silent=1
+  auto r4 = parse_deep_link(
+      "clash://install-config?url=https://example.com/sub?token=1&flag=2&silent=1");
+  UT_CHECK(r4.is_ok());
+  if (r4.is_ok()) {
+    UT_CHECK_EQ(r4.value().url, "https://example.com/sub?token=1&flag=2");
+  }
+
+  // ⑤ 纯空白 url 参数必须拒绝
+  UT_CHECK(!parse_deep_link("clash://install-config?url=%20%20%20&name=Empty").is_ok());
+}

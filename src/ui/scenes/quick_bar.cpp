@@ -1,6 +1,8 @@
 // 快捷条实现（T13）。数值/配色全部取自 Clash Mini 3.2.2 源码（见各处 // src:）。
 #include "quick_bar.h"
 
+#include <windows.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -374,6 +376,24 @@ void QuickBar::set_badge(int delay, bool has_node) {
   invalidate();
 }
 
+void QuickBar::set_network_health(NetworkHealthIssue issue) {
+  if (network_health_ == issue) return;
+  network_health_ = issue;
+  if (issue == NetworkHealthIssue::None) {
+    health_pill_hover_ = false;
+    health_pill_pressed_ = false;
+  }
+  if (bounds().w > 0) on_arrange(bounds());
+  invalidate();
+}
+
+void QuickBar::set_self_heal_testing(bool testing) {
+  if (self_heal_testing_ == testing) return;
+  self_heal_testing_ = testing;
+  if (bounds().w > 0) on_arrange(bounds());
+  invalidate();
+}
+
 void QuickBar::set_pinned(bool p) {
   pinned_ = p;
   if (pin_) {
@@ -399,9 +419,10 @@ void QuickBar::set_pinned(bool p) {
 void QuickBar::on_arrange(const RectF& area) {
   set_bounds(area);
   chip_rect_ = {};  // 每次重排先清，避免 has_badge_ 变 false 后残留旧命中区
+  health_pill_rect_ = {};
   const float pad_top = padding().t;
   const float content_h = area.h - padding().v();
-  const float btn_w = 28.0f, btn_h = 28.0f;  // src: _layout.tsx:1345-1346 28×28
+  const float btn_w = 28.0f, btn_h = 28.0f;  // src: src/pages/_layout.tsx:1345
   const float btn_y = pad_top + (content_h - btn_h) / 2;
   const float right = area.w - padding().r;
   if (gear_) gear_->layout_tree({right - btn_w, btn_y, btn_w, btn_h});
@@ -410,15 +431,16 @@ void QuickBar::on_arrange(const RectF& area) {
   // 卡片：x=快捷条左 padding，右缘 = pin 左缘（quickbar gap 0，_layout.tsx:1321）
   const float card_x = padding().l;
   const float card_r = pin_ ? pin_->bounds().x : right;
-  const float inner_l = card_x + 12;  // active-node-card.tsx:236 p:'0 12px'
-  const float inner_r = card_r - 12;
-  const float gap = 12.0f;            // active-node-card.tsx:240 gap:1.5 → 12px
+  const float inner_l = card_x + 12;  // src: src/pages/_layout/components/active-node-card.tsx:342
+  const float inner_r = card_r - 12;  // src: src/pages/_layout/components/active-node-card.tsx:342
+  const float gap = 12.0f;            // src: src/pages/_layout/components/active-node-card.tsx:346
 
-  // 断点：max-width 580/480/400 → 小于等于该宽即隐藏
-  // src: active-node-card.tsx:252 / :273 / :363
-  const bool show_active = area.w > 580;
-  const bool show_proto = area.w > 480;
-  const bool show_addr = area.w > 400 && addr_label_ && !addr_label_->text.empty();
+  // 断点：max-width 580/480/400 → 小于等于该宽即隐藏；网络异常胶囊展示期间隐藏节点地址
+  // src: src/pages/_layout/components/active-node-card.tsx:351,372,483
+  const bool has_health_pill = network_health_ != NetworkHealthIssue::None;
+  const bool show_active = area.w > 580;  // src: src/pages/_layout/components/active-node-card.tsx:351
+  const bool show_proto = area.w > 480;   // src: src/pages/_layout/components/active-node-card.tsx:372
+  const bool show_addr = !has_health_pill && area.w > 400 && addr_label_ && !addr_label_->text.empty();  // src: src/pages/_layout/components/active-node-card.tsx:483
   if (active_label_ && active_label_->visible() != show_active)
     active_label_->set_visible(show_active);
   if (proto_label_ && proto_label_->visible() != show_proto)
@@ -427,28 +449,43 @@ void QuickBar::on_arrange(const RectF& area) {
     addr_label_->set_visible(show_addr);
 
   // 固定宽元素（顺序即 Mini flex 顺序）
-  const SizeF as = show_active ? active_label_->measure(1e6f, content_h) : SizeF{};
-  const SizeF ps = show_proto ? proto_label_->measure(1e6f, content_h) : SizeF{};
-  const float proto_pad_x = 6.4f;   // src: active-node-card.tsx:271 px: 0.8 → 8*0.8
-  const float proto_pad_y = 1.6f;   // src: :272 py: 0.2 → 8*0.2
-  const float proto_border = 1.0f;  // src: :268 border: '1px solid'
+  const SizeF as = show_active ? active_label_->measure(1e6f, content_h) : SizeF{};  // src: src/pages/_layout/components/active-node-card.tsx:356
+  const SizeF ps = show_proto ? proto_label_->measure(1e6f, content_h) : SizeF{};    // src: src/pages/_layout/components/active-node-card.tsx:377
+  const float proto_pad_x = 6.4f;   // src: src/pages/_layout/components/active-node-card.tsx:370
+  const float proto_pad_y = 1.6f;   // src: src/pages/_layout/components/active-node-card.tsx:371
+  const float proto_border = 1.0f;  // src: src/pages/_layout/components/active-node-card.tsx:367
   const float pill_w = show_proto ? ps.w + 2 * proto_pad_x + 2 * proto_border : 0;
   const float pill_h = show_proto ? ps.h + 2 * proto_pad_y + 2 * proto_border : 0;
-  const SizeF ads = show_addr ? addr_label_->measure(1e6f, content_h) : SizeF{};
+  const SizeF ads = show_addr ? addr_label_->measure(1e6f, content_h) : SizeF{};  // src: src/pages/_layout/components/active-node-card.tsx:495
 
-  // src: active-node-card.tsx:315-320 测试中图标为 CircularProgress（10×10，占同宽图标位）
-  // src: MUI Chip(size=small, filled)：root padding 0、icon marginLeft 4 /
-  //   marginRight -4、label paddingLeft/Right 8 ⇒ 左 4、图标后 4、右 8
   float chip_w = 0;
   if (has_badge_ && wifi_ && delay_label_) {
-    const float icon_w = delay_ == -2 ? 10.0f : wifi_->measure(1e6f, content_h).w;
-    chip_w = 4.0f + icon_w + 4.0f + delay_label_->measure(1e6f, content_h).w + 8.0f;
+    const float icon_w = delay_ == -2 ? 10.0f : wifi_->measure(1e6f, content_h).w;  // src: src/pages/_layout/components/active-node-card.tsx:416
+    chip_w = 4.0f + icon_w + 4.0f + delay_label_->measure(1e6f, content_h).w + 8.0f;  // src: src/pages/_layout/components/active-node-card.tsx:412
+  }
+
+  float health_w = 0.0f;
+  if (has_health_pill) {
+    const std::wstring htxt =
+        network_health_ == NetworkHealthIssue::Offline
+            ? tr("settings.mini.networkOffline")
+            : tr("settings.mini.allNodesTimeout");
+    TextStyle hts;
+    hts.size = 10.0f;  // src: src/pages/_layout/components/active-node-card.tsx:473
+    hts.weight = 700;  // src: src/pages/_layout/components/active-node-card.tsx:475
+    float tw = 44.0f;  // src: src/pages/_layout/components/active-node-card.tsx:473
+    if (ITextEngine* eng = text_engine()) {
+      tw = eng->measure_text(htxt, hts, 0).w;
+    }
+    const float spin_extra = self_heal_testing_ ? 14.0f : 0.0f;  // src: src/pages/_layout/components/active-node-card.tsx:416
+    health_w = 8.0f + spin_extra + tw + 8.0f;  // src: src/pages/_layout/components/active-node-card.tsx:464
   }
 
   float fixed = 0;
   if (show_active) fixed += as.w + gap;
   if (show_proto) fixed += pill_w + gap;
   if (has_badge_) fixed += gap + chip_w;
+  if (has_health_pill) fixed += gap + health_w;
   if (show_addr) fixed += gap + ads.w;
 
   float avail = inner_r - inner_l - fixed;
@@ -499,6 +536,13 @@ void QuickBar::on_arrange(const RectF& area) {
     x += chip_w;
   }
 
+  if (has_health_pill && health_w > 0.0f) {
+    x += gap;
+    const float hp_h = 20.0f;  // src: src/pages/_layout/components/active-node-card.tsx:474
+    health_pill_rect_ = {x, pad_top + (content_h - hp_h) / 2.0f, health_w, hp_h};
+    x += health_w;
+  }
+
   if (show_addr && addr_label_) {
     x += gap;
     const float ah = std::min(ads.h, content_h);
@@ -507,7 +551,59 @@ void QuickBar::on_arrange(const RectF& area) {
   }
 }
 
+HCURSOR QuickBar::cursor(const PointF& local) const {
+  if (network_health_ != NetworkHealthIssue::None && health_pill_rect_.w > 0.0f &&
+      health_pill_rect_.contains(local.x, local.y)) {
+    return LoadCursorW(nullptr, self_heal_testing_ ? IDC_WAIT : IDC_HAND);
+  }
+  if (has_badge_ && chip_rect_.contains(local.x, local.y)) {
+    return LoadCursorW(nullptr, IDC_HAND);
+  }
+  if (node_label_ && !node_label_->text.empty() &&
+      node_label_->bounds().contains(local.x, local.y)) {
+    return LoadCursorW(nullptr, IDC_HAND);
+  }
+  return nullptr;
+}
+
 bool QuickBar::on_mouse(const MouseEvent& e) {
+  if (e.type == MouseEventType::Leave) {
+    if (health_pill_hover_ || node_hover_) {
+      health_pill_hover_ = false;
+      node_hover_ = false;
+      invalidate();
+    }
+    return false;
+  }
+  // BUG-359: 网络健康告警胶囊优先命中，点击触发自愈重测而非轮换节点
+  if (network_health_ != NetworkHealthIssue::None && health_pill_rect_.w > 0.0f &&
+      health_pill_rect_.contains(e.pos.x, e.pos.y)) {
+    if (e.type == MouseEventType::Move) {
+      if (!health_pill_hover_ || node_hover_) {
+        health_pill_hover_ = true;
+        node_hover_ = false;
+        invalidate();
+      }
+      return true;
+    }
+    if (e.type == MouseEventType::Down) {
+      health_pill_pressed_ = true;
+      return true;
+    }
+    if (e.type == MouseEventType::Up) {
+      const bool fired = health_pill_pressed_;
+      health_pill_pressed_ = false;
+      if (fired && !self_heal_testing_ && on_self_heal_retest) on_self_heal_retest();
+      return true;
+    }
+    return true;
+  }
+  if (health_pill_hover_) {
+    health_pill_hover_ = false;
+    invalidate();
+  }
+  if (e.type == MouseEventType::Up) health_pill_pressed_ = false;
+
   if (!node_label_ || node_label_->text.empty()) return false;
   // 延迟 Chip 先判：点一下测单节点延迟（src: :311-344 onClick={handleTestDelay}）
   if (has_badge_ && chip_rect_.contains(e.pos.x, e.pos.y)) {
@@ -654,8 +750,59 @@ void QuickBar::on_paint(IRenderTarget& rt) {
     float x0 = wifi_->bounds().x - 4, x1 = delay_label_->bounds().right() + 8;
     const float y0 = (h - 20) / 2;
     Pen none{Color4f(0, 0, 0, 0), 0};
-    Brush pb{tier.r, tier.g, tier.b, 0.12f};
-    rt.round_rect({x0, y0, x1 - x0, 20}, 10.0f, none, &pb);
+    Brush pb{tier.r, tier.g, tier.b, 0.12f};  // src: src/pages/_layout/components/active-node-card.tsx:437
+    rt.round_rect({x0, y0, x1 - x0, 20}, 10.0f, none, &pb);  // src: src/pages/_layout/components/active-node-card.tsx:434
+  }
+  // BUG-359: 网络异常告警胶囊（src: src/pages/_layout/components/active-node-card.tsx:455-481）
+  if (network_health_ != NetworkHealthIssue::None && health_pill_rect_.w > 0.0f) {
+    const double pulse_phase = std::fmod(steady_ms(), 1800.0) / 1800.0;  // src: src/pages/_layout/components/active-node-card.tsx:477
+    const float pulse_alpha = 0.85f + 0.15f * (0.5f + 0.5f * static_cast<float>(std::cos(pulse_phase * 6.283185307)));  // src: src/pages/_layout/components/active-node-card.tsx:477
+    Color4f bg = pal.error_color;  // src: src/pages/_layout/components/active-node-card.tsx:465
+    if (health_pill_hover_) {
+      bg.r *= 0.88f;  // src: src/pages/_layout/components/active-node-card.tsx:465
+      bg.g *= 0.88f;  // src: src/pages/_layout/components/active-node-card.tsx:465
+      bg.b *= 0.88f;  // src: src/pages/_layout/components/active-node-card.tsx:465
+    }
+    bg.a *= pulse_alpha;
+    Brush hb{bg};
+    rt.round_rect(health_pill_rect_, 10.0f, Pen{Color4f(0, 0, 0, 0), 0.0f}, &hb);  // src: src/pages/_layout/components/active-node-card.tsx:474
+
+    Color4f fg = Color4f::hex(0xFFFFFF, pulse_alpha);  // src: src/pages/_layout/components/active-node-card.tsx:465
+    float text_x = health_pill_rect_.x + 8.0f;  // src: src/pages/_layout/components/active-node-card.tsx:464
+    if (self_heal_testing_) {
+      const float cx = text_x + 5.0f;  // src: src/pages/_layout/components/active-node-card.tsx:416
+      const float cy = health_pill_rect_.y + health_pill_rect_.h * 0.5f;
+      const double sp = std::fmod(steady_ms() / 1400.0, 1.0);  // src: src/pages/_layout/components/active-node-card.tsx:416
+      for (int i = 0; i < 8; ++i) {  // src: src/pages/_layout/components/active-node-card.tsx:416
+        const double ang = (sp + static_cast<double>(i) / 8.0) * 6.283185307;  // src: src/pages/_layout/components/active-node-card.tsx:416
+        constexpr float kDot = 1.7f;  // src: src/pages/_layout/components/active-node-card.tsx:416
+        constexpr float kRad = 4.0f;  // src: src/pages/_layout/components/active-node-card.tsx:416
+        Color4f si = fg;
+        si.a *= 0.9f * (1.0f - static_cast<float>(i) / 8.0f);  // src: src/pages/_layout/components/active-node-card.tsx:416
+        Brush sb{si};
+        rt.round_rect({cx + static_cast<float>(std::cos(ang)) * kRad - kDot * 0.5f,
+                       cy + static_cast<float>(std::sin(ang)) * kRad - kDot * 0.5f,
+                       kDot, kDot},
+                      kDot * 0.5f, Pen{si, 0.0f}, &sb);  // src: src/pages/_layout/components/active-node-card.tsx:416
+      }
+      text_x += 14.0f;  // src: src/pages/_layout/components/active-node-card.tsx:416
+    }
+    const std::wstring htxt =
+        network_health_ == NetworkHealthIssue::Offline
+            ? tr("settings.mini.networkOffline")
+            : tr("settings.mini.allNodesTimeout");
+    TextStyle hts;
+    hts.size = 10.0f;  // src: src/pages/_layout/components/active-node-card.tsx:473
+    hts.weight = 700;  // src: src/pages/_layout/components/active-node-card.tsx:475
+    hts.color = fg;
+    hts.align_v = AlignV::Center;
+    hts.wrap = false;
+    rt.draw_text(htxt,
+                 {text_x, health_pill_rect_.y,
+                  std::max(0.0f, health_pill_rect_.right() - 8.0f - text_x),
+                  health_pill_rect_.h},
+                 hts);  // src: src/pages/_layout/components/active-node-card.tsx:466
+    invalidate();
   }
 }
 

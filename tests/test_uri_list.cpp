@@ -1038,3 +1038,126 @@ UT_TEST(t06_from_url_direct_chinese_names) {
   // 节点名在序列化产物中
   UT_CHECK(item.value().file_data->find("测试节点") != std::string::npos);
 }
+
+// ================= BUG-320 + BUG-348：VMess sni 与全协议 @/?/尾随 '/' =================
+
+UT_TEST(t_bug320_parse_vmess_sni_field_preserved) {
+  // 1) sni 显式指定 → servername 采用 sni，ws-opts.headers.Host 保持 host
+  std::string j1 = R"({"v":"2","ps":"VMess-SNI","add":"198.51.100.10","port":"443","id":"11111111-2222-3333-4444-555555555555","aid":"0","net":"ws","type":"none","host":"cdn.host.example","path":"/ws","tls":"tls","sni":"real.sni.example"})";
+  auto m1 = parse_vmess("vmess://" + b64(j1));
+  UT_CHECK(m1.has_value());
+  if (m1) {
+    UT_CHECK(B(*m1, "tls"));
+    UT_CHECK_EQ(S(*m1, "servername"), "real.sni.example");
+    YAML::Node wso = SUB(*m1, "ws-opts");
+    UT_CHECK_EQ(S(SUB(wso, "headers"), "Host"), "cdn.host.example");
+  }
+
+  // 2) sni 为空空白且 tls=="tls" → servername 回退到 host
+  std::string j2 = R"({"v":"2","ps":"VMess-Fallback","add":"198.51.100.11","port":443,"id":"11111111-2222-3333-4444-555555555555","aid":0,"net":"ws","host":"  cdn.fallback.example  ","path":"/ws","tls":"tls","sni":"   "})";
+  auto m2 = parse_vmess("vmess://" + b64(j2));
+  UT_CHECK(m2.has_value());
+  if (m2) {
+    UT_CHECK_EQ(S(*m2, "servername"), "cdn.fallback.example");
+  }
+
+  // 3) tls 非 "tls" 但显式携带非空 sni → 仍保留 servername
+  std::string j3 = R"({"v":"2","ps":"VMess-PlainSNI","add":"198.51.100.12","port":8080,"id":"11111111-2222-3333-4444-555555555555","sni":"plain.sni.example"})";
+  auto m3 = parse_vmess("vmess://" + b64(j3));
+  UT_CHECK(m3.has_value());
+  if (m3) {
+    UT_CHECK(!HAS(*m3, "tls"));
+    UT_CHECK_EQ(S(*m3, "servername"), "plain.sni.example");
+  }
+
+  // 4) sni 类型非法（整数）→ 拒绝
+  std::string j4 = R"({"v":"2","ps":"Bad","add":"1.2.3.4","port":443,"id":"uuid","sni":12345})";
+  UT_CHECK(!parse_vmess("vmess://" + b64(j4)).has_value());
+}
+
+UT_TEST(t_bug348_all_9_protocols_query_with_at_and_trailing_slash) {
+  // 对照 Mini test_parse_ss_wireguard_socks5_query_with_at：
+  // 全部 9 协议均携带尾随 '/' 与含 '@' 的 query 参数，双重断言 server 与非默认 port 不被回退为 443
+  auto ss = parse_ss(
+      "ss://YWVzLTI1Ni1nY206cGFzc0B3b3Jk@ss.example.com:8388/?plugin=obfs-local%3Bobfs%3Dhttp%3Bobfs-host%3Da@b.com#SS-At");
+  UT_CHECK(ss.has_value());
+  if (ss) {
+    UT_CHECK_EQ(S(*ss, "server"), "ss.example.com");
+    UT_CHECK_EQ(I(*ss, "port"), 8388);
+    UT_CHECK_EQ(S(*ss, "password"), "pass@word");
+    UT_CHECK_EQ(S(*ss, "name"), "SS-At");
+  }
+
+  auto wg = parse_wireguard(
+      "wireguard://privkey123@wg.example.com:51820/?publicKey=pub123&address=10.0.0.2/32&endpoint=peer@node#WG-At");
+  UT_CHECK(wg.has_value());
+  if (wg) {
+    UT_CHECK_EQ(S(*wg, "server"), "wg.example.com");
+    UT_CHECK_EQ(I(*wg, "port"), 51820);
+    UT_CHECK_EQ(S(*wg, "name"), "WG-At");
+  }
+
+  auto s5 = parse_socks5(
+      "socks5://user%40domain.com:p%40ss@socks.example.com:1080/?udp=1&tag=user@edge#S5-At");
+  UT_CHECK(s5.has_value());
+  if (s5) {
+    UT_CHECK_EQ(S(*s5, "server"), "socks.example.com");
+    UT_CHECK_EQ(I(*s5, "port"), 1080);
+    UT_CHECK_EQ(S(*s5, "username"), "user@domain.com");
+    UT_CHECK_EQ(S(*s5, "password"), "p@ss");
+    UT_CHECK_EQ(S(*s5, "name"), "S5-At");
+  }
+
+  auto vl = parse_vless(
+      "vless://2513e61a-6982-39cd-9f0a-8f6fbc3fc5f0@vl.example.com:8443/?type=ws&path=%2Fws%40v2&host=a@b.example.com&security=tls&sni=vl.example.com#VL-At");
+  UT_CHECK(vl.has_value());
+  if (vl) {
+    UT_CHECK_EQ(S(*vl, "server"), "vl.example.com");
+    UT_CHECK_EQ(I(*vl, "port"), 8443);
+    UT_CHECK_EQ(S(*vl, "name"), "VL-At");
+  }
+
+  auto tj = parse_trojan(
+      "trojan://p@ssword@tj.example.com:8443/?sni=tj.example.com&extra=x@y#TJ-At");
+  UT_CHECK(tj.has_value());
+  if (tj) {
+    UT_CHECK_EQ(S(*tj, "server"), "tj.example.com");
+    UT_CHECK_EQ(I(*tj, "port"), 8443);
+    UT_CHECK_EQ(S(*tj, "password"), "p@ssword");
+  }
+
+  auto hy2 = parse_hysteria2(
+      "hysteria2://auth@pw@hy2.example.com:8443/?sni=hy2.example.com&obfs-password=o@p#HY2-At");
+  UT_CHECK(hy2.has_value());
+  if (hy2) {
+    UT_CHECK_EQ(S(*hy2, "server"), "hy2.example.com");
+    UT_CHECK_EQ(I(*hy2, "port"), 8443);
+    UT_CHECK_EQ(S(*hy2, "password"), "auth@pw");
+  }
+
+  auto hy1 = parse_hysteria(
+      "hysteria://hy1.example.com:8443/?protocol=udp&auth=my@auth&peer=hy1.example.com&upmbps=50&downmbps=100#HY1-At");
+  UT_CHECK(hy1.has_value());
+  if (hy1) {
+    UT_CHECK_EQ(S(*hy1, "server"), "hy1.example.com");
+    UT_CHECK_EQ(I(*hy1, "port"), 8443);
+  }
+
+  auto atls = parse_anytls(
+      "anytls://sec@pw@atls.example.com:8443/?sni=atls.example.com&extra=u@v#ATLS-At");
+  UT_CHECK(atls.has_value());
+  if (atls) {
+    UT_CHECK_EQ(S(*atls, "server"), "atls.example.com");
+    UT_CHECK_EQ(I(*atls, "port"), 8443);
+    UT_CHECK_EQ(S(*atls, "password"), "sec@pw");
+  }
+
+  auto tuic = parse_tuic(
+      "tuic://11111111-2222-3333-4444-555555555555:p@ss@tuic.example.com:8443/?congestion_control=bbr&sni=tuic.example.com&tag=a@b#TUIC-At");
+  UT_CHECK(tuic.has_value());
+  if (tuic) {
+    UT_CHECK_EQ(S(*tuic, "server"), "tuic.example.com");
+    UT_CHECK_EQ(I(*tuic, "port"), 8443);
+    UT_CHECK_EQ(S(*tuic, "password"), "p@ss");
+  }
+}

@@ -415,14 +415,16 @@ UT_TEST(t22_monitor_node_dead_two_consecutive_heals) {
   UT_CHECK_EQ(heals, 1);
 }
 
-// 12. 守护升级梯（v0.2.2 起现行语义 = 「3 次归零」，用户 2026-11-09 裁决对齐
-//     Mini monitor.rs:1594-1621）：连续 3 次自愈失败 → 计数归零；仅当「内核 API 不可达
-//     → 重启内核 → 重启仍失败」才弹窗。旧期望「3 次重启 / 5 次弹窗」是变更前行为，已作废。
+// 12. 守护升级梯（BUG-318 双计数解耦状态机）：
+//     - API 假死连续 3 次自愈失败 → 重启内核（保留告警计数 auto_select_fail_count=3），
+//       若重启后仍继续失败，至第 5 次触发系统警报并重置双计数；
+//     - API 可达（节点侧故障）→ 第 3 次跳过内核重启但保留告警计数，至第 5 次触发系统警报并归零；
+//     - API 不可达且重启内核自身返回 Err → 第 3 次立即升级触发终态系统警报并重置双计数。
 UT_TEST(t22_monitor_escalation_ladder_3fail_reset_then_alert) {
   MonitorGuard mg;
   auto& m = CoreMonitor::instance();
 
-  // ---------- 阶段 A：3 次自愈失败且 API 不可达 → restart_core ----------
+  // ---------- 阶段 A：3 次自愈失败且 API 不可达 → restart_core（保留告警计数=3）→ 第 5 次弹窗 ----------
   {
     int restarts = 0, alerts = 0;
     int64_t clock = 1000;
@@ -449,23 +451,43 @@ UT_TEST(t22_monitor_escalation_ladder_3fail_reset_then_alert) {
     UT_CHECK(a1 == CoreMonitor::Action::Idle);
     UT_CHECK_EQ(m.heal_fail_count(), 1);
 
-    // 跨过 60s 冷却，失败第 2 轮
+    // 跨过冷却，失败第 2 轮
     clock += 70000;
     m.tick_once(); m.tick_once();
     auto a2 = m.tick_once();
     UT_CHECK(a2 == CoreMonitor::Action::Idle);
     UT_CHECK_EQ(m.heal_fail_count(), 2);
 
-    // 跨过 60s 冷却，失败第 3 轮：触发 restart_core
+    // 跨过冷却，失败第 3 轮：触发 restart_core，保留 auto_select_fail_count=3
     clock += 70000;
     m.tick_once(); m.tick_once();
     auto a3 = m.tick_once();
     UT_CHECK(a3 == CoreMonitor::Action::RestartedOnHealFail);
     UT_CHECK_EQ(restarts, 1);
     UT_CHECK_EQ(alerts, 0);
+    UT_CHECK_EQ(m.heal_fail_count(), 3);
+    UT_CHECK_EQ(m.api_dead_heal_fail_count(), 0);
+
+    // 跨过冷却，失败第 4 轮
+    clock += 70000;
+    m.tick_once(); m.tick_once();
+    auto a4 = m.tick_once();
+    UT_CHECK(a4 == CoreMonitor::Action::Idle);
+    UT_CHECK_EQ(m.heal_fail_count(), 4);
+    UT_CHECK_EQ(alerts, 0);
+
+    // 跨过冷却，失败第 5 轮：触发终态网络警报并重置双计数
+    clock += 70000;
+    m.tick_once(); m.tick_once();
+    auto a5 = m.tick_once();
+    UT_CHECK(a5 == CoreMonitor::Action::Alerted);
+    UT_CHECK_EQ(restarts, 1);
+    UT_CHECK_EQ(alerts, 1);
+    UT_CHECK_EQ(m.heal_fail_count(), 0);
+    UT_CHECK_EQ(m.api_dead_heal_fail_count(), 0);
   }
 
-  // ---------- 阶段 B：API 可达（节点侧故障）→ 3 次失败仅归零，不重启不弹窗 ----------
+  // ---------- 阶段 B：API 可达（节点侧故障）→ 跳过内核重启，累计至第 5 次触发网络警报 ----------
   {
     m.reset_state();
     int restarts = 0, alerts = 0;
@@ -488,8 +510,7 @@ UT_TEST(t22_monitor_escalation_ladder_3fail_reset_then_alert) {
     h.now_ms = [&] { return clock; };
     m.set_hooks(h);
 
-    // 每轮 = 2 次判死 → 1 次自愈失败；历经两轮后计数为 2
-    for (int i = 1; i <= 2; ++i) {
+    for (int i = 1; i <= 4; ++i) {
       clock += 70000;
       m.tick_once();
       auto a = m.tick_once();
@@ -499,28 +520,17 @@ UT_TEST(t22_monitor_escalation_ladder_3fail_reset_then_alert) {
       UT_CHECK_EQ(alerts, 0);
     }
 
-    // 第 3 次失败：达 3 即归零（API 可达仅记日志，不重启、不弹窗）
+    // 第 5 次失败：触发网络警报并归零
     clock += 70000;
     m.tick_once();
-    auto a3 = m.tick_once();
-    UT_CHECK(a3 == CoreMonitor::Action::Idle);
+    auto a5 = m.tick_once();
+    UT_CHECK(a5 == CoreMonitor::Action::Alerted);
     UT_CHECK_EQ(m.heal_fail_count(), 0);
     UT_CHECK_EQ(restarts, 0);
-    UT_CHECK_EQ(alerts, 0);
-
-    // 归零后可重新累计：再走两轮仍为 1、2，不发生升级
-    for (int i = 1; i <= 2; ++i) {
-      clock += 70000;
-      m.tick_once();
-      auto a = m.tick_once();
-      UT_CHECK(a == CoreMonitor::Action::Idle);
-      UT_CHECK_EQ(m.heal_fail_count(), i);
-      UT_CHECK_EQ(restarts, 0);
-      UT_CHECK_EQ(alerts, 0);
-    }
+    UT_CHECK_EQ(alerts, 1);
   }
 
-  // ---------- 阶段 C：API 不可达且重启内核失败 → 第 3 次失败后弹窗 ----------
+  // ---------- 阶段 C：API 不可达且重启内核失败 → 第 3 次失败立即升级弹窗 ----------
   {
     m.reset_state();
     int restarts = 0, alerts = 0;
@@ -542,7 +552,6 @@ UT_TEST(t22_monitor_escalation_ladder_3fail_reset_then_alert) {
     h.now_ms = [&] { return clock; };
     m.set_hooks(h);
 
-    // 每轮 = 3 次 API 不可达 → 1 次自愈失败；先跑两轮把计数推到 2
     for (int i = 1; i <= 2; ++i) {
       clock += 70000;
       m.tick_once();
@@ -559,7 +568,8 @@ UT_TEST(t22_monitor_escalation_ladder_3fail_reset_then_alert) {
     UT_CHECK(a3 == CoreMonitor::Action::Alerted);
     UT_CHECK_EQ(restarts, 1);
     UT_CHECK_EQ(alerts, 1);
-    UT_CHECK_EQ(m.heal_fail_count(), 0);  // 达 3 先归零再升级
+    UT_CHECK_EQ(m.heal_fail_count(), 0);
+    UT_CHECK_EQ(m.api_dead_heal_fail_count(), 0);
   }
 }
 

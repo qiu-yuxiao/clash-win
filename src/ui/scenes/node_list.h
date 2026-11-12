@@ -10,6 +10,8 @@
 //   奇偶行 rgba(0,120,215,.04) light；底边框 2px divider。
 // 无分组头（Mini 单组扁平列表，src: use-render-list.ts:144）；
 // 空态：Inbox 图标 2.5em + "No Proxies" 居中（src: proxy-render.tsx:63-78）。
+#include <atomic>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -49,6 +51,8 @@ inline constexpr float kScrollTopShowPx = 100;   // proxy-groups.tsx:172 scrollT
 Color4f delay_tier_color(DelayTier tier);
 // 清洗节点展示名（← proxy-item.tsx:51 剥离重名去重六位数字后缀）
 std::string clean_node_display_name(const std::string& raw);
+// src: src/components/proxy/use-proxy-delay-state.ts:61 PRESET_PROXY_NAMES 的延迟列不渲染/不参与单测
+bool is_preset_proxy(const std::string& name);
 
 // 单行（节点行）
 class NodeRowWidget : public Widget {
@@ -57,8 +61,15 @@ class NodeRowWidget : public Widget {
             bool selected);
   void on_paint(IRenderTarget& rt) override;
   bool on_mouse(const MouseEvent& e) override;
+  HCURSOR cursor(const PointF& local) const override;
   std::wstring tooltip_text() const override;
+  std::optional<RectF> tooltip_anchor_rect() const override;
   std::function<void()> on_click;
+  // BUG-357: 右侧 65px 延迟列点击触发单节点独立测速（不切换当前节点）
+  std::function<void()> on_test_single;
+  const std::string& node_name() const { return name_; }
+  int delay_value() const { return delay_; }
+  bool is_hovered() const { return hover_; }
   int index_in_group = 0;  // 奇偶行底色
   int pos_in_set = 0;      // src: src/components/proxy/proxy-groups.tsx:437 aria-posinset
   int set_size = 0;        // src: src/components/proxy/proxy-groups.tsx:438 aria-setsize
@@ -82,11 +93,14 @@ class NodeRowWidget : public Widget {
   }
 
  private:
+  bool in_delay_zone(float local_x) const;
+
   std::string type_, name_;
   int delay_ = -1;
   bool selected_ = false;
   bool hover_ = false;
   float hover_x_ = 0.0f;
+  bool down_in_delay_zone_ = false;
 };
 
 // 一张 3D 卡片的入参（← proxy-render.tsx:32-50 每个 ProxyItem 单元格）
@@ -106,9 +120,13 @@ struct GridCardItem {
 class NodeGridRowWidget : public Widget {
  public:
   void set_cards(const std::vector<GridCardItem>& items, int cols);
+  // BUG-339: 可见节点序列未变时原地更新已物化行内卡片，避免销毁重建丢失 hover/焦点
+  void update_cards_in_place(const std::vector<GridCardItem>& items);
+  const std::vector<NodeRowWidget*>& cards() const { return cards_; }
   void on_paint(IRenderTarget& rt) override;
   void on_arrange(const RectF& area) override;
   std::function<void(const std::string&)> on_select;
+  std::function<void(const std::string&)> on_test_single;
 
  private:
   int cols_ = 1;
@@ -209,19 +227,35 @@ class NodeList : public Widget {
   // 点击节点回调（NodeData::select 由宿主接，失败回弹由 NodeList 处理：
   // select 失败时不更新选中态）
   std::function<bool(const std::string& node)> select_node;  // 返回 false 回弹
+  // BUG-357: 单行右侧 65px 延迟热区点击触发单节点独立测速
+  std::function<void(const std::string& node)> on_test_single;
   // 批量测速择优（⚡ 点击 / 过滤输入触发）生命周期钩子，供宿主弹常驻提示与结果通知
   std::function<uint64_t()> on_batch_test_begin;
   std::function<void(uint64_t wait_id, const BatchTestSummary& summary)>
       on_batch_test_end;
   // 排序模式切换回调（0=默认 1=延迟 2=名称），供宿主弹出排序结果提示
   std::function<void(int sort_type)> on_sort_changed;
+  // BUG-360: 宿主可取消 700ms 定时器钩子（替代后台游离 sleep 线程）
+  std::function<void(uint32_t delay_ms)> on_arm_filter_auto_test_timer;
+  std::function<void()> on_cancel_filter_auto_test_timer;
+
+  // BUG-355 / BUG-360: 快捷键与过滤去抖状态控制
+  void focus_filter_input();
+  bool pending_auto_test() const { return pending_auto_test_; }
+  bool is_testing() const { return is_testing_; }
+  void set_testing(bool testing);
+  void fire_filter_auto_test_timer();
+  bool cancel_pending_filter_auto_test();
+  // BUG-339: ScrollList::set_content 全量重建计数（测试断言原地刷新不重建）
+  uint64_t sync_rebuild_count() const { return sync_rebuild_count_; }
 
   void on_paint(IRenderTarget& rt) override;
   void on_arrange(const RectF& area) override;
 
  private:
   void rebuild_visible();   // 过滤+排序 → visible_ 索引
-  void sync_list();         // ScrollList 内容重建
+  void sync_list();         // ScrollList 内容重建或原地刷新
+  void refresh_filter_spinner();
 
   NodeData* data_ = nullptr;
   ScrollList* list_ = nullptr;
@@ -238,12 +272,18 @@ class NodeList : public Widget {
   std::string filter_;
   std::string last_auto_select_filter_;  // G4: 上次已触发自动择优的过滤词（同词去重，← Mini proxy-head.tsx lastTriggeredFilterRef）
   std::atomic<uint64_t> filter_change_seq_{0};
+  bool pending_auto_test_ = false;
+  bool is_testing_ = false;
   int sort_type_ = 1;  // src: use-head-state.ts:21 sortType 初值 1（按延迟）
   // ★ ❌1 网格列数（宽窗 3 / 窄窗 1，由内容宽决定）与最近一次内容宽（用于判定切换）
   int cols_ = 1;
   float last_content_w_ = 0;
   // visible_：rows_ 索引（无分组头）
   std::vector<int> visible_;
+  std::vector<std::string> last_synced_names_;
+  int last_synced_cols_ = -1;
+  uint64_t sync_rebuild_count_ = 0;
+  std::shared_ptr<std::atomic<bool>> alive_ = std::make_shared<std::atomic<bool>>(true);
 };
 
 }  // namespace clashwin::ui::scene

@@ -68,6 +68,131 @@ bool ServiceIpcAdapter::pipe_present() {
 Result<nlohmann::json> ServiceIpcAdapter::get_clash_logs() { return ipc_->get_clash_logs(); }
 
 // ---------- SCM ----------
+std::recursive_mutex& service_operation_mutex() {
+  static std::recursive_mutex mu;
+  return mu;
+}
+
+std::wstring extract_service_exe_from_image_path(const std::wstring& raw) {
+  auto trim_ws = [](std::wstring s) {
+    size_t b = 0;
+    while (b < s.size() && (s[b] == L' ' || s[b] == L'\t')) ++b;
+    size_t e = s.size();
+    while (e > b && (s[e - 1] == L' ' || s[e - 1] == L'\t' || s[e - 1] == L'\0')) --e;
+    return s.substr(b, e - b);
+  };
+
+  std::wstring s = trim_ws(raw);
+  if (s.empty()) return {};
+  if (s.rfind(L"\\??\\", 0) == 0) {
+    s = trim_ws(s.substr(4));
+  }
+  if (s.empty()) return {};
+
+  if (s.find(L'%') != std::wstring::npos) {
+    DWORD needed = ::ExpandEnvironmentStringsW(s.c_str(), nullptr, 0);
+    if (needed > 0) {
+      std::wstring expanded(needed, L'\0');
+      DWORD written = ::ExpandEnvironmentStringsW(s.c_str(), expanded.data(), needed);
+      if (written > 0) {
+        while (!expanded.empty() && expanded.back() == L'\0') expanded.pop_back();
+        s = trim_ws(expanded);
+      }
+    }
+  }
+  if (s.empty()) return {};
+
+  if (s.front() == L'"') {
+    size_t end = s.find(L'"', 1);
+    if (end == std::wstring::npos) return {};
+    return trim_ws(s.substr(1, end - 1));
+  }
+
+  std::wstring lower = s;
+  for (wchar_t& ch : lower) ch = static_cast<wchar_t>(::towlower(ch));
+  size_t pos = 0;
+  while ((pos = lower.find(L".exe", pos)) != std::wstring::npos) {
+    size_t after = pos + 4;
+    if (after == lower.size() || lower[after] == L' ' || lower[after] == L'\t') {
+      return trim_ws(s.substr(0, after));
+    }
+    pos += 4;
+  }
+  return s;
+}
+
+ScmServiceRegistration inspect_service_registration() {
+  const std::wstring reg_subkey =
+      std::wstring(L"SYSTEM\\CurrentControlSet\\Services\\") + kServiceNameW;
+  HKEY hkey = nullptr;
+  LONG rc = ::RegOpenKeyExW(HKEY_LOCAL_MACHINE, reg_subkey.c_str(), 0, KEY_READ, &hkey);
+  if (rc == ERROR_SUCCESS && hkey != nullptr) {
+    DWORD start_type = 0;
+    DWORD cb_start = sizeof(start_type);
+    DWORD type_start = 0;
+    bool has_start = (::RegQueryValueExW(hkey, L"Start", nullptr, &type_start,
+                                         reinterpret_cast<LPBYTE>(&start_type),
+                                         &cb_start) == ERROR_SUCCESS &&
+                      type_start == REG_DWORD);
+
+    wchar_t img_buf[2048] = {};
+    DWORD cb_img = sizeof(img_buf) - sizeof(wchar_t);
+    DWORD type_img = 0;
+    std::wstring raw_img;
+    if (::RegQueryValueExW(hkey, L"ImagePath", nullptr, &type_img,
+                           reinterpret_cast<LPBYTE>(img_buf), &cb_img) == ERROR_SUCCESS &&
+        (type_img == REG_SZ || type_img == REG_EXPAND_SZ) && cb_img >= sizeof(wchar_t)) {
+      img_buf[cb_img / sizeof(wchar_t)] = L'\0';
+      raw_img = img_buf;
+    }
+    ::RegCloseKey(hkey);
+
+    if (has_start && start_type == SERVICE_DISABLED) {
+      return ScmServiceRegistration::DisabledOrBroken;
+    }
+    std::wstring exe_path = extract_service_exe_from_image_path(raw_img);
+    if (exe_path.empty()) {
+      return ScmServiceRegistration::DisabledOrBroken;
+    }
+    DWORD attr = ::GetFileAttributesW(exe_path.c_str());
+    if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+      return ScmServiceRegistration::DisabledOrBroken;
+    }
+    return ScmServiceRegistration::InstalledAndEnabled;
+  }
+  if (rc == ERROR_FILE_NOT_FOUND || rc == ERROR_PATH_NOT_FOUND) {
+    if (!is_service_installed()) {
+      return ScmServiceRegistration::NotInstalled;
+    }
+  }
+
+  SC_HANDLE scm = ::OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+  if (!scm) return ScmServiceRegistration::NotInstalled;
+  SC_HANDLE svc = ::OpenServiceW(scm, kServiceNameW, SERVICE_QUERY_CONFIG);
+  if (!svc) {
+    DWORD gle = ::GetLastError();
+    ::CloseServiceHandle(scm);
+    return (gle == ERROR_SERVICE_DOES_NOT_EXIST) ? ScmServiceRegistration::NotInstalled
+                                                 : ScmServiceRegistration::DisabledOrBroken;
+  }
+  std::vector<BYTE> buf(8192);
+  auto cfg = reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(buf.data());
+  DWORD needed = 0;
+  bool ok = ::QueryServiceConfigW(svc, cfg, static_cast<DWORD>(buf.size()), &needed) != FALSE;
+  ::CloseServiceHandle(svc);
+  ::CloseServiceHandle(scm);
+  if (!ok) return ScmServiceRegistration::DisabledOrBroken;
+  if (cfg->dwStartType == SERVICE_DISABLED) return ScmServiceRegistration::DisabledOrBroken;
+  std::wstring exe = extract_service_exe_from_image_path(
+      cfg->lpBinaryPathName ? cfg->lpBinaryPathName : L"");
+  if (exe.empty()) return ScmServiceRegistration::DisabledOrBroken;
+  DWORD attr = ::GetFileAttributesW(exe.c_str());
+  if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+    return ScmServiceRegistration::DisabledOrBroken;
+  }
+  return ScmServiceRegistration::InstalledAndEnabled;
+}
+
 // ← Mini: src-tauri/src/core/service.rs:445 is_service_installed()
 bool is_service_installed() {
   SC_HANDLE scm = ::OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
@@ -114,17 +239,7 @@ bool is_service_binary_valid() {
   ::CloseServiceHandle(scm);
   if (!ok) return false;
   std::wstring raw = cfg->lpBinaryPathName ? cfg->lpBinaryPathName : L"";
-  if (raw.empty()) return false;
-  // 取可执行文件路径：带引号取引号内；否则截到 ".exe" 末尾
-  std::wstring path;
-  if (raw.front() == L'"') {
-    size_t end = raw.find(L'"', 1);
-    if (end == std::wstring::npos) return false;
-    path = raw.substr(1, end - 1);
-  } else {
-    size_t exe = raw.find(L".exe");
-    path = exe == std::wstring::npos ? raw : raw.substr(0, exe + 4);
-  }
+  std::wstring path = extract_service_exe_from_image_path(raw);
   if (path.empty()) return false;
   DWORD attr = ::GetFileAttributesW(path.c_str());
   return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
@@ -132,6 +247,7 @@ bool is_service_binary_valid() {
 
 // ← Mini: src-tauri/src/core/service.rs:446-452（已安装未运行 → 启动服务并等待）
 Result<void> start_service() {
+  std::lock_guard<std::recursive_mutex> op_lock(service_operation_mutex());
   SC_HANDLE scm = ::OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
   if (scm) {
     SC_HANDLE svc = ::OpenServiceW(scm, kServiceNameW, SERVICE_START);
@@ -162,6 +278,7 @@ Result<void> start_service() {
 }
 
 Result<void> stop_service() {
+  std::lock_guard<std::recursive_mutex> op_lock(service_operation_mutex());
   if (!is_service_installed() || !is_service_running()) {
     return Result<void>::ok();
   }

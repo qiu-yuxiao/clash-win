@@ -374,12 +374,275 @@ Result<std::string> CoreUpdater::compute_file_sha256(const std::wstring& file_pa
   return Result<std::string>::ok(std::string(hex));
 }
 
+CoreBinaryValidation CoreUpdater::inspect_mihomo_pe_binary(const std::wstring& file_path) {
+  WIN32_FILE_ATTRIBUTE_DATA fad{};
+  if (!::GetFileAttributesExW(file_path.c_str(), GetFileExInfoStandard, &fad)) {
+    const DWORD gle = ::GetLastError();
+    if (gle == ERROR_FILE_NOT_FOUND || gle == ERROR_PATH_NOT_FOUND) {
+      return {CoreBinaryValidationKind::IoUnavailable, "file not found"};
+    }
+    return {CoreBinaryValidationKind::IoUnavailable,
+            "failed to stat file, gle=" + std::to_string(gle)};
+  }
+  if ((fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+    return {CoreBinaryValidationKind::Corrupted, "path is a directory, not a PE binary"};
+  }
+
+  HANDLE hFile = ::CreateFileW(
+      file_path.c_str(), GENERIC_READ,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (hFile == INVALID_HANDLE_VALUE) {
+    const DWORD gle = ::GetLastError();
+    return {CoreBinaryValidationKind::IoUnavailable,
+            "failed to open file for PE inspection, gle=" + std::to_string(gle)};
+  }
+
+  LARGE_INTEGER li_size{};
+  if (!::GetFileSizeEx(hFile, &li_size)) {
+    const DWORD gle = ::GetLastError();
+    ::CloseHandle(hFile);
+    return {CoreBinaryValidationKind::IoUnavailable,
+            "GetFileSizeEx failed, gle=" + std::to_string(gle)};
+  }
+  const uint64_t file_len = static_cast<uint64_t>(li_size.QuadPart);
+  if (file_len < kMinValidCoreBytes) {
+    ::CloseHandle(hFile);
+    return {CoreBinaryValidationKind::Corrupted,
+            "file size " + std::to_string(file_len) + " bytes < minimum 5 MiB"};
+  }
+
+  BYTE header[4096] = {};
+  const DWORD initial_read =
+      static_cast<DWORD>((std::min)(file_len, static_cast<uint64_t>(sizeof(header))));
+  DWORD bytes_read = 0;
+  if (!::ReadFile(hFile, header, initial_read, &bytes_read, nullptr)) {
+    const DWORD gle = ::GetLastError();
+    ::CloseHandle(hFile);
+    return {CoreBinaryValidationKind::IoUnavailable,
+            "ReadFile failed during PE inspection, gle=" + std::to_string(gle)};
+  }
+  if (bytes_read < 64) {
+    ::CloseHandle(hFile);
+    return {CoreBinaryValidationKind::Corrupted, "DOS header truncated (< 64 bytes)"};
+  }
+  if (header[0] != 'M' || header[1] != 'Z') {
+    ::CloseHandle(hFile);
+    return {CoreBinaryValidationKind::Corrupted, "missing MZ DOS signature"};
+  }
+
+  auto rd_u16 = [](const BYTE* p) -> uint16_t {
+    return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
+  };
+  auto rd_i32 = [](const BYTE* p) -> int32_t {
+    uint32_t v = static_cast<uint32_t>(p[0]) |
+                 (static_cast<uint32_t>(p[1]) << 8) |
+                 (static_cast<uint32_t>(p[2]) << 16) |
+                 (static_cast<uint32_t>(p[3]) << 24);
+    return static_cast<int32_t>(v);
+  };
+
+  const int32_t e_lfanew = rd_i32(header + 0x3C);
+  if (e_lfanew < 64) {
+    ::CloseHandle(hFile);
+    return {CoreBinaryValidationKind::Corrupted,
+            "invalid e_lfanew offset: " + std::to_string(e_lfanew)};
+  }
+  const uint64_t pe_off = static_cast<uint64_t>(e_lfanew);
+  if (pe_off + 26ULL > file_len) {
+    ::CloseHandle(hFile);
+    return {CoreBinaryValidationKind::Corrupted, "e_lfanew points past EOF"};
+  }
+
+  BYTE nt_buf[26] = {};
+  const BYTE* nt_ptr = nullptr;
+  if (pe_off + 26ULL <= bytes_read) {
+    nt_ptr = header + pe_off;
+  } else {
+    LARGE_INTEGER seek_pos{};
+    seek_pos.QuadPart = static_cast<LONGLONG>(pe_off);
+    DWORD nt_read = 0;
+    if (!::SetFilePointerEx(hFile, seek_pos, nullptr, FILE_BEGIN) ||
+        !::ReadFile(hFile, nt_buf, sizeof(nt_buf), &nt_read, nullptr)) {
+      const DWORD gle = ::GetLastError();
+      ::CloseHandle(hFile);
+      return {CoreBinaryValidationKind::IoUnavailable,
+              "failed reading NT header at e_lfanew, gle=" + std::to_string(gle)};
+    }
+    if (nt_read < sizeof(nt_buf)) {
+      ::CloseHandle(hFile);
+      return {CoreBinaryValidationKind::Corrupted, "NT header truncated"};
+    }
+    nt_ptr = nt_buf;
+  }
+  ::CloseHandle(hFile);
+
+  if (nt_ptr[0] != 'P' || nt_ptr[1] != 'E' || nt_ptr[2] != 0 || nt_ptr[3] != 0) {
+    return {CoreBinaryValidationKind::Corrupted, "missing PE\\0\\0 signature"};
+  }
+
+  const BYTE* coff = nt_ptr + 4;
+  const uint16_t machine = rd_u16(coff + 0);
+  const uint16_t num_sections = rd_u16(coff + 2);
+  const uint16_t size_of_opt_hdr = rd_u16(coff + 16);
+  const uint16_t characteristics = rd_u16(coff + 18);
+  const uint16_t opt_magic = rd_u16(nt_ptr + 24);
+
+  if (machine != 0x8664) {
+    return {CoreBinaryValidationKind::Corrupted,
+            "invalid COFF Machine (expected AMD64 0x8664)"};
+  }
+  if (num_sections < 1 || num_sections > 96) {
+    return {CoreBinaryValidationKind::Corrupted,
+            "invalid COFF NumberOfSections: " + std::to_string(num_sections)};
+  }
+  if (size_of_opt_hdr < 112) {
+    return {CoreBinaryValidationKind::Corrupted,
+            "OptionalHeader too small: " + std::to_string(size_of_opt_hdr)};
+  }
+  if ((characteristics & 0x0002) == 0) {
+    return {CoreBinaryValidationKind::Corrupted,
+            "COFF IMAGE_FILE_EXECUTABLE_IMAGE flag missing"};
+  }
+  if (opt_magic != 0x020B) {
+    return {CoreBinaryValidationKind::Corrupted,
+            "invalid OptionalHeader Magic (expected PE32+ 0x020B)"};
+  }
+
+  const uint64_t section_table_end =
+      pe_off + 24ULL + static_cast<uint64_t>(size_of_opt_hdr) +
+      static_cast<uint64_t>(num_sections) * 40ULL;
+  if (section_table_end > file_len) {
+    return {CoreBinaryValidationKind::Corrupted,
+            "PE section table extends past EOF"};
+  }
+
+  return {CoreBinaryValidationKind::Valid, ""};
+}
+
+Result<void> CoreUpdater::validate_mihomo_pe_binary(const std::wstring& file_path) {
+  auto v = inspect_mihomo_pe_binary(file_path);
+  if (v.is_valid()) return Result<void>::ok();
+  return Result<void>::err(make_err(v.reason));
+}
+
+std::optional<std::wstring> CoreUpdater::resolve_usable_custom_core(
+    const std::wstring& cores_dir) {
+  if (cores_dir.empty()) return std::nullopt;
+  const std::wstring custom = cores_dir + L"\\win-mihomo.exe";
+  WIN32_FILE_ATTRIBUTE_DATA fad{};
+  if (!::GetFileAttributesExW(custom.c_str(), GetFileExInfoStandard, &fad)) {
+    const DWORD gle = ::GetLastError();
+    if (gle == ERROR_FILE_NOT_FOUND || gle == ERROR_PATH_NOT_FOUND) {
+      return std::nullopt;
+    }
+    CWLOG_WARN("custom core win-mihomo.exe stat unavailable (gle=" +
+               std::to_string(gle) + "), keeping file and falling back to sidecar");
+    return std::nullopt;
+  }
+
+  const auto check = inspect_mihomo_pe_binary(custom);
+  if (check.kind == CoreBinaryValidationKind::Valid) {
+    return custom;
+  }
+  if (check.kind == CoreBinaryValidationKind::Corrupted) {
+    CWLOG_WARN("custom core win-mihomo.exe is corrupted (" + check.reason +
+               "), deleting broken binary and falling back to sidecar");
+    std::error_code ec;
+    std::filesystem::remove_all(custom, ec);
+    return std::nullopt;
+  }
+
+  CWLOG_WARN("custom core win-mihomo.exe temporarily unavailable (" + check.reason +
+             "), keeping file and falling back to sidecar");
+  return std::nullopt;
+}
+
+namespace {
+
+Result<void> write_buffer_to_staging(const std::wstring& staging_path,
+                                     const char* data,
+                                     size_t len) {
+  HANDLE h = ::CreateFileW(staging_path.c_str(), GENERIC_WRITE, 0, nullptr,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (h == INVALID_HANDLE_VALUE) {
+    return Result<void>::err(
+        make_err("failed to create staging core file, gle=" + std::to_string(::GetLastError())));
+  }
+  size_t offset = 0;
+  while (offset < len) {
+    const DWORD chunk = static_cast<DWORD>((std::min)(len - offset, static_cast<size_t>(1048576)));
+    DWORD written = 0;
+    if (!::WriteFile(h, data + offset, chunk, &written, nullptr) || written != chunk) {
+      const DWORD gle = ::GetLastError();
+      ::CloseHandle(h);
+      std::error_code ec;
+      std::filesystem::remove(staging_path, ec);
+      return Result<void>::err(
+          make_err("WriteFile to staging core failed, gle=" + std::to_string(gle)));
+    }
+    offset += written;
+  }
+  ::FlushFileBuffers(h);
+  ::CloseHandle(h);
+  return Result<void>::ok();
+}
+
+Result<void> flush_and_commit_staging(const std::wstring& staging_path,
+                                      const std::wstring& target_exe_path) {
+  {
+    HANDLE h = ::CreateFileW(staging_path.c_str(), GENERIC_WRITE,
+                             FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h != INVALID_HANDLE_VALUE) {
+      ::FlushFileBuffers(h);
+      ::CloseHandle(h);
+    }
+  }
+
+  auto pe_ok = CoreUpdater::validate_mihomo_pe_binary(staging_path);
+  if (!pe_ok.is_ok()) {
+    std::error_code ec;
+    std::filesystem::remove(staging_path, ec);
+    return Result<void>::err(
+        make_err("extracted core failed PE validation: " + pe_ok.error().message));
+  }
+
+  DWORD last_err = 0;
+  for (int attempt = 0; attempt < 10; ++attempt) {
+    if (::MoveFileExW(staging_path.c_str(), target_exe_path.c_str(),
+                      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+      return Result<void>::ok();
+    }
+    last_err = ::GetLastError();
+    if (last_err != ERROR_ACCESS_DENIED && last_err != ERROR_SHARING_VIOLATION) {
+      break;
+    }
+    if (attempt + 1 < 10) {
+      ::Sleep(100);
+    }
+  }
+
+  std::error_code ec;
+  std::filesystem::remove(staging_path, ec);
+  return Result<void>::err(make_err(
+      "failed to atomically replace win-mihomo.exe from staging, gle=" +
+      std::to_string(last_err)));
+}
+
+}  // namespace
+
 Result<void> CoreUpdater::extract_core_binary(const std::wstring& archive_path,
                                             const std::wstring& target_exe_path) {
   // Ensure target parent directory exists
   std::filesystem::path target_path(target_exe_path);
   if (target_path.has_parent_path()) {
     std::filesystem::create_directories(target_path.parent_path());
+  }
+  const std::wstring staging_path = target_exe_path + L".staging";
+  {
+    std::error_code cleanup_ec;
+    std::filesystem::remove(staging_path, cleanup_ec);
   }
 
   // Attempt direct uncompressed PKZIP extraction (STORE, compression method = 0)
@@ -411,20 +674,15 @@ Result<void> CoreUpdater::extract_core_binary(const std::wstring& archive_path,
         std::string lower_fname = to_lower(fname);
         if (method == 0 && lower_fname.find("mihomo") != std::string::npos &&
             ends_with(lower_fname, ".exe")) {
-          // Extract directly
+          // Extract directly to .staging, flush, validate PE64, then atomic MoveFileExW
           std::vector<char> data(uncomp_size);
           if (uncomp_size > 0) {
             arch.read(data.data(), uncomp_size);
           }
-          std::ofstream out(target_exe_path, std::ios::binary | std::ios::trunc);
-          if (!out.is_open()) {
-            return Result<void>::err(make_err("failed to create destination core file"));
-          }
-          if (uncomp_size > 0) {
-            out.write(data.data(), uncomp_size);
-          }
-          out.close();
-          return Result<void>::ok();
+          arch.close();
+          auto wr = write_buffer_to_staging(staging_path, data.data(), data.size());
+          if (!wr.is_ok()) return wr;
+          return flush_and_commit_staging(staging_path, target_exe_path);
         }
 
         // Skip payload
@@ -490,16 +748,18 @@ Result<void> CoreUpdater::extract_core_binary(const std::wstring& archive_path,
     return Result<void>::err(make_err("在压缩包内未找到 win-mihomo 程序二进制"));
   }
 
-  // Copy/move to target exe path
-  std::filesystem::copy_file(found_exe, target_path,
+  // Stage to target.staging first, remove temp dir, then flush + PE validate + atomic replace
+  std::filesystem::copy_file(found_exe, staging_path,
                              std::filesystem::copy_options::overwrite_existing, ec);
   std::filesystem::remove_all(temp_extract_dir, ec);
 
   if (ec) {
-    return Result<void>::err(make_err("failed to copy extracted binary to destination: " + ec.message()));
+    std::error_code rm_ec;
+    std::filesystem::remove(staging_path, rm_ec);
+    return Result<void>::err(make_err("failed to copy extracted binary to staging: " + ec.message()));
   }
 
-  return Result<void>::ok();
+  return flush_and_commit_staging(staging_path, target_exe_path);
 }
 
 Result<GithubRelease> CoreUpdater::check_latest_release() {
@@ -590,17 +850,27 @@ Result<void> CoreUpdater::start_core_upgrade(const GithubRelease& release) {
     }
   }
 
-  // Snapshot active proxy group
+  // Snapshot active proxy group (BUG-335: fallback to persisted non-dummy selection)
   std::optional<std::string> saved_proxy_now;
   if (api_client_) {
     saved_proxy_now = CoreManager::instance().snapshot_proxy_group_now(*api_client_);
   }
+  if (!saved_proxy_now.has_value()) {
+    saved_proxy_now = CoreManager::instance().read_persisted_proxy_selection("PROXY");
+  }
 
-  // Stop core before replacing binary
+  // Stop core before replacing binary (BUG-346: wait up to 3000ms for file handle release)
   if (lifecycle_ops_.has_value() && lifecycle_ops_->stop) {
     lifecycle_ops_->stop();
   } else {
     CoreManager::instance().stop();
+  }
+  if (lifecycle_ops_.has_value()) {
+    if (lifecycle_ops_->wait_cores_exit) {
+      lifecycle_ops_->wait_cores_exit(3000);
+    }
+  } else {
+    CoreManager::instance().wait_for_win_cores_exit(3000);
   }
 
   // Stage 5: Extracting (90%)

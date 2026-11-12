@@ -7,7 +7,9 @@
 
 #include "config/profiles.h"
 #include "clashwin/config/constants.h"
+#include "cmd/cmd_install.h"
 #include "config/prfitem.h"
+#include "config/verge.h"
 #include "test_util.h"
 #include "util/dirs.h"
 #include "util/utf.h"
@@ -342,4 +344,78 @@ UT_TEST(t03_profiles_save_load_roundtrip) {
   UT_CHECK(got->extra && got->extra->upload == 1 && got->extra->expire == 4);
   // groups 为 null 时保留 null 语义
   UT_CHECK(!got->option->groups.has_value());
+}
+
+UT_TEST(t_bug362_prf_option_custom_user_agent_normalization_and_merge) {
+  // 1) normalize_custom_user_agent
+  UT_CHECK(!prfitem::normalize_custom_user_agent(std::nullopt).has_value());
+  UT_CHECK(!prfitem::normalize_custom_user_agent("").has_value());
+  UT_CHECK(!prfitem::normalize_custom_user_agent("   \t  ").has_value());
+  auto norm = prfitem::normalize_custom_user_agent("  ClashForWindows/0.20.39  ");
+  UT_CHECK(norm.has_value() && *norm == "ClashForWindows/0.20.39");
+
+  // 2) merge_opt：other.user_agent 为 nullopt 时保留并 trim 原有自定义 UA
+  PrfOption base;
+  base.user_agent = "  OldCustomUA/1.0  ";
+  base.update_interval = 60;
+  PrfOption patch_keep;
+  patch_keep.update_interval = 120;
+  auto m1 = PrfOption::merge_opt(base, patch_keep);
+  UT_CHECK(m1.has_value());
+  UT_CHECK(m1->user_agent.has_value() && *m1->user_agent == "OldCustomUA/1.0");
+  UT_CHECK(m1->update_interval.has_value() && *m1->update_interval == 120);
+
+  // 3) merge_opt：other.user_agent 为空串或纯空白时，显式清空已有自定义 UA（回退默认兼容 UA）
+  PrfOption patch_clear;
+  patch_clear.user_agent = "   ";
+  auto m2 = PrfOption::merge_opt(base, patch_clear);
+  UT_CHECK(m2.has_value());
+  UT_CHECK(!m2->user_agent.has_value());
+
+  // 4) IProfiles::patch_item 编辑保存空白 UA 时同样归一为 nullopt
+  fresh_profiles_home("ua_patch");
+  IProfiles p = profiles::load();
+  PrfItem item;
+  item.uid = "Rua1";
+  item.set_type(PrfType::Remote);
+  item.url = "https://example.com/sub";
+  item.file = "Rua1.yaml";
+  item.option = PrfOption{};
+  item.option->user_agent = "CustomUA/1.0";
+  UT_CHECK(p.append_item(item).is_ok());
+
+  PrfItem edit;
+  edit.option = PrfOption{};
+  edit.option->user_agent = "   ";
+  UT_CHECK(p.patch_item("Rua1", edit).is_ok());
+
+  IProfiles p_reloaded = profiles::load();
+  const PrfItem* got = p_reloaded.get_item("Rua1");
+  UT_CHECK(got != nullptr && got->option.has_value());
+  if (got && got->option) {
+    UT_CHECK(!got->option->user_agent.has_value());
+  }
+}
+
+UT_TEST(t_bug333_copy_clash_env_default_mixed_port_constant) {
+  _putenv_s("CLASH_VERGE_REV_IP", "");
+  IVerge v_default;
+  auto ps = cmd::build_clash_env_text(v_default);
+  UT_CHECK(ps.is_ok());
+  if (ps.is_ok()) {
+    const std::string expected_port = std::to_string(consts::kDefaultMixed);
+    UT_CHECK(ps.value().find("127.0.0.1:" + expected_port) != std::string::npos);
+    UT_CHECK(ps.value().find("7897") == std::string::npos);
+  }
+
+  IVerge v_custom;
+  v_custom.proxy_host = "192.168.50.2";
+  v_custom.verge_mixed_port = 10899;
+  v_custom.env_type = "sh";
+  auto sh = cmd::build_clash_env_text(v_custom);
+  UT_CHECK(sh.is_ok());
+  if (sh.is_ok()) {
+    UT_CHECK(sh.value().find("http://192.168.50.2:10899") != std::string::npos);
+    UT_CHECK(sh.value().find("socks5://192.168.50.2:10899") != std::string::npos);
+  }
 }

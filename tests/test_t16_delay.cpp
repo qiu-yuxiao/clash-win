@@ -24,9 +24,12 @@ namespace {
 struct ProbeState {
   // 测量组返回（nullopt = 测量组未就绪）
   std::optional<std::map<std::string, uint32_t>> probe_result;
-  std::map<std::string, uint32_t> history;
-  std::vector<std::pair<std::string, std::vector<std::pair<std::string, uint32_t>>>>
-      emitted;  // 每次注入记录（断言 -2 中间态序列）
+  struct EmittedBatch {
+    std::string group;
+    std::vector<std::pair<std::string, uint32_t>> results;
+    bool from_probe = true;
+  };
+  std::vector<EmittedBatch> emitted;
   int probe_calls = 0;
 };
 
@@ -36,10 +39,10 @@ DelayProbeHooks make_hooks(ProbeState& st) {
     ++st.probe_calls;
     return st.probe_result;
   };
-  h.fresh_history = [&st] { return st.history; };
   h.emit_results = [&st](const std::string& group,
-                         const std::vector<std::pair<std::string, uint32_t>>& r) {
-    st.emitted.push_back({group, r});
+                         const std::vector<std::pair<std::string, uint32_t>>& r,
+                         bool from_probe) {
+    st.emitted.push_back({group, r, from_probe});
   };
   return h;
 }
@@ -54,17 +57,15 @@ UT_TEST(t16_group_probe_and_testing_state) {
   auto out = DelayManager::instance().test_group(
       "PROXY", {"n1", "n2", "n3"}, false, std::nullopt);
   UT_CHECK(out.injected);
+  UT_CHECK(out.source == core::DelayResultSource::LiveProbe);
   UT_CHECK_EQ(out.display.size(), 3u);
   // 未测得=0 语义 + 实际值
   UT_CHECK(out.display[0] == std::make_pair(std::string("n1"), 120u));
   UT_CHECK(out.display[2] == std::make_pair(std::string("n3"), 2500u));
-  // 注入序列：第一帧 -2 testing、第二帧实际值
-  UT_CHECK_EQ(st.emitted.size(), 2u);
-  bool first_all_testing = true;
-  for (const auto& [n, d] : st.emitted[0].second)
-    if (d != static_cast<uint32_t>(-2)) first_all_testing = false;
-  UT_CHECK(first_all_testing);
-  UT_CHECK(st.emitted[1].second[0].second == 120);
+  // BUG-321：后端不再预广播 -2 中间态，仅广播一次实测结果（from_probe=true）
+  UT_CHECK_EQ(st.emitted.size(), 1u);
+  UT_CHECK(st.emitted[0].from_probe);
+  UT_CHECK(st.emitted[0].results[0].second == 120);
   // T13 tier 口径（BUG-304）：-2 → Unknown / 2500 → Slow（<5000 有效）
   UT_CHECK(clashwin::ui::scene::delay_tier(-2) == clashwin::ui::scene::DelayTier::Unknown);
   UT_CHECK(clashwin::ui::scene::delay_tier(2500) == clashwin::ui::scene::DelayTier::Slow);
@@ -73,28 +74,29 @@ UT_TEST(t16_group_probe_and_testing_state) {
 }
 
 UT_TEST(t16_single_not_executed_no_fake_timeout) {
-  // ← monitor.rs「单点测速语义：测量组未返回数据 → 未执行，严禁伪造 Timeout」
+  // ← BUG-344：测量组未返回数据 → 单点与群测均判定未执行，废除陈旧 history 兜底，严禁伪造 Timeout(0)
   ProbeState st;
   st.probe_result = std::nullopt;  // 测量组未就绪
-  st.history = {{"n1", 300}};      // 有 history 但单点禁用兜底
   DelayManager::instance().set_hooks(make_hooks(st));
   auto out = DelayManager::instance().test_single("PROXY", "n1");
-  UT_CHECK(!out.injected);       // 未执行
-  UT_CHECK(out.display.empty());  // 不伪造
-  // 群测路径：全空 → history 兜底生效
+  UT_CHECK(!out.injected);
+  UT_CHECK(out.source == core::DelayResultSource::NotExecuted);
+  UT_CHECK(out.display.empty());
+  UT_CHECK(st.emitted.empty());
+
   ProbeState st2;
   st2.probe_result = std::nullopt;
-  st2.history = {{"n1", 300}};
   DelayManager::instance().set_hooks(make_hooks(st2));
   auto out2 = DelayManager::instance().test_group(
       "PROXY", {"n1", "n2"}, false, std::nullopt);
-  UT_CHECK(out2.injected);
-  UT_CHECK(out2.display[0].second == 300);
-  UT_CHECK(out2.display[1].second == 0);  // 兜底无 n2 → 0 Timeout
+  UT_CHECK(!out2.injected);
+  UT_CHECK(out2.source == core::DelayResultSource::NotExecuted);
+  UT_CHECK(out2.display.empty());
+  UT_CHECK(st2.emitted.empty());
 }
 
 UT_TEST(t16_cache_reuse_skips_probe) {
-  // ← 子集测速降频：新鲜缓存复用跳过拨测（len==1 不复用）
+  // ← 子集测速降频：新鲜缓存复用跳过拨测（len==1 不复用，from_probe=false）
   ProbeState st;
   st.probe_result = std::map<std::string, uint32_t>{{"n1", 999}};
   DelayManager::instance().set_hooks(make_hooks(st));
@@ -103,11 +105,17 @@ UT_TEST(t16_cache_reuse_skips_probe) {
   auto out = DelayManager::instance().test_group(
       "PROXY", {"n1", "n2"}, /*allow_cache_reuse=*/true, cached);
   UT_CHECK_EQ(st.probe_calls, 0);  // 跳过拨测
+  UT_CHECK(out.source == core::DelayResultSource::FreshMetricsCache);
   UT_CHECK(out.display[0].second == 120);
+  UT_CHECK_EQ(st.emitted.size(), 1u);
+  UT_CHECK(!st.emitted[0].from_probe);
   // 单点不复用（强制实测）
   auto out2 = DelayManager::instance().test_single("PROXY", "n1");
   UT_CHECK_EQ(st.probe_calls, 1);
+  UT_CHECK(out2.source == core::DelayResultSource::LiveProbe);
   UT_CHECK(out2.display[0].second == 999);
+  UT_CHECK_EQ(st.emitted.size(), 2u);
+  UT_CHECK(st.emitted[1].from_probe);
 }
 
 UT_TEST(t16_auto_select_pick_matrix) {
@@ -159,7 +167,8 @@ UT_TEST(t16_auto_select_lock_mutex) {
     return std::optional{std::map<std::string, uint32_t>{{"n", 100}}};
   };
   dh.emit_results = [](const std::string&,
-                       const std::vector<std::pair<std::string, uint32_t>>&) {};
+                       const std::vector<std::pair<std::string, uint32_t>>&,
+                       bool) {};
   DelayManager::instance().set_hooks(std::move(dh));
 
   std::atomic<bool> second_busy{false};
@@ -203,7 +212,8 @@ UT_TEST(t16_auto_select_select_and_writeback) {
                                                          {"slow", 800}}};
   };
   dh.emit_results = [](const std::string&,
-                       const std::vector<std::pair<std::string, uint32_t>>&) {};
+                       const std::vector<std::pair<std::string, uint32_t>>&,
+                       bool) {};
   DelayManager::instance().set_hooks(std::move(dh));
 
   auto out = as.trigger("u1", std::vector<std::string>{"fast", "slow"}, 1,
@@ -264,7 +274,8 @@ UT_TEST(t16_wakeup_cooldown) {
     return std::optional{std::map<std::string, uint32_t>{{"n", 100}}};
   };
   dh.emit_results = [](const std::string&,
-                       const std::vector<std::pair<std::string, uint32_t>>&) {};
+                       const std::vector<std::pair<std::string, uint32_t>>&,
+                       bool) {};
   DelayManager::instance().set_hooks(std::move(dh));
 
   UT_CHECK(as.wakeup_cooldown_remaining_ms() == 0);  // 初始无冷却

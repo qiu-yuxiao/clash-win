@@ -249,11 +249,12 @@ void EventBus::notice_message(const char* status, const std::string& message) {
                      Payload{{"status", status ? status : ""}, {"message", message}});
 }
 void EventBus::backend_delay_results(
-    const std::string& group, const std::vector<std::pair<std::string, uint32_t>>& results) {
+    const std::string& group, const std::vector<std::pair<std::string, uint32_t>>& results,
+    bool from_probe) {
   nlohmann::json arr = nlohmann::json::array();
   for (const auto& [name, delay] : results) arr.push_back({name, delay});
   instance().publish(names::kBackendDelayResults,
-                     Payload{{"group", group}, {"results", arr}});
+                     Payload{{"group", group}, {"results", arr}, {"fromProbe", from_probe}});
 }
 
 }  // namespace clashwin::events

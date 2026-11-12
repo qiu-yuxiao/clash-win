@@ -219,6 +219,12 @@ void install_cmd_verge(CommandService& svc) {
          IVerge old = *verge.latest_arc();
          verge.edit_draft([&patch](IVerge& d) { d.patch_config(patch); });
 
+         // BUG-328: 用户显式变更 TUN 或系统代理开关时，解除本次会话的临时 TUN 降级快照，
+         // 允许真实意图正常写入 verge.yaml（若后续 start_auto 再次遭遇瞬态故障则会重新进入快照）。
+         if (patch.enable_tun_mode.has_value() || patch.enable_system_proxy.has_value()) {
+           config::IVerge::clear_temp_tun_fallback();
+         }
+
          uint16_t flags = determine_update_flags(
              old, patch,
              core::CoreManager::instance().running_mode() == core::RunningMode::Service);

@@ -58,9 +58,10 @@ class ProfileTimer {
   // 测试观察
   bool running(const std::string& uid) const;
   int64_t now_ms() const;
+  void reset_for_test();
 
  private:
-  ProfileTimer() = default;
+  ProfileTimer();
 
   struct TaskState {
     uint64_t interval_minutes = 1440;

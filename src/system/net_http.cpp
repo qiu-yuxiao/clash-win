@@ -1,4 +1,13 @@
 // WinHTTP 同步下载封装（← utils/network.rs NetworkManager 逐行为对齐）
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
 #include "system/net_http.h"
 
 #include <winhttp.h>
@@ -11,6 +20,7 @@
 #include <vector>
 
 #include "clashwin/config/constants.h"
+#include "config/ssrf.h"
 #include "util/str_utils.h"
 #include "util/utf.h"
 
@@ -619,15 +629,64 @@ std::optional<std::string> read_system_proxy() {
 
 // ---------- 请求执行 ----------
 
+std::string resolve_effective_user_agent(
+    std::optional<std::string_view> custom_ua) {
+  if (custom_ua) {
+    std::string trimmed = trim(*custom_ua);
+    if (!trimmed.empty()) return trimmed;
+  }
+  return std::string(kDefaultUserAgent);
+}
+
 namespace {
 
-void CALLBACK security_callback(HINTERNET h, DWORD_PTR, DWORD status,
-                                LPVOID, DWORD) {
+struct WinHttpReqContext {
+  bool accept_invalid_certs = false;
+  bool ssrf_guard_direct = false;
+  bool ssrf_blocked = false;
+  HINTERNET* request_slot = nullptr;
+};
+
+void abort_ssrf_request(WinHttpReqContext* ctx) {
+  if (!ctx) return;
+  ctx->ssrf_blocked = true;
+  if (ctx->request_slot && *ctx->request_slot) {
+    HINTERNET req = *ctx->request_slot;
+    *ctx->request_slot = nullptr;
+    WinHttpSetStatusCallback(req, nullptr, 0, 0);
+    WinHttpCloseHandle(req);
+  }
+}
+
+void CALLBACK winhttp_status_callback(HINTERNET h, DWORD_PTR ctx_ptr,
+                                      DWORD status, LPVOID info, DWORD) {
+  auto* ctx = reinterpret_cast<WinHttpReqContext*>(ctx_ptr);
+  if (!ctx) return;
+
+  // BUG-327：直连模式下在 TCP 连接前/后立即复查实际解析出的目标 IP，根除 DNS Rebinding TOCTOU
+  if (ctx->ssrf_guard_direct &&
+      (status == WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER ||
+       status == WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER)) {
+    if (info != nullptr &&
+        config::ssrf::ip_string_forbidden(static_cast<const wchar_t*>(info))) {
+      abort_ssrf_request(ctx);
+      return;
+    }
+  }
+
   if (status == WINHTTP_CALLBACK_STATUS_SENDING_REQUEST) {
-    DWORD_PTR ctx = 0;
-    DWORD sz = sizeof(ctx);
-    if (WinHttpQueryOption(h, WINHTTP_OPTION_CONTEXT_VALUE, &ctx, &sz) &&
-        ctx == 1) {
+    if (ctx->ssrf_guard_direct && !ctx->ssrf_blocked) {
+      WINHTTP_CONNECTION_INFO conn_info{};
+      conn_info.cbSize = sizeof(conn_info);
+      DWORD cb = sizeof(conn_info);
+      if (WinHttpQueryOption(h, WINHTTP_OPTION_CONNECTION_INFO, &conn_info,
+                             &cb) &&
+          config::ssrf::sockaddr_forbidden(&conn_info.RemoteAddress)) {
+        abort_ssrf_request(ctx);
+        return;
+      }
+    }
+    if (ctx->accept_invalid_certs) {
       DWORD flags = SECURITY_FLAG_IGNORE_UNKNOWN_CA |
                     SECURITY_FLAG_IGNORE_CERT_CN_INVALID |
                     SECURITY_FLAG_IGNORE_CERT_DATE_INVALID |
@@ -702,7 +761,7 @@ Result<RawResponse> receive_headers(HINTERNET request) {
         HttpHeader h;
         h.name = trim(line.substr(0, colon));
         h.value = trim(line.substr(colon + 1));
-        if (h.name == "Location") out.locations.push_back(h.value);
+        if (to_lower(h.name) == "location") out.locations.push_back(h.value);
         out.headers.push_back(std::move(h));
       }
     }
@@ -749,8 +808,10 @@ Result<HttpResponse> http_request(const std::string& method_in,
     return static_cast<int>(std::max<int64_t>(0, left));
   };
 
-  // 默认采用与 UI 版本号解耦的 kSubscriptionCompatUserAgent（详见《有关User-Agent的思考.md》）
-  const std::string ua = opts.user_agent.value_or(kDefaultUserAgent);
+  // 默认采用与 UI 版本号解耦的 kSubscriptionCompatUserAgent；空白自定义 UA 自动回退（BUG-362）
+  const std::string ua =
+      opts.user_agent ? resolve_effective_user_agent(*opts.user_agent)
+                      : resolve_effective_user_agent(std::nullopt);
 
   // ← 代理三态（ProxyType::Localhost 端口经注入 resolver）
   std::optional<std::string> proxy;
@@ -803,6 +864,13 @@ Result<HttpResponse> http_request(const std::string& method_in,
       break;
     }
     UrlParts parts = pr.value();
+    if (opts.ssrf_guard && !opts.ssrf_connect_only_for_test) {
+      auto sv = config::ssrf::validate_url_no_ssrf(parts);
+      if (!sv.is_ok()) {
+        final_err = sv.error();
+        break;
+      }
+    }
     // ← network.rs get_with_tls_mode：URL 内嵌 userinfo → Authorization Basic，
     //   仅首段使用（重定向 host 变更时剥除）
     if (first_leg && (!parts.username.empty() || !parts.password.empty())) {
@@ -868,13 +936,40 @@ Result<HttpResponse> http_request(const std::string& method_in,
     int connect_ms = std::min(rem, static_cast<int>(std::min<uint64_t>(timeout_s, 10) * 1000));
     WinHttpSetTimeouts(request, connect_ms, connect_ms, rem, rem);
 
-    if (is_https && opts.accept_invalid_certs) {
-      WinHttpSetStatusCallback(request, security_callback,
-                               WINHTTP_CALLBACK_STATUS_SENDING_REQUEST, 0);
-      DWORD_PTR ctx = 1;
-      WinHttpSetOption(request, WINHTTP_OPTION_CONTEXT_VALUE, &ctx,
-                       sizeof(ctx));
+    WinHttpReqContext req_ctx{};
+    req_ctx.accept_invalid_certs = is_https && opts.accept_invalid_certs;
+    req_ctx.ssrf_guard_direct =
+        !proxy && (opts.ssrf_guard || opts.ssrf_connect_only_for_test);
+    req_ctx.request_slot = &request;
+
+    const bool use_status_cb =
+        req_ctx.accept_invalid_certs || req_ctx.ssrf_guard_direct;
+    DWORD_PTR cb_ctx = 0;
+    if (use_status_cb) {
+      cb_ctx = reinterpret_cast<DWORD_PTR>(&req_ctx);
+      WinHttpSetOption(request, WINHTTP_OPTION_CONTEXT_VALUE, &cb_ctx,
+                       sizeof(cb_ctx));
+      WinHttpSetStatusCallback(
+          request, winhttp_status_callback,
+          WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER |
+              WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER |
+              WINHTTP_CALLBACK_STATUS_SENDING_REQUEST,
+          0);
     }
+
+    auto close_request_and_connect = [&]() {
+      if (request) {
+        if (use_status_cb) {
+          WinHttpSetStatusCallback(request, nullptr, 0, 0);
+        }
+        WinHttpCloseHandle(request);
+        request = nullptr;
+      }
+      if (connect) {
+        WinHttpCloseHandle(connect);
+        connect = nullptr;
+      }
+    };
 
     std::string req_headers = "User-Agent: " + ua + "\r\n";
     if (auth_header) req_headers += "Authorization: " + *auth_header + "\r\n";
@@ -886,37 +981,52 @@ Result<HttpResponse> http_request(const std::string& method_in,
           request, headers_w.c_str(),
           static_cast<DWORD>(headers_w.size()), body->data(),
           static_cast<DWORD>(body->size()),
-          static_cast<DWORD>(body->size()), 0);
+          static_cast<DWORD>(body->size()), cb_ctx);
     } else {
       sent = WinHttpSendRequest(request, headers_w.c_str(),
                                 static_cast<DWORD>(headers_w.size()),
-                                WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
+                                WINHTTP_NO_REQUEST_DATA, 0, 0, cb_ctx);
+    }
+    if (req_ctx.ssrf_blocked) {
+      close_request_and_connect();
+      Error e;
+      e.code = 40;
+      e.message =
+          "cannot fetch subscription from private/loopback IP (DNS rebinding blocked)";
+      final_err = std::move(e);
+      break;
     }
     if (!sent) {
       Error e;
       e.code = 33;
       e.message = "Request failed: " + last_error_msg("WinHttpSendRequest",
                                                       GetLastError());
-      WinHttpCloseHandle(request);
-      WinHttpCloseHandle(connect);
+      close_request_and_connect();
       final_err = std::move(e);
       break;
     }
     if (!WinHttpReceiveResponse(request, nullptr)) {
+      if (req_ctx.ssrf_blocked) {
+        close_request_and_connect();
+        Error e;
+        e.code = 40;
+        e.message =
+            "cannot fetch subscription from private/loopback IP (DNS rebinding blocked)";
+        final_err = std::move(e);
+        break;
+      }
       Error e;
       e.code = 33;
       e.message = "Request failed: " + last_error_msg("WinHttpReceiveResponse",
                                                       GetLastError());
-      WinHttpCloseHandle(request);
-      WinHttpCloseHandle(connect);
+      close_request_and_connect();
       final_err = std::move(e);
       break;
     }
 
     auto hr = receive_headers(request);
     if (!hr.is_ok()) {
-      WinHttpCloseHandle(request);
-      WinHttpCloseHandle(connect);
+      close_request_and_connect();
       final_err = hr.error();
       break;
     }
@@ -927,13 +1037,20 @@ Result<HttpResponse> http_request(const std::string& method_in,
                         raw.status == 303 || raw.status == 307 ||
                         raw.status == 308) &&
                        !raw.locations.empty();
+    if (is_redirect && redirects >= opts.max_redirects && opts.ssrf_guard) {
+      close_request_and_connect();
+      Error e;
+      e.code = 34;
+      e.message = "too many redirects";
+      final_err = std::move(e);
+      break;
+    }
     if (is_redirect && redirects < opts.max_redirects) {
       std::string location = raw.locations.front();
       std::string next = absolutize(parts, location);
       auto np = parse_http_url(next);
       if (!np.is_ok()) {
-        WinHttpCloseHandle(request);
-        WinHttpCloseHandle(connect);
+        close_request_and_connect();
         Error e;
         e.code = 34;
         e.message = "invalid redirect location";
@@ -952,8 +1069,7 @@ Result<HttpResponse> http_request(const std::string& method_in,
       body = adj.body;
       current_url = next;
       ++redirects;
-      WinHttpCloseHandle(request);
-      WinHttpCloseHandle(connect);
+      close_request_and_connect();
       continue;
     }
 
@@ -1013,8 +1129,7 @@ Result<HttpResponse> http_request(const std::string& method_in,
       buf.resize(got);
       body_out += buf;
     }
-    WinHttpCloseHandle(request);
-    WinHttpCloseHandle(connect);
+    close_request_and_connect();
     if (failed) break;
     // ← String::from_utf8 严格校验
     if (!util::is_valid_utf8(body_out)) {
@@ -1049,7 +1164,9 @@ Result<void> http_download_file(
     const std::string& url, const std::wstring& dest_path, const HttpOptions& opts,
     std::function<void(uint64_t, uint64_t)> on_progress) {
   const uint64_t timeout_s = opts.timeout_seconds.value_or(kDefaultTimeoutS);
-  const std::string ua = opts.user_agent.value_or(kDefaultUserAgent);
+  const std::string ua =
+      opts.user_agent ? resolve_effective_user_agent(*opts.user_agent)
+                      : resolve_effective_user_agent(std::nullopt);
 
   // ← network.rs：代理三态（与 http_request 同口径）
   std::optional<std::string> proxy;
@@ -1092,6 +1209,13 @@ Result<void> http_download_file(
       return Result<void>::err(pr.error());
     }
     UrlParts parts = pr.value();
+    if (opts.ssrf_guard && !opts.ssrf_connect_only_for_test) {
+      auto sv = config::ssrf::validate_url_no_ssrf(parts);
+      if (!sv.is_ok()) {
+        WinHttpCloseHandle(session);
+        return Result<void>::err(sv.error());
+      }
+    }
     const bool is_https = parts.scheme == "https";
 
     HINTERNET connect = WinHttpConnect(session,

@@ -194,6 +194,38 @@ std::vector<std::string> decode_alpn_list(std::string_view v) {
   return list;
 }
 
+std::string_view trim_end_slashes(std::string_view s) {
+  while (!s.empty() && s.back() == '/') {
+    s.remove_suffix(1);
+  }
+  return s;
+}
+
+// ← universal_parser.rs::strip_fragment_and_query（BUG-320 / BUG-348）：
+//   统一先剥离 #fragment，再剥离 ?query，确保后续按最后一个 '@' 切分 userinfo@host:port
+//   时绝不被 query 参数值中的 '@' 或 host:port 尾随 '/' 污染。
+struct StrippedUri {
+  std::string_view auth_host;
+  std::optional<std::string_view> query;
+  std::optional<std::string> fragment;
+};
+
+StrippedUri strip_fragment_and_query(std::string_view payload) {
+  StrippedUri out;
+  std::string_view before_frag = payload;
+  if (auto sp = split_once_char(payload, '#')) {
+    before_frag = sp->first;
+    out.fragment = percent_decode(sp->second);
+  }
+  if (auto sq = split_once_char(before_frag, '?')) {
+    out.auth_host = sq->first;
+    out.query = sq->second;
+  } else {
+    out.auth_host = before_frag;
+  }
+  return out;
+}
+
 }  // namespace
 
 // ← extract_host_port
@@ -248,7 +280,8 @@ std::optional<YAML::Node> parse_vmess(std::string_view link) {
   auto str_field_ok = [&](const char* k) {
     return !j.contains(k) || j[k].is_null() || j[k].is_string();
   };
-  for (const char* k : {"ps", "add", "id", "net", "host", "path", "tls"}) {
+  for (const char* k :
+       {"ps", "add", "id", "net", "host", "path", "tls", "sni"}) {
     if (!str_field_ok(k)) return std::nullopt;
   }
   std::optional<std::string> ps = get_opt_str("ps");
@@ -258,6 +291,12 @@ std::optional<YAML::Node> parse_vmess(std::string_view link) {
   std::optional<std::string> host = get_opt_str("host");
   std::optional<std::string> path = get_opt_str("path");
   std::optional<std::string> tls = get_opt_str("tls");
+  std::optional<std::string> sni = get_opt_str("sni");
+  std::optional<std::string> sni_val;
+  if (sni) {
+    std::string t = trim(*sni);
+    if (!t.empty()) sni_val = std::move(t);
+  }
   // port/aid：serde_json::Value（缺失视同 null）
   nlohmann::json port_v = j.contains("port") ? j["port"] : nlohmann::json();
   nlohmann::json aid_v = j.contains("aid") ? j["aid"] : nlohmann::json();
@@ -303,6 +342,16 @@ std::optional<YAML::Node> parse_vmess(std::string_view link) {
 
   if (tls && *tls == "tls") {
     map["tls"] = true;
+    std::optional<std::string> eff_sni = sni_val;
+    if (!eff_sni && host) {
+      std::string h = trim(*host);
+      if (!h.empty()) eff_sni = std::move(h);
+    }
+    if (eff_sni) {
+      ystr(map, "servername", *eff_sni);
+    }
+  } else if (sni_val) {
+    ystr(map, "servername", *sni_val);
   }
 
   std::string network = net.value_or("");
@@ -331,27 +380,29 @@ std::optional<YAML::Node> parse_ss(std::string_view link) {
   constexpr std::string_view kPrefix = "ss://";
   if (!starts_with(link, kPrefix)) return std::nullopt;
   std::string_view payload = link.substr(kPrefix.size());
-  auto parts = splitn2_char(payload, '#');
-  std::string_view base_part = parts.first;
-  std::string remarks = parts.second ? percent_decode(*parts.second) : "SS Node";
+  auto stripped = strip_fragment_and_query(payload);
+  std::string remarks = stripped.fragment.value_or("SS Node");
 
   std::string method_pw;
   std::string host_port;
-  if (base_part.find('@') != std::string_view::npos) {
-    auto mp_hp = split_once_char(base_part, '@');
+  if (stripped.auth_host.find('@') != std::string_view::npos) {
+    auto mp_hp = rsplit_once_char(stripped.auth_host, '@');
     if (!mp_hp) return std::nullopt;
     method_pw.assign(mp_hp->first);
-    host_port.assign(mp_hp->second);
+    host_port.assign(trim_end_slashes(mp_hp->second));
   } else {
-    auto decoded = util::decode_base64_robust(base_part);
+    auto decoded =
+        util::decode_base64_robust(trim_end_slashes(stripped.auth_host));
     if (!decoded) return std::nullopt;
     std::string decoded_str(reinterpret_cast<const char*>(decoded->data()),
                             decoded->size());
     if (!is_valid_utf8(decoded_str)) return std::nullopt;
-    auto mp_hp = split_once_char(decoded_str, '@');
+    auto inner_q = split_once_char(decoded_str, '?');
+    std::string_view auth_part = inner_q ? inner_q->first : std::string_view(decoded_str);
+    auto mp_hp = rsplit_once_char(auth_part, '@');
     if (!mp_hp) return std::nullopt;
     method_pw = std::string(mp_hp->first);
-    host_port = std::string(mp_hp->second);
+    host_port = std::string(trim_end_slashes(mp_hp->second));
   }
 
   std::string decoded_method_pw;
@@ -362,7 +413,7 @@ std::optional<YAML::Node> parse_ss(std::string_view link) {
                              decoded->size());
     if (!is_valid_utf8(decoded_method_pw)) return std::nullopt;
   } else {
-    decoded_method_pw = method_pw;
+    decoded_method_pw = percent_decode(method_pw);
   }
 
   auto mp_parts = splitn2_char(decoded_method_pw, ':');
@@ -373,10 +424,7 @@ std::optional<YAML::Node> parse_ss(std::string_view link) {
   std::string password =
       mp_parts.second ? trim(*mp_parts.second) : std::string();
 
-  auto hp_parts = splitn2_char(host_port, '?');
-  std::string_view server_port = hp_parts.first;
-
-  auto sp = extract_host_port(server_port, 8388);
+  auto sp = extract_host_port(host_port, 8388);
   if (!sp) return std::nullopt;
 
   YAML::Node map(YAML::NodeType::Map);
@@ -394,23 +442,17 @@ std::optional<YAML::Node> parse_ss(std::string_view link) {
 std::optional<YAML::Node> parse_trojan(std::string_view link) {
   constexpr std::string_view kPrefix = "trojan://";
   if (!starts_with(link, kPrefix)) return std::nullopt;
-  std::string_view payload = link.substr(kPrefix.size());
-  auto parts = splitn2_char(payload, '#');
-  std::string_view base_part = parts.first;
-  std::string remarks =
-      parts.second ? percent_decode(*parts.second) : "Trojan Node";
+  const std::string payload = trim(link.substr(kPrefix.size()));
+  auto stripped = strip_fragment_and_query(payload);
+  std::string remarks = stripped.fragment.value_or("Trojan Node");
 
-  // 先分离 query，再按最后一个 @ 拆分 userinfo：密码含未编码 @、query 值含 @
-  // 都不会切错
-  auto qsplit = split_once_char(base_part, '?');
-  std::string_view auth_host = qsplit ? qsplit->first : base_part;
-  std::optional<std::string_view> query =
-      qsplit ? std::optional<std::string_view>(qsplit->second) : std::nullopt;
-  auto uh = rsplit_once_char(auth_host, '@');
+  // 先分离 #fragment 与 ?query，再按最后一个 @ 拆分 userinfo，并剥离 host:port 尾随 '/'
+  auto uh = rsplit_once_char(stripped.auth_host, '@');
   if (!uh) return std::nullopt;
   std::string password = percent_decode(uh->first);
+  std::optional<std::string_view> query = stripped.query;
 
-  auto sp = extract_host_port(uh->second, 443);
+  auto sp = extract_host_port(trim_end_slashes(uh->second), 443);
   if (!sp) return std::nullopt;
 
   YAML::Node map(YAML::NodeType::Map);
@@ -440,25 +482,17 @@ std::optional<YAML::Node> parse_trojan(std::string_view link) {
 std::optional<YAML::Node> parse_vless(std::string_view link) {
   constexpr std::string_view kPrefix = "vless://";
   if (!starts_with(link, kPrefix)) return std::nullopt;
-  std::string_view payload = link.substr(kPrefix.size());
-  auto parts = splitn2_char(payload, '#');
-  std::string_view base_part = parts.first;
-  std::string remarks =
-      parts.second ? percent_decode(*parts.second) : "VLESS Node";
+  const std::string payload = trim(link.substr(kPrefix.size()));
+  auto stripped = strip_fragment_and_query(payload);
+  std::string remarks = stripped.fragment.value_or("VLESS Node");
 
-  auto subparts = splitn2_char(base_part, '@');
-  if (base_part.find('@') == std::string_view::npos) {
-    return std::nullopt;  // 缺 '@'
-  }
-  std::string uuid(subparts.first);
-  std::string_view host_port_query =
-      subparts.second ? *subparts.second : std::string_view{};
+  auto uh = rsplit_once_char(stripped.auth_host, '@');
+  if (!uh) return std::nullopt;
+  std::string uuid = percent_decode(uh->first);
+  if (uuid.empty()) return std::nullopt;
+  std::optional<std::string_view> query = stripped.query;
 
-  auto hpq = splitn2_char(host_port_query, '?');
-  std::string_view host_port = hpq.first;
-  std::optional<std::string_view> query = hpq.second;
-
-  auto sp = extract_host_port(host_port, 443);
+  auto sp = extract_host_port(trim_end_slashes(uh->second), 443);
   if (!sp) return std::nullopt;
 
   YAML::Node map(YAML::NodeType::Map);
@@ -539,21 +573,16 @@ std::optional<YAML::Node> parse_vless(std::string_view link) {
 std::optional<YAML::Node> parse_hysteria2(std::string_view link) {
   constexpr std::string_view kPrefix = "hysteria2://";
   if (!starts_with(link, kPrefix)) return std::nullopt;
-  std::string_view payload = link.substr(kPrefix.size());
-  auto parts = splitn2_char(payload, '#');
-  std::string_view base_part = parts.first;
-  std::string remarks =
-      parts.second ? percent_decode(*parts.second) : "Hysteria2 Node";
+  const std::string payload = trim(link.substr(kPrefix.size()));
+  auto stripped = strip_fragment_and_query(payload);
+  std::string remarks = stripped.fragment.value_or("Hysteria2 Node");
+  std::optional<std::string_view> query = stripped.query;
 
-  auto qsplit = split_once_char(base_part, '?');
-  std::string_view auth_host = qsplit ? qsplit->first : base_part;
-  std::optional<std::string_view> query =
-      qsplit ? std::optional<std::string_view>(qsplit->second) : std::nullopt;
-  auto uh = rsplit_once_char(auth_host, '@');
+  auto uh = rsplit_once_char(stripped.auth_host, '@');
   if (!uh) return std::nullopt;
   std::string password = percent_decode(uh->first);
 
-  auto sp = extract_host_port(uh->second, 443);
+  auto sp = extract_host_port(trim_end_slashes(uh->second), 443);
   if (!sp) return std::nullopt;
 
   YAML::Node map(YAML::NodeType::Map);
@@ -587,26 +616,21 @@ std::optional<YAML::Node> parse_hysteria2(std::string_view link) {
 std::optional<YAML::Node> parse_hysteria(std::string_view link) {
   constexpr std::string_view kPrefix = "hysteria://";
   if (!starts_with(link, kPrefix)) return std::nullopt;
-  std::string payload = trim(link.substr(kPrefix.size()));
-  auto parts = splitn2_char(payload, '#');
-  std::string_view base_part = parts.first;
-  std::string remarks =
-      parts.second ? percent_decode(*parts.second) : "Hysteria Node";
+  const std::string payload = trim(link.substr(kPrefix.size()));
+  auto stripped = strip_fragment_and_query(payload);
+  std::string remarks = stripped.fragment.value_or("Hysteria Node");
+  std::optional<std::string_view> query = stripped.query;
 
-  auto qsplit = split_once_char(base_part, '?');
-  std::string_view auth_host = qsplit ? qsplit->first : base_part;
-  std::optional<std::string_view> query =
-      qsplit ? std::optional<std::string_view>(qsplit->second) : std::nullopt;
   std::string_view host_port;
   std::optional<std::string_view> userinfo;
-  if (auto uh = rsplit_once_char(auth_host, '@')) {
+  if (auto uh = rsplit_once_char(stripped.auth_host, '@')) {
     host_port = uh->second;
     userinfo = uh->first;
   } else {
-    host_port = auth_host;
+    host_port = stripped.auth_host;
   }
 
-  auto sp = extract_host_port(host_port, 443);
+  auto sp = extract_host_port(trim_end_slashes(host_port), 443);
   if (!sp) return std::nullopt;
   if (sp->first.empty()) return std::nullopt;
 
@@ -684,22 +708,17 @@ std::optional<YAML::Node> parse_hysteria(std::string_view link) {
 std::optional<YAML::Node> parse_anytls(std::string_view link) {
   constexpr std::string_view kPrefix = "anytls://";
   if (!starts_with(link, kPrefix)) return std::nullopt;
-  std::string payload = trim(link.substr(kPrefix.size()));
-  auto parts = splitn2_char(payload, '#');
-  std::string_view base_part = parts.first;
-  std::string remarks =
-      parts.second ? percent_decode(*parts.second) : "AnyTLS Node";
+  const std::string payload = trim(link.substr(kPrefix.size()));
+  auto stripped = strip_fragment_and_query(payload);
+  std::string remarks = stripped.fragment.value_or("AnyTLS Node");
+  std::optional<std::string_view> query = stripped.query;
 
-  auto qsplit = split_once_char(base_part, '?');
-  std::string_view auth_host = qsplit ? qsplit->first : base_part;
-  std::optional<std::string_view> query =
-      qsplit ? std::optional<std::string_view>(qsplit->second) : std::nullopt;
-  auto uh = rsplit_once_char(auth_host, '@');
+  auto uh = rsplit_once_char(stripped.auth_host, '@');
   if (!uh) return std::nullopt;
   std::string password = percent_decode(uh->first);
   if (password.empty()) return std::nullopt;
 
-  auto sp = extract_host_port(uh->second, 443);
+  auto sp = extract_host_port(trim_end_slashes(uh->second), 443);
   if (!sp) return std::nullopt;
   if (sp->first.empty()) return std::nullopt;
 
@@ -744,20 +763,15 @@ std::optional<YAML::Node> parse_anytls(std::string_view link) {
 std::optional<YAML::Node> parse_tuic(std::string_view link) {
   constexpr std::string_view kPrefix = "tuic://";
   if (!starts_with(link, kPrefix)) return std::nullopt;
-  std::string_view payload = link.substr(kPrefix.size());
-  auto parts = splitn2_char(payload, '#');
-  std::string_view base_part = parts.first;
-  std::string remarks =
-      parts.second ? percent_decode(*parts.second) : "TUIC Node";
+  const std::string payload = trim(link.substr(kPrefix.size()));
+  auto stripped = strip_fragment_and_query(payload);
+  std::string remarks = stripped.fragment.value_or("TUIC Node");
+  std::optional<std::string_view> query = stripped.query;
 
-  auto qsplit = split_once_char(base_part, '?');
-  std::string_view auth_host = qsplit ? qsplit->first : base_part;
-  std::optional<std::string_view> query =
-      qsplit ? std::optional<std::string_view>(qsplit->second) : std::nullopt;
-  auto uh = rsplit_once_char(auth_host, '@');
+  auto uh = rsplit_once_char(stripped.auth_host, '@');
   if (!uh) return std::nullopt;
 
-  auto sp = extract_host_port(uh->second, 443);
+  auto sp = extract_host_port(trim_end_slashes(uh->second), 443);
   if (!sp) return std::nullopt;
 
   YAML::Node map(YAML::NodeType::Map);
@@ -816,24 +830,17 @@ std::optional<YAML::Node> parse_tuic(std::string_view link) {
 std::optional<YAML::Node> parse_wireguard(std::string_view link) {
   constexpr std::string_view kPrefix = "wireguard://";
   if (!starts_with(link, kPrefix)) return std::nullopt;
-  std::string_view payload = link.substr(kPrefix.size());
-  auto parts = splitn2_char(payload, '#');
-  std::string_view base_part = parts.first;
-  std::string remarks =
-      parts.second ? percent_decode(*parts.second) : "WireGuard Node";
+  const std::string payload = trim(link.substr(kPrefix.size()));
+  auto stripped = strip_fragment_and_query(payload);
+  std::string remarks = stripped.fragment.value_or("WireGuard Node");
+  std::optional<std::string_view> query = stripped.query;
 
   // wireguard://private-key@host:port?public-key=xxx&...
-  auto kh = split_once_char(base_part, '@');
+  auto kh = rsplit_once_char(stripped.auth_host, '@');
   if (!kh) return std::nullopt;
   std::string_view private_key_raw = kh->first;
-  std::string_view host_port_query = kh->second;
 
-  auto hq = split_once_char(host_port_query, '?');
-  std::string_view host_port = hq ? hq->first : host_port_query;
-  std::optional<std::string_view> query =
-      hq ? std::optional<std::string_view>(hq->second) : std::nullopt;
-
-  auto sp = extract_host_port(host_port, 51820);
+  auto sp = extract_host_port(trim_end_slashes(kh->second), 51820);
   if (!sp) return std::nullopt;
 
   // Try base64 decode for private key, fallback to raw
@@ -955,29 +962,27 @@ std::optional<YAML::Node> parse_wireguard(std::string_view link) {
 // ← parse_socks5
 std::optional<YAML::Node> parse_socks5(std::string_view link) {
   // Support both socks5:// and socks://
-  std::string_view payload;
+  std::string_view payload_sv;
   if (starts_with(link, "socks5://")) {
-    payload = link.substr(9);
+    payload_sv = link.substr(9);
   } else if (starts_with(link, "socks://")) {
-    payload = link.substr(8);
+    payload_sv = link.substr(8);
   } else {
     return std::nullopt;
   }
-  auto parts = splitn2_char(payload, '#');
-  std::string_view base_part = parts.first;
-  std::string remarks =
-      parts.second ? percent_decode(*parts.second) : "SOCKS5 Node";
+  const std::string payload = trim(payload_sv);
+  auto stripped = strip_fragment_and_query(payload);
+  std::string remarks = stripped.fragment.value_or("SOCKS5 Node");
 
-  // socks5://[username:password@]host:port（按最后一个 @ 拆）
+  // socks5://[username:password@]host:port（先剥 #/? 再按最后一个 @ 拆，并剥尾随 '/'）
   std::optional<std::string_view> user_info;
-  std::string_view host_port = base_part;
-  size_t at = base_part.rfind('@');
-  if (at != std::string_view::npos) {
-    user_info = base_part.substr(0, at);
-    host_port = base_part.substr(at + 1);
+  std::string_view host_port = stripped.auth_host;
+  if (auto uh = rsplit_once_char(stripped.auth_host, '@')) {
+    user_info = uh->first;
+    host_port = uh->second;
   }
 
-  auto sp = extract_host_port(host_port, 1080);
+  auto sp = extract_host_port(trim_end_slashes(host_port), 1080);
   if (!sp) return std::nullopt;
 
   YAML::Node map(YAML::NodeType::Map);

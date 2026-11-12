@@ -103,6 +103,7 @@ struct PipeReader {
   std::string buf;
   size_t pos = 0;              // 已消费偏移
   int timeout_ms = 3000;
+  bool timed_out = false;      // 区分真实等待超时与对端断管/EOF（BUG-329/351）
 
   // 单次补读（deadline 收口）；返回 false = deadline 用尽或管道级失败
   bool read_more(std::chrono::steady_clock::time_point deadline) {
@@ -111,7 +112,10 @@ struct PipeReader {
           std::chrono::duration_cast<std::chrono::milliseconds>(deadline -
                                                                 std::chrono::steady_clock::now())
               .count();
-      if (remain_ms <= 0) return false;
+      if (remain_ms <= 0) {
+        timed_out = true;
+        return false;
+      }
       char tmp[16384];
       DWORD got = 0;
       IoResult r = timed_read(h, tmp, sizeof(tmp), &got,
@@ -263,28 +267,35 @@ bool PipeHttpClient::pipe_peek_valid(void* h) {
   return PeekNamedPipe(static_cast<HANDLE>(h), nullptr, 0, nullptr, &avail, nullptr) != FALSE;
 }
 
-// 打开管道：ERROR_PIPE_BUSY 重试 busy_retry_count × busy_retry_delay_ms
-//（← ipc.rs connect_to_socket：BUSY 24 次、其他错误 3 次，均带 125ms 延迟）
-Result<void*> PipeHttpClient::open_pipe_locked() {
+// 打开管道：ERROR_PIPE_BUSY 时优先通过 WaitNamedPipeW(<=100ms) 事件唤醒立即重试，
+// 仅在 WaitNamedPipeW 返回 FALSE（如实例暂未创建）时退避 busy_retry_delay_ms（默认 80ms），
+// 且全程在连接池互斥锁 mu_ 之外执行，杜绝单条管道慢连接阻塞全池归还/借出（BUG-330 / BUG-351）。
+Result<void*> PipeHttpClient::open_pipe(const std::wstring& raw_pipe_name,
+                                        const PipeHttpConfig& cfg) {
   // 允许调用方传裸服务名（如 clash-verge-service），此处统一补 \\.\pipe\ 前缀
   const std::wstring name =
-      pipe_name_.rfind(L"\\\\.\\pipe\\", 0) == 0 ? pipe_name_
-                                                : L"\\\\.\\pipe\\" + pipe_name_;
-  int busy_left = cfg_.busy_retry_count;
-  int other_left = cfg_.open_retry_count;
+      raw_pipe_name.rfind(L"\\\\.\\pipe\\", 0) == 0 ? raw_pipe_name
+                                                    : L"\\\\.\\pipe\\" + raw_pipe_name;
+  int busy_left = cfg.busy_retry_count;
+  int other_left = cfg.open_retry_count;
+  const DWORD wait_ms = static_cast<DWORD>(cfg.pipe_wait_ms > 0 ? cfg.pipe_wait_ms : 100);
+  const DWORD fallback_ms =
+      static_cast<DWORD>(cfg.busy_retry_delay_ms >= 0 ? cfg.busy_retry_delay_ms : 80);
   while (true) {
     HANDLE h = CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
                            OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
     if (h != INVALID_HANDLE_VALUE) return Result<void*>::ok(h);
     DWORD err = GetLastError();
     if (err == ERROR_PIPE_BUSY) {
-      if (busy_left-- == 0)
+      if (busy_left-- <= 0)
         return Result<void*>::err(
             make_err(HttpErrc::Busy, "Named pipe busy timeout exceeded"));
-      // WaitNamedPipe 与原版语义等价（原版直接 sleep 后重试 CreateFile）
-      WaitNamedPipeW(name.c_str(), static_cast<DWORD>(cfg_.busy_retry_delay_ms));
+      BOOL waited = WaitNamedPipeW(name.c_str(), wait_ms);
+      if (!waited) {
+        Sleep(fallback_ms);
+      }
     } else {
-      if (other_left-- == 0) {
+      if (other_left-- <= 0) {
         HttpErrc cat = (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND)
                            ? HttpErrc::PipeNotFound
                            : HttpErrc::Other;
@@ -292,7 +303,7 @@ Result<void*> PipeHttpClient::open_pipe_locked() {
         snprintf(buf, sizeof(buf), "Failed to connect to named pipe (win32=%lu)", err);
         return Result<void*>::err(make_err(cat, buf));
       }
-      Sleep(static_cast<DWORD>(cfg_.busy_retry_delay_ms));
+      Sleep(fallback_ms);
     }
   }
 }
@@ -301,13 +312,13 @@ Result<HttpResponse> PipeHttpClient::send(const std::string& method,
                                           const std::string& path,
                                           const std::map<std::string, std::string>& headers,
                                           const std::string& body, int timeout_ms) {
-  if (pipe_name_.empty())
-    return Result<HttpResponse>::err(make_err(HttpErrc::Other, "connect() not called"));
+  std::wstring pipe_snapshot;
+  PipeHttpConfig cfg_snapshot;
 
   // ---- permit 获取（拒绝策略 Timeout）----
   {
     std::unique_lock lk(mu_);
-    if (!connected_)
+    if (!connected_ || pipe_name_.empty())
       return Result<HttpResponse>::err(make_err(HttpErrc::Other, "connect() not called"));
     int max = cfg_.max_connections;
     int wait_ms = cfg_.pool_wait_timeout_ms;
@@ -317,6 +328,8 @@ Result<HttpResponse> PipeHttpClient::send(const std::string& method,
     if (!got || stopping_)
       return Result<HttpResponse>::err(make_err(HttpErrc::PoolFull, "connection pool full"));
     ++in_use_;
+    pipe_snapshot = pipe_name_;
+    cfg_snapshot = cfg_;
   }
   struct PermitGuard {
     PipeHttpClient* self;
@@ -329,9 +342,10 @@ Result<HttpResponse> PipeHttpClient::send(const std::string& method,
     }
   } guard{this};
 
-  // ---- 取连接：空闲复用或新建 ----
+  // ---- 取连接：锁内仅弹出空闲连接，新建物理管道严格在锁外执行（BUG-330/351） ----
   Conn conn;
   bool fresh = false;
+  std::vector<void*> stale_handles;
   {
     std::lock_guard lk(mu_);
     while (!idle_.empty()) {
@@ -339,30 +353,57 @@ Result<HttpResponse> PipeHttpClient::send(const std::string& method,
       idle_.pop_back();
       auto idle_for = std::chrono::steady_clock::now() - c.last_used;
       if (idle_for > std::chrono::seconds(cfg_.idle_timeout_s) || !pipe_peek_valid(c.handle)) {
-        close_handle(c.handle);  // 惰性回收
+        stale_handles.push_back(c.handle);  // 延后到锁外关闭
         continue;
       }
       conn = c;
       reused_.fetch_add(1, std::memory_order_relaxed);
       break;
     }
-    if (!conn.handle) {
-      auto r = open_pipe_locked();
-      if (!r.is_ok()) return Result<HttpResponse>::err(r.error());
-      conn.handle = r.value();
+  }
+  for (void* h : stale_handles) close_handle(h);
+
+  if (!conn.handle) {
+    auto r = open_pipe(pipe_snapshot, cfg_snapshot);
+    if (!r.is_ok()) return Result<HttpResponse>::err(r.error());
+    conn.handle = r.value();
+    fresh = true;
+    created_.fetch_add(1, std::memory_order_relaxed);
+  }
+
+  const int eff_timeout = timeout_ms > 0 ? timeout_ms : cfg_snapshot.default_timeout_ms;
+  const auto send_start = std::chrono::steady_clock::now();
+  auto resp = do_send(conn, method, path, headers, body, eff_timeout);
+
+  // ---- 半关闭空闲管道透明单次重发（BUG-329 / BUG-351） ----
+  // 池中复用的空闲命名管道在对端热重载或空闲回收时可能已半关闭（PeekNamedPipe 尚未感知）；
+  // 仅对 GET / HEAD 幂等只读请求且非外层超时错误自动丢弃旧连接并新建物理管道重发 1 次，
+  // 非幂等写请求（PUT/POST/PATCH/DELETE）严禁盲目重发以免内核重复执行。
+  const bool is_idempotent_read = str_ieq(method, "GET") || str_ieq(method, "HEAD");
+  if (!resp.is_ok() && !fresh && is_idempotent_read &&
+      resp.error().code != static_cast<int>(HttpErrc::Timeout)) {
+    close_handle(conn.handle);
+    conn.handle = nullptr;
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - send_start)
+                                .count();
+    const int remain_ms = static_cast<int>(eff_timeout - elapsed_ms);
+    if (remain_ms > 0) {
+      auto r2 = open_pipe(pipe_snapshot, cfg_snapshot);
+      if (!r2.is_ok()) return Result<HttpResponse>::err(r2.error());
+      conn.handle = r2.value();
       fresh = true;
       created_.fetch_add(1, std::memory_order_relaxed);
+      resp = do_send(conn, method, path, headers, body, remain_ms);
     }
   }
 
-  auto resp = do_send(conn, method, path, headers, body, timeout_ms);
-
   // ---- 归还或丢弃连接 ----
-  bool keep = resp.is_ok();
+  bool keep = resp.is_ok() && conn.handle != nullptr;
   if (keep) {
     // 服务端要求关闭则不复用
     if (auto* cc = resp.value().header("connection"); cc && str_ieq(*cc, "close")) keep = false;
-    if (cfg_.force_connection_close) keep = false;
+    if (cfg_snapshot.force_connection_close) keep = false;
   }
   if (keep && !pipe_peek_valid(conn.handle)) keep = false;
   if (keep) {
@@ -374,8 +415,7 @@ Result<HttpResponse> PipeHttpClient::send(const std::string& method,
       idle_.push_back(conn);
     }
   }
-  if (!keep) close_handle(conn.handle);
-  (void)fresh;
+  if (!keep && conn.handle) close_handle(conn.handle);
   return resp;
 }
 
@@ -426,8 +466,13 @@ Result<HttpResponse> PipeHttpClient::do_send(
 
   // ---- 读响应 ----
   PipeReader rd{static_cast<HANDLE>(conn.handle), {}, 0, timeout_ms};
-  if (!rd.read_until_headers_end(deadline))
-    return Result<HttpResponse>::err(make_err(HttpErrc::Timeout, "response headers timeout"));
+  if (!rd.read_until_headers_end(deadline)) {
+    if (rd.timed_out) {
+      return Result<HttpResponse>::err(make_err(HttpErrc::Timeout, "response headers timeout"));
+    }
+    return Result<HttpResponse>::err(
+        make_err(HttpErrc::Other, "pipe closed before response headers"));
+  }
 
   HttpResponse resp;
   if (!parse_head(rd.buf.substr(0, rd.pos), &resp.status, &resp.headers))

@@ -308,7 +308,13 @@ Result<void> IProfiles::patch_item(const std::string& uid, const PrfItem& item) 
     if (item.selected) each.selected = item.selected;
     if (item.extra) each.extra = item.extra;
     if (item.updated) each.updated = item.updated;
-    if (item.option) each.option = item.option;
+    if (item.option) {
+      each.option = item.option;
+      each.option->user_agent = prfitem::normalize_custom_user_agent(
+          each.option->user_agent
+              ? std::optional<std::string_view>(*each.option->user_agent)
+              : std::nullopt);
+    }
     return save_file();
   }
   Error e;

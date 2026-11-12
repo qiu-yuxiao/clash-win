@@ -115,30 +115,45 @@ inline std::string lower(std::string s) {
 class MockMihomo {
  public:
   explicit MockMihomo(const std::wstring& pipe_name, std::string secret = kSecret)
-      : pipe_(pipe_name), secret_(std::move(secret)), rest_(pipe_name, 8, 32) {}
+      : pipe_(pipe_name), secret_(std::move(secret)) {}
+  ~MockMihomo() { stop(); }
 
-  // 启动 REST + WS 服务。ws_handler(pipe, path) 在 WS 握手完成后被调用（推送脚本）。
+  // 启动统一命名管道服务（单实例池同时按 Upgrade 头分发 REST 与 WebSocket，对齐真实 mihomo 内核）。
   void start(std::function<void(HANDLE, const std::string&)> ws_handler) {
     ws_handler_ = std::move(ws_handler);
     running_ = true;
+    ready_count_ = 0;
     stop_ev_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    rest_.start([this](const mockpipe::Request& req) { return rest_handler(req); });
-    for (int i = 0; i < 8; ++i) ws_threads_.emplace_back([this] { ws_instance_loop(); });
+    for (int i = 0; i < kPipeInstances; ++i) {
+      threads_.emplace_back([this] { instance_loop(); });
+    }
+    for (int i = 0; i < 5000 && ready_count_.load() < 1; ++i) Sleep(1);
   }
 
   void stop() {
     if (!running_.exchange(false)) return;
-    SetEvent(stop_ev_);
-    rest_.stop();
-    for (auto& t : ws_threads_)
+    if (stop_ev_) SetEvent(stop_ev_);
+    std::vector<HANDLE> hs;
+    {
+      std::lock_guard lk(hmu_);
+      hs = live_handles_;
+    }
+    for (HANDLE h : hs) CancelIoEx(h, nullptr);
+    for (auto& t : threads_) {
       if (t.joinable()) t.join();
-    ws_threads_.clear();
-    if (stop_ev_) { CloseHandle(stop_ev_); stop_ev_ = nullptr; }
+    }
+    threads_.clear();
+    if (stop_ev_) {
+      CloseHandle(stop_ev_);
+      stop_ev_ = nullptr;
+    }
   }
 
   State state;
 
  private:
+  static constexpr int kPipeInstances = 16;
+  static constexpr DWORD kMaxPipeInstances = 32;
   // 鉴权：secret 非空时校验 Bearer（← 任务验收 c 项；mihomo TCP 模式行为）
   bool check_auth(const mockpipe::Request& req, mockpipe::Response* resp) {
     if (secret_.empty()) return true;
@@ -281,16 +296,23 @@ class MockMihomo {
     return r;
   }
 
-  // ---- WS ----
-  void ws_instance_loop() {
+  // ---- 统一 REST + WebSocket 命名管道监听循环 ----
+  void instance_loop() {
     while (running_.load()) {
       HANDLE h = CreateNamedPipeW(pipe_.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-                                  PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 32, 1 << 20,
-                                  1 << 20, 0, nullptr);
+                                  PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                                  kMaxPipeInstances, 1 << 20, 1 << 20, 0, nullptr);
       if (h == INVALID_HANDLE_VALUE) {
-        Sleep(100);
+        if (!running_.load()) break;
+        Sleep(20);
         continue;
       }
+      {
+        std::lock_guard lk(hmu_);
+        live_handles_.push_back(h);
+      }
+      ready_count_.fetch_add(1);
+
       OVERLAPPED ov{};
       ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
       BOOL ok = ConnectNamedPipe(h, &ov);
@@ -299,60 +321,66 @@ class MockMihomo {
       if (!have && err == ERROR_IO_PENDING) {
         HANDLE waits[2] = {ov.hEvent, stop_ev_};
         have = WaitForMultipleObjects(2, waits, FALSE, INFINITE) == WAIT_OBJECT_0;
+        if (!have) CancelIoEx(h, &ov);
       }
       CloseHandle(ov.hEvent);
-      if (have && running_.load()) ws_serve(h);
+
+      if (have && running_.load()) serve_connection(h);
       FlushFileBuffers(h);
       DisconnectNamedPipe(h);
       CloseHandle(h);
+      {
+        std::lock_guard lk(hmu_);
+        for (auto it = live_handles_.begin(); it != live_handles_.end(); ++it) {
+          if (*it == h) {
+            live_handles_.erase(it);
+            break;
+          }
+        }
+      }
     }
   }
 
-  void ws_serve(HANDLE h) {
-    // 读升级请求
-    std::string buf;
-    char tmp[8192];
-    size_t head_end;
-    for (;;) {
-      head_end = buf.find("\r\n\r\n");
-      if (head_end != std::string::npos) break;
-      DWORD got = 0;
-      if (!mo_read(h, tmp, sizeof(tmp), &got, 10000)) return;
-      if (got == 0) return;
-      buf.append(tmp, got);
-    }
-    std::string head = buf.substr(0, head_end);
-    if (head.find("Upgrade: websocket") == std::string::npos) return;
-    size_t kpos = head.find("Sec-WebSocket-Key: ");
-    if (kpos == std::string::npos) return;
-    size_t kstart = kpos + strlen("Sec-WebSocket-Key: ");
-    std::string key = head.substr(kstart, head.find("\r\n", kstart) - kstart);
-    // 请求行路径
-    size_t line_end = head.find("\r\n");
-    std::string req_line = head.substr(0, line_end);
-    size_t sp1 = req_line.find(' ');
-    size_t sp2 = req_line.find(' ', sp1 + 1);
-    std::string path = req_line.substr(sp1 + 1, sp2 - sp1 - 1);
+  void serve_connection(HANDLE h) {
+    while (running_.load()) {
+      mockpipe::Request req;
+      if (!mockpipe::mo_read_request(h, &req)) break;
 
-    std::string resp = "HTTP/1.1 101 Switching Protocols\r\n"
-                       "Upgrade: websocket\r\n"
-                       "Connection: Upgrade\r\n"
-                       "Sec-WebSocket-Accept: " + ws_compute_accept(key) + "\r\n\r\n";
-    if (!mo_write(h, resp.data(), static_cast<DWORD>(resp.size()), 10000)) return;
-    if (ws_handler_) ws_handler_(h, path);
+      auto up_it = req.headers.find("upgrade");
+      if (up_it != req.headers.end() && lower(up_it->second) == "websocket") {
+        auto key_it = req.headers.find("sec-websocket-key");
+        if (key_it == req.headers.end()) break;
+        std::string resp = "HTTP/1.1 101 Switching Protocols\r\n"
+                           "Upgrade: websocket\r\n"
+                           "Connection: Upgrade\r\n"
+                           "Sec-WebSocket-Accept: " + ws_compute_accept(key_it->second) + "\r\n\r\n";
+        if (!mo_write(h, resp.data(), static_cast<DWORD>(resp.size()), 10000)) break;
+        if (ws_handler_) ws_handler_(h, req.path);
 
-    // 之后读客户端帧直到 close（ drains 关闭帧）
-    WsFrame f;
-    while (ws_read_frame(h, &f, 2000)) {
-      if (f.opcode == 0x8) break;
+        // 之后读客户端帧直到 close（drains 关闭帧）或服务端停止
+        WsFrame f;
+        while (running_.load() && ws_read_frame(h, &f, 2000)) {
+          if (f.opcode == 0x8) break;
+        }
+        break;
+      }
+
+      mockpipe::Response resp = rest_handler(req);
+      mockpipe::mo_write_response(h, resp);
+      auto conn_it = req.headers.find("connection");
+      bool client_close = conn_it != req.headers.end() &&
+                          lower(conn_it->second).find("close") != std::string::npos;
+      if (resp.close_after || client_close) break;
     }
   }
 
   std::wstring pipe_;
   std::string secret_;
-  mockpipe::Server rest_;
   std::function<void(HANDLE, const std::string&)> ws_handler_;
-  std::vector<std::thread> ws_threads_;
+  std::mutex hmu_;
+  std::vector<HANDLE> live_handles_;
+  std::vector<std::thread> threads_;
+  std::atomic<int> ready_count_{0};
   std::atomic<bool> running_{false};
   HANDLE stop_ev_ = nullptr;
 };

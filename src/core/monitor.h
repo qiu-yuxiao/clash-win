@@ -44,15 +44,20 @@ class CoreMonitor {
   // ← monitor.rs:1277-1280 物理网络双频探测间隔（在线 60s / 离线 5s）
   static constexpr int64_t kOnlineProbeIntervalMs = 60000;
   static constexpr int64_t kOfflineProbeIntervalMs = 5000;
+  // ← monitor.rs:302-307（BUG-317 / BUG-345）：3 路 TCP:53 并发竞速上限 600ms，总预算下限 2s
+  static constexpr int kTcp53RaceTimeoutMs = 600;
+  static constexpr uint64_t kMinProbeBudgetSecs = 2;
+  static constexpr uint32_t kSupervisorRestartDelayMs = 2000;
 
-  // 参数对照表（← census §70 / monitor.rs v3.2.4，全 hooks 注入可测）
+  // 参数对照表（← census §70 / monitor.rs v3.2.4 + BUG-318，全 hooks 注入可测）
   struct Params {
     int normal_interval_secs = 15;     // 正常体检 15s
     int retry_interval_secs = 3;       // 判死后重试 3s
     int offline_interval_secs = 5;     // 物理网络离线 5s
     int node_dead_threshold = 2;       // 节点连续 2 次判死
     int api_fail_threshold = 3;        // API 连续 3 次不可达
-    int heal_fail_threshold = 3;       // 自愈连续失败 3 次（达 3 即归零，见 heal()）
+    int heal_fail_threshold = 3;       // API 假死下连续 3 次自愈失败 → 重启内核（BUG-318）
+    int alert_fail_threshold = 5;      // 自愈连续 5 次失败 → 系统网络警报（BUG-318）
     // ★ §5.3 自愈冷却保护（← monitor.rs:1538-1542 v3.2.4 BUG-315：60s → 25s）
     int64_t heal_cooldown_ms = 25000;
     int64_t failed_server_cooldown_ms = 600000;  // 失败服务器 600s
@@ -140,18 +145,51 @@ class CoreMonitor {
 
   // 可注入探测原语（单测零外网依赖）
   struct PhysicalNetProbeOps {
+    // BUG-317 / BUG-345：3 路并发非阻塞 TCP:53 竞速（生产默认注入 tcp_race_connect_ipv4）
+    std::function<bool(const std::vector<const char*>& ips, uint16_t port,
+                       int timeout_ms)>
+        tcp_race_connect;
     std::function<bool(const char* ip, uint16_t port, int timeout_ms)> tcp_connect;
     std::function<bool(const std::string& host, uint16_t port, int timeout_ms)>
         dns_lookup;
     std::function<int64_t()> now_ms;
   };
+  static bool tcp_race_connect_ipv4(const std::vector<const char*>& ips,
+                                    uint16_t port, int timeout_ms);
   static bool probe_physical_network_with(uint64_t timeout_secs,
                                           const std::string& test_url,
                                           const PhysicalNetProbeOps& ops);
-  // 生产入口：优先 TCP:53 直连 223.5.5.5 / 119.29.29.29 / 1.1.1.1，
-  // 全部不通时回退 test_url 域名 DNS 查询兜底。
+  // 生产入口：优先 TCP:53 并发竞速直连 223.5.5.5 / 119.29.29.29 / 1.1.1.1（600ms 上限），
+  // 全部不通时回退 test_url 域名 DNS 查询兜底（保底 >= 1400ms 预算）。
   static bool is_physical_network_online(uint64_t timeout_secs,
                                          const std::string& test_url);
+
+  // ---- BUG-318：自愈双计数器纯函数状态机 ----
+  enum class SelfHealAction {
+    None,
+    RestartCore,
+    FireAlert,
+  };
+  static SelfHealAction evaluate_self_heal_counters(
+      int& auto_select_fail_count, int& api_dead_heal_fail_count,
+      bool api_alive, int restart_threshold = 3, int alert_threshold = 5);
+  static SelfHealAction complete_restart_core_attempt(
+      bool restart_ok, int& auto_select_fail_count,
+      int& api_dead_heal_fail_count);
+
+  // ---- BUG-336：手动切节点即时刷新宽限期 ----
+  void notify_manual_node_switched();
+
+  // ---- BUG-359：网络健康状态去重广播（network_health::ok / offline / all_dead） ----
+  void emit_network_health_notice(const std::string& health_msg);
+  std::string last_notified_health_for_test() const;
+
+  // ---- BUG-353：外层受监管守护循环 ----
+  static void run_supervised_daemon(
+      const char* task_name, const std::function<bool()>& is_stopping,
+      const std::function<void(uint32_t)>& backoff_sleep_ms,
+      const std::function<void()>& on_reset,
+      const std::function<void()>& daemon_body);
 
   // 双频探测节流器（← monitor.rs:1275-1293：在线 60s / 离线 5s，首次必探）
   class ThrottledNetProbe {
@@ -179,7 +217,11 @@ class CoreMonitor {
   // 观测（测试断言）
   int api_fail_count() const { return api_fail_count_.load(); }
   int node_fail_count() const { return node_fail_count_.load(); }
-  int heal_fail_count() const { return heal_fail_count_.load(); }
+  int auto_select_fail_count() const { return auto_select_fail_count_.load(); }
+  int api_dead_heal_fail_count() const {
+    return api_dead_heal_fail_count_.load();
+  }
+  int heal_fail_count() const { return auto_select_fail_count_.load(); }
   int64_t last_heal_ms() const { return last_heal_ms_.load(); }
   // ★ §5.1 切换宽限期：当前是否处于宽限期内（切节点后 20s）
   bool in_switch_grace() const;
@@ -191,6 +233,8 @@ class CoreMonitor {
  private:
   CoreMonitor() = default;
   Action heal(const std::string& uid);  // 自愈记账核心（tick 内调用）
+  void absorb_pending_manual_switch(int64_t fallback_now_ms);
+  void reset_runtime_loop_state();
 
   std::mutex m_;  // 保护 hooks_/params_ 配置
   Hooks hooks_;
@@ -200,7 +244,8 @@ class CoreMonitor {
   std::atomic<bool> kick_{false};  // 非阻塞唤醒标志（kick() 置位，worker 消费）
   std::atomic<int> api_fail_count_{0};
   std::atomic<int> node_fail_count_{0};
-  std::atomic<int> heal_fail_count_{0};
+  std::atomic<int> auto_select_fail_count_{0};
+  std::atomic<int> api_dead_heal_fail_count_{0};
   std::atomic<bool> was_offline_{false};
   std::atomic<int64_t> last_heal_ms_{0};
   std::atomic<int64_t> last_tick_ms_{0};
@@ -214,6 +259,16 @@ class CoreMonitor {
   //   ← Mini monitor.rs:1173 last_active_node
   std::mutex last_node_m_;
   std::string last_active_node_;
+
+  // BUG-336：前端手动切节点暂存真实点击时刻 + 非阻塞唤醒标志
+  std::mutex manual_m_;
+  int64_t pending_manual_switch_ms_{-1};
+  std::atomic<bool> manual_switch_wake_{false};
+  std::atomic<bool> manual_grace_unmatched_{false};
+
+  // BUG-359：去重记录最近广播的网络健康状态
+  mutable std::mutex health_m_;
+  std::string last_notified_health_{"network_health::ok"};
 
   // 失败服务器表（server → 失败时刻 ms；600s 冷却）
   std::mutex failed_m_;

@@ -13,6 +13,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -38,14 +39,17 @@ class PipeWebSocket {
   Result<void> connect(const std::wstring& pipe_name, const std::string& path,
                        const std::string& secret, PipeWsCallbacks cbs,
                        int open_timeout_ms = 5000);
-  // 外部停止：发 close 帧（尽力）→ 取消未决 I/O → join 读线程
-  void close(uint16_t code = 1000, const std::string& reason = {});
+  // 外部停止：有界超时发 close 帧（force_timeout.unwrap_or(1000).max(500)，BUG-325）→ 取消未决 I/O → join 读线程
+  void close(std::optional<uint32_t> force_timeout_ms = std::nullopt);
+  void close(uint16_t code, const std::string& reason,
+             std::optional<uint32_t> force_timeout_ms = std::nullopt);
   bool is_open() const { return open_.load(std::memory_order_acquire); }
   // 主动发送文本帧（供 T05 扩展使用）
   Result<void> send_text(const std::string& payload);
 
  private:
-  Result<void> send_frame(int opcode, const std::string& payload);
+  Result<void> send_frame(int opcode, const std::string& payload,
+                          uint32_t write_timeout_ms = 5000);
   void reader_loop(std::string pending);
 
   void* handle_ = nullptr;      // HANDLE

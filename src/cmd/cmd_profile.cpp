@@ -21,11 +21,22 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <ctime>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
 
 namespace clashwin::cmd {
 
 namespace {
+int64_t parse_rfc3339_epoch_sec(const std::string& t) {
+  if (t.size() < 19) return -1;
+  std::tm tm{};
+  std::istringstream iss(t.substr(0, 19));
+  iss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
+  if (iss.fail()) return -1;
+  return static_cast<int64_t>(_mkgmtime(&tm));
+}
 // ← feat::CURRENT_SWITCHING_PROFILE：导入/更新/删除/切换/定时互斥。
 // T15：锁实现上移 core/switching_lock.h（timer 同一把，跨层互斥）
 std::atomic<bool>& switching_lock() { return core::profile_switching_lock(); }
@@ -105,27 +116,34 @@ void ensure_t16_hooks() {
       url = verge.default_latency_test.value_or(url);
     } catch (...) {}
     auto r = c->delay_group(metrics_group, url, core::kNodeDelayMaxMs);
+    if (!r.is_ok()) {
+      static constexpr const char* kFallbackTestUrl =
+          "https://www.gstatic.com/generate_204";
+      if (url != kFallbackTestUrl) {
+        r = c->delay_group(metrics_group, kFallbackTestUrl,
+                           core::kNodeDelayMaxMs);
+      }
+    }
     if (!r.is_ok() && metrics_group != "PROXY") {
       r = c->delay_group("PROXY", url, core::kNodeDelayMaxMs);
     }
     if (!r.is_ok()) return std::nullopt;
     return r.value();
   };
-  dh.fresh_history = [get_client]() -> std::map<std::string, uint32_t> {
-    std::map<std::string, uint32_t> out;
-    auto* c = get_client();
-    if (!c) return out;
-    auto px = c->get_proxies();
-    if (!px.is_ok()) return out;
-    for (const auto& [name, p] : px.value().proxies) {
-      if (!p.alive || p.history.empty()) continue;
-      out[name] = p.history.back().delay;
-    }
-    return out;
-  };
   dh.emit_results = [](const std::string& group,
-                       const std::vector<std::pair<std::string, uint32_t>>& r) {
-    events::EventBus::backend_delay_results(group, r);
+                       const std::vector<std::pair<std::string, uint32_t>>& r,
+                       bool from_probe) {
+    events::EventBus::backend_delay_results(group, r, from_probe);
+    if (!core::AutoSelect::instance().is_running()) {
+      for (const auto& [name, d] : r) {
+        (void)name;
+        if (d > 0 && d < core::kNodeDelayMaxMs) {
+          core::CoreMonitor::instance().emit_network_health_notice(
+              "network_health::ok");
+          break;
+        }
+      }
+    }
   };
   core::DelayManager::instance().set_hooks(std::move(dh));
 
@@ -146,6 +164,47 @@ void ensure_t16_hooks() {
     auto gs = config::proxy_head_state::get_group_state(st, uid, "PROXY");
     if (gs) return gs->filter_text;
     return std::string();
+  };
+  ah.saved_sort_type = [](const std::string& uid) -> std::optional<int> {
+    if (uid.empty()) return std::nullopt;
+    auto st = config::proxy_head_state::load();
+    if (!st.is_object()) return std::nullopt;
+    auto uit = st.find(uid);
+    if (uit == st.end() || !uit->is_object()) return std::nullopt;
+    auto git = uit->find("PROXY");
+    if (git == uit->end() || !git->is_object()) return std::nullopt;
+    auto sit = git->find("sortType");
+    if (sit == git->end() || !sit->is_number_integer()) return std::nullopt;
+    return sit->get<int>();
+  };
+  ah.fresh_metrics_subset = [get_client](const std::vector<std::string>& nodes)
+      -> std::optional<std::vector<std::pair<std::string, uint32_t>>> {
+    if (nodes.empty()) return std::nullopt;
+    auto* c = get_client();
+    if (!c) return std::nullopt;
+    auto px = c->get_proxies();
+    if (!px.is_ok()) return std::nullopt;
+    const int64_t now_sec = static_cast<int64_t>(std::time(nullptr));
+    static constexpr int64_t kMaxMetricsReuseAgeSecs = 30;
+    std::vector<std::pair<std::string, uint32_t>> cached;
+    cached.reserve(nodes.size());
+    for (const auto& name : nodes) {
+      auto it = px.value().proxies.find(name);
+      if (it == px.value().proxies.end() || it->second.history.empty()) {
+        return std::nullopt;
+      }
+      const auto& latest_h = it->second.history.back();
+      const int64_t rec_sec = parse_rfc3339_epoch_sec(latest_h.time);
+      if (rec_sec < 0 || (now_sec - rec_sec) >= kMaxMetricsReuseAgeSecs) {
+        return std::nullopt;
+      }
+      const uint32_t d = (it->second.alive && latest_h.delay > 0 &&
+                          latest_h.delay < core::kNodeDelayMaxMs)
+                             ? latest_h.delay
+                             : 0;
+      cached.emplace_back(name, d);
+    }
+    return cached;
   };
   ah.is_dummy = [](const std::string& name) {
     return clashwin::util::is_dummy_node(name);
@@ -295,18 +354,13 @@ void install_cmd_profile(CommandService& svc) {
          }
          const std::string profile_name =
              old->name.value_or(std::string("UnKnown Profile"));
-         PrfOption option = old->option.value_or(PrfOption{});
+         std::optional<PrfOption> override_opt;
          if (const Json* op = find_arg(args, {"option"}); op && op->is_object()) {
-           PrfOption override_opt = prf_option_from_json(*op);
-           if (override_opt.user_agent) option.user_agent = override_opt.user_agent;
-           if (override_opt.with_proxy) option.with_proxy = override_opt.with_proxy;
-           if (override_opt.self_proxy) option.self_proxy = override_opt.self_proxy;
-           if (override_opt.update_interval) option.update_interval = override_opt.update_interval;
-           if (override_opt.danger_accept_invalid_certs)
-             option.danger_accept_invalid_certs = override_opt.danger_accept_invalid_certs;
-           if (override_opt.allow_auto_update) option.allow_auto_update = override_opt.allow_auto_update;
-           if (override_opt.timeout_seconds) option.timeout_seconds = override_opt.timeout_seconds;
+           override_opt = prf_option_from_json(*op);
          }
+         PrfOption option =
+             config::PrfOption::merge_opt(old->option, override_opt)
+                 .value_or(PrfOption{});
          auto& profiles = config::Config::instance().profiles();
          std::optional<config::PrfItem> item_opt;
          bool used_proxy_fallback = false;

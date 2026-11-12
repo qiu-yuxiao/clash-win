@@ -325,6 +325,18 @@ std::optional<uint16_t> resolve_localhost_mixed_port() {
 
 }  // namespace
 
+namespace prfitem {
+
+std::optional<std::string> normalize_custom_user_agent(
+    std::optional<std::string_view> ua) {
+  if (!ua) return std::nullopt;
+  std::string trimmed = util::trim(*ua);
+  if (trimmed.empty()) return std::nullopt;
+  return trimmed;
+}
+
+}  // namespace prfitem
+
 // ← prfitem.rs::from_url_direct（281-422）
 Result<PrfItem> PrfItem::from_url_direct(
     const std::string& url, const std::optional<std::string>& name,
@@ -459,7 +471,10 @@ Result<PrfItem> PrfItem::from_url(const std::string& url,
   const std::optional<bool> allow_auto_update =
       option ? option->allow_auto_update : std::nullopt;
   const std::optional<std::string> user_agent =
-      option ? option->user_agent : std::nullopt;
+      prfitem::normalize_custom_user_agent(
+          (option && option->user_agent)
+              ? std::optional<std::string_view>(*option->user_agent)
+              : std::nullopt);
   std::optional<uint64_t> update_interval =
       option ? option->update_interval : std::nullopt;
   const uint64_t timeout =
@@ -470,6 +485,8 @@ Result<PrfItem> PrfItem::from_url(const std::string& url,
   PrfOption opt = enhanced.value();
   opt.allow_auto_update = allow_auto_update;
   opt = clean_download_option(std::move(opt));
+  // BUG-362：保留经 trim 归一化后的自定义 user_agent，防止导入/更新订阅后自定义 UA 丢失
+  opt.user_agent = user_agent;
 
   // 选择代理类型（← network.rs ProxyType）
   ProxyType proxy_type = self_proxy ? ProxyType::Localhost
@@ -499,6 +516,7 @@ Result<PrfItem> PrfItem::from_url(const std::string& url,
   http_opts.timeout_seconds = timeout;
   if (user_agent) http_opts.user_agent = user_agent;
   http_opts.accept_invalid_certs = accept_invalid_certs;
+  http_opts.ssrf_guard = true;  // ← BUG-327：逐跳 30x 校验 + 直连 connect 期重绑定防护
   http_opts.localhost_mixed_port = resolve_localhost_mixed_port;
 
   auto resp = clashwin::system::http_get(fixed_url, http_opts);
@@ -794,10 +812,18 @@ std::optional<PrfExtra> PrfExtra::from_yaml(const YAML::Node& m) {
 
 std::optional<PrfOption> PrfOption::merge_opt(
     const std::optional<PrfOption>& one, const std::optional<PrfOption>& other) {
-  // ← prfitem.rs:128-152
+  // ← prfitem.rs:129-160（BUG-362：user_agent 支持 trim 归一化及传空/纯空白清空回退默认兼容 UA）
+  auto norm_ua = [](const std::optional<std::string>& ua) {
+    return prfitem::normalize_custom_user_agent(
+        ua ? std::optional<std::string_view>(*ua) : std::nullopt);
+  };
   if (one && other) {
     PrfOption r = *one;
-    if (other->user_agent) r.user_agent = other->user_agent;
+    if (other->user_agent.has_value()) {
+      r.user_agent = norm_ua(other->user_agent);
+    } else {
+      r.user_agent = norm_ua(r.user_agent);
+    }
     if (other->with_proxy) r.with_proxy = other->with_proxy;
     if (other->self_proxy) r.self_proxy = other->self_proxy;
     if (other->danger_accept_invalid_certs)
@@ -812,8 +838,16 @@ std::optional<PrfOption> PrfOption::merge_opt(
     if (other->timeout_seconds) r.timeout_seconds = other->timeout_seconds;
     return r;
   }
-  if (one) return one;
-  if (other) return other;
+  if (one) {
+    PrfOption cloned = *one;
+    cloned.user_agent = norm_ua(cloned.user_agent);
+    return cloned;
+  }
+  if (other) {
+    PrfOption cloned = *other;
+    cloned.user_agent = norm_ua(cloned.user_agent);
+    return cloned;
+  }
   return std::nullopt;
 }
 

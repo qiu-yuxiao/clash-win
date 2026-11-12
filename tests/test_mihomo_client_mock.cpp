@@ -213,11 +213,14 @@ UT_TEST(mihomo_mock_ws_channels) {
     }
   });
 
+  Sink traffic;
+  Sink conn;
+  Sink logs;
+  Sink mem;
   auto ws = std::make_unique<WsManager>();
   ws->configure(pipe, mockmihomo::kSecret);
 
   // traffic：≥2 条且第 6 条含 upTotal（← 04§2 {up,down,upTotal?,downTotal?}）
-  Sink traffic;
   ws->subscribe_traffic([&](const std::string& p) { traffic.push(p); });
   bool got_traffic = traffic.wait(2, 10000);
   UT_CHECK(got_traffic);
@@ -244,7 +247,6 @@ UT_TEST(mihomo_mock_ws_channels) {
 
   // connections：裸流经 WsManager 转换器 → snapshot(seq0) → delta(seq1，
   // added=c2 / removed=c1；updated 仅差分 upload/download，本序列无变化)
-  Sink conn;
   ws->subscribe_connections([&](const std::string& p) { conn.push(p); });
   bool got_conn = conn.wait(2, 10000);
   UT_CHECK(got_conn);
@@ -272,7 +274,6 @@ UT_TEST(mihomo_mock_ws_channels) {
   }
 
   // logs（level=info 请求路径由 WsManager 构造）
-  Sink logs;
   ws->subscribe_logs(LogLevel::Info, [&](const std::string& p) { logs.push(p); });
   bool got_logs = logs.wait(1, 10000);
   UT_CHECK(got_logs);
@@ -285,7 +286,6 @@ UT_TEST(mihomo_mock_ws_channels) {
   }
 
   // memory：连通即可（前端无 consumer）
-  Sink mem;
   ws->subscribe_memory([&](const std::string& p) { mem.push(p); });
   bool got_mem = mem.wait(1, 10000);
   UT_CHECK(got_mem);
@@ -331,10 +331,10 @@ UT_TEST(mihomo_mock_ws_shared) {
     }
   });
 
+  Sink a, b, c;
   auto ws = std::make_unique<WsManager>();
   ws->configure(pipe, mockmihomo::kSecret);
 
-  Sink a, b;
   uint64_t id_a = ws->subscribe_traffic([&](const std::string& p) { a.push(p); });
   uint64_t id_b = ws->subscribe_traffic([&](const std::string& p) { b.push(p); });
   UT_CHECK(id_a != 0 && id_b != 0 && id_a != id_b);
@@ -361,7 +361,6 @@ UT_TEST(mihomo_mock_ws_shared) {
   ws->unsubscribe(id_b);
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
   UT_CHECK(!ws->channel_connected(WsManager::kTraffic));
-  Sink c;
   ws->subscribe_traffic([&](const std::string& p) { c.push(p); });
   UT_CHECK(c.wait(2, 10000));
 

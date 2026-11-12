@@ -31,6 +31,74 @@ std::string_view strip_outer(std::string_view s) {
   return s;
 }
 
+// ← scheme.rs:query_pairs().find(|(k, _)| k == key)
+std::optional<std::string> extract_query_param(std::string_view query,
+                                               std::string_view key) {
+  size_t start = 0;
+  while (start <= query.size()) {
+    size_t amp = query.find('&', start);
+    std::string_view seg = (amp == std::string_view::npos)
+                               ? query.substr(start)
+                               : query.substr(start, amp - start);
+    size_t eq = seg.find('=');
+    if (eq != std::string_view::npos) {
+      std::string_view k = seg.substr(0, eq);
+      std::string_view v = seg.substr(eq + 1);
+      if (k == key) {
+        return util::percent_decode(v);
+      }
+    }
+    if (amp == std::string_view::npos) break;
+    start = amp + 1;
+  }
+  return std::nullopt;
+}
+
+// ← utils/resolve/scheme.rs:54-88 extract_subscription_url（BUG-323）：
+//   1) 标准/百分号编码 url 参数按 query_pairs 精确停在下一个 '&'（避免将 &name=、&silent= 等吞入订阅 URL）；
+//   2) 未编码嵌套查询串（如 url=https://a.com/sub?token=1&flag=meta&name=Sub）保留嵌套参数并剥离外层 &name=/&silent=。
+std::optional<std::string> extract_subscription_url(std::string_view query) {
+  size_t pos = std::string_view::npos;
+  if (const size_t amp = query.find("&url="); amp != std::string_view::npos) {
+    pos = amp + 1;
+  } else if (query.starts_with("url=")) {
+    pos = 0;
+  } else {
+    return std::nullopt;
+  }
+
+  std::string after_prefix = util::trim(query.substr(pos + 4));
+  if (after_prefix.empty()) return std::nullopt;
+
+  const std::string lower = util::to_lower(after_prefix);
+  const size_t first_amp = after_prefix.find('&');
+  const std::string_view first_seg =
+      (first_amp == std::string::npos)
+          ? std::string_view(after_prefix)
+          : std::string_view(after_prefix).substr(0, first_amp);
+  const bool is_unencoded_nested_query =
+      (lower.starts_with("http://") || lower.starts_with("https://")) &&
+      (first_seg.find('?') != std::string_view::npos);
+
+  if (!is_unencoded_nested_query) {
+    auto val = extract_query_param(query, "url");
+    if (!val) return std::nullopt;
+    std::string trimmed = util::trim(*val);
+    if (trimmed.empty()) return std::nullopt;
+    return util::decode_subscription_url(trimmed);
+  }
+
+  std::string_view raw_url(after_prefix);
+  for (std::string_view marker : {"&name=", "&silent="}) {
+    if (const size_t idx = raw_url.find(marker); idx != std::string_view::npos) {
+      raw_url = raw_url.substr(0, idx);
+    }
+  }
+  std::string trimmed = util::trim(raw_url);
+  if (trimmed.empty()) return std::nullopt;
+  return util::decode_subscription_url(trimmed);
+}
+
 }  // namespace
 
 Result<DeepLinkInfo> parse_deep_link(std::string_view link) {
@@ -52,70 +120,24 @@ Result<DeepLinkInfo> parse_deep_link(std::string_view link) {
   if (qpos == std::string_view::npos) {
     return Result<DeepLinkInfo>::err(Error{2904, "Missing query string in deep link: " + std::string(s)});
   }
-  std::string_view query = s.substr(qpos + 1);
+  const size_t fpos = s.find('#', qpos + 1);
+  std::string_view query = (fpos == std::string_view::npos)
+                               ? s.substr(qpos + 1)
+                               : s.substr(qpos + 1, fpos - (qpos + 1));
 
-  // 提取 name 参数（可选）
-  std::optional<std::string> name_opt;
-  size_t name_pos = std::string_view::npos;
-  if (query.starts_with("name=")) {
-    name_pos = 0;
-  } else {
-    name_pos = query.find("&name=");
-    if (name_pos != std::string_view::npos) {
-      name_pos += 1;  // 跳过 '&'
-    }
-  }
-
-  if (name_pos != std::string_view::npos) {
-    size_t val_start = name_pos + 5;  // 跳过 "name="
-    size_t val_end = query.find('&', val_start);
-    std::string_view raw_name;
-    if (val_end == std::string_view::npos) {
-      raw_name = query.substr(val_start);
-    } else {
-      raw_name = query.substr(val_start, val_end - val_start);
-    }
-    if (!raw_name.empty()) {
-      name_opt = util::percent_decode(raw_name);
-    }
+  // 提取 name 参数（可选；忽略空值以保持与既有接口一致）
+  std::optional<std::string> name_opt = extract_query_param(query, "name");
+  if (name_opt && name_opt->empty()) {
+    name_opt = std::nullopt;
   }
 
   // 提取 url 参数（必选）
-  size_t url_pos = std::string_view::npos;
-  if (query.starts_with("url=")) {
-    url_pos = 0;
-  } else {
-    url_pos = query.find("&url=");
-    if (url_pos != std::string_view::npos) {
-      url_pos += 1;  // 跳过 '&'
-    }
+  auto decoded_url = extract_subscription_url(query);
+  if (!decoded_url || decoded_url->empty()) {
+    return Result<DeepLinkInfo>::err(Error{2904, "Missing or empty url parameter in deep link: " + std::string(s)});
   }
 
-  if (url_pos == std::string_view::npos) {
-    return Result<DeepLinkInfo>::err(Error{2904, "Missing url parameter in deep link: " + std::string(s)});
-  }
-
-  size_t url_val_start = url_pos + 4;  // 跳过 "url="
-  std::string_view raw_url;
-  // 如果 url 在 name 之前，截断到 &name=
-  if (name_pos != std::string_view::npos && name_pos > url_pos) {
-    // name 在 url 之后：找到 &name=
-    size_t and_name = query.find("&name=", url_val_start);
-    if (and_name != std::string_view::npos) {
-      raw_url = query.substr(url_val_start, and_name - url_val_start);
-    } else {
-      raw_url = query.substr(url_val_start);
-    }
-  } else {
-    raw_url = query.substr(url_val_start);
-  }
-
-  if (raw_url.empty()) {
-    return Result<DeepLinkInfo>::err(Error{2904, "Empty url parameter in deep link: " + std::string(s)});
-  }
-
-  std::string decoded_url = util::decode_subscription_url(raw_url);
-  return Result<DeepLinkInfo>::ok(DeepLinkInfo{std::move(decoded_url), std::move(name_opt)});
+  return Result<DeepLinkInfo>::ok(DeepLinkInfo{std::move(*decoded_url), std::move(name_opt)});
 }
 
 Result<void> resolve_scheme(std::string_view link) {

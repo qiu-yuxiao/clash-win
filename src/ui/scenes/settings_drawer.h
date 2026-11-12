@@ -22,6 +22,8 @@
 //   代理方式→rule_fallback+patch_clash_mode；开关→auto_launch/silent/
 //   allow-lan/ipv6；Mixed Port→verge_mixed_port（Enter 提交）；
 //   主题/滑条→ThemeService+clashwin-skin.json。
+#include <atomic>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -68,6 +70,8 @@ struct SkinPrefs {
 };
 SkinPrefs load_skin_prefs();
 void save_skin_prefs(const SkinPrefs& p);
+uint64_t skin_prefs_save_count();
+void reset_skin_prefs_save_count();
 // 取某皮肤的因子（未保存时按 skin_default_factors 缺省；retro-3d 回落 legacy 顶层字段）
 std::pair<float, float> skin_factors(const SkinPrefs& p, const std::string& skin);
 // 写入某皮肤的因子
@@ -194,6 +198,12 @@ class SettingsDrawer : public Stack {
   std::function<void()> on_add_rule;
   std::function<void()> on_unlock_check;
   std::function<void(bool open)> on_open_changed;
+  // BUG-358: 滑条拖动期 200ms 防抖落盘宿主定时器回调（← use-skin-controls.ts:4）
+  std::function<void(uint32_t delay_ms)> on_arm_skin_persist_timer;
+  std::function<void()> on_cancel_skin_persist_timer;
+
+  void flush_pending_skin_prefs();
+  bool has_pending_skin_prefs() const { return skin_prefs_dirty_; }
 
   void on_arrange(const RectF& area) override;
   void on_paint(IRenderTarget& rt) override;
@@ -272,6 +282,14 @@ class SettingsDrawer : public Stack {
   ContextMenu* url_menu_ = nullptr;          // URL 输入右键菜单（_layout.tsx:1859-1932）
   EditProfileModal* edit_profile_modal_ = nullptr;  // 编辑订阅（layout-dialogs.tsx:119-245）
   bool open_ = false;
+  bool skin_prefs_dirty_ = false;
+  std::string pending_skin_name_;
+  float pending_depth_ = 0.3f;     // src: src/pages/_layout/hooks/use-skin-controls.ts:45
+  float pending_vibrancy_ = 1.0f;  // src: src/pages/_layout/hooks/use-skin-controls.ts:49
+  bool has_last_persisted_ = false;
+  std::string last_persisted_skin_;
+  float last_persisted_depth_ = 0.0f;
+  float last_persisted_vibrancy_ = 0.0f;
 };
 
 }  // namespace clashwin::ui::scene

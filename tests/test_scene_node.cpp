@@ -84,9 +84,8 @@ UT_TEST(t13_delay_tier_mapping) {
   UT_CHECK(delay_tier(2000) == DelayTier::Slow);     // 拥塞期慢而可用
   UT_CHECK(delay_tier(4999) == DelayTier::Slow);
   UT_CHECK(delay_tier(5000) == DelayTier::Timeout);
-  // 文本 ← formatDelay
-  // src: proxy-item.tsx:215 未测（-1）不渲染数字/连字符，整段空白
-  UT_CHECK(format_delay(-1) == L"");
+  // 文本 ← formatDelay（BUG-357: 未测 -1 统一返回 "-"，与顶栏徽章及单节点可点占位对齐）
+  UT_CHECK(format_delay(-1) == L"-");
   UT_CHECK(format_delay(-2) == L"testing");
   UT_CHECK(format_delay(0) == L"Timeout");
   UT_CHECK(format_delay(250) == L"250");

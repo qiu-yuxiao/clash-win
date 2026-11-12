@@ -286,8 +286,13 @@ bool App::init() {
   app::Lifecycle::instance().set_window(main_window_);
   app::Lifecycle::instance().set_tray(tray_.get());
 
-  tray_->set_on_left_click([] {
-    app::Lifecycle::instance().exit_lightweight_mode();
+  tray_->set_on_left_click([this] {
+    if (main_window_ && main_window_->should_tray_click_hide(
+            app::Lifecycle::instance().is_in_lightweight_mode())) {
+      main_window_->close_to_lightweight();
+    } else {
+      app::Lifecycle::instance().exit_lightweight_mode();
+    }
   });
   tray_->set_on_toggle_lite_mode([] {
     if (app::Lifecycle::instance().is_in_lightweight_mode()) {
@@ -343,187 +348,173 @@ bool App::init() {
     // ← module/monitor.rs 守护线程（v3.2.4 BUG-315：双频 TCP:53 + DNS 兜底物理网络探测）
     auto net_probe = std::make_shared<core::CoreMonitor::ThrottledNetProbe>();
     auto& monitor = system::CoreMonitor::instance();
-    monitor.set_hooks({
-        /*.api_alive =*/[] {
-          return cmd::mihomo_unchecked().get_base_config().is_ok();
-        },
-        /*.core_alive =*/[] { return core::CoreManager::instance().core_alive(); },
-        /*.restart_core =*/
-        [] {
-          // ← Verge start_core_by_sidecar：先 generate_file(Run) 重生成运行时
-          //   产物再起内核（档案增删改后守护拉起才不会用陈旧配置）
-          auto outcome = cmd::run_enhance_pipeline();
-          if (!outcome.is_valid()) {
-            // 失败必须留痕：此前这里只有 WARN 且后续启动失败静默，
-            // 导致“内核反复静默退出→自动重启”却查不到 enhance 的真实错误
-            CWLOG_WARN("restart_core: enhance pipeline invalid: " + outcome.message);
-          } else {
-            CWLOG_INFO("restart_core: enhance pipeline ok（clash-win.yaml 已重生成）");
+    core::CoreMonitor::Hooks mh;
+    mh.api_alive = [] {
+      return cmd::mihomo_unchecked().get_base_config().is_ok();
+    };
+    mh.core_alive = [] { return core::CoreManager::instance().core_alive(); };
+    mh.restart_core = [] {
+      auto outcome = cmd::run_enhance_pipeline();
+      if (!outcome.is_valid()) {
+        CWLOG_WARN("restart_core: enhance pipeline invalid: " + outcome.message);
+      } else {
+        CWLOG_INFO("restart_core: enhance pipeline ok（clash-win.yaml 已重生成）");
+      }
+      auto& mgr = core::CoreManager::instance();
+      core::CoreApiClientAdapter api(&cmd::mihomo_unchecked());
+      core::CoreOps ops;
+      ops.start = [] {
+        return core::CoreManager::instance().start_auto(
+            util::dirs::clash_mini_path());
+      };
+      ops.stop = [] { return core::CoreManager::instance().stop(); };
+      auto rr = mgr.restart_with_restore(api, ops);
+      if (!rr.is_ok()) {
+        CWLOG_WARN("restart_core: 内核重启失败: " + rr.error().message);
+      }
+      events::EventBus::refresh_clash();
+      return rr;
+    };
+    mh.network_online = [net_probe] {
+      const int64_t now = static_cast<int64_t>(GetTickCount64());
+      return net_probe->check(now, [] {
+        std::string test_url = "https://cp.cloudflare.com/generate_204";
+        try {
+          const auto verge = config::Config::instance().verge().latest_arc();
+          if (verge && verge->default_latency_test &&
+              !verge->default_latency_test->empty()) {
+            test_url = *verge->default_latency_test;
           }
-          auto& mgr = core::CoreManager::instance();
-          core::CoreApiClientAdapter api(&cmd::mihomo_unchecked());
-          core::CoreOps ops;
-          ops.start = [] {
-            return core::CoreManager::instance().start_auto(
-                util::dirs::clash_mini_path());
-          };
-          ops.stop = [] { return core::CoreManager::instance().stop(); };
-          auto rr = mgr.restart_with_restore(api, ops);
-          if (!rr.is_ok()) {
-            CWLOG_WARN("restart_core: 内核重启失败: " + rr.error().message);
-          }
-          // ← Verge：内核起来后 handle.refresh_clash()，UI 据此重取 PROXY 组
-          //   （否则启动期 fetch 失败后主页列表永远空）
-          events::EventBus::refresh_clash();
-          return rr;
-        },
-        /*.network_online =*/
-        [net_probe] {
-          // ← monitor.rs:289-308 + :1275-1293（v3.2.4 BUG-315）：
-          //   在线 60s / 离线 5s 节流；优先 TCP:53 直连 223.5.5.5 / 119.29.29.29 /
-          //   1.1.1.1，避开 TUN 代理环路与 DNS 解析死锁，最后回退 test_url DNS 兜底。
-          const int64_t now = static_cast<int64_t>(GetTickCount64());
-          return net_probe->check(now, [] {
-            std::string test_url = "https://cp.cloudflare.com/generate_204";
-            try {
-              const auto verge = config::Config::instance().verge().latest_arc();
-              if (verge && verge->default_latency_test &&
-                  !verge->default_latency_test->empty()) {
-                test_url = *verge->default_latency_test;
-              }
-            } catch (...) {
-            }
-            return core::CoreMonitor::is_physical_network_online(2, test_url);
-          });
-        },
-        /*.node_healthy =*/
-        []() -> bool {
-          auto& client = cmd::mihomo_unchecked();
-          auto grp = client.get_group_by_name("PROXY");
-          if (grp.is_err() || !grp.value().now || grp.value().now->empty()) return true;
-          const std::string& active = *grp.value().now;
-          if (active == "DIRECT" || active == "REJECT") return true;
+        } catch (...) {
+        }
+        return core::CoreMonitor::is_physical_network_online(2, test_url);
+      });
+    };
+    mh.node_healthy = []() -> bool {
+      auto& client = cmd::mihomo_unchecked();
+      auto grp = client.get_group_by_name("PROXY");
+      if (grp.is_err() || !grp.value().now || grp.value().now->empty())
+        return true;
+      const std::string& active = *grp.value().now;
+      if (active == "DIRECT" || active == "REJECT") return true;
+      auto px = client.get_proxy_by_name(active);
+      if (px.is_err()) return false;
+      if (!px.value().alive) return false;
+      if (px.value().history.empty()) return false;
+      uint32_t delay = px.value().history.back().delay;
+      if (delay < core::kNodeDelayMinMs || delay >= core::kNodeDelayMaxMs)
+        return false;
+      return true;
+    };
+    mh.active_node_name = []() -> std::string {
+      auto grp = cmd::mihomo_unchecked().get_group_by_name("PROXY");
+      if (grp.is_err() || !grp.value().now) return std::string();
+      return *grp.value().now;
+    };
+    mh.is_dummy_active = []() -> bool {
+      auto grp = cmd::mihomo_unchecked().get_group_by_name("PROXY");
+      if (grp.is_err() || !grp.value().now || grp.value().now->empty())
+        return false;
+      return util::is_dummy_node(*grp.value().now);
+    };
+    mh.probe_metrics_with_fallback = []() -> bool {
+      auto& client = cmd::mihomo_unchecked();
+      auto grp = client.get_group_by_name("PROXY");
+      if (grp.is_ok() && grp.value().now && !grp.value().now->empty()) {
+        const std::string& active = *grp.value().now;
+        if (active != "DIRECT" && active != "REJECT") {
           auto px = client.get_proxy_by_name(active);
-          if (px.is_err()) return false;
-          if (!px.value().alive) return false;
-          if (px.value().history.empty()) return false;
-          uint32_t delay = px.value().history.back().delay;
-          if (delay < core::kNodeDelayMinMs || delay >= core::kNodeDelayMaxMs) return false;
-          return true;
-        },
-        /*.active_node_name =*/
-        []() -> std::string {
-          // ★ §5.1 切换宽限期的起算依据（← Mini monitor.rs:1358 读 active_node_name）
-          auto grp = cmd::mihomo_unchecked().get_group_by_name("PROXY");
-          if (grp.is_err() || !grp.value().now) return std::string();
-          return *grp.value().now;
-        },
-        /*.is_dummy_active =*/
-        []() -> bool {
-          // ★ §5.4 第 3 道铁锁（← Mini monitor.rs:663-666）
-          auto grp = cmd::mihomo_unchecked().get_group_by_name("PROXY");
-          if (grp.is_err() || !grp.value().now || grp.value().now->empty()) return false;
-          return util::is_dummy_node(*grp.value().now);
-        },
-        /*.probe_metrics_with_fallback =*/
-        []() -> bool {
-          // ★ §5.1 按需拨测门控（← Mini monitor.rs:63,70,673-683 evaluate_failover，v3.2.4 BUG-315）
-          //   活跃节点健康且数据新鲜(<20s) → 不拨测；已判死且 10s 内刚复核 → 不重复拨测；
-          //   其余才真正拨测，兼顾突发断流快速感知与防止探测风暴自激误报。
-          auto& client = cmd::mihomo_unchecked();
-          auto grp = client.get_group_by_name("PROXY");
-          if (grp.is_ok() && grp.value().now && !grp.value().now->empty()) {
-            const std::string& active = *grp.value().now;
-            if (active != "DIRECT" && active != "REJECT") {
-              auto px = client.get_proxy_by_name(active);
-              if (px.is_ok()) {
-                const auto& p = px.value();
-                int64_t rec_sec = -1;
-                if (!p.history.empty()) {
-                  // RFC3339 → epoch sec（与 node_data.cpp parse_iso_time_ms 同口径）
-                  const std::string& t = p.history.back().time;
-                  if (t.size() >= 19) {
-                    std::tm tm{};
-                    std::istringstream iss(t.substr(0, 19));
-                    iss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
-                    if (!iss.fail())
-                      rec_sec = static_cast<int64_t>(_mkgmtime(&tm));
-                  }
-                }
-                int64_t now_sec = static_cast<int64_t>(std::time(nullptr));
-                if (p.alive && rec_sec >= 0 &&
-                    (now_sec - rec_sec) < core::CoreMonitor::kHealthDataFreshSecs)
-                  return true;  // 健康且数据新鲜(<20s) → 免拨测
-                if (!p.alive && rec_sec >= 0 &&
-                    (now_sec - rec_sec) <
-                        core::CoreMonitor::kDeadConfirmMinIntervalSecs)
-                  return true;  // 死判定且 10s 内刚复核 → 免重复拨测
+          if (px.is_ok()) {
+            const auto& p = px.value();
+            int64_t rec_sec = -1;
+            if (!p.history.empty()) {
+              const std::string& t = p.history.back().time;
+              if (t.size() >= 19) {
+                std::tm tm{};
+                std::istringstream iss(t.substr(0, 19));
+                iss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
+                if (!iss.fail()) rec_sec = static_cast<int64_t>(_mkgmtime(&tm));
               }
             }
+            int64_t now_sec = static_cast<int64_t>(std::time(nullptr));
+            if (p.alive && rec_sec >= 0 &&
+                (now_sec - rec_sec) < core::CoreMonitor::kHealthDataFreshSecs)
+              return true;
+            if (!p.alive && rec_sec >= 0 &&
+                (now_sec - rec_sec) <
+                    core::CoreMonitor::kDeadConfirmMinIntervalSecs)
+              return true;
           }
+        }
+      }
 
-          // ★ §5.8 测速失真复核（← Mini monitor.rs:188-223 probe_metrics_group）
-          //   主测速地址整体失败 → 备用地址复核；主备双双整体失败 → 链路不可用。
-          std::string main_url = "https://cp.cloudflare.com/generate_204";
-          try {
-            const auto& verge = *config::Config::instance().verge().latest_arc();
-            main_url = verge.default_latency_test.value_or(main_url);
-          } catch (...) {
-          }
-          auto r = client.delay_group("PROXY__METRICS", main_url,
-                                      core::kNodeDelayMaxMs, 5000);
-          if (r.is_ok()) {
-            std::vector<std::pair<std::string, uint32_t>> vec;
-            for (const auto& [name, ms] : r.value()) vec.emplace_back(name, ms);
-            events::EventBus::backend_delay_results("PROXY", vec);
-            return true;
-          }
-          CWLOG_WARN(
-              "CoreMonitor: 主测速地址整体失败，改用备用地址复核: " + main_url);
-          auto r2 = client.delay_group("PROXY__METRICS",
-                                       "https://www.gstatic.com/generate_204",
-                                       core::kNodeDelayMaxMs, 5000);
-          if (r2.is_ok()) {
-            CWLOG_INFO(
-                "CoreMonitor: 备用测速地址可用 → 判定为主测速地址失真，节点侧正常");
-            std::vector<std::pair<std::string, uint32_t>> vec;
-            for (const auto& [name, ms] : r2.value()) vec.emplace_back(name, ms);
-            events::EventBus::backend_delay_results("PROXY", vec);
-            return true;
-          }
-          CWLOG_WARN("CoreMonitor: 主/备测速地址均整体失败 → 测速链路不可用");
-          return false;
-        },
-        /*.auto_select_trigger =*/
-        []() -> Result<bool> {
-          auto latest = config::Config::instance().profiles().latest_arc();
-          std::string uid = latest && latest->current ? *latest->current : "";
-          if (uid.empty()) return Result<bool>::err(Error{1, "no active profile"});
-          auto out = core::AutoSelect::instance().trigger(uid, std::nullopt,
-                                                          /*sort_type=*/1,
-                                                          /*select=*/true,
-                                                          /*skip_wait=*/false);
-          if (out.busy) return Result<bool>::ok(false);
-          if (!out.selected) return Result<bool>::err(Error{2, "auto_select failed"});
-          return Result<bool>::ok(true);
-        },
-        /*.alert =*/
-        [](const std::wstring& title, const std::wstring& text) {
-          MessageBoxW(nullptr, text.c_str(), title.c_str(),
-                      MB_OK | MB_ICONWARNING);
-        },
-        /*.current_uid =*/
-        [] {
-          auto latest = config::Config::instance().profiles().latest_arc();
-          return latest && latest->current ? *latest->current : std::string();
-        },
-        /*.is_headless =*/
-        [this] {
-          return !main_window_ || !main_window_->hwnd() ||
-                 !IsWindowVisible(main_window_->hwnd());
-        },
-        /*.now_ms =*/[] { return static_cast<int64_t>(GetTickCount64()); },
-    });
+      std::string main_url = "https://cp.cloudflare.com/generate_204";
+      try {
+        const auto& verge = *config::Config::instance().verge().latest_arc();
+        main_url = verge.default_latency_test.value_or(main_url);
+      } catch (...) {
+      }
+      auto r = client.delay_group("PROXY__METRICS", main_url,
+                                  core::kNodeDelayMaxMs, 5000);
+      if (r.is_ok()) {
+        std::vector<std::pair<std::string, uint32_t>> vec;
+        for (const auto& [name, ms] : r.value()) vec.emplace_back(name, ms);
+        events::EventBus::backend_delay_results("PROXY", vec,
+                                                /*from_probe=*/true);
+        return true;
+      }
+      CWLOG_WARN("CoreMonitor: 主测速地址整体失败，改用备用地址复核: " + main_url);
+      auto r2 = client.delay_group("PROXY__METRICS",
+                                   "https://www.gstatic.com/generate_204",
+                                   core::kNodeDelayMaxMs, 5000);
+      if (r2.is_ok()) {
+        CWLOG_INFO(
+            "CoreMonitor: 备用测速地址可用 → 判定为主测速地址失真，节点侧正常");
+        std::vector<std::pair<std::string, uint32_t>> vec;
+        for (const auto& [name, ms] : r2.value()) vec.emplace_back(name, ms);
+        events::EventBus::backend_delay_results("PROXY", vec,
+                                                /*from_probe=*/true);
+        return true;
+      }
+      CWLOG_WARN("CoreMonitor: 主/备测速地址均整体失败 → 测速链路不可用");
+      return false;
+    };
+    mh.auto_select_trigger = []() -> Result<bool> {
+      auto latest = config::Config::instance().profiles().latest_arc();
+      std::string uid = latest && latest->current ? *latest->current : "";
+      if (uid.empty()) return Result<bool>::err(Error{1, "no active profile"});
+      auto out = core::AutoSelect::instance().trigger(uid, std::nullopt,
+                                                      /*sort_type=*/0,
+                                                      /*select=*/true,
+                                                      /*skip_wait=*/false);
+      if (out.busy) return Result<bool>::err(Error{-2, "AUTO_SELECT_BUSY"});
+      if (!out.selected)
+        return Result<bool>::err(Error{2, "auto_select failed"});
+      return Result<bool>::ok(true);
+    };
+    mh.alert = [](const std::wstring& title, const std::wstring& text) {
+      static std::atomic<bool> s_alert_dialog_open{false};
+      bool expected = false;
+      if (!s_alert_dialog_open.compare_exchange_strong(expected, true)) {
+        CWLOG_INFO("CoreMonitor: 系统网络警报弹窗已在显示中，跳过重复弹窗");
+        return;
+      }
+      std::thread([title, text] {
+        MessageBoxW(nullptr, text.c_str(), title.c_str(),
+                    MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
+        s_alert_dialog_open.store(false);
+      }).detach();
+    };
+    mh.current_uid = [] {
+      auto latest = config::Config::instance().profiles().latest_arc();
+      return latest && latest->current ? *latest->current : std::string();
+    };
+    mh.is_headless = [this] {
+      return !main_window_ || !main_window_->hwnd() ||
+             !IsWindowVisible(main_window_->hwnd());
+    };
+    mh.now_ms = [] { return static_cast<int64_t>(GetTickCount64()); };
+    monitor.set_hooks(std::move(mh));
 
     // ← clash.rs::start_core（启动收敛）：主动重生成运行时配置并拉起内核。
     //   此前这里只装配 CoreMonitor hooks，从不主动 start_core，只能等守护
