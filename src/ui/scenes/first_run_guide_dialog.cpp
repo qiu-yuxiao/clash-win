@@ -356,6 +356,7 @@ FirstRunGuideDialog::FirstRunGuideDialog(Widget* parent) : Widget(parent) {
   url_field_ = uf.get();
   url_field_->set_placeholder(
       L"https://example.com/api/v1/client/subscribe?token=...");
+  url_field_->set_i18n_a11y_name("settings.mini.importPlaceholder");
   url_field_->apply_theme();  // ← get3DInputStyle 6 套皮肤查表
   url_field_->style_.size = 13;
   url_field_->height_ = kFieldH;  // src: size="small" 输入框高 40
@@ -1376,6 +1377,159 @@ void FirstRunGuideDialog::open_url_menu(PointF anchor) {
   };
   // ContextMenu 是 dialog 子件：锚点转 dialog 局部坐标
   url_menu_->open(its, to_local(anchor));
+}
+
+std::wstring FirstRunGuideDialog::a11y_default_name() const {
+  return step_ == FirstRunStep::Input
+             ? tr("layout.components.firstRun.title")
+             : tr("layout.components.firstRun.readyTitle");
+}
+
+size_t FirstRunGuideDialog::a11y_virtual_child_count() const {
+  if (step_ == FirstRunStep::Input) {
+    return (!detected_clipboard_url_.empty() && url_.empty()) ? 5u : 4u;
+  }
+  const bool show_retest = !proxy_ready() && (unconfirmed() || retesting_);
+  return show_retest ? 5u : 4u;
+}
+
+A11ySubItem FirstRunGuideDialog::a11y_virtual_child(size_t idx) const {
+  A11ySubItem sub;
+  if (step_ == FirstRunStep::Input) {
+    if (idx == 0) {
+      sub.role = A11yRole::Text;
+      sub.name = tr("layout.components.firstRun.intro");
+      sub.local_bounds = card_rect_;
+    } else if (idx == 1) {
+      sub.role = A11yRole::Button;
+      sub.name = tr("layout.components.firstRun.paste");
+      sub.local_bounds = btn_paste_rect_;
+      sub.can_invoke = !is_importing_;
+      sub.enabled = !is_importing_;
+    } else if (idx == 2) {
+      sub.role = A11yRole::Button;
+      sub.name = tr("layout.components.firstRun.importAndStart");
+      sub.local_bounds = btn_submit_rect_;
+      sub.can_invoke = !is_importing_;
+      sub.enabled = !is_importing_;
+    } else if (idx == 3) {
+      sub.role = A11yRole::Button;
+      sub.name = tr("layout.components.firstRun.later");
+      sub.local_bounds = btn_later_rect_;
+      sub.can_invoke = !is_importing_;
+      sub.enabled = !is_importing_;
+    } else {
+      sub.role = A11yRole::Button;
+      sub.name = tr("layout.components.firstRun.clipboardDetected");
+      sub.local_bounds = banner_clip_rect_;
+      sub.can_invoke = !is_importing_;
+      sub.enabled = !is_importing_;
+    }
+    return sub;
+  }
+  if (idx == 0) {
+    sub.role = A11yRole::Text;
+    std::wstring msg = proxy_ready()
+                           ? tr("layout.components.firstRun.readyOk")
+                           : (unconfirmed()
+                                  ? tr("layout.components.firstRun.readyUnconfirmed")
+                                  : tr("layout.components.firstRun.checking"));
+    if (!active_node_name_.empty()) {
+      msg += L" - " + utf::utf8_to_utf16(active_node_name_);
+    }
+    sub.name = msg;
+    sub.local_bounds = card_node_rect_;
+  } else if (idx == 1) {
+    sub.role = A11yRole::Button;
+    sub.name = tr("layout.components.firstRun.openWiki");
+    sub.local_bounds = btn_wiki_rect_;
+    sub.can_invoke = true;
+  } else if (idx == 2) {
+    sub.role = A11yRole::Button;
+    sub.name = tr("layout.components.firstRun.openGithubStar");
+    sub.local_bounds = btn_finish_star_rect_;
+    sub.can_invoke = true;
+  } else if (idx == 3) {
+    sub.role = A11yRole::Button;
+    sub.name = tr("layout.components.firstRun.finish");
+    sub.local_bounds = btn_finish_rect_;
+    sub.can_invoke = true;
+  } else {
+    sub.role = A11yRole::Button;
+    sub.name = tr("layout.components.firstRun.retestNodes");
+    sub.local_bounds = btn_retest_rect_;
+    sub.can_invoke = !retesting_;
+    sub.enabled = !retesting_;
+  }
+  return sub;
+}
+
+bool FirstRunGuideDialog::a11y_invoke_virtual_child(size_t idx) {
+  if (!open_ || !enabled()) return false;
+  if (step_ == FirstRunStep::Input) {
+    if (is_importing_) return false;
+    if (idx == 1) {
+      std::string clip = read_clipboard_url();
+      if (!clip.empty()) {
+        set_url(clip);
+      } else if (url_field_) {
+        url_field_->clear_text();
+        url_field_->paste();
+      }
+      if (url_field_) url_field_->request_focus();
+      return true;
+    }
+    if (idx == 2) {
+      submit_import();
+      return true;
+    }
+    if (idx == 3) {
+      finish();
+      if (on_dismiss_later) on_dismiss_later();
+      return true;
+    }
+    if (idx == 4 && !detected_clipboard_url_.empty() && url_.empty()) {
+      set_url(detected_clipboard_url_);
+      if (url_field_) url_field_->request_focus();
+      return true;
+    }
+    return false;
+  }
+  if (idx == 1) {
+    if (on_open_wiki) {
+      on_open_wiki();
+    } else {
+      ShellExecuteW(nullptr, L"open",
+                    L"https://github.com/qiu-yuxiao/clash-win/wiki", nullptr,
+                    nullptr, SW_SHOWNORMAL);
+    }
+    return true;
+  }
+  if (idx == 2) {
+    if (on_open_github) {
+      on_open_github();
+    } else {
+      ShellExecuteW(nullptr, L"open", L"https://github.com/qiu-yuxiao/clash-win",
+                    nullptr, nullptr, SW_SHOWNORMAL);
+    }
+    finish();
+    return true;
+  }
+  if (idx == 3) {
+    finish();
+    return true;
+  }
+  if (idx == 4 && !proxy_ready() && !retesting_) {
+    retesting_ = true;
+    gave_up_ = false;
+    ready_started_ms_ = 0;
+    last_poll_ms_ = 0;
+    if (bounds().w > 0.0f && bounds().h > 0.0f) on_arrange(bounds());
+    invalidate();
+    if (on_retest_nodes) on_retest_nodes();
+    return true;
+  }
+  return false;
 }
 
 }  // namespace clashwin::ui::scene

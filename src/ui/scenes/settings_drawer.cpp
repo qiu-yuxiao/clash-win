@@ -440,6 +440,7 @@ TakeoverCard::TakeoverCard() : Widget(nullptr) {
   add_child(std::move(t));
   auto seg = std::make_unique<TakeoverSegmented>();
   seg_ = seg.get();
+  seg_->set_a11y_labelled_by(title_);
   // TakeoverSegmented 自绘金渐变段（quick_bar.cpp，源码 takeover-mode-card.tsx）
   add_child(std::move(seg));
   auto hint = std::make_unique<Label>();
@@ -479,6 +480,7 @@ RoutingCard::RoutingCard() : Widget(nullptr) {
                            "settings.mini.gfwlistTooltip",
                            "settings.mini.addUrlTooltip"});
   style_gold_segmented(seg_);
+  seg_->set_a11y_labelled_by(title_);
   add_child(std::move(seg));
   auto hint = std::make_unique<Label>();
   hint_ = hint.get();
@@ -533,6 +535,7 @@ BasicCard::BasicCard() : Widget(nullptr) {
     add_child(std::move(lb));
     auto sw = std::make_unique<SwitchW>();
     *defs[i].slot = sw.get();
+    sw->set_a11y_labelled_by(labels_[i]);
     add_child(std::move(sw));
   }
   auto pl = std::make_unique<Label>();
@@ -547,6 +550,7 @@ BasicCard::BasicCard() : Widget(nullptr) {
   port_field_ = pf.get();
   style_input(port_field_);
   port_field_->set_text(std::to_wstring(static_cast<uint32_t>(config::consts::kDefaultMixed)));
+  port_field_->set_a11y_labelled_by(port_label_);
   add_child(std::move(pf));
   auto btn = std::make_unique<Button>();
   btn->set_i18n_text("shared.actions.save");
@@ -649,6 +653,7 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
                                "settings.sections.appearance.light",
                                "settings.sections.appearance.dark"}, 0);
   style_gold_segmented_small(mode_seg_);
+  mode_seg_->set_a11y_labelled_by(title_);
   add_child(std::move(mode));
   auto dl = std::make_unique<Label>();
   depth_label_ = dl.get();
@@ -676,6 +681,7 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
     depth_slider_->step_ = 0.1f;
   }
   style_slider(depth_slider_);
+  depth_slider_->set_a11y_labelled_by(depth_label_);
   add_child(std::move(ds));
   auto dv = std::make_unique<Label>();
   depth_value_ = dv.get();
@@ -715,6 +721,7 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
     vibrancy_slider_->step_ = 0.1f;
   }
   style_slider(vibrancy_slider_);
+  vibrancy_slider_->set_a11y_labelled_by(vibrancy_label_);
   add_child(std::move(vs));
   auto vv = std::make_unique<Label>();
   vibrancy_value_ = vv.get();
@@ -878,6 +885,9 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
   bottom_help_->text_style.weight = static_cast<int>(Weight::Bold);
   bottom_help_->on_click = [this]() { open_help_menu(); };
   bottom_help_->set_tooltip_text(tr("layout.components.helpMenu.buttonAriaLabel"));  // src: locales/zh/layout.json:40 buttonAriaLabel
+  bottom_help_->set_i18n_a11y_name("layout.components.helpMenu.buttonAriaLabel");
+  bottom_help_->set_a11y_expanded_getter(
+      [this]() { return help_menu_ && help_menu_->is_open(); });
   panel_->add_child(std::move(bh));
 
   auto lb = std::make_unique<Button>(L"Language");
@@ -885,6 +895,10 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
   style_cell(lang_btn_, 11.0f);  // src: _layout.tsx:1586 fontSize 11
   lang_btn_->text_style.weight = 700;  // src: :1587 fontWeight 'bold'
   lang_btn_->text_style.font_family.clear();  // src: :1588 var(--control-font-family)
+  lang_btn_->set_a11y_role(A11yRole::ComboBox);
+  lang_btn_->set_i18n_a11y_name("layout.a11y.selectLanguage");
+  lang_btn_->set_a11y_expanded_getter(
+      [this]() { return lang_menu_ && lang_menu_->is_open(); });
   panel_->add_child(std::move(lb));
 
   auto lm = std::make_unique<ContextMenu>();
@@ -935,6 +949,7 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
     const auto& fc = theme::skin_font_candidates(kSkinIds[i]);
     if (!fc.empty()) raw->text_style.font_family = fc.front();
     raw->on_click = [this, i]() { select_skin(i); };
+    raw->set_a11y_toggle_getter([raw]() { return raw->selected; });
     skin_row_.push_back(raw);
     panel_->add_child(std::move(b));
   }
@@ -956,6 +971,7 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
   // 图标色由 CloseButton::on_paint 按 button_paint("primary").text 实时取
   // （src: button-styles.ts:35 primary contained textColor，逐皮肤）
   close_btn_->on_click = [this]() { set_open(false); };
+  close_btn_->set_i18n_a11y_name("layout.a11y.closeSettings");  // src: src/pages/_layout.tsx:1299
   close_btn_->set_z_order(9999);  // src: _layout.tsx:1286「zIndex: 9999」
   close_btn_->set_visible(false);
   add_child(std::move(close));
@@ -1778,6 +1794,10 @@ void SettingsDrawer::on_paint(IRenderTarget& rt) {
   if (theme_rect_.y < area.h) draw_card_bg(rt, theme_rect_);
   rt.pop_clip();
   if (ThemeService::instance().panel_paint().pulse) invalidate();
+}
+
+std::wstring SettingsDrawer::a11y_default_name() const {
+  return tr("settings.components.verge.basic.title");
 }
 
 }  // namespace clashwin::ui::scene

@@ -280,4 +280,49 @@ bool ConnectionDetailDialog::on_key(const KeyEvent& e) {
   return false;
 }
 
+std::wstring ConnectionDetailDialog::a11y_default_name() const {
+  return tr("connections.components.contextMenu.viewDetail") + L" - " +
+         utf::utf8_to_utf16(item_.host_formatted());
+}
+
+size_t ConnectionDetailDialog::a11y_virtual_child_count() const {
+  return closed_ ? 2u : 3u;
+}
+
+A11ySubItem ConnectionDetailDialog::a11y_virtual_child(size_t idx) const {
+  A11ySubItem sub;
+  if (idx == 0) {
+    sub.role = A11yRole::Text;
+    std::wstring summary;
+    for (const auto& [lbl, val] : fields()) {
+      if (!summary.empty()) summary += L"; ";
+      summary += lbl + L": " + val;
+    }
+    sub.name = summary;
+    sub.local_bounds = card_rect_;
+    return sub;
+  }
+  sub.role = A11yRole::Button;
+  sub.can_invoke = enabled();
+  if (!closed_ && idx == 1) {
+    sub.name = tr("connections.components.actions.closeConnection");
+    sub.local_bounds = btn_close_conn_rect_;
+  } else {
+    sub.name = tr("shared.actions.close");
+    sub.local_bounds = btn_dismiss_rect_;
+  }
+  return sub;
+}
+
+bool ConnectionDetailDialog::a11y_invoke_virtual_child(size_t idx) {
+  if (!open_ || !enabled() || idx == 0) return false;
+  if (!closed_ && idx == 1) {
+    if (on_close_connection) on_close_connection(item_.id);
+    close();
+    return true;
+  }
+  close();
+  return true;
+}
+
 }  // namespace clashwin::ui::scene

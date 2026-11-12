@@ -71,6 +71,17 @@ class SnackbarW : public Widget {
     return false;
   }
 
+  bool a11y_subtree_visible() const override {
+    return visible() && !a11y_hidden() && !items_.empty();
+  }
+  A11yRole a11y_default_role() const override { return A11yRole::StatusBar; }
+  std::wstring a11y_default_name() const override;
+  size_t a11y_virtual_child_count() const override {
+    return std::min(items_.size(), item_rects_.size());
+  }
+  A11ySubItem a11y_virtual_child(size_t index) const override;
+  bool a11y_invoke_virtual_child(size_t index) override;
+
   // 测试断言：第 i 条在自身坐标系的矩形
   const std::vector<RectF>& item_rects() const { return item_rects_; }
   void layout_items();  // 依 bounds + position_ 计算 item_rects_
@@ -92,6 +103,7 @@ class SnackbarW : public Widget {
   std::string position_ = "top-right";
   events::NoticeService* svc_ = nullptr;
   uint64_t sub_id_ = 0;
+  uint64_t last_announced_id_ = 0;
 };
 
 }  // namespace clashwin::ui

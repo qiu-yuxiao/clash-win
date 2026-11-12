@@ -54,6 +54,64 @@ struct KeyEvent {
   bool handled = false;
 };
 
+// ---------- Win32 UI Automation 无障碍语义模型 ----------
+// 豁免: Mini 无对应物 — 原生 UIA 控件角色与虚拟子项描述结构（出处: 无）
+enum class A11yRole {
+  None = 0,
+  Window,
+  Pane,
+  Group,
+  Dialog,
+  TitleBar,
+  ToolBar,
+  StatusBar,
+  Text,
+  Button,
+  CheckBox,
+  RadioButton,
+  Edit,
+  Slider,
+  ComboBox,
+  List,
+  ListItem,
+  Menu,
+  MenuItem,
+  Tab,
+  TabItem,
+};
+
+struct A11yRange {
+  double val = 0.0;
+  double min_val = 0.0;
+  double max_val = 1.0;
+  double small_step = 0.05;
+  double large_step = 0.2;
+};
+
+struct A11yPosInSet {
+  int pos = 0;   // 1-based 序号
+  int size = 0;  // 集合总数
+};
+
+struct A11ySubItem {
+  A11yRole role = A11yRole::Button;
+  std::wstring name;
+  std::wstring value;
+  std::wstring help_text;
+  std::wstring automation_id;
+  RectF local_bounds{};  // 父 Widget 局部逻辑坐标 (DIP)
+  bool enabled = true;
+  bool focusable = true;
+  bool has_focus = false;
+  bool can_invoke = false;
+  std::optional<bool> toggle_state;
+  std::optional<bool> selected;
+  std::optional<bool> expanded;
+  bool can_set_value = false;
+  int pos_in_set = 0;
+  int size_of_set = 0;
+};
+
 class Widget {
  public:
   explicit Widget(Widget* parent = nullptr);
@@ -141,11 +199,92 @@ class Widget {
   // ---- tooltip 钩子（TooltipHost 扫描用；返回空=无提示） ----
   void set_tooltip_text(std::wstring t) { tooltip_text_ = std::move(t); }
   void set_i18n_tooltip(const char* key) { bind_i18n_text(&tooltip_text_, key); }
-  virtual std::wstring tooltip_text() const { return tooltip_text_; }
+  virtual std::wstring tooltip_text() const {
+    ensure_i18n_fresh();
+    return tooltip_text_;
+  }
   // 可选：指定提示锚定矩形（全局 DIP 坐标，如分段器的当前悬停子段、输入框清空钮）
   virtual std::optional<RectF> tooltip_anchor_rect() const { return std::nullopt; }
   // 可选：对齐 Mini <Tooltip placement="top" arrow>（分段器悬停提示）
   virtual bool tooltip_prefer_top_arrow() const { return false; }
+
+  // ---- Win32 UI Automation 无障碍钩子 ----
+  void set_a11y_role(A11yRole r) { a11y_role_ = r; }
+  A11yRole a11y_role() const {
+    return a11y_role_ != A11yRole::None ? a11y_role_ : a11y_default_role();
+  }
+  void set_a11y_name(std::wstring n) { a11y_name_ = std::move(n); }
+  void set_i18n_a11y_name(const char* key) { bind_i18n_text(&a11y_name_, key); }
+  void set_a11y_automation_id(std::wstring id) { a11y_automation_id_ = std::move(id); }
+  const std::wstring& a11y_automation_id() const { return a11y_automation_id_; }
+  void set_a11y_labelled_by(const Widget* label_w) { a11y_labelled_by_ = label_w; }
+  const Widget* a11y_labelled_by() const { return a11y_labelled_by_; }
+  void set_a11y_hidden(bool h) { a11y_hidden_ = h; }
+  bool a11y_hidden() const { return a11y_hidden_; }
+  void set_a11y_toggle_getter(std::function<std::optional<bool>()> fn) {
+    a11y_toggle_getter_ = std::move(fn);
+  }
+  void set_a11y_expanded_getter(std::function<std::optional<bool>()> fn) {
+    a11y_expanded_getter_ = std::move(fn);
+  }
+
+  virtual bool a11y_subtree_visible() const { return visible_ && !a11y_hidden_; }
+  virtual bool a11y_is_modal() const { return false; }
+  virtual A11yRole a11y_default_role() const { return A11yRole::None; }
+  virtual std::wstring a11y_default_name() const { return {}; }
+  std::wstring a11y_name() const;
+  virtual std::wstring a11y_value() const { return {}; }
+  virtual std::wstring a11y_help_text() const;
+  virtual bool a11y_is_focusable() const { return wants_key() && enabled_; }
+  virtual bool a11y_can_invoke() const { return false; }
+  virtual bool a11y_invoke() { return false; }
+  virtual std::optional<bool> a11y_toggle_state() const {
+    return a11y_toggle_getter_ ? a11y_toggle_getter_() : std::nullopt;
+  }
+  virtual bool a11y_toggle() {
+    return a11y_toggle_state().has_value() ? a11y_invoke() : false;
+  }
+  virtual bool a11y_can_set_value() const { return false; }
+  virtual bool a11y_set_value(const std::wstring& v) {
+    (void)v;
+    return false;
+  }
+  virtual std::optional<A11yRange> a11y_range() const { return std::nullopt; }
+  virtual bool a11y_set_range(double v) {
+    (void)v;
+    return false;
+  }
+  virtual std::optional<bool> a11y_is_selected() const { return std::nullopt; }
+  virtual bool a11y_select() { return false; }
+  virtual std::optional<bool> a11y_expanded() const {
+    return a11y_expanded_getter_ ? a11y_expanded_getter_() : std::nullopt;
+  }
+  virtual bool a11y_expand_collapse(bool expand) {
+    (void)expand;
+    return a11y_expanded().has_value() ? a11y_invoke() : false;
+  }
+  virtual std::optional<A11yPosInSet> a11y_pos_in_set() const { return std::nullopt; }
+
+  // 自绘复合控件的虚拟无障碍子项（如 Segmented 子段、MenuList 菜单项、弹窗自绘钮）
+  virtual size_t a11y_virtual_child_count() const { return 0; }
+  virtual A11ySubItem a11y_virtual_child(size_t index) const {
+    (void)index;
+    return {};
+  }
+  virtual bool a11y_invoke_virtual_child(size_t index) {
+    (void)index;
+    return false;
+  }
+  virtual bool a11y_set_virtual_child_value(size_t index, const std::wstring& v) {
+    (void)index;
+    (void)v;
+    return false;
+  }
+  void ensure_i18n_fresh() const;
+  // 豁免: Mini 无对应物 — 虚拟滚动容器暴露当前物化行子控件供 UIA 与键盘导航遍历（出处: 无）
+  virtual void collect_transient_children(std::vector<Widget*>& out) const {
+    (void)out;
+  }
 
   // ---- flex 权重（Column/Row 主轴分配；0 = 固定尺寸） ----
   float flex_weight = 0;
@@ -193,12 +332,21 @@ class Widget {
   int z_order_ = 0;
   std::wstring tooltip_text_;
 
+  A11yRole a11y_role_ = A11yRole::None;
+  std::wstring a11y_name_;
+  std::wstring a11y_automation_id_;
+  const Widget* a11y_labelled_by_ = nullptr;
+  bool a11y_hidden_ = false;
+  std::function<std::optional<bool>()> a11y_toggle_getter_;
+  std::function<std::optional<bool>()> a11y_expanded_getter_;
+
   struct I18nSlot {
     std::wstring* slot;
     std::string key;
   };
   std::vector<I18nSlot> i18n_slots_;
   uint64_t root_i18n_revision_ = 0;
+  mutable uint64_t widget_i18n_rev_ = 0;
   void apply_i18n();
   void refresh_i18n_tree();
 };

@@ -35,6 +35,11 @@ class MenuList : public Widget {
   bool on_mouse(const MouseEvent& e) override;
   void on_paint(IRenderTarget& rt) override;
 
+  A11yRole a11y_default_role() const override { return A11yRole::Menu; }
+  size_t a11y_virtual_child_count() const override;
+  A11ySubItem a11y_virtual_child(size_t index) const override;
+  bool a11y_invoke_virtual_child(size_t index) override;
+
   float content_height() const;
   float scroll_y() const { return scroll_y_; }
   void set_scroll_y(float sy);
@@ -170,6 +175,9 @@ class ContextMenu : public Widget {
   // 未打开时不参与命中
   bool hit_self(PointF local) const override {
     return open_ && Widget::hit_self(local);
+  }
+  bool a11y_subtree_visible() const override {
+    return open_ && visible() && !a11y_hidden();
   }
 
  private:

@@ -42,6 +42,7 @@ class TooltipHost : public Widget {
   void on_paint(IRenderTarget& rt) override;
   // 提示层不拦截命中（否则显示期间鼠标事件全被它吃掉）
   bool hit_self(PointF) const override { return false; }
+  bool a11y_subtree_visible() const override { return false; }
 
   // 绘制参数（MUI tooltip：深灰底白字）
   Color4f bg_ = Color4f::hex(0x616161, 0.95f);  // src: MUI grey[700] rgba(97,97,97,.95)

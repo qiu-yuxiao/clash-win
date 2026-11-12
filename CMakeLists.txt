@@ -220,6 +220,7 @@ add_library(clashwin_ui STATIC
   src/ui/title_bar.cpp
   src/ui/main_scene.cpp
   src/ui/main_window.cpp
+  src/ui/uia_provider.cpp
   src/ui/help_menu.cpp
 )
 target_include_directories(clashwin_ui PUBLIC
@@ -227,7 +228,7 @@ target_include_directories(clashwin_ui PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 target_link_libraries(clashwin_ui PUBLIC clashwin_util clashwin_cmd clashwin_i18n clashwin_system
-  d2d1 dwrite windowscodecs user32)
+  d2d1 dwrite windowscodecs user32 uiautomationcore oleaut32 ole32)
 target_compile_options(clashwin_ui PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
 # app 应用聚合与生命周期/单实例/深链（T19）
@@ -361,6 +362,7 @@ add_executable(clashwin_test
   tests/test_t37_pixel_and_popup_parity.cpp
   tests/test_t38_notice_parity.cpp
   tests/test_t39_guardian.cpp
+  tests/test_uia_accessibility.cpp
   tests/test_coexist.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_app clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32 bcrypt)

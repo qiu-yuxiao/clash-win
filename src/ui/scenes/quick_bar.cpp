@@ -138,7 +138,8 @@ QuickBar::QuickBar(Widget* parent) : Row(parent) {
   auto act = std::make_unique<Label>();
   active_label_ = act.get();
   active_label_->style.size = 11;  // src: :251
-  active_label_->set_text(tr("settings.mini.activeNodeLabel"));
+  active_label_->set_i18n_text("settings.mini.activeNodeLabel");
+  active_label_->set_a11y_hidden(true);
   add_child(std::move(act));
 
   // 协议胶囊文字（11px 粗体 + 1px 边框 + 圆角 4 + px6.4/py1.6；≤480 隐藏）
@@ -148,6 +149,7 @@ QuickBar::QuickBar(Widget* parent) : Row(parent) {
   proto_label_->style.size = 11;                            // src: :266
   proto_label_->style.weight = static_cast<int>(Weight::Bold);  // src: :265
   proto_label_->set_text(L"Direct");  // src: :278 「|| 'Direct'」
+  proto_label_->set_a11y_hidden(true);
   add_child(std::move(proto));
 
   // 当前节点名（12px 粗体、单行省略）
@@ -162,6 +164,7 @@ QuickBar::QuickBar(Widget* parent) : Row(parent) {
   node_label_->style.weight = static_cast<int>(Weight::Bold);
   node_label_->style.color = Color4f::hex(0x2C1F03);
   node_label_->style.ellipsis = true;
+  node_label_->set_a11y_hidden(true);
   add_child(std::move(label));
 
   // 徽章：wifi + 延迟数（字色随主题；胶囊底在 on_paint 绘制）
@@ -172,6 +175,7 @@ QuickBar::QuickBar(Widget* parent) : Row(parent) {
   wifi_->size_ = 12;  // src: active-node-card.tsx:350 MuiChip-icon fontSize 12px
   wifi_->color_ = Color4f::hex(0x0075FF);
   wifi_->set_visible(false);
+  wifi_->set_a11y_hidden(true);
   add_child(std::move(wifi));
 
   auto dl = std::make_unique<Label>();
@@ -180,6 +184,7 @@ QuickBar::QuickBar(Widget* parent) : Row(parent) {
   delay_label_->style.weight = 600;  // src: active-node-card.tsx:333-336 Chip label weight 600
   delay_label_->style.color = Color4f::hex(0x0075FF);
   delay_label_->set_visible(false);
+  delay_label_->set_a11y_hidden(true);
   add_child(std::move(dl));
 
   // 节点地址 "(server:port)"（11px 粗体；≤400 隐藏）
@@ -190,6 +195,7 @@ QuickBar::QuickBar(Widget* parent) : Row(parent) {
   addr_label_->style.weight = static_cast<int>(Weight::Bold);   // src: :361
   addr_label_->style.ellipsis = true;
   addr_label_->set_visible(false);  // 无地址时不渲染（src: :356 {nodeAddr && ...}）
+  addr_label_->set_a11y_hidden(true);
   add_child(std::move(addr));
 
   // 图钉（置顶窗口 T19）：28×28 命中盒，3D 按钮底在 on_paint 铺
@@ -200,7 +206,9 @@ QuickBar::QuickBar(Widget* parent) : Row(parent) {
   pin->color_ = Color4f::hex(0x888888);
   pin->box_w = 28;
   pin->box_h = 28;
-  pin->set_tooltip_text(tr("layout.a11y.pinWindow"));  // src: locales/zh/layout.json:100 a11y.pinWindow
+  pin->set_i18n_tooltip("layout.a11y.pinWindow");  // src: src/pages/_layout.tsx:1332
+  pin->set_i18n_a11y_name("layout.a11y.pinWindow");
+  pin->set_a11y_toggle_getter([this]() -> std::optional<bool> { return pinned_; });
   pin->on_click = [this] {
     if (on_toggle_pin) on_toggle_pin();
   };
@@ -214,7 +222,8 @@ QuickBar::QuickBar(Widget* parent) : Row(parent) {
   gear->color_ = Color4f::hex(0x2C1F03);
   gear->box_w = 28;
   gear->box_h = 28;
-  gear->set_tooltip_text(tr("layout.a11y.openSettings"));  // src: locales/zh/layout.json:101 a11y.openSettings
+  gear->set_i18n_tooltip("layout.a11y.openSettings");  // src: src/pages/_layout.tsx:1373
+  gear->set_i18n_a11y_name("layout.a11y.openSettings");
   gear->on_click = [this] {
     if (on_open_settings) on_open_settings();
   };
@@ -222,6 +231,63 @@ QuickBar::QuickBar(Widget* parent) : Row(parent) {
 }
 
 QuickBar::~QuickBar() = default;
+
+size_t QuickBar::a11y_virtual_child_count() const {
+  return has_badge_ ? 2 : 1;
+}
+
+A11ySubItem QuickBar::a11y_virtual_child(size_t index) const {
+  A11ySubItem sub;
+  if (index == 0) {
+    sub.role = A11yRole::Button;
+    std::wstring n = tr("settings.mini.activeNodeLabel");
+    if (node_label_ && !node_label_->text.empty()) {
+      n += node_label_->text;
+    }
+    if (proto_label_ && !proto_label_->text.empty()) {
+      n += L", " + proto_label_->text;
+    }
+    if (has_badge_ && delay_label_ && !delay_label_->text.empty()) {
+      n += L", " + delay_label_->text;
+    }
+    sub.name = std::move(n);
+    sub.help_text = tr("settings.mini.rotateNodeTooltip");
+    // 豁免: Mini 无对应物 — 快捷条活跃节点卡无障碍命中框（出处: 无）
+    const float card_w = std::max(0.0f, bounds().w - 72.0f);
+    sub.local_bounds = {8.0f, 1.0f, card_w, 28.0f};
+    sub.enabled = enabled();
+    sub.focusable = enabled();
+    sub.can_invoke = enabled() && static_cast<bool>(on_cycle_node);
+    return sub;
+  }
+  if (index == 1 && has_badge_) {
+    sub.role = A11yRole::Button;
+    std::wstring n = tr("proxies.page.tooltips.delayCheck");
+    if (delay_label_ && !delay_label_->text.empty()) {
+      n += L": " + delay_label_->text;
+    }
+    sub.name = std::move(n);
+    sub.local_bounds = chip_rect_;
+    sub.enabled = enabled();
+    sub.focusable = enabled();
+    sub.can_invoke = enabled() && static_cast<bool>(on_test_delay);
+    return sub;
+  }
+  return sub;
+}
+
+bool QuickBar::a11y_invoke_virtual_child(size_t index) {
+  if (!enabled()) return false;
+  if (index == 0 && on_cycle_node) {
+    on_cycle_node();
+    return true;
+  }
+  if (index == 1 && has_badge_ && on_test_delay) {
+    on_test_delay();
+    return true;
+  }
+  return false;
+}
 
 SizeF QuickBar::on_measure(float max_w, float max_h) {
   SizeF s = Row::on_measure(max_w, max_h);
@@ -595,6 +661,39 @@ void QuickBar::on_paint(IRenderTarget& rt) {
 
 // ---------- TakeoverSegmented ----------
 TakeoverSegmented::~TakeoverSegmented() = default;
+
+A11ySubItem TakeoverSegmented::a11y_virtual_child(size_t index) const {
+  A11ySubItem sub;
+  if (index >= 3) return sub;
+  const int idx = static_cast<int>(index);
+  sub.role = A11yRole::RadioButton;
+  sub.name = takeover_label(idx);
+  if (idx == 0) sub.help_text = tr("settings.mini.takeoverTooltipManual");
+  else if (idx == 1) sub.help_text = tr("settings.mini.takeoverTooltipSystem");
+  else sub.help_text = tr("settings.mini.takeoverTooltipTun");
+  const float seg_w = bounds().w / 3.0f;
+  sub.local_bounds = {seg_w * static_cast<float>(idx), 0.0f, seg_w, bounds().h};
+  sub.enabled = enabled();
+  sub.focusable = enabled();
+  sub.can_invoke = enabled();
+  sub.selected = (mode_ == takeover_mode(idx));
+  sub.pos_in_set = idx + 1;
+  sub.size_of_set = 3;
+  return sub;
+}
+
+bool TakeoverSegmented::a11y_invoke_virtual_child(size_t index) {
+  if (!enabled() || index >= 3) return false;
+  const std::string next = takeover_mode(static_cast<int>(index));
+  if (next == mode_) return true;
+  if (!apply || apply(next)) {
+    mode_ = next;
+    invalidate();
+  } else if (on_apply_failed) {
+    on_apply_failed(next);
+  }
+  return true;
+}
 
 void TakeoverSegmented::set_mode(const std::string& m) {
   if (mode_ == m) return;

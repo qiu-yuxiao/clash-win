@@ -49,6 +49,18 @@ class Button : public Widget {
   void on_paint(IRenderTarget& rt) override;
   bool on_mouse(const MouseEvent& e) override;
 
+  A11yRole a11y_default_role() const override { return A11yRole::Button; }
+  std::wstring a11y_default_name() const override { return text; }
+  bool a11y_is_focusable() const override { return enabled(); }
+  bool a11y_can_invoke() const override {
+    return enabled() && static_cast<bool>(on_click);
+  }
+  bool a11y_invoke() override {
+    if (!enabled() || !on_click) return false;
+    on_click();
+    return true;
+  }
+
  protected:
   // T12 皮肤系统重写点：按钮底（3D 内阴影 ×depth×vibrancy 在此挂）
   virtual void draw_button_bg(IRenderTarget& rt, const RectF& r);

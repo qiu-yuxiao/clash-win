@@ -17,7 +17,7 @@ inline constexpr const char* kUnlockCache = "unlock_cache.json";
 // ---------- 应用版本（2026-11-06 23:20 用户裁定：Clash Win 独立版本线，
 //   从 0.1.0 起步逐版递增，不与 Clash Mini 的 3.2.2 绑死；
 //   3.2.2 仅作移植时的源码参照版本，不是本产品版本号） ----------
-inline constexpr const char* kAppVersion = "0.2.9";
+inline constexpr const char* kAppVersion = "0.2.10";
 
 // ---------- 端口（1:1 对齐 Clash Mini 官方规范） ----------
 // 取消开发期同机共存特例，全量端口与密钥回归 1:1 对齐：

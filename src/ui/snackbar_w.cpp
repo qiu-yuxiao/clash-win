@@ -11,6 +11,7 @@
 #include "icon_w.h"
 #include "theme/theme.h"
 #include "ui/i18n_text.h"
+#include "ui/uia_provider.h"
 #include "ui_postbox.h"
 #include "util/utf.h"
 
@@ -84,7 +85,44 @@ void SnackbarW::refresh() {
   }
   items_ = events::NoticeService::instance().snapshot();
   layout_items();
+  for (const auto& it : items_) {
+    if (it.id > last_announced_id_) {
+      last_announced_id_ = it.id;
+      if (!it.message.empty()) {
+        uia::notify_live_announcement(utf::utf8_to_utf16(it.message), it.id);
+      }
+    }
+  }
   invalidate();
+}
+
+std::wstring SnackbarW::a11y_default_name() const {
+  std::wstring out;
+  for (const auto& it : items_) {
+    if (it.message.empty()) continue;
+    if (!out.empty()) out += L"; ";
+    out += utf::utf8_to_utf16(it.message);
+  }
+  return out;
+}
+
+A11ySubItem SnackbarW::a11y_virtual_child(size_t index) const {
+  A11ySubItem sub;
+  if (index >= items_.size() || index >= item_rects_.size()) return sub;
+  sub.role = A11yRole::Button;
+  sub.name = utf::utf8_to_utf16(items_[index].message);
+  sub.help_text = tr("shared.actions.close");
+  sub.local_bounds = item_rects_[index];
+  sub.enabled = enabled();
+  sub.focusable = enabled();
+  sub.can_invoke = enabled();
+  return sub;
+}
+
+bool SnackbarW::a11y_invoke_virtual_child(size_t index) {
+  if (index >= items_.size()) return false;
+  events::NoticeService::instance().hide(items_[index].id);
+  return true;
 }
 
 void SnackbarW::set_position(const std::string& pos) {

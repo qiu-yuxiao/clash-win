@@ -48,6 +48,16 @@ class AddUrlDialog : public Widget {
   bool hit_self(PointF local) const override {
     return open_ && Widget::hit_self(local);
   }
+  bool a11y_subtree_visible() const override {
+    return open_ && visible() && !a11y_hidden();
+  }
+  bool a11y_is_modal() const override { return open_; }
+  A11yRole a11y_default_role() const override { return A11yRole::Dialog; }
+  std::wstring a11y_default_name() const override;
+  size_t a11y_virtual_child_count() const override { return 3; }
+  A11ySubItem a11y_virtual_child(size_t idx) const override;
+  bool a11y_invoke_virtual_child(size_t idx) override;
+  bool a11y_set_virtual_child_value(size_t idx, const std::wstring& v) override;
 
   // 几何区域（供单测与命中检测）
   RectF card_rect() const { return card_rect_; }

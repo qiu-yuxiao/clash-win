@@ -31,6 +31,15 @@ class SwitchW : public Widget {
   bool on_mouse(const MouseEvent& e) override;
   void on_paint(IRenderTarget& rt) override;
 
+  A11yRole a11y_default_role() const override { return A11yRole::CheckBox; }
+  bool a11y_is_focusable() const override { return enabled(); }
+  std::optional<bool> a11y_toggle_state() const override { return checked_; }
+  bool a11y_toggle() override {
+    if (!enabled()) return false;
+    set_checked(!checked_, true);
+    return true;
+  }
+
  private:
   void update_drag(float local_x);
   bool checked_ = false;

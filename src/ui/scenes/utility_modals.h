@@ -52,6 +52,14 @@ class EditProfileModal : public Widget {
   bool on_key(const KeyEvent& e) override;
 
   bool hit_self(PointF local) const override { return open_ && Widget::hit_self(local); }
+  bool a11y_subtree_visible() const override { return open_ && visible() && !a11y_hidden(); }
+  bool a11y_is_modal() const override { return open_; }
+  A11yRole a11y_default_role() const override { return A11yRole::Dialog; }
+  std::wstring a11y_default_name() const override;
+  size_t a11y_virtual_child_count() const override { return is_local_ ? 3u : 5u; }
+  A11ySubItem a11y_virtual_child(size_t idx) const override;
+  bool a11y_invoke_virtual_child(size_t idx) override;
+  bool a11y_set_virtual_child_value(size_t idx, const std::wstring& v) override;
 
   RectF card_rect() const { return card_rect_; }
   RectF save_btn_rect() const { return btn_save_rect_; }
@@ -111,6 +119,13 @@ class ClientUpdateModal : public Widget {
   bool on_key(const KeyEvent& e) override;
 
   bool hit_self(PointF local) const override { return open_ && Widget::hit_self(local); }
+  bool a11y_subtree_visible() const override { return open_ && visible() && !a11y_hidden(); }
+  bool a11y_is_modal() const override { return open_; }
+  A11yRole a11y_default_role() const override { return A11yRole::Dialog; }
+  std::wstring a11y_default_name() const override;
+  size_t a11y_virtual_child_count() const override { return 3u; }
+  A11ySubItem a11y_virtual_child(size_t idx) const override;
+  bool a11y_invoke_virtual_child(size_t idx) override;
 
   RectF card_rect() const { return card_rect_; }
   RectF update_btn_rect() const { return btn_update_rect_; }
@@ -172,6 +187,13 @@ class CoreUpdateModal : public Widget {
   bool on_key(const KeyEvent& e) override;
 
   bool hit_self(PointF local) const override { return open_ && Widget::hit_self(local); }
+  bool a11y_subtree_visible() const override { return open_ && visible() && !a11y_hidden(); }
+  bool a11y_is_modal() const override { return open_; }
+  A11yRole a11y_default_role() const override { return A11yRole::Dialog; }
+  std::wstring a11y_default_name() const override;
+  size_t a11y_virtual_child_count() const override { return 3u; }
+  A11ySubItem a11y_virtual_child(size_t idx) const override;
+  bool a11y_invoke_virtual_child(size_t idx) override;
 
   RectF card_rect() const { return card_rect_; }
   RectF upgrade_btn_rect() const { return btn_upgrade_rect_; }
@@ -261,8 +283,17 @@ class LogViewerModal : public Widget {
   bool on_key(const KeyEvent& e) override;
 
   bool hit_self(PointF local) const override { return open_ && Widget::hit_self(local); }
+  bool a11y_subtree_visible() const override { return open_ && visible() && !a11y_hidden(); }
+  bool a11y_is_modal() const override { return open_; }
+  A11yRole a11y_default_role() const override { return A11yRole::Dialog; }
+  std::wstring a11y_default_name() const override;
+  size_t a11y_virtual_child_count() const override { return 6u; }
+  A11ySubItem a11y_virtual_child(size_t idx) const override;
+  bool a11y_invoke_virtual_child(size_t idx) override;
+  bool a11y_set_virtual_child_value(size_t idx, const std::wstring& v) override;
 
   RectF card_rect() const { return card_rect_; }
+  float scroll_y() const { return scroll_y_; }
 
  private:
   bool matches_filter(const LogEntry& entry) const;

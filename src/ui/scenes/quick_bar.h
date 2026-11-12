@@ -56,6 +56,11 @@ class QuickBar : public Row {
     return std::nullopt;
   }
 
+  A11yRole a11y_default_role() const override { return A11yRole::ToolBar; }
+  size_t a11y_virtual_child_count() const override;
+  A11ySubItem a11y_virtual_child(size_t index) const override;
+  bool a11y_invoke_virtual_child(size_t index) override;
+
   std::function<void()> on_toggle_pin;    // 图钉（T19 置顶窗口）
   std::function<void()> on_open_settings; // 齿轮（T17 设置抽屉占位）
   std::function<void()> on_cycle_node;    // 点击节点名 → 轮换下一个
@@ -119,6 +124,11 @@ class TakeoverSegmented : public Widget {
     return RectF{g.x + static_cast<float>(hover_) * seg_w, g.y, seg_w, g.h};
   }
   bool tooltip_prefer_top_arrow() const override { return true; }
+
+  A11yRole a11y_default_role() const override { return A11yRole::Group; }
+  size_t a11y_virtual_child_count() const override { return 3; }
+  A11ySubItem a11y_virtual_child(size_t index) const override;
+  bool a11y_invoke_virtual_child(size_t index) override;
 
  private:
   int hit_segment(const PointF& local) const;

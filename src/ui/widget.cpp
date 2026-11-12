@@ -7,6 +7,7 @@
 #include <typeinfo>
 
 #include "i18n_text.h"
+#include "uia_provider.h"
 #include "util/log.h"
 
 namespace clashwin::ui {
@@ -34,6 +35,7 @@ void clear_input_state() { g_hover = g_capture = g_focus = nullptr; }
 Widget::Widget(Widget* parent) : parent_(parent) {}
 
 Widget::~Widget() {
+  uia::on_widget_destroyed(this);
   // 自身被直接 delete（绕过 remove_child）时清路由悬空指针
   if (g_hover == this) g_hover = nullptr;
   if (g_capture == this) g_capture = nullptr;
@@ -152,9 +154,15 @@ void Widget::set_opacity(float a) {
 bool Widget::focused() const { return g_focus == this; }
 
 void Widget::request_focus() {
-  if (g_focus != this && g_focus && g_focus->on_focus_lost)
-    g_focus->on_focus_lost();  // MUI onBlur：焦点被接管
+  if (g_focus == this) return;
+  Widget* prev = g_focus;
   g_focus = this;
+  if (prev) {
+    if (prev->on_focus_lost) prev->on_focus_lost();  // MUI onBlur：焦点被接管
+    prev->invalidate();
+  }
+  invalidate();
+  uia::on_widget_focused(this);
 }
 void Widget::blur() {
   if (g_focus == this) {
@@ -239,6 +247,7 @@ void Widget::paint(IRenderTarget& rt, const RectF& clip) {
 // ---------- i18n 文本绑定（F-D01） ----------
 void Widget::bind_i18n_text(std::wstring* slot, const char* key) {
   if (!slot || !key || !*key) return;
+  widget_i18n_rev_ = clashwin::i18n::I18n::instance().revision();
   for (auto& s : i18n_slots_) {
     if (s.slot == slot) {
       s.key = key;
@@ -250,13 +259,57 @@ void Widget::bind_i18n_text(std::wstring* slot, const char* key) {
   *slot = tr(key);
 }
 
+void Widget::ensure_i18n_fresh() const {
+  const uint64_t rev = clashwin::i18n::I18n::instance().revision();
+  if (widget_i18n_rev_ != rev) {
+    widget_i18n_rev_ = rev;
+    for (const auto& s : i18n_slots_) {
+      if (s.slot) *s.slot = tr(s.key.c_str());
+    }
+  }
+}
+
 void Widget::apply_i18n() {
+  widget_i18n_rev_ = clashwin::i18n::I18n::instance().revision();
   for (auto& s : i18n_slots_) *s.slot = tr(s.key.c_str());
+}
+
+std::wstring Widget::a11y_name() const {
+  ensure_i18n_fresh();
+  if (!a11y_name_.empty()) return a11y_name_;
+  if (a11y_labelled_by_ && a11y_labelled_by_ != this) {
+    std::wstring lbl = a11y_labelled_by_->a11y_name();
+    if (!lbl.empty()) return lbl;
+  }
+  std::wstring def = a11y_default_name();
+  if (!def.empty()) return def;
+  // ← MUI Tooltip: 交互控件无显式文本时自动继承 Tooltip title 作为 aria-label
+  const A11yRole role = a11y_role();
+  if (role != A11yRole::None && role != A11yRole::Pane &&
+      role != A11yRole::Group && role != A11yRole::Window &&
+      role != A11yRole::TitleBar) {
+    std::wstring tip = tooltip_text();
+    if (!tip.empty()) return tip;
+  }
+  return {};
+}
+
+std::wstring Widget::a11y_help_text() const {
+  ensure_i18n_fresh();
+  std::wstring tip = tooltip_text();
+  if (tip.empty()) return {};
+  if (tip == a11y_name()) return {};
+  return tip;
 }
 
 void Widget::refresh_i18n_tree() {
   apply_i18n();
   for (auto& c : children_) c->refresh_i18n_tree();
+  std::vector<Widget*> trans;
+  collect_transient_children(trans);
+  for (Widget* t : trans) {
+    if (t) t->refresh_i18n_tree();
+  }
 }
 
 void Widget::paint_all(IRenderTarget& rt) {
@@ -359,10 +412,84 @@ Widget* route_mouse_event(Widget* root, MouseEvent& e) {
 }
 
 // ---------- 键盘路由 ----------
+namespace {
+
+std::vector<Widget*> ordered_children(Widget* w) {
+  std::vector<Widget*> out;
+  out.reserve(w->child_count());
+  for (size_t i = 0; i < w->child_count(); ++i) out.push_back(w->child(i));
+  w->collect_transient_children(out);
+  std::stable_sort(out.begin(), out.end(),
+                   [](const Widget* a, const Widget* b) {
+                     return a->z_order() < b->z_order();
+                   });
+  return out;
+}
+
+Widget* find_topmost_modal(Widget* w) {
+  if (!w || !w->a11y_subtree_visible()) return nullptr;
+  auto kids = ordered_children(w);
+  for (auto it = kids.rbegin(); it != kids.rend(); ++it) {
+    if (Widget* m = find_topmost_modal(*it)) return m;
+  }
+  return w->a11y_is_modal() ? w : nullptr;
+}
+
+bool is_in_visible_scope(const Widget* w, const Widget* scope_root) {
+  if (!w || !scope_root) return false;
+  for (const Widget* cur = w; cur; cur = cur->parent()) {
+    if (!cur->a11y_subtree_visible() || !cur->enabled()) return false;
+    if (cur == scope_root) return true;
+  }
+  return false;
+}
+
+void collect_focusable_widgets(Widget* w, std::vector<Widget*>& out) {
+  if (!w || !w->a11y_subtree_visible() || !w->enabled()) return;
+  if (w->a11y_is_focusable()) out.push_back(w);
+  for (Widget* c : ordered_children(w)) collect_focusable_widgets(c, out);
+}
+
+}  // namespace
+
 Widget* route_key_event(Widget* root, KeyEvent& e) {
   if (!root) return nullptr;
+  Widget* scope = find_topmost_modal(root);
+  if (!scope) scope = root;
+
+  // Tab / Shift+Tab 无障碍键盘焦点循环（模态开启时自动限制在模态子树内）
+  if (e.type == KeyEventType::Down && e.key == VK_TAB && !e.ctrl && !e.alt) {
+    std::vector<Widget*> focusables;
+    collect_focusable_widgets(scope, focusables);
+    if (!focusables.empty()) {
+      int cur_idx = -1;
+      for (size_t i = 0; i < focusables.size(); ++i) {
+        if (focusables[i] == g_focus) {
+          cur_idx = static_cast<int>(i);
+          break;
+        }
+      }
+      int next_idx = 0;
+      const int n = static_cast<int>(focusables.size());
+      if (e.shift) {
+        next_idx = (cur_idx <= 0) ? (n - 1) : (cur_idx - 1);
+      } else {
+        next_idx = (cur_idx < 0 || cur_idx + 1 >= n) ? 0 : (cur_idx + 1);
+      }
+      Widget* target = focusables[static_cast<size_t>(next_idx)];
+      target->request_focus();
+      e.handled = true;
+      return target;
+    }
+  }
+
+  // 若当前焦点已隐藏/禁用或落在活跃模态外，先释放陈旧焦点（但若无模态且原本在树内则保留）
+  if (g_focus && !is_in_visible_scope(g_focus, scope)) {
+    g_focus = nullptr;
+  }
+
   if (!g_focus) {
-    // 无焦点：找树中第一个 wants_key 的可见启用 widget（焦点自动落位）
+    // 无焦点：找当前作用域内第一个 wants_key 的可见启用 widget（焦点自动落位）
     std::function<Widget*(Widget*)> find = [&](Widget* w) -> Widget* {
       if (!w->visible() || !w->enabled()) return nullptr;
       if (w->wants_key()) return w;
@@ -370,10 +497,34 @@ Widget* route_key_event(Widget* root, KeyEvent& e) {
         if (Widget* r = find(w->child(i))) return r;
       return nullptr;
     };
-    g_focus = find(root);
+    g_focus = find(scope);
+    if (!g_focus && scope != root && scope->on_key(e)) return scope;
   }
   if (!g_focus) return nullptr;
   if (g_focus->on_key(e)) return g_focus;
+
+  // 非文本输入控件获焦时支持 Space / Enter 无障碍激活或切换
+  if (!g_focus->wants_key() && e.type == KeyEventType::Down && !e.ctrl && !e.alt) {
+    if (e.key == VK_SPACE) {
+      if (g_focus->a11y_toggle_state().has_value() && g_focus->a11y_toggle()) {
+        e.handled = true;
+        return g_focus;
+      }
+      if (g_focus->a11y_can_invoke() && g_focus->a11y_invoke()) {
+        e.handled = true;
+        return g_focus;
+      }
+    } else if (e.key == VK_RETURN) {
+      if (g_focus->a11y_can_invoke() && g_focus->a11y_invoke()) {
+        e.handled = true;
+        return g_focus;
+      }
+      if (g_focus->a11y_toggle_state().has_value() && g_focus->a11y_toggle()) {
+        e.handled = true;
+        return g_focus;
+      }
+    }
+  }
   return nullptr;
 }
 

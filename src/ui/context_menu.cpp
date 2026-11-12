@@ -15,6 +15,58 @@ float MenuList::content_height() const {
   return h;
 }
 
+size_t MenuList::a11y_virtual_child_count() const {
+  size_t n = 0;
+  for (const auto& it : items) {
+    if (!it.separator) ++n;
+  }
+  return n;
+}
+
+A11ySubItem MenuList::a11y_virtual_child(size_t index) const {
+  A11ySubItem sub;
+  sub.role = A11yRole::MenuItem;
+  size_t non_sep_total = a11y_virtual_child_count();
+  size_t cur = 0;
+  float cy = pad_top_ - scroll_y_;
+  for (size_t i = 0; i < items.size(); ++i) {
+    const auto& it = items[i];
+    const float ih = it.separator ? sep_height_ : item_height;
+    if (!it.separator) {
+      if (cur == index) {
+        sub.name = it.label;
+        if (!it.shortcut.empty()) sub.help_text = it.shortcut;
+        sub.local_bounds = {0.0f, cy, bounds().w, ih};
+        sub.enabled = enabled() && !it.disabled;
+        sub.focusable = sub.enabled;
+        sub.can_invoke = sub.enabled;
+        if (it.selected) sub.selected = true;
+        sub.pos_in_set = static_cast<int>(cur) + 1;
+        sub.size_of_set = static_cast<int>(non_sep_total);
+        return sub;
+      }
+      ++cur;
+    }
+    cy += ih;
+  }
+  return sub;
+}
+
+bool MenuList::a11y_invoke_virtual_child(size_t index) {
+  size_t cur = 0;
+  for (size_t i = 0; i < items.size(); ++i) {
+    const auto& it = items[i];
+    if (it.separator) continue;
+    if (cur == index) {
+      if (it.disabled || !on_select) return false;
+      on_select(static_cast<int>(i));
+      return true;
+    }
+    ++cur;
+  }
+  return false;
+}
+
 void MenuList::set_scroll_y(float sy) {
   const float max_s = std::max(0.0f, content_height() - bounds().h);
   const float clamped = std::clamp(sy, 0.0f, max_s);

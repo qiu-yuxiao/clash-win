@@ -25,6 +25,7 @@
 #include "d2d_context.h"
 #include "render_target.h"
 #include "title_bar.h"
+#include "uia_provider.h"
 #include "widget.h"
 #include "container.h"
 #include "tooltip_w.h"
@@ -333,6 +334,7 @@ class MainWindow : public app::ILifecycleWindow {
   int64_t tun_guard_cool_until_ = 0;      // 1s 冷却（:123-127）
   std::atomic<bool> tun_guard_busy_{false};
   void tun_guard_tick();
+  std::unique_ptr<UiaWindowBridge> uia_;  // 原生 Win32 UI Automation 读屏桥接
 };
 
 }  // namespace clashwin::ui::win

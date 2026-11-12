@@ -86,6 +86,16 @@ class TextField : public Widget {
 
   bool wants_key() const override { return true; }
 
+  A11yRole a11y_default_role() const override { return A11yRole::Edit; }
+  std::wstring a11y_default_name() const override { return placeholder_; }
+  std::wstring a11y_value() const override { return text_; }
+  bool a11y_can_set_value() const override { return enabled(); }
+  bool a11y_set_value(const std::wstring& v) override {
+    if (!enabled()) return false;
+    set_text(v);
+    return true;
+  }
+
   // 按当前皮肤/滑块刷新输入框绘制参数（← get3DInputStyle 6 套皮肤查表）。
   // 调用点：各处创建 TextField 后统一调用，替代手写 bg_/border_ 字面量。
   void apply_theme();

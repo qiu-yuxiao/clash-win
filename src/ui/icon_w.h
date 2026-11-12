@@ -62,6 +62,21 @@ class IconW : public Widget {
   void on_paint(IRenderTarget& rt) override;
   bool on_mouse(const MouseEvent& e) override;
 
+  A11yRole a11y_default_role() const override {
+    return on_click ? A11yRole::Button : A11yRole::None;
+  }
+  bool a11y_is_focusable() const override {
+    return enabled() && static_cast<bool>(on_click);
+  }
+  bool a11y_can_invoke() const override {
+    return enabled() && static_cast<bool>(on_click);
+  }
+  bool a11y_invoke() override {
+    if (!enabled() || !on_click) return false;
+    on_click();
+    return true;
+  }
+
  private:
   wchar_t glyph_ = 0;
   std::string name_;  // 归一化 MUI 名（矢量 path 查表用）

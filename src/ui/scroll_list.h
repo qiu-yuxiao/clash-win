@@ -39,6 +39,7 @@ class ScrollList : public Widget {
   bool on_mouse(const MouseEvent& e) override;
   void on_paint(IRenderTarget& rt) override;
   Widget* hit_test(PointF global) override;
+  void collect_transient_children(std::vector<Widget*>& out) const override;
 
   // 绘制参数
   Color4f scrollbar_ = Color4f::hex(0x000000, 0.25f);  // 豁免: Mini 无对应物 — 滚动条缺省 25% 黑（可被主题覆盖）

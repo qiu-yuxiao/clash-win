@@ -151,4 +151,11 @@ Widget* ScrollList::hit_test(PointF global) {
   return Widget::hit_test(global);
 }
 
+void ScrollList::collect_transient_children(std::vector<Widget*>& out) const {
+  auto indices = materialized_indices();
+  for (int idx : indices) {
+    if (Widget* r = materialized_row(idx)) out.push_back(r);
+  }
+}
+
 }  // namespace clashwin::ui

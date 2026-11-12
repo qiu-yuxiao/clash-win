@@ -1,6 +1,7 @@
 #pragma once
 // Slider（T10）：滑块——值/步进/拖拽；双滑块预留（value2）。
 // 对照 MUI Slider：step 量化、active_thumb、拖拽中回调。
+#include <cstdio>
 #include <functional>
 #include <optional>
 
@@ -31,6 +32,24 @@ class Slider : public Widget {
   bool on_key(const KeyEvent& e) override;
   void on_paint(IRenderTarget& rt) override;
   bool wants_key() const override { return true; }
+
+  A11yRole a11y_default_role() const override { return A11yRole::Slider; }
+  std::wstring a11y_value() const override {
+    wchar_t buf[32]{};
+    swprintf_s(buf, L"%.2f", static_cast<double>(value_));
+    return buf;
+  }
+  std::optional<A11yRange> a11y_range() const override {
+    const double sp = step_ > 0.0f ? static_cast<double>(step_) : 0.05;
+    const double lp = (max_ > min_) ? static_cast<double>(max_ - min_) * 0.1 : sp;
+    return A11yRange{static_cast<double>(value_), static_cast<double>(min_),
+                     static_cast<double>(max_), sp, lp};
+  }
+  bool a11y_set_range(double v) override {
+    if (!enabled()) return false;
+    set_value(static_cast<float>(v), true);
+    return true;
+  }
 
   // 绘制参数
   Color4f track_ = Color4f::hex(0x000000, 0.20f);  // ← 滑轨 20% 黑

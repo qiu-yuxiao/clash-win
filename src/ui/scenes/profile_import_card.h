@@ -53,6 +53,23 @@ class ProfileRowWidget : public Widget {
   std::function<void()> on_delete;
   std::function<void(PointF)> on_context;  // 右键：参数为窗口坐标系锚点
 
+  A11yRole a11y_default_role() const override { return A11yRole::ListItem; }
+  std::wstring a11y_default_name() const override;
+  bool a11y_is_focusable() const override { return enabled(); }
+  bool a11y_can_invoke() const override {
+    return enabled() && static_cast<bool>(on_select);
+  }
+  bool a11y_invoke() override {
+    if (!enabled() || !on_select) return false;
+    on_select();
+    return true;
+  }
+  std::optional<bool> a11y_is_selected() const override { return active_; }
+  bool a11y_select() override { return a11y_invoke(); }
+  size_t a11y_virtual_child_count() const override;
+  A11ySubItem a11y_virtual_child(size_t idx) const override;
+  bool a11y_invoke_virtual_child(size_t idx) override;
+
  private:
   std::string uid_;
   std::string name_;

@@ -148,6 +148,9 @@ std::optional<std::pair<double, double>> LargeModeController::load(
 MainWindow::MainWindow() = default;
 
 MainWindow::~MainWindow() {
+  if (uia_) {
+    uia_->shutdown();
+  }
   if (node_data_ && node_data_sub_) {
     node_data_->unsubscribe(node_data_sub_);
     node_data_sub_ = 0;
@@ -184,7 +187,16 @@ bool MainWindow::create(bool show_immediately, bool defer_render) {
   if (pos != std::wstring::npos) app_dir_.resize(pos);
 
   if (!init_window_class()) return false;
-  if (!create_hwnd()) return false;
+  // 在 CreateWindowExW 之前预建 UIA 桥接：若读屏软件（讲述人/NVDA）已提前运行，
+  // 系统在窗口创建期即会同步投递 WM_GETOBJECT，预建可确保首条查询即命中自绘 Provider
+  uia_ = std::make_unique<UiaWindowBridge>(nullptr, &root_,
+                                           [this] { return dpi_scale(); });
+  if (!create_hwnd()) {
+    uia_->shutdown();
+    uia_.reset();
+    return false;
+  }
+  uia_->set_hwnd(hwnd_);
   // 静默启动直入轻量：跳过 D2D 设备创建（渲染层进轻量后立即释放，纯属浪费）
   if (!defer_render && !init_render()) return false;
   build_widget_tree();
@@ -509,12 +521,16 @@ void MainWindow::build_widget_tree() {
   unlock_page_->set_visible(false);
   unlock_page_->on_dismiss = [this]() {
     if (unlock_page_) unlock_page_->set_visible(false);
+    if (scene_) scene_->set_a11y_hidden(false);
+    if (settings_drawer_) settings_drawer_->set_a11y_hidden(false);
   };
   content_raw->add_child(std::move(unlock));
 }
 
 void MainWindow::open_unlock_page() {
   if (!unlock_page_) return;
+  if (scene_) scene_->set_a11y_hidden(true);
+  if (settings_drawer_) settings_drawer_->set_a11y_hidden(true);
   unlock_page_->set_visible(true);
   // 整页首次可见时手动补一次布局（不可见子层不参与 ContentStack::on_arrange）
   if (content_) {
@@ -1008,6 +1024,7 @@ void MainWindow::build_scene() {
     settings_drawer_->on_open_changed = [this](bool open) {
       // src: _layout.tsx:1309「{!drawerOpen && (…)}」→ 抽屉打开时整条 quickbar 不渲染
       if (quick_bar_) quick_bar_->set_visible(!open);
+      if (node_list_) node_list_->set_a11y_hidden(open);
       update_conn_ws_state();
     };
     // patch_verge 键 → patch_verge_config；clash 键 → patch_clash_config
@@ -2500,6 +2517,14 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 
     // 【INPUTFIX】鼠标/键盘路由给 widget 树（此前仅 feed_activity，
     // route_*_event 只在 tests/ 被调 → 实机开关点击无反应）
+    case WM_GETOBJECT: {
+      if (uia_) {
+        LRESULT r = uia_->handle_wm_getobject(hwnd_, wp, lp);
+        if (r != 0) return r;
+      }
+      break;
+    }
+
     case WM_GETICON: {
       if (wp == ICON_BIG || wp == 2 /* ICON_BIG */) return reinterpret_cast<LRESULT>(h_icon_big_);
       return reinterpret_cast<LRESULT>(h_icon_sm_);
@@ -2778,6 +2803,7 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       return 0;
 
     case WM_DESTROY: {
+      if (uia_) uia_->shutdown();
       if (tooltip_host_) tooltip_host_->bind_owner_hwnd(nullptr);
       // 退出序列：立即落盘（跳过节流；← save_window_state_immediately）
       persist_geometry(true);

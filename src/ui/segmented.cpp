@@ -133,8 +133,7 @@ bool Segmented::on_mouse(const MouseEvent& e) {
   return false;
 }
 
-void Segmented::on_paint(IRenderTarget& rt) {
-  // F-D01：语言切换 → 重取分段文案（← _layout.tsx:478-483 重渲染）
+void Segmented::sync_i18n_options() const {
   if (!option_keys_.empty()) {
     const uint64_t rev = clashwin::i18n::I18n::instance().revision();
     if (rev != options_revision_) {
@@ -143,6 +142,51 @@ void Segmented::on_paint(IRenderTarget& rt) {
         options_[i] = tr(option_keys_[i].c_str());
     }
   }
+}
+
+size_t Segmented::a11y_virtual_child_count() const {
+  sync_i18n_options();
+  return options_.size();
+}
+
+A11ySubItem Segmented::a11y_virtual_child(size_t index) const {
+  sync_i18n_options();
+  A11ySubItem sub;
+  if (index >= options_.size()) return sub;
+  sub.role = A11yRole::RadioButton;
+  sub.name = options_[index];
+  if (index < tooltip_keys_.size()) {
+    sub.help_text = tr(tooltip_keys_[index].c_str());
+  } else if (index < tooltips_.size()) {
+    sub.help_text = tooltips_[index];
+  }
+  const float seg_w = options_.empty()
+                          ? 0.0f
+                          : bounds().w / static_cast<float>(options_.size());
+  sub.local_bounds = {seg_w * static_cast<float>(index), 0.0f, seg_w, bounds().h};
+  sub.enabled = enabled();
+  sub.focusable = enabled();
+  sub.can_invoke = enabled();
+  sub.selected = (static_cast<int>(index) == selected_);
+  sub.pos_in_set = static_cast<int>(index) + 1;
+  sub.size_of_set = static_cast<int>(options_.size());
+  return sub;
+}
+
+bool Segmented::a11y_invoke_virtual_child(size_t index) {
+  if (!enabled() || index >= options_.size()) return false;
+  const int idx = static_cast<int>(index);
+  if (idx == selected_) {
+    if (on_reclick) on_reclick(idx);
+  } else {
+    set_selected(idx);
+  }
+  return true;
+}
+
+void Segmented::on_paint(IRenderTarget& rt) {
+  // F-D01：语言切换 → 重取分段文案（← _layout.tsx:478-483 重渲染）
+  sync_i18n_options();
   RectF r{0, 0, bounds().w, bounds().h};
   Color4f bg_c = bg_, act_bg = selected_bg_, act_txt = selected_text_color_,
          txt_c = text_color_, act_border{}, cont_border{};

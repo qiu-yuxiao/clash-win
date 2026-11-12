@@ -412,4 +412,70 @@ bool UnlockDialog::on_key(const KeyEvent& e) {
   return false;
 }
 
+std::wstring UnlockDialog::a11y_default_name() const {
+  return tr("tests.unlock.page.title");
+}
+
+size_t UnlockDialog::a11y_virtual_child_count() const {
+  const size_t header_count = page_mode_ ? 1u : 2u;
+  const size_t card_count = std::min(items_.size(), ctrls_.size());
+  return header_count + card_count;
+}
+
+A11ySubItem UnlockDialog::a11y_virtual_child(size_t idx) const {
+  A11ySubItem sub;
+  if (idx == 0) {
+    sub.role = A11yRole::Button;
+    sub.name = is_checking_ ? tr("tests.unlock.page.actions.testing")
+                            : tr("tests.page.actions.testAll");
+    sub.local_bounds = btn_retest_rect_;
+    sub.can_invoke = !is_checking_;
+    sub.enabled = !is_checking_;
+    return sub;
+  }
+  if (!page_mode_ && idx == 1) {
+    sub.role = A11yRole::Button;
+    sub.name = tr("shared.actions.close");
+    sub.local_bounds = btn_close_x_rect_;
+    sub.can_invoke = true;
+    return sub;
+  }
+  const size_t hdr = page_mode_ ? 1u : 2u;
+  if (idx >= hdr) {
+    const size_t ci = idx - hdr;
+    if (ci < items_.size() && ci < ctrls_.size()) {
+      const auto& it = items_[ci];
+      sub.role = A11yRole::Button;
+      std::wstring label = utf::utf8_to_utf16(it.name) + L" - " + status_label(it.status);
+      if (it.region && !it.region->empty()) {
+        label += L" (" + utf::utf8_to_utf16(*it.region) + L")";
+      }
+      sub.name = label;
+      sub.local_bounds = ctrls_[ci].card;
+      sub.can_invoke = !is_checking_;
+      sub.enabled = !is_checking_;
+    }
+  }
+  return sub;
+}
+
+bool UnlockDialog::a11y_invoke_virtual_child(size_t idx) {
+  if (!open_ || !enabled()) return false;
+  if (idx == 0) {
+    if (is_checking_) return false;
+    start_check();
+    return true;
+  }
+  if (!page_mode_ && idx == 1) {
+    close();
+    return true;
+  }
+  const size_t hdr = page_mode_ ? 1u : 2u;
+  if (idx >= hdr && (idx - hdr) < items_.size() && !is_checking_) {
+    start_check();
+    return true;
+  }
+  return false;
+}
+
 }  // namespace clashwin::ui::scene

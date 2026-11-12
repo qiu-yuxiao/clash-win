@@ -303,4 +303,50 @@ bool AddUrlDialog::on_key(const KeyEvent& e) {
   return false;
 }
 
+std::wstring AddUrlDialog::a11y_default_name() const {
+  return tr("settings.mini.addUrl");
+}
+
+A11ySubItem AddUrlDialog::a11y_virtual_child(size_t idx) const {
+  A11ySubItem sub;
+  if (idx == 0) {
+    sub.role = A11yRole::Edit;
+    sub.name = tr("settings.mini.addUrlPlaceholder");
+    sub.local_bounds = input_rect_;
+    sub.focusable = true;
+    sub.can_set_value = true;
+    sub.value = utf::utf8_to_utf16(payload_);
+    return sub;
+  }
+  sub.role = A11yRole::Button;
+  sub.can_invoke = enabled();
+  if (idx == 1) {
+    sub.name = tr("shared.actions.cancel");
+    sub.local_bounds = btn_cancel_rect_;
+  } else {
+    sub.name = tr("settings.mini.addUrlButton");
+    sub.local_bounds = btn_add_rect_;
+  }
+  return sub;
+}
+
+bool AddUrlDialog::a11y_invoke_virtual_child(size_t idx) {
+  if (!open_ || !enabled()) return false;
+  if (idx == 1) {
+    close();
+    return true;
+  }
+  if (idx == 2) {
+    do_submit();
+    return true;
+  }
+  return false;
+}
+
+bool AddUrlDialog::a11y_set_virtual_child_value(size_t idx, const std::wstring& v) {
+  if (!open_ || !enabled() || idx != 0) return false;
+  set_payload(utf::utf16_to_utf8(v));
+  return true;
+}
+
 }  // namespace clashwin::ui::scene

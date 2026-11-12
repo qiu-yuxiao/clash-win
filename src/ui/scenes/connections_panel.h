@@ -45,6 +45,11 @@ class ConnTableOverlay : public Widget {
   bool empty = false;
   void on_paint(IRenderTarget& rt) override;
   bool hit_self(PointF) const override { return false; }
+  bool a11y_subtree_visible() const override {
+    return empty && visible() && !a11y_hidden();
+  }
+  A11yRole a11y_default_role() const override { return A11yRole::Text; }
+  std::wstring a11y_default_name() const override;
 };
 
 class ConnPanelRowWidget : public Widget {
@@ -60,6 +65,18 @@ class ConnPanelRowWidget : public Widget {
   std::function<void(const ConnItem& item, PointF local_pt, RectF row_global)> on_context_menu;
 
   const ConnItem& item() const { return item_; }
+
+  A11yRole a11y_default_role() const override { return A11yRole::ListItem; }
+  std::wstring a11y_default_name() const override;
+  bool a11y_is_focusable() const override { return enabled(); }
+  bool a11y_can_invoke() const override {
+    return enabled() && static_cast<bool>(on_click);
+  }
+  bool a11y_invoke() override {
+    if (!enabled() || !on_click) return false;
+    on_click(item_, global_bounds());
+    return true;
+  }
 
  private:
   ConnItem item_;
@@ -108,6 +125,12 @@ class ConnectionsPanel : public Widget {
   void on_arrange(const RectF& area) override;
   void on_paint(IRenderTarget& rt) override;
   bool on_mouse(const MouseEvent& e) override;
+
+  A11yRole a11y_default_role() const override { return A11yRole::Group; }
+  std::wstring a11y_default_name() const override;
+  size_t a11y_virtual_child_count() const override { return 4; }
+  A11ySubItem a11y_virtual_child(size_t idx) const override;
+  bool a11y_invoke_virtual_child(size_t idx) override;
 
   void refresh_visible();
 

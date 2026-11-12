@@ -1429,4 +1429,273 @@ bool LogViewerModal::on_key(const KeyEvent& e) {
   return false;
 }
 
+// ==========================================
+// UI Automation 虚拟子项实现
+// ==========================================
+std::wstring EditProfileModal::a11y_default_name() const {
+  return tr("layout.components.dialogs.editProfile.title");
+}
+
+A11ySubItem EditProfileModal::a11y_virtual_child(size_t idx) const {
+  A11ySubItem sub;
+  if (idx == 0) {
+    sub.role = A11yRole::Edit;
+    sub.name = tr("layout.components.dialogs.editProfile.nameLabel");
+    sub.local_bounds = name_input_rect_;
+    sub.focusable = true;
+    sub.can_set_value = true;
+    sub.value = utf::utf8_to_utf16(name_);
+    return sub;
+  }
+  if (!is_local_ && idx == 1) {
+    sub.role = A11yRole::Edit;
+    sub.name = tr("layout.components.dialogs.editProfile.urlLabel");
+    sub.local_bounds = url_input_rect_;
+    sub.focusable = true;
+    sub.can_set_value = true;
+    sub.value = utf::utf8_to_utf16(url_);
+    return sub;
+  }
+  if (!is_local_ && idx == 2) {
+    sub.role = A11yRole::Edit;
+    sub.name = tr("layout.components.dialogs.editProfile.intervalLabel");
+    sub.local_bounds = interval_input_rect_;
+    sub.focusable = true;
+    sub.can_set_value = true;
+    sub.value = std::to_wstring(interval_mins_);
+    return sub;
+  }
+  const size_t base = is_local_ ? 1u : 3u;
+  const size_t btn_idx = (idx >= base) ? (idx - base) : 99u;
+  sub.role = A11yRole::Button;
+  sub.can_invoke = enabled();
+  if (btn_idx == 0) {
+    sub.name = tr("shared.actions.cancel");
+    sub.local_bounds = btn_cancel_rect_;
+  } else {
+    sub.name = tr("shared.actions.save");
+    sub.local_bounds = btn_save_rect_;
+  }
+  return sub;
+}
+
+bool EditProfileModal::a11y_invoke_virtual_child(size_t idx) {
+  if (!open_ || !enabled()) return false;
+  const size_t base = is_local_ ? 1u : 3u;
+  if (idx < base) return false;
+  const size_t btn_idx = idx - base;
+  if (btn_idx == 0) {
+    close();
+    return true;
+  }
+  if (btn_idx == 1) {
+    if (on_save) on_save(name_, url_, interval_mins_);
+    close();
+    return true;
+  }
+  return false;
+}
+
+bool EditProfileModal::a11y_set_virtual_child_value(size_t idx, const std::wstring& v) {
+  if (!open_ || !enabled()) return false;
+  if (idx == 0) {
+    set_name(utf::utf16_to_utf8(v));
+    return true;
+  }
+  if (!is_local_ && idx == 1) {
+    set_url(utf::utf16_to_utf8(v));
+    return true;
+  }
+  if (!is_local_ && idx == 2) {
+    set_interval_mins(_wtoi(v.c_str()));
+    return true;
+  }
+  return false;
+}
+
+std::wstring ClientUpdateModal::a11y_default_name() const {
+  return tr("layout.components.dialogs.client.title");
+}
+
+A11ySubItem ClientUpdateModal::a11y_virtual_child(size_t idx) const {
+  A11ySubItem sub;
+  const bool busy = is_downloading_;
+  if (idx == 0) {
+    sub.role = A11yRole::Text;
+    const std::wstring unknown = tr("layout.components.dialogs.update.unknown");
+    sub.name = tr("layout.components.dialogs.update.currentVersion",
+                  {{"version", current_version_.empty() ? utf::utf16_to_utf8(unknown)
+                                                        : current_version_}}) +
+               L", " +
+               tr("layout.components.dialogs.update.latestVersion",
+                  {{"version", latest_version_.empty() ? utf::utf16_to_utf8(unknown)
+                                                       : latest_version_}});
+    sub.local_bounds = card_rect_;
+    return sub;
+  }
+  sub.role = A11yRole::Button;
+  sub.enabled = !busy;
+  sub.can_invoke = !busy;
+  if (idx == 1) {
+    sub.name = tr("shared.actions.close");
+    sub.local_bounds = btn_close_rect_;
+  } else {
+    if (status_ == "done")
+      sub.name = tr("layout.components.dialogs.client.prepareRestart");
+    else if (busy)
+      sub.name = tr("layout.components.dialogs.update.updating");
+    else if (!latest_version_.empty() && latest_version_ == current_version_)
+      sub.name = tr("layout.components.dialogs.update.upToDate");
+    else
+      sub.name = tr("layout.components.dialogs.update.updateNow");
+    sub.local_bounds = btn_update_rect_;
+  }
+  return sub;
+}
+
+bool ClientUpdateModal::a11y_invoke_virtual_child(size_t idx) {
+  if (!open_ || !enabled()) return false;
+  if (idx == 1) {
+    if (is_downloading_) return false;
+    close();
+    return true;
+  }
+  if (idx == 2) {
+    if (download_url_.empty() || is_downloading_ || progress_ >= 100) return false;
+    handle_progress_event("downloading", 0,
+                          utf::utf16_to_utf8(
+                              tr("layout.components.dialogs.progress.clientDownloading")));
+    if (on_start_update) on_start_update();
+    return true;
+  }
+  return false;
+}
+
+std::wstring CoreUpdateModal::a11y_default_name() const {
+  return tr("layout.components.dialogs.core.title");
+}
+
+A11ySubItem CoreUpdateModal::a11y_virtual_child(size_t idx) const {
+  A11ySubItem sub;
+  const bool busy = is_upgrading_ || status_ == "checking" ||
+                    status_ == "downloading" || status_ == "extracting";
+  if (idx == 0) {
+    sub.role = A11yRole::Text;
+    sub.name = tr("layout.components.dialogs.update.currentVersion",
+                  {{"version", current_version_}}) +
+               L", " +
+               tr("layout.components.dialogs.update.latestVersion",
+                  {{"version", latest_version_.empty()
+                                   ? utf::utf16_to_utf8(
+                                         tr("layout.components.dialogs.core.fetching"))
+                                   : latest_version_}});
+    sub.local_bounds = card_rect_;
+    return sub;
+  }
+  sub.role = A11yRole::Button;
+  sub.enabled = !busy;
+  sub.can_invoke = !busy;
+  if (idx == 1) {
+    sub.name = tr("shared.actions.close");
+    sub.local_bounds = btn_close_rect_;
+  } else {
+    if (status_ == "done")
+      sub.name = tr("layout.components.dialogs.core.updateDone");
+    else if (busy)
+      sub.name = tr("layout.components.dialogs.update.updating");
+    else
+      sub.name = tr("layout.components.dialogs.update.updateNow");
+    sub.local_bounds = btn_upgrade_rect_;
+  }
+  return sub;
+}
+
+bool CoreUpdateModal::a11y_invoke_virtual_child(size_t idx) {
+  if (!open_ || !enabled()) return false;
+  const bool busy = is_upgrading_ || status_ == "checking" ||
+                    status_ == "downloading" || status_ == "extracting";
+  if (idx == 1) {
+    if (busy) return false;
+    close();
+    return true;
+  }
+  if (idx == 2) {
+    if (busy || status_ == "done") return false;
+    is_upgrading_ = true;
+    handle_progress_event("checking", 5,
+                          utf::utf16_to_utf8(
+                              tr("layout.components.dialogs.progress.coreStarting")));
+    if (on_start_upgrade) on_start_upgrade();
+    return true;
+  }
+  return false;
+}
+
+std::wstring LogViewerModal::a11y_default_name() const {
+  return tr("settings.mini.debugLogs");
+}
+
+A11ySubItem LogViewerModal::a11y_virtual_child(size_t idx) const {
+  A11ySubItem sub;
+  if (idx == 0) {
+    sub.role = A11yRole::Button;
+    sub.name = tr("layout.a11y.closeLogsDialog");
+    sub.local_bounds = btn_close_x_rect_;
+    sub.can_invoke = true;
+  } else if (idx == 1) {
+    sub.role = A11yRole::Button;
+    sub.name = paused_ ? tr("shared.actions.resume") : tr("shared.actions.pause");
+    sub.local_bounds = btn_pause_rect_;
+    sub.can_invoke = true;
+  } else if (idx == 2) {
+    sub.role = A11yRole::Button;
+    sub.name = desc_ ? tr("logs.actions.showAscending") : tr("logs.actions.showDescending");
+    sub.local_bounds = btn_order_rect_;
+    sub.can_invoke = true;
+  } else if (idx == 3) {
+    sub.role = A11yRole::Button;
+    sub.name = tr("shared.actions.clear");
+    sub.local_bounds = btn_clear_rect_;
+    sub.can_invoke = true;
+  } else if (idx == 4) {
+    sub.role = A11yRole::ComboBox;
+    sub.name = utf::utf8_to_utf16(level_filter_);
+    sub.local_bounds = seg_level_rect_;
+    sub.can_invoke = true;
+    sub.expanded = (lvl_menu_ && lvl_menu_->visible());
+    sub.value = utf::utf8_to_utf16(level_filter_);
+  } else {
+    sub.role = A11yRole::Edit;
+    sub.name = tr("shared.placeholders.filter");
+    sub.local_bounds = search_box_rect_;
+    sub.focusable = true;
+    sub.can_set_value = true;
+    sub.value = utf::utf8_to_utf16(search_query_);
+  }
+  return sub;
+}
+
+bool LogViewerModal::a11y_invoke_virtual_child(size_t idx) {
+  if (!open_ || !enabled()) return false;
+  switch (idx) {
+    case 0: close(); return true;
+    case 1: set_paused(!paused_); return true;
+    case 2: set_desc(!desc_); return true;
+    case 3: clear_logs(); return true;
+    case 4:
+      if (lvl_menu_) {
+        lvl_menu_->set_visible(!lvl_menu_->visible());
+        invalidate();
+      }
+      return true;
+    default: return false;
+  }
+}
+
+bool LogViewerModal::a11y_set_virtual_child_value(size_t idx, const std::wstring& v) {
+  if (!open_ || !enabled() || idx != 5) return false;
+  set_search_query(utf::utf16_to_utf8(v));
+  return true;
+}
+
 }  // namespace clashwin::ui::scene

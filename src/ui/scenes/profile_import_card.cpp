@@ -251,6 +251,49 @@ std::optional<RectF> ProfileRowWidget::tooltip_anchor_rect() const {
   return std::nullopt;
 }
 
+std::wstring ProfileRowWidget::a11y_default_name() const {
+  std::wstring out = utf::utf8_to_utf16(name_.empty() ? "未命名配置" : name_);
+  if (has_line2_) {
+    if (!used_.empty()) out += L" " + utf::utf8_to_utf16(used_);
+    if (!date_.empty()) out += L" " + utf::utf8_to_utf16(date_);
+  }
+  return out;
+}
+
+size_t ProfileRowWidget::a11y_virtual_child_count() const {
+  return type_ == "remote" ? 2u : 1u;
+}
+
+A11ySubItem ProfileRowWidget::a11y_virtual_child(size_t idx) const {
+  A11ySubItem sub;
+  sub.role = A11yRole::Button;
+  sub.can_invoke = enabled();
+  const float w = bounds().w;
+  const float del_cx = w - 8.0f - 9.0f;  // src: src/pages/_layout/components/profile-import-card.tsx:275
+  const float upd_cx = del_cx - 20.0f;   // src: src/pages/_layout/components/profile-import-card.tsx:275
+  const float btn_cy = 15.0f;            // src: src/pages/_layout/components/profile-import-card.tsx:275
+  if (type_ == "remote" && idx == 0) {
+    sub.name = tr("shared.actions.update");
+    sub.local_bounds = {upd_cx - 9.0f, btn_cy - 9.0f, 18.0f, 18.0f};
+  } else {
+    sub.name = tr("shared.actions.delete");
+    sub.local_bounds = {del_cx - 9.0f, btn_cy - 9.0f, 18.0f, 18.0f};
+  }
+  return sub;
+}
+
+bool ProfileRowWidget::a11y_invoke_virtual_child(size_t idx) {
+  if (!enabled()) return false;
+  if (type_ == "remote" && idx == 0) {
+    if (!on_update) return false;
+    on_update();
+    return true;
+  }
+  if (!on_delete) return false;
+  on_delete();
+  return true;
+}
+
 // ---------------- ProfileImportCard ----------------
 // src: profile-import-card.tsx:94-369 卡容器 p1 + get3DCardStyle('default')
 ProfileImportCard::ProfileImportCard(Widget* parent) : Widget(parent) {
@@ -268,6 +311,7 @@ ProfileImportCard::ProfileImportCard(Widget* parent) : Widget(parent) {
   auto uf = std::make_unique<TextField>();
   url_field_ = uf.get();
   url_field_->set_placeholder(tr("settings.mini.importPlaceholder"));
+  url_field_->set_i18n_a11y_name("settings.mini.importPlaceholder");
   url_field_->apply_theme();  // ← get3DInputStyle 6 套皮肤查表（:734-927）
   url_field_->style_.size = 13;
   url_field_->height_ = 46.0f;  // src: profile-import-card.tsx:145-165 py4 + 2×13px*1.4375 + py4 ≈ 46
@@ -301,6 +345,8 @@ ProfileImportCard::ProfileImportCard(Widget* parent) : Widget(parent) {
   auto list = std::make_unique<ScrollList>();
   list_ = list.get();
   list_->set_show_scrollbar(true);
+  list_->set_a11y_role(A11yRole::List);
+  list_->set_a11y_labelled_by(title_);
   add_child(std::move(list));
 }
 

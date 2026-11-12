@@ -202,6 +202,11 @@ class SettingsDrawer : public Stack {
   bool hit_self(PointF local) const override {
     return open_ && Widget::hit_self(local);
   }
+  bool a11y_subtree_visible() const override {
+    return open_ && visible() && !a11y_hidden();
+  }
+  A11yRole a11y_default_role() const override { return A11yRole::Pane; }
+  std::wstring a11y_default_name() const override;
 
   // 回调接线（宿主 set 回调后调用一次；幂等）
   void wire_callbacks();

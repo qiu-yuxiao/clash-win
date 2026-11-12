@@ -139,6 +139,7 @@ TrafficPane::TrafficPane(Widget* parent) : Widget(parent) {
   // 折线色 = 主题 token（src: traffic-graph.tsx:122-123 down=primary.main
   //   up=secondary.main）；α：down .9(:14) up .8(:11)。on_paint 每帧刷新。
   graph_->bg_ = Color4f(0, 0, 0, 0);  // src: traffic-graph.tsx:163 仅 clearRect，画布透明
+  graph_->set_a11y_hidden(true);
   add_child(std::move(graph));
 
   // 12 个文字段（src: mini-traffic-panel.tsx 每卡 prefix 9px bold(:119) +
@@ -151,6 +152,7 @@ TrafficPane::TrafficPane(Widget* parent) : Widget(parent) {
                               : static_cast<int>(Weight::Normal);
     slot->style.align_v = AlignV::Center;
     slot->style.wrap = false;
+    slot->set_a11y_hidden(true);
     add_child(std::move(lb));
   };
   mk(dl_prefix_, 9, true); mk(dl_value_, 13, true); mk(dl_unit_, 8, false);
@@ -425,6 +427,17 @@ void TrafficPane::unsubscribe(uint64_t id) {
   subs_.erase(std::remove_if(subs_.begin(), subs_.end(),
                              [id](const auto& p) { return p.first == id; }),
               subs_.end());
+}
+
+std::wstring TrafficPane::a11y_default_name() const {
+  auto fmt_card = [](const Label* p, const Label* v, const Label* u) {
+    if (!p || !v || !u) return std::wstring{};
+    return p->text + L" " + v->text + L" " + u->text;
+  };
+  return fmt_card(dl_prefix_, dl_value_, dl_unit_) + L", " +
+         fmt_card(dt_prefix_, dt_value_, dt_unit_) + L", " +
+         fmt_card(ul_prefix_, ul_value_, ul_unit_) + L", " +
+         fmt_card(ut_prefix_, ut_value_, ut_unit_);
 }
 
 }  // namespace clashwin::ui::scene

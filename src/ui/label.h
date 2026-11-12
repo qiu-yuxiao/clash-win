@@ -23,6 +23,9 @@ class Label : public Widget {
   // 文本不吞鼠标：让 Click/悬停落到父级按钮/段选/输入框
   // （否则点段选文字时命中 Label，父控件收不到 Up，表现为“点了没反应”）
   bool hit_self(PointF) const override { return false; }
+
+  A11yRole a11y_default_role() const override { return A11yRole::Text; }
+  std::wstring a11y_default_name() const override { return text; }
 };
 
 }  // namespace clashwin::ui

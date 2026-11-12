@@ -71,6 +71,9 @@ class TrafficPane : public Widget {
   void on_arrange(const RectF& area) override;
   void on_paint(IRenderTarget& rt) override;
 
+  A11yRole a11y_default_role() const override { return A11yRole::Group; }
+  std::wstring a11y_default_name() const override;
+
   // 测试观察
   TrafficSeries& series() { return series_; }
   CanvasGraph* graph() const { return graph_; }

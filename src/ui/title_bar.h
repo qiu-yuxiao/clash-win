@@ -40,6 +40,17 @@ class TitleBarButton : public Widget {
     return {28, 28};  // ← window-controller btnSx 28×28
   }
 
+  A11yRole a11y_default_role() const override { return A11yRole::Button; }
+  bool a11y_is_focusable() const override { return enabled(); }
+  bool a11y_can_invoke() const override {
+    return enabled() && static_cast<bool>(on_click);
+  }
+  bool a11y_invoke() override {
+    if (!enabled() || !on_click) return false;
+    on_click();
+    return true;
+  }
+
   bool on_mouse(const MouseEvent& e) override {
     switch (e.type) {
       case MouseEventType::Enter: hover_ = true; invalidate(); return true;
@@ -148,6 +159,10 @@ class TitleBar : public Row {
 
   void set_large_mode(bool large);  // 切换 □/restore 字形
   void set_version(const std::wstring& v);
+
+  std::wstring a11y_default_name() const override {
+    return title_label_ ? title_label_->text : L"Clash Win";
+  }
 
   void on_paint(IRenderTarget& rt) override;  // 背景 + divider 底边
 

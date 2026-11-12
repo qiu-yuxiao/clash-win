@@ -60,6 +60,26 @@ class NodeRowWidget : public Widget {
   std::wstring tooltip_text() const override;
   std::function<void()> on_click;
   int index_in_group = 0;  // 奇偶行底色
+  int pos_in_set = 0;      // src: src/components/proxy/proxy-groups.tsx:437 aria-posinset
+  int set_size = 0;        // src: src/components/proxy/proxy-groups.tsx:438 aria-setsize
+
+  A11yRole a11y_default_role() const override { return A11yRole::ListItem; }
+  std::wstring a11y_default_name() const override;
+  bool a11y_is_focusable() const override { return enabled(); }
+  bool a11y_can_invoke() const override {
+    return enabled() && static_cast<bool>(on_click);
+  }
+  bool a11y_invoke() override {
+    if (!enabled() || !on_click) return false;
+    on_click();
+    return true;
+  }
+  std::optional<bool> a11y_is_selected() const override { return selected_; }
+  bool a11y_select() override { return a11y_invoke(); }
+  std::optional<A11yPosInSet> a11y_pos_in_set() const override {
+    if (pos_in_set > 0 && set_size > 0) return A11yPosInSet{pos_in_set, set_size};
+    return std::nullopt;
+  }
 
  private:
   std::string type_, name_;
@@ -76,6 +96,8 @@ struct GridCardItem {
   int delay = -1;
   bool selected = false;
   int index = 0;  // 全局行序（奇偶底色）
+  int pos_in_set = 0;
+  int set_size = 0;
 };
 
 // 一行含最多 cols 张卡片（← proxy-render.tsx:81-94 display:grid repeat(col,1fr)
@@ -118,6 +140,20 @@ class ScrollTopButton : public Widget {
   bool on_mouse(const MouseEvent& e) override;
   // MUI <Fade> 退出后 visibility:hidden → 不参与命中（点击穿透回列表）
   Widget* hit_test(PointF global) override;
+  bool a11y_subtree_visible() const override {
+    return shown_ && visible() && !a11y_hidden();
+  }
+  A11yRole a11y_default_role() const override { return A11yRole::Button; }
+  std::wstring a11y_default_name() const override { return L"Scroll to top"; }
+  bool a11y_is_focusable() const override { return shown_ && enabled(); }
+  bool a11y_can_invoke() const override {
+    return shown_ && enabled() && static_cast<bool>(on_click);
+  }
+  bool a11y_invoke() override {
+    if (!shown_ || !enabled() || !on_click) return false;
+    on_click();
+    return true;
+  }
 
  private:
   void advance_anim(int64_t now_ms);

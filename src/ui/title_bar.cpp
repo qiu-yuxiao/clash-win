@@ -97,6 +97,7 @@ void TitleBarIcon::on_paint(IRenderTarget& rt) {
 }
 
 TitleBar::TitleBar(MainWindow* owner) {
+  set_a11y_role(A11yRole::TitleBar);
   spacing = 8;  // ← gap 8px
   set_padding(10, 0, 8, 0);  // ← padding 0 8px 0 10px
   flex_weight = 0;
@@ -105,6 +106,7 @@ TitleBar::TitleBar(MainWindow* owner) {
   // 左：AppIcon 16×16（src: _layout.tsx:1143-1154）
   auto icon = std::make_unique<TitleBarIcon>();
   icon_ = icon.get();
+  icon_->set_a11y_hidden(true);
   add_child(std::move(icon));
 
   // 标题文本 12px / Medium / 单行省略（← CSS flex:1 + overflow:hidden +
@@ -145,14 +147,17 @@ TitleBar::TitleBar(MainWindow* owner) {
   // Mini 标题栏只有三键：齿轮在 quickbar 内（_layout.tsx:1339-1349），
   // 这里不再重复挂 Setting，避免与 quickbar 齿轮双入口（P1）。
   auto bmin = mkbtn(L'\uE921', "minimize", false);  // Minimize
+  bmin->set_i18n_a11y_name("shared.window.minimize");
   bmin->on_click = [owner] { if (owner) owner->minimize(); };
   btn_min_ = bmin.get();
   ctrls->add_child(std::move(bmin));
   auto blg = mkbtn(L'\uE922', "cropsquare", false);  // CropSquare（large 态换 FilterNone）
+  blg->set_i18n_a11y_name("shared.window.maximize");
   blg->on_click = [owner] { if (owner) owner->toggle_large(); };
   btn_large_ = blg.get();
   ctrls->add_child(std::move(blg));
   auto bcl = mkbtn(L'\uE711', "winclose", true);  // Close；hover 红
+  bcl->set_i18n_a11y_name("shared.actions.close");
   bcl->on_click = [owner] { if (owner) owner->close_to_lightweight(); };
   btn_close_ = bcl.get();
   ctrls->add_child(std::move(bcl));

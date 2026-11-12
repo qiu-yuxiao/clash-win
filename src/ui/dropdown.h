@@ -37,6 +37,26 @@ class Dropdown : public Widget {
   bool on_mouse(const MouseEvent& e) override;
   void on_paint(IRenderTarget& rt) override;
 
+  A11yRole a11y_default_role() const override { return A11yRole::ComboBox; }
+  bool a11y_is_focusable() const override { return enabled(); }
+  std::wstring a11y_value() const override {
+    return (selected_ >= 0 && selected_ < static_cast<int>(options.size()))
+               ? options[static_cast<size_t>(selected_)]
+               : std::wstring();
+  }
+  std::optional<bool> a11y_expanded() const override { return open_; }
+  bool a11y_expand_collapse(bool expand) override {
+    if (!enabled()) return false;
+    expand ? open() : close();
+    return true;
+  }
+  bool a11y_can_invoke() const override { return enabled(); }
+  bool a11y_invoke() override {
+    if (!enabled()) return false;
+    open_ ? close() : open();
+    return true;
+  }
+
   // 绘制参数
   TextStyle style_;
   Color4f bg_ = Color4f::hex(0xFFFFFF);  // src: MUI background.paper #fff

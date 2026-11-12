@@ -118,6 +118,15 @@ class FirstRunGuideDialog : public Widget {
     if (!open_) return nullptr;
     return Widget::hit_test(global);
   }
+  bool a11y_subtree_visible() const override {
+    return open_ && visible() && !a11y_hidden();
+  }
+  bool a11y_is_modal() const override { return open_; }
+  A11yRole a11y_default_role() const override { return A11yRole::Dialog; }
+  std::wstring a11y_default_name() const override;
+  size_t a11y_virtual_child_count() const override;
+  A11ySubItem a11y_virtual_child(size_t idx) const override;
+  bool a11y_invoke_virtual_child(size_t idx) override;
 
   // 几何区域供单测断言
   RectF card_rect() const { return card_rect_; }

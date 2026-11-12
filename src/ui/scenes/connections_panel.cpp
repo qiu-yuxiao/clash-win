@@ -178,6 +178,7 @@ ConnectionsPanel::ConnectionsPanel(Widget* parent) : Widget(parent) {
   search_ = search.get();
   // src: locales/zh/shared.json:64 「"filter": "过滤条件"」（base-search-box.tsx:117）
   search_->set_placeholder(tr("shared.placeholders.filter"));
+  search_->set_i18n_a11y_name("shared.placeholders.filter");
   // 清空按钮（opt-in）：src: connections-panel.tsx:182 BaseSearchBox
   //   → base-search-box.tsx:121-140 endAdornment ClearRounded / resetInput tooltip
   search_->set_clear_button(true, tr("shared.placeholders.resetInput"));
@@ -221,6 +222,8 @@ ConnectionsPanel::ConnectionsPanel(Widget* parent) : Widget(parent) {
   auto list = std::make_unique<ScrollList>();
   list_ = list.get();
   list_->set_show_scrollbar(false);
+  list_->set_a11y_role(A11yRole::List);
+  list_->set_i18n_a11y_name("settings.mini.pathControl");
   add_child(std::move(list));
 
   // 4.1 外框 + 空态覆盖层（须在列表之上）
@@ -704,6 +707,66 @@ bool ConnectionsPanel::on_mouse(const MouseEvent& e) {
   }
 
   return Widget::on_mouse(e);
+}
+
+std::wstring ConnTableOverlay::a11y_default_name() const {
+  return tr("shared.statuses.empty");
+}
+
+std::wstring ConnPanelRowWidget::a11y_default_name() const {
+  std::string cat = item_.chains_category();
+  std::wstring cat_text = tr("connections.components.miniTable.chainsProxy");
+  if (cat == "Direct") cat_text = tr("connections.components.miniTable.chainsDirect");
+  else if (cat == "Reject") cat_text = tr("connections.components.miniTable.chainsReject");
+  return utf::utf8_to_utf16(item_.host_formatted()) + L" - " + cat_text;
+}
+
+std::wstring ConnectionsPanel::a11y_default_name() const {
+  return tr("settings.mini.pathControl");
+}
+
+A11ySubItem ConnectionsPanel::a11y_virtual_child(size_t idx) const {
+  A11ySubItem sub;
+  sub.can_invoke = enabled();
+  size_t act_num = data_ ? data_->active().size() : 0;
+  size_t cls_num = data_ ? data_->closed().size() : 0;
+  if (idx == 0) {
+    sub.role = A11yRole::TabItem;
+    sub.name = tr("settings.mini.connectionsActive") + L" (" +
+               std::to_wstring(act_num) + L")";
+    sub.local_bounds = tab_active_rect_;
+    sub.selected = (tab_ == Tab::Active);
+    sub.pos_in_set = 1;
+    sub.size_of_set = 2;
+  } else if (idx == 1) {
+    sub.role = A11yRole::TabItem;
+    sub.name = tr("settings.mini.connectionsHistory") + L" (" +
+               std::to_wstring(cls_num) + L")";
+    sub.local_bounds = tab_closed_rect_;
+    sub.selected = (tab_ == Tab::Closed);
+    sub.pos_in_set = 2;
+    sub.size_of_set = 2;
+  } else if (idx == 2) {
+    sub.role = A11yRole::Button;
+    sub.name = tr("connections.components.miniTable.hostColumn");
+    sub.local_bounds = header_host_rect_;
+  } else {
+    sub.role = A11yRole::Button;
+    sub.name = tr("connections.components.miniTable.chainsColumn");
+    sub.local_bounds = header_chains_rect_;
+  }
+  return sub;
+}
+
+bool ConnectionsPanel::a11y_invoke_virtual_child(size_t idx) {
+  if (!enabled()) return false;
+  switch (idx) {
+    case 0: set_tab(Tab::Active); return true;
+    case 1: set_tab(Tab::Closed); return true;
+    case 2: cycle_sort_host(); return true;
+    case 3: cycle_sort_chains(); return true;
+    default: return false;
+  }
 }
 
 }  // namespace clashwin::ui::scene

@@ -298,6 +298,29 @@ std::wstring NodeRowWidget::tooltip_text() const {
   return {};
 }
 
+std::wstring NodeRowWidget::a11y_default_name() const {
+  std::wstring out = strip_six_digit_suffix(utf::utf8_to_utf16(name_));
+  if (!type_.empty()) {
+    std::wstring wtype = utf::utf8_to_utf16(type_);
+    for (auto& c : wtype)
+      c = static_cast<wchar_t>(std::towupper(static_cast<wint_t>(c)));
+    if (!out.empty()) out += L" ";
+    out += L"(" + wtype + L")";
+  }
+  if (!is_preset_proxy(name_)) {
+    std::wstring d = (delay_ == -2) ? L"..." : format_delay(delay_);
+    if (!d.empty()) {
+      if (delay_ > 0 && delay_ < kNodeDelayMaxMs) d += L"ms";
+      if (!out.empty()) out += L" ";
+      out += d;
+    }
+  }
+  if (selected_) {
+    out += L" - " + tr("shared.statuses.enabled");
+  }
+  return out;
+}
+
 // ---------- NodeGridRowWidget ----------
 void NodeGridRowWidget::set_cards(const std::vector<GridCardItem>& items, int cols) {
   cols_ = cols;
@@ -305,6 +328,8 @@ void NodeGridRowWidget::set_cards(const std::vector<GridCardItem>& items, int co
     auto card = std::make_unique<NodeRowWidget>();
     card->bind(it.type, it.name, it.delay, it.selected);
     card->index_in_group = it.index;
+    card->pos_in_set = it.pos_in_set;
+    card->set_size = it.set_size;
     card->on_click = [this, name = it.name]() {
       if (on_select) on_select(name);
     };
@@ -351,6 +376,7 @@ ScrollTopButton::ScrollTopButton(Widget* parent) : Widget(parent) {
   icon_ = ic.get();
   icon_->set_icon("keyboardarrowup");  // ← KeyboardArrowUpIcon
   icon_->size_ = 24;                   // MUI SvgIcon 默认 fontSize medium = 1.5rem
+  icon_->set_a11y_hidden(true);
   add_child(std::move(ic));
 }
 
@@ -464,6 +490,7 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   bolt->flex_weight = 0;
   // src: proxy-head.tsx:145 title={t('proxies.page.tooltips.delayCheck')}
   bolt->set_i18n_tooltip("proxies.page.tooltips.delayCheck");
+  bolt->set_i18n_a11y_name("proxies.page.tooltips.delayCheck");
   bolt_btn_ = bolt.get();
   bolt->on_click = [this] {
     // ★ §5.2/§5.6「所见即所选」（← Mini proxy-groups.tsx:230-275 handleCheckAll）：
@@ -507,6 +534,7 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   sort->box_w = sort->box_h = 26;
   sort->color_ = pal.primary_text;
   sort->set_i18n_tooltip("proxies.page.tooltips.sortDelay");  // src: locales/zh/proxies.json:34-36
+  sort->set_i18n_a11y_name("proxies.page.tooltips.sortDelay");
   sort->on_click = [this] { toggle_sort(); };
   bar_p->add_child(std::move(sort));
 
@@ -527,6 +555,7 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   search_->flex_weight = 1;
   // placeholder src: base-search-box.tsx:117 shared.placeholders.filter
   search_->set_placeholder(tr("shared.placeholders.filter"));
+  search_->set_i18n_a11y_name("shared.placeholders.filter");
   // src: button-styles.ts:734-927 get3DInputStyle（6 套皮肤全部走 apply_theme）
   search_->apply_theme();
   search_->style_.size = 11;
@@ -579,6 +608,8 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   list_->themed_ = true;
   // src: proxy-groups.tsx:413 `scrollbarWidth: 'none'`（:416 同为 none，列表无滚动条）
   list_->set_show_scrollbar(false);
+  list_->set_a11y_role(A11yRole::List);
+  list_->set_i18n_a11y_name("proxies.page.a11y.nodelist");  // src: src/components/proxy/proxy-groups.tsx:412
   add_child(std::move(list));
 
   // 空态：InboxRounded 2.5em(=40px) + "No Proxies"，居中
@@ -590,6 +621,7 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   ei->box_w = ei->box_h = 40;
   ei->color_ = pal.primary_text;  // color 'inherit' → text.primary
   ei->set_visible(false);
+  ei->set_a11y_hidden(true);
   add_child(std::move(ei));
 
   auto el = std::make_unique<Label>();
@@ -680,6 +712,7 @@ void NodeList::restore_head_state() {
   if (sort_btn_) {
     sort_btn_->set_icon(kSortIcons[sort_type_]);
     sort_btn_->set_i18n_tooltip(kSortTipKeys[sort_type_]);
+    sort_btn_->set_i18n_a11y_name(kSortTipKeys[sort_type_]);
   }
 
   // 兜底：恢复出的过滤词不视为「新词」，避免后续被误判触发自动测速择优
@@ -752,6 +785,7 @@ void NodeList::toggle_sort() {
   if (sort_btn_) {
     sort_btn_->set_icon(kSortIcons[sort_type_]);
     sort_btn_->set_i18n_tooltip(kSortTipKeys[sort_type_]);
+    sort_btn_->set_i18n_a11y_name(kSortTipKeys[sort_type_]);
   }
   rebuild_visible();
   sync_list();
@@ -874,13 +908,14 @@ void NodeList::sync_list() {
         auto row = std::make_unique<NodeGridRowWidget>();
         std::vector<GridCardItem> items;
         const int base = index * cols;
+        const int total_vis = static_cast<int>(self->visible_.size());
         for (int c = 0; c < cols; ++c) {
           const int vi = base + c;
-          if (vi >= static_cast<int>(self->visible_.size())) break;
+          if (vi >= total_vis) break;
           const int ri = self->visible_[vi];
           const auto& r = nd->rows()[static_cast<size_t>(ri)];
           items.push_back({r.type, r.name, nd->row_delay(r.name),
-                           r.name == nd->now(), ri});
+                           r.name == nd->now(), ri, vi + 1, total_vis});
         }
         row->on_select = [self](const std::string& name) {
           // 失败回弹：select 返回 false 时不更新选中（NodeData.now_ 未变）

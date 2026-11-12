@@ -48,6 +48,14 @@ class ConnectionDetailDialog : public Widget {
   bool hit_self(PointF local) const override {
     return open_ && Widget::hit_self(local);
   }
+  bool a11y_subtree_visible() const override {
+    return open_ && visible() && !a11y_hidden();
+  }
+  A11yRole a11y_default_role() const override { return A11yRole::Dialog; }
+  std::wstring a11y_default_name() const override;
+  size_t a11y_virtual_child_count() const override;
+  A11ySubItem a11y_virtual_child(size_t idx) const override;
+  bool a11y_invoke_virtual_child(size_t idx) override;
 
  private:
   void place_card();

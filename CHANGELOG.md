@@ -8,6 +8,14 @@ Format reference: `Changelog.md` in the Clash Mini repository (newest first, `##
 
 ---
 
+## v0.2.10 (2026-11-12)
+
+### 原生无障碍声音读屏（Win32 UI Automation）全量补齐
+- **纯自绘 Direct2D 控件树原生桥接 Windows UI Automation (`WM_GETOBJECT`)**：在零 WebView2 / 零浏览器内核开销的前提下，完整实现 `IRawElementProviderSimple` / `IRawElementProviderFragment` / `IRawElementProviderFragmentRoot` COM 无障碍提供程序树，支持 **Windows 讲述人（Narrator）**、**NVDA**、**JAWS** 及 Accessibility Insights 直接发现、逐项聚焦、框选定位并语音朗读全界面自绘控件。
+- **六大 UIA 标准控制模式与复合控件虚拟子项全覆盖**：全面实现 `IInvokeProvider`（按钮/菜单项点击）、`IToggleProvider`（开关/置顶/皮肤格状态读写）、`IValueProvider`（过滤框/订阅框/端口框与弹窗输入框读写）、`IRangeValueProvider`（各皮肤双因子滑块精确调节）、`ISelectionItemProvider`（代理节点切换、流量接管/分流分段单选、连接标签页）及 `IExpandCollapseProvider`（13 国语言选择器与帮助菜单展开状态），并为自绘复合区域（快捷栏活跃节点卡与延迟胶囊、订阅条目动作钮、连接面板表头、首启两步式向导及全部模态弹窗）补齐虚拟无障碍子项。
+- **13 种内置语言实时读屏热切换与智能降噪**：接入惰性 `i18n` 版本校验（`ensure_i18n_fresh`），切换 13 种界面语言（`简体中文`、`繁體中文`、`English`、`日本語`、`한국어`、`Русский`、`Deutsch`、`Español`、`Bahasa Indonesia`、`Türkçe`、`فارسی`、`العربية`、`Татарча`）后无需等待重绘即可即时向读屏器输出对应语种 `aria-label`（`layout.a11y.*` 等）文案；自动聚合节点行（名称 + 协议 + 延迟 + 当前节点标注 + `PositionInSet/SizeOfSet`）与底部四宫格流量摘要，屏蔽碎片化装饰图元干扰。
+- **实时通知语音播报、模态焦点隔离与全键盘无障碍导航**：动态绑定 Windows `UiaRaiseNotificationEvent` 实现 `SnackbarW` 顶部通知条免抢焦点实时语音播报；在打开清洁安装首启引导、编辑订阅、调试日志等模态弹窗或展开设置抽屉时自动屏蔽底层被遮挡控件，提供 `Tab` / `Shift+Tab` 模态环绕焦点遍历与 `Space` / `Enter` 激活，并在控件动态销毁时自动断开 COM 引用杜绝悬空访问。
+
 ## v0.2.9 (2026-11-12)
 
 ### 同步跟进 Clash Mini v3.2.5（BUG-316）：双层防误杀与零断流自愈守护

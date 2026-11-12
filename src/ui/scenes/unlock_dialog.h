@@ -42,6 +42,17 @@ class UnlockDialog : public Widget {
   bool hit_self(PointF local) const override {
     return open_ && Widget::hit_self(local);
   }
+  bool a11y_subtree_visible() const override {
+    return open_ && visible() && !a11y_hidden();
+  }
+  bool a11y_is_modal() const override { return !page_mode_ && open_; }
+  A11yRole a11y_default_role() const override {
+    return page_mode_ ? A11yRole::Pane : A11yRole::Dialog;
+  }
+  std::wstring a11y_default_name() const override;
+  size_t a11y_virtual_child_count() const override;
+  A11ySubItem a11y_virtual_child(size_t idx) const override;
+  bool a11y_invoke_virtual_child(size_t idx) override;
 
   RectF card_rect() const { return card_rect_; }
   RectF retest_btn_rect() const { return btn_retest_rect_; }

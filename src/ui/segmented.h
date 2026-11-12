@@ -53,13 +53,19 @@ class Segmented : public Widget {
   bool on_mouse(const MouseEvent& e) override;
   void on_paint(IRenderTarget& rt) override;
 
+  A11yRole a11y_default_role() const override { return A11yRole::Group; }
+  size_t a11y_virtual_child_count() const override;
+  A11ySubItem a11y_virtual_child(size_t index) const override;
+  bool a11y_invoke_virtual_child(size_t index) override;
+
  private:
+  void sync_i18n_options() const;
   int hit_segment(const PointF& local) const;
-  std::vector<std::wstring> options_;
+  mutable std::vector<std::wstring> options_;
   std::vector<std::wstring> tooltips_;
   std::vector<std::string> option_keys_;
   std::vector<std::string> tooltip_keys_;
-  uint64_t options_revision_ = 0;
+  mutable uint64_t options_revision_ = 0;
   int selected_ = 0;
   int pressed_ = -1;
   int hover_ = -1;
