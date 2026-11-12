@@ -1,18 +1,19 @@
 #pragma once
 
-// ★ Windows 双层防误杀与零断流自愈守护（← Clash Mini src-tauri/src/utils/guardian.rs，v3.2.5 BUG-316）
+// ★ Windows 轻量模式防强杀四重闭环守护（← Clash Mini src-tauri/src/process/guardian.rs，v3.2.5 BUG-316 + BUG-363）
 //
-// 第一层（事前免疫）：常驻零渲染防清理哨兵窗口对（owner 隐藏 + sentinel WS_POPUP|WS_VISIBLE alpha=0）
-//   - 绕过 360 加速球（360perfoptm2.dll DoOptmGroupResidual / FastOptm）等第三方清理工具的
-//     「无可见顶层窗口后台进程 → TerminateProcess(hProcess, 99)」误杀规则；
-//   - 被隐藏 owner 持有，且不含 WS_EX_APPWINDOW / WS_EX_TOOLWINDOW / WS_EX_TOPMOST：
-//     既满足 IsWindowVisible != 0 且不被判为悬浮工具窗，又绝不出现在任务栏与 Alt+Tab。
-//
-// 第二层（事后兜底）：超轻量级伴生看门狗进程（--guardian）+ 零断流自愈重连（--guardian-respawn）
-//   - 伴生进程在 wWinMain 最早期拦截，不初始化 D2D/UI/网络栈，阻塞于内核对象 WaitForMultipleObjects，0% CPU；
-//   - 主进程正常退出 / 系统关机 / 对方互斥接管前先置位 Local\ClashWinIntentionalExit_<pid>，伴生进程 0ms 退出；
-//   - 主进程在后台轻量/托盘态被意外强杀时：同步落盘退出码取证日志（clashwin.log）→ 多重安全门禁 →
-//     静默拉起 --guardian-respawn 恢复托盘与 CoreMonitor，系统服务内核存活时零断流无感挂载。
+// 1. 伴生看门狗异名异目录物理隔离（clashwin-guard.exe / clashwin-guard-alt.exe）：
+//    - 按需经 .staging 原子同步至 %LOCALAPPDATA%\io.github.clash-win.clash-win\guard\，传入 --target-exe
+//      并脱离父 Job Object 独立拉起，彻底免疫 360 加速球按 clashwin.exe 应用组连坐双杀，且不锁安装目录。
+// 2. 主进程与看门狗双向互锁监督（0% CPU 内核阻塞）：
+//    - 主进程通过独立监督线程（WaitForMultipleObjects([child, exit_event], INFINITE)）反向监控看门狗死活，
+//      正常退出 0ms 唤醒；看门狗若遭外部误杀则记录退出码并按指数退避（1.5s~30s）自动重建。
+// 3. 主进程与看门狗双端挂载工作区哨兵窗口对（owner 屏外隐藏 + sentinel 主屏工作区原点 1×1）：
+//    - WS_POPUP | WS_VISIBLE + WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE，LWA_ALPHA = 1（1/255 肉眼不可见）、
+//      非空标题、WM_NCHITTEST -> HTTRANSPARENT 完全穿透，既落入真实显示器工作区（MonitorFromWindow != NULL），
+//      又绝不出现在任务栏与 Alt+Tab；看门狗侧以 MsgWaitForMultipleObjects(..., QS_ALLINPUT) 泵消息防 Hung 判死。
+// 4. 120s 稳态代数复位与零断流自愈重挂（--guardian-respawn）：
+//    - 稳定运行满 120s 后若遭外部强杀自动将 --gen 重置为 1，兼顾启动崩溃 3 次熔断与 7×24h 无限次静默托盘自愈。
 
 #include <cstdint>
 #include <filesystem>
@@ -24,13 +25,24 @@ namespace clashwin::system::guardian {
 
 /// 短时间内允许连续快速自愈拉起的最大代数（防止启动即崩导致无限拉起风暴）
 inline constexpr uint32_t kMaxRapidRespawnGen = 3;
-/// 主进程稳定存活超过该秒数后，自愈代数清零重新计算
-inline constexpr uint64_t kStableUptimeResetSecs = 60;
+/// 主进程稳定存活超过该秒数（120s）后，自愈代数重置为 1（支持 7×24h 无限次外部清理自愈）
+inline constexpr uint64_t kStableUptimeResetSecs = 120;
 /// 检测到异常强杀后延迟拉起的缓冲毫秒数（避开卸载器/安装器/关机序列瞬态）
 inline constexpr uint32_t kRespawnSafetyDelayMs = 1500;
+/// 伴生看门狗稳定存活超过该秒数后被杀，快速重建退避计数归零
+inline constexpr uint64_t kGuardRapidDeathWindowSecs = 60;
+/// 伴生看门狗首次或稳态后意外终止的基础重建延迟毫秒数
+inline constexpr uint64_t kGuardRebuildBaseDelayMs = 1500;
+/// 1/255（约 0.39% 不透明度）：肉眼完全不可见，同时令 GetLayeredWindowAttributes 返回非零 bAlpha
+inline constexpr uint8_t kSentinelVisibleAlpha = 1;
+
+/// 物理隔离目录中的伴生看门狗主/备可执行文件名（与安装目录 clashwin.exe 异名异目录）
+inline constexpr const wchar_t* kIsolatedGuardianBinaryName = L"clashwin-guard.exe";
+inline constexpr const wchar_t* kIsolatedGuardianFallbackName = L"clashwin-guard-alt.exe";
 
 struct GuardianArgs {
   uint32_t parent_pid = 0;
+  std::filesystem::path target_exe;
   std::filesystem::path log_dir;
   uint16_t singleton_port = 33335;
   uint32_t generation = 0;
@@ -56,10 +68,21 @@ bool is_guardian_respawn_args(const std::vector<std::wstring>& args);
 /// 当前进程是否由伴生看门狗通过 `--guardian-respawn` 拉起
 bool is_guardian_respawn();
 
-/// 计算下一次自愈拉起代数（稳定运行 ≥60s 重置为 1；超过 kMaxRapidRespawnGen 返回 nullopt）
+/// 计算下一次自愈拉起代数（稳定运行 ≥120s 重置为 1；超过 kMaxRapidRespawnGen 返回 nullopt）
 std::optional<uint32_t> compute_next_generation(uint32_t current_gen, uint64_t uptime_secs);
 
-/// 将 Windows 进程退出码格式化为人类可读的取证诊断文本（← guardian.rs:509-520）
+/// 根据伴生看门狗短时间连续异常死亡次数计算重建退避毫秒数（1500ms -> 2s -> 5s -> 15s -> 30s 封顶）
+uint64_t compute_guard_rebuild_backoff_ms(uint32_t rapid_deaths);
+
+/// 解析物理隔离看门狗驻留目录（优先 %LOCALAPPDATA%\io.github.clash-win.clash-win\guard）
+std::filesystem::path resolve_isolated_guardian_dir();
+
+/// 将主程序按需经 .staging 原子同步至隔离目录（clashwin-guard.exe，锁定时落入 clashwin-guard-alt.exe）
+std::optional<std::filesystem::path> sync_guardian_binary_to_dir(
+    const std::filesystem::path& main_exe,
+    const std::filesystem::path& guard_dir);
+
+/// 将 Windows 进程退出码格式化为人类可读的取证诊断文本（← guardian.rs:292-303）
 std::string format_exit_code_diagnosis(uint32_t code);
 
 /// 不依赖主进程日志器，直接以原子追加模式向 <log_dir>\clashwin.log 写入取证记录并刷盘
@@ -73,8 +96,10 @@ std::wstring lightweight_mode_event_name(uint32_t pid);
 
 // ---------- 第一层：常驻零渲染防清理哨兵窗口对 ----------
 
-/// 按给定窗口类名创建一对防清理哨兵窗口（测试可传独立类名校验 Win32 属性不变量）
-std::optional<SentinelWindowPair> create_sentinel_window_pair(const wchar_t* class_name);
+/// 按给定窗口类名与标题创建一对工作区防清理哨兵窗口（测试可传独立类名校验 Win32 属性不变量）
+std::optional<SentinelWindowPair> create_sentinel_window_pair(
+    const wchar_t* class_name,
+    const wchar_t* title = L"Clash Win Tray Host");
 void destroy_sentinel_window_pair(SentinelWindowPair& pair);
 
 /// 在主线程（UI 线程）创建全生命周期常驻哨兵窗口（幂等）

@@ -35,6 +35,7 @@
 #include "util/log.h"
 #include "util/utf.h"
 #include "system/tray.h"
+#include "system/guardian.h"
 #include "system/signals.h"
 #include "system/service_runner.h"  // TUN 守卫：服务可用性探测
 #include "ui/help_menu.h"
@@ -2373,6 +2374,7 @@ void MainWindow::show_and_activate() {
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
   }
   SetForegroundWindow(hwnd_);
+  system::guardian::set_lightweight_mode_signal(false);  // src: src-tauri/src/utils/window_manager.rs:570
   stealth_.feed_activity(now_ms());
 
   // 窗口唤醒防雪崩静默探测（5min 冷却，select=false，刷新前端延迟缓存）
@@ -2393,6 +2395,9 @@ void MainWindow::hide() {
   clear_mouse_hover();
   if (tooltip_host_) tooltip_host_->leave();
   ShowWindow(hwnd_, SW_HIDE);
+  if (!app::Lifecycle::instance().is_exiting()) {
+    system::guardian::set_lightweight_mode_signal(true);  // src: src-tauri/src/utils/window_manager.rs:455
+  }
 }
 
 void MainWindow::release_d2d_resources() {

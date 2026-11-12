@@ -162,8 +162,8 @@ bool Lifecycle::entry_lightweight_mode(bool force) {
       CWLOG_INFO("Lifecycle: enable_auto_light_weight_mode is false, only hiding window");
       if (window_) {
         window_->hide();
-        system::guardian::set_lightweight_mode_signal(true);
       }
+      system::guardian::set_lightweight_mode_signal(true);
       if (tray_) tray_->update_lite_mode_menu(false);
       return true;
     }

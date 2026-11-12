@@ -663,6 +663,13 @@ Section "Install"
   nsExec::Exec 'netsh int tcp res'
   Pop $0
 
+  ; BUG-363：升级/重装前先清理本方隔离看门狗伴生进程（clashwin-guard.exe /
+  ;   clashwin-guard-alt.exe），防止 CheckIfAppIsRunning 终止主进程瞬间被看门狗自愈拉起。
+  nsExec::Exec '$SYSDIR\taskkill.exe /F /IM clashwin-guard.exe'
+  Pop $0
+  nsExec::Exec '$SYSDIR\taskkill.exe /F /IM clashwin-guard-alt.exe'
+  Pop $0
+
   ; 运行中检测 + 提示终止（← 模板 :895 CheckIfAppIsRunning；用户可见交互：
   ;   appRunningOkKill 确认/取消 → 静默/被动直接终止）
   !insertmacro CheckIfAppIsRunning "${MAINBINARY}"
@@ -671,11 +678,15 @@ Section "Install"
   ;   安装时强杀 Clash Mini 全部进程（不删对方磁盘文件）。
   ;   归属判定按 exe 安装目录路径，绝不按进程名（← coexist.cpp 同一口径）：
   ;   Clash Mini 专属二进制（clash-mini.exe / "Clash Mini.exe" / clash-verge.exe /
-  ;   clashwin.exe）按名杀安全；ClashWin 内核名 win-mihomo.exe、Clash Mini 内核名
-  ;   mini-mihomo.exe（已不再同名），clash-verge-service.exe 两侧同名，
-  ;   须按路径过滤（含 "Clash Mini"/"clash-mini" 且不属于本方 $INSTDIR），否则升级场景
-  ;   下运行中的 ClashWin 重跑安装器会误杀自家内核/服务。
+  ;   clashwin.exe / clash-mini-guard.exe / clash-mini-guard-alt.exe）按名杀安全；
+  ;   ClashWin 内核名 win-mihomo.exe、Clash Mini 内核名 mini-mihomo.exe（已不再同名），
+  ;   clash-verge-service.exe 两侧同名，须按路径过滤（含 "Clash Mini"/"clash-mini"
+  ;   且不属于本方 $INSTDIR），否则升级场景下运行中的 ClashWin 重跑安装器会误杀自家内核/服务。
   DetailPrint "Cleaning up legacy and Clash Mini processes/services..."
+  nsExec::Exec 'taskkill /F /IM clash-mini-guard.exe'
+  Pop $0
+  nsExec::Exec 'taskkill /F /IM clash-mini-guard-alt.exe'
+  Pop $0
   nsExec::Exec 'taskkill /F /IM clash-mini.exe'
   Pop $0
   nsExec::Exec 'taskkill /F /IM "Clash Mini.exe"'
@@ -871,6 +882,12 @@ Section "Uninstall"
   Call un.KeepTopMost
   SetRegView 64
 
+  ; BUG-363：卸载前先清理本方隔离看门狗伴生进程，防止主进程被杀瞬间看门狗自愈拉起。
+  nsExec::Exec '$SYSDIR\taskkill.exe /F /IM clashwin-guard.exe'
+  Pop $0
+  nsExec::Exec '$SYSDIR\taskkill.exe /F /IM clashwin-guard-alt.exe'
+  Pop $0
+
   !insertmacro un.CheckIfAppIsRunning "${MAINBINARY}"
 
   ; 内核进程清理（同安装段：共存豁免，仅本目录；ClashWin 内核=win-mihomo.exe）
@@ -892,6 +909,8 @@ Section "Uninstall"
   SetShellVarContext current
   Delete "$APPDATA\${BUNDLEID}\window-state.json"
   Delete "$APPDATA\${BUNDLEID}\.window-state.json"
+  ; BUG-363：无条件清理 %LOCALAPPDATA%\io.github.clash-win.clash-win\guard 隔离看门狗缓存目录
+  RMDir /r "$LOCALAPPDATA\${BUNDLEID}\guard"
 
   ; 历史自启动注册表值（← 模板 :1089-1108，品牌位替换）
   StrCpy $R1 "Software\Microsoft\Windows\CurrentVersion\Run"

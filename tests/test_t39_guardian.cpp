@@ -1,14 +1,16 @@
-// T39: Windows 双层防误杀与零断流自愈守护验证（对齐 Clash Mini v3.2.5 / BUG-316）
+// T39: Windows 双层防误杀与零断流自愈守护验证（对齐 Clash Mini v3.2.5 / BUG-316 + BUG-363）
 //
 // 覆盖：
-//   1. parse_guardian_args / parse_respawn_info 命令行解析与缺参防御
-//   2. compute_next_generation 快速自愈代数退避与 60s 稳定运行归零
-//   3. format_exit_code_diagnosis 退出码诊断（含 360 加速球 99/0x63 强杀特征码）
-//   4. append_forensic_log 独立原子追加写 clashwin.log 取证记录
-//   5. create_sentinel_window_pair 常驻防清理哨兵窗口对 Win32 属性不变量
-//      （owner 不可见、sentinel 可见、无 TOOLWINDOW/TOPMOST/APPWINDOW、销毁干净）
-//   6. 命名内核事件信令（轻量模式切换、主动退出通知、对端 Clash Mini 互斥礼貌置位）
-//   7. CoreManager 零断流无感挂载标志与 CoreMonitor 启动跳过首轮自动选点 + 重试恢复闭环
+//   1. parse_guardian_args / parse_respawn_info 命令行解析（含 --target-exe 与兼容回退）与缺参防御
+//   2. compute_next_generation 快速自愈代数退避与 120s 稳定运行归零 + compute_guard_rebuild_backoff_ms 看门狗重建退避
+//   3. sync_guardian_binary_to_dir 异名异目录伴生二进制原子同步、复用、更新与锁定回退（clashwin-guard-alt.exe）
+//   4. format_exit_code_diagnosis 退出码诊断（含 360 加速球 99/0x63 强杀特征码与通用 NTSTATUS）
+//   5. append_forensic_log 独立原子追加写 clashwin.log 取证记录
+//   6. create_sentinel_window_pair 常驻防清理哨兵窗口对 Win32 属性不变量
+//      （owner 不可见、sentinel 可见、位于主屏工作区内 MonitorFromWindow != NULL、
+//       非空标题、alpha=1、WM_NCHITTEST==HTTRANSPARENT、无 TOOLWINDOW/TOPMOST/APPWINDOW、销毁干净）
+//   7. 命名内核事件信令（轻量模式切换、主动退出通知、对端 Clash Mini 互斥礼貌置位）
+//   8. CoreManager 零断流无感挂载标志与 CoreMonitor 启动跳过首轮自动选点 + 重试恢复闭环
 #include "system/guardian.h"
 
 #include <windows.h>
@@ -36,11 +38,13 @@ UT_TEST(guardian_parse_args_and_respawn_info) {
   UT_CHECK(!is_guardian_respawn_args(normal));
 
   const std::vector<std::wstring> valid = {
-      L"ClashWin.exe",     L"--guardian",
+      L"C:\\Users\\test\\AppData\\Local\\io.github.clash-win.clash-win\\guard\\clashwin-guard.exe",
+      L"--guardian",
       L"--parent-pid",     L"4242",
       L"--log-dir",        L"C:\\Temp\\ClashWin\\logs",
       L"--singleton-port", L"33339",
       L"--gen",            L"2",
+      L"--target-exe",     L"C:\\Program Files\\Clash Win\\ClashWin.exe",
   };
   const auto parsed = parse_guardian_args(valid);
   UT_CHECK(parsed.has_value());
@@ -49,6 +53,22 @@ UT_TEST(guardian_parse_args_and_respawn_info) {
   UT_CHECK(parsed->log_dir == std::filesystem::path(L"C:\\Temp\\ClashWin\\logs"));
   UT_CHECK_EQ(parsed->singleton_port, 33339u);
   UT_CHECK_EQ(parsed->generation, 2u);
+  UT_CHECK(parsed->target_exe ==
+           std::filesystem::path(L"C:\\Program Files\\Clash Win\\ClashWin.exe"));
+
+  // 兼容旧版未传 --target-exe：自动回退至 args[0]
+  const std::vector<std::wstring> legacy = {
+      L"C:\\Program Files\\Clash Win\\ClashWin.exe",
+      L"--guardian",
+      L"--parent-pid", L"4242",
+      L"--log-dir",    L"C:\\Temp\\ClashWin\\logs",
+  };
+  const auto legacy_parsed = parse_guardian_args(legacy);
+  UT_CHECK(legacy_parsed.has_value());
+  if (legacy_parsed.has_value()) {
+    UT_CHECK(legacy_parsed->target_exe ==
+             std::filesystem::path(L"C:\\Program Files\\Clash Win\\ClashWin.exe"));
+  }
 
   const std::vector<std::wstring> missing_pid = {
       L"ClashWin.exe", L"--guardian", L"--log-dir", L"C:\\Temp\\logs"};
@@ -70,15 +90,105 @@ UT_TEST(guardian_parse_args_and_respawn_info) {
 }
 
 UT_TEST(guardian_compute_next_generation_backoff_and_reset) {
-  // 短时间连续崩溃：0 -> 1 -> 2 -> 3 -> nullopt（阻止无限拉起风暴）
+  // 短时间连续崩溃（< 120s）：0 -> 1 -> 2 -> 3 -> nullopt（阻止无限拉起风暴）
   UT_CHECK(compute_next_generation(0, 10) == std::optional<uint32_t>(1u));
   UT_CHECK(compute_next_generation(1, 25) == std::optional<uint32_t>(2u));
-  UT_CHECK(compute_next_generation(2, 59) == std::optional<uint32_t>(3u));
+  UT_CHECK(compute_next_generation(2, 119) == std::optional<uint32_t>(3u));
   UT_CHECK(!compute_next_generation(3, 5).has_value());
+  UT_CHECK(!compute_next_generation(3, 119).has_value());
 
-  // 稳定运行满 60s 后再次意外被杀：代数重置为 1
-  UT_CHECK(compute_next_generation(3, 60) == std::optional<uint32_t>(1u));
+  // 稳定运行满 120s 后再次意外被杀：代数重置为 1（BUG-363）
+  UT_CHECK(compute_next_generation(3, 120) == std::optional<uint32_t>(1u));
   UT_CHECK(compute_next_generation(2, 3600) == std::optional<uint32_t>(1u));
+
+  // 主进程监督看门狗重建退避阶梯（BUG-363）
+  UT_CHECK_EQ(compute_guard_rebuild_backoff_ms(0), 1500u);
+  UT_CHECK_EQ(compute_guard_rebuild_backoff_ms(1), 2000u);
+  UT_CHECK_EQ(compute_guard_rebuild_backoff_ms(2), 5000u);
+  UT_CHECK_EQ(compute_guard_rebuild_backoff_ms(3), 15000u);
+  UT_CHECK_EQ(compute_guard_rebuild_backoff_ms(4), 30000u);
+  UT_CHECK_EQ(compute_guard_rebuild_backoff_ms(99), 30000u);
+}
+
+UT_TEST(guardian_sync_isolated_binary_stages_reuses_updates_and_fallback) {
+  const auto temp_dir =
+      std::filesystem::temp_directory_path() /
+      (L"clashwin_guard_sync_test_" + std::to_wstring(::GetCurrentProcessId()) +
+       L"_" + std::to_wstring(::GetTickCount64()));
+  std::error_code ec;
+  std::filesystem::remove_all(temp_dir, ec);
+  std::filesystem::create_directories(temp_dir, ec);
+
+  const auto fake_main = temp_dir / L"ClashWin.exe";
+  const auto guard_dir = temp_dir / L"guard";
+  std::filesystem::create_directories(guard_dir, ec);
+
+  {
+    std::ofstream ofs(fake_main, std::ios::binary | std::ios::trunc);
+    ofs << "fake-clashwin-binary-v1";
+  }
+
+  // 制造历史残留 staging 临时文件，验证同步前自动清理
+  const auto stale_staging = guard_dir / L"clashwin-guard.staging.99999.exe";
+  {
+    std::ofstream ofs(stale_staging, std::ios::binary | std::ios::trunc);
+    ofs << "stale";
+  }
+  UT_CHECK(std::filesystem::exists(stale_staging));
+
+  // 1. 首次同步创建 clashwin-guard.exe 并清理 staging
+  const auto synced1 = sync_guardian_binary_to_dir(fake_main, guard_dir);
+  UT_CHECK(synced1.has_value());
+  if (!synced1.has_value()) return;
+  UT_CHECK_EQ(synced1->filename().wstring(), std::wstring(kIsolatedGuardianBinaryName));
+  UT_CHECK(std::filesystem::exists(*synced1));
+  UT_CHECK(!std::filesystem::exists(stale_staging));
+  UT_CHECK_EQ(std::filesystem::file_size(*synced1, ec),
+              std::filesystem::file_size(fake_main, ec));
+
+  // 2. 二进制大小和时间戳一致时直接复用
+  const auto mtime1 = std::filesystem::last_write_time(*synced1, ec);
+  const auto synced2 = sync_guardian_binary_to_dir(fake_main, guard_dir);
+  UT_CHECK(synced2.has_value());
+  if (!synced2.has_value()) return;
+  UT_CHECK(*synced2 == *synced1);
+  UT_CHECK(std::filesystem::last_write_time(*synced2, ec) == mtime1);
+
+  // 3. 主二进制内容更新后重新同步覆盖
+  {
+    std::ofstream ofs(fake_main, std::ios::binary | std::ios::trunc);
+    ofs << "fake-clashwin-binary-v2-updated-longer-payload";
+  }
+  const auto synced3 = sync_guardian_binary_to_dir(fake_main, guard_dir);
+  UT_CHECK(synced3.has_value());
+  if (!synced3.has_value()) return;
+  UT_CHECK(*synced3 == *synced1);
+  UT_CHECK_EQ(std::filesystem::file_size(*synced3, ec),
+              std::filesystem::file_size(fake_main, ec));
+
+  // 4. 当主槽位 clashwin-guard.exe 被独占锁定时（模拟旧看门狗正在运行），回退至 clashwin-guard-alt.exe
+  {
+    std::ofstream ofs(fake_main, std::ios::binary | std::ios::trunc);
+    ofs << "fake-clashwin-binary-v3-locked-fallback-payload-extra";
+  }
+  HANDLE h_lock = ::CreateFileW(synced1->c_str(), GENERIC_READ, FILE_SHARE_READ,
+                                nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+                                nullptr);
+  UT_CHECK(h_lock != INVALID_HANDLE_VALUE);
+  if (h_lock != INVALID_HANDLE_VALUE) {
+    const auto synced_alt = sync_guardian_binary_to_dir(fake_main, guard_dir);
+    UT_CHECK(synced_alt.has_value());
+    if (synced_alt.has_value()) {
+      UT_CHECK_EQ(synced_alt->filename().wstring(),
+                  std::wstring(kIsolatedGuardianFallbackName));
+      UT_CHECK(std::filesystem::exists(*synced_alt));
+      UT_CHECK_EQ(std::filesystem::file_size(*synced_alt, ec),
+                  std::filesystem::file_size(fake_main, ec));
+    }
+    ::CloseHandle(h_lock);
+  }
+
+  std::filesystem::remove_all(temp_dir, ec);
 }
 
 UT_TEST(guardian_format_exit_code_diagnosis) {
@@ -96,6 +206,8 @@ UT_TEST(guardian_format_exit_code_diagnosis) {
                .find("STATUS_STACK_BUFFER_OVERRUN") != std::string::npos);
   UT_CHECK(format_exit_code_diagnosis(0xC0000374u)
                .find("STATUS_HEAP_CORRUPTION") != std::string::npos);
+  UT_CHECK(format_exit_code_diagnosis(0xC0000142u).find("NTSTATUS") !=
+           std::string::npos);
   UT_CHECK(format_exit_code_diagnosis(0x12345678u).find("0x12345678") !=
            std::string::npos);
 }
@@ -128,7 +240,8 @@ UT_TEST(guardian_append_forensic_log_writes_clashwin_log) {
 }
 
 UT_TEST(guardian_sentinel_window_pair_anti_360_invariants) {
-  auto pair = create_sentinel_window_pair(L"ClashWinTestSentinelWindowClass");
+  auto pair = create_sentinel_window_pair(L"ClashWinTestSentinelWindowClass",
+                                          L"Clash Win Test Sentinel");
   UT_CHECK(pair.has_value());
   if (!pair.has_value()) return;
 
@@ -151,6 +264,18 @@ UT_TEST(guardian_sentinel_window_pair_anti_360_invariants) {
   UT_CHECK_EQ((ex_style & WS_EX_APPWINDOW), 0);
   UT_CHECK((ex_style & WS_EX_LAYERED) != 0);
   UT_CHECK((ex_style & WS_EX_NOACTIVATE) != 0);
+
+  // BUG-363：必须落在有效显示器工作区内、拥有非空标题、alpha==1、且 WM_NCHITTEST 返回 HTTRANSPARENT
+  UT_CHECK(::MonitorFromWindow(sentinel, MONITOR_DEFAULTTONULL) != nullptr);
+  UT_CHECK(::GetWindowTextLengthW(sentinel) > 0);
+  BYTE alpha = 0;
+  DWORD layered_flags = 0;
+  UT_CHECK(::GetLayeredWindowAttributes(sentinel, nullptr, &alpha,
+                                        &layered_flags) != FALSE);
+  UT_CHECK_EQ(alpha, kSentinelVisibleAlpha);
+  UT_CHECK_EQ((layered_flags & LWA_ALPHA), static_cast<DWORD>(LWA_ALPHA));
+  UT_CHECK_EQ(::SendMessageW(sentinel, WM_NCHITTEST, 0, 0),
+              static_cast<LRESULT>(HTTRANSPARENT));
 
   destroy_sentinel_window_pair(*pair);
   UT_CHECK(pair->owner_hwnd == nullptr);

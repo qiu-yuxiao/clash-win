@@ -49,6 +49,7 @@ std::wstring image_exe_path(const std::wstring& raw) {
 bool is_shared_component_name(const std::wstring& file_lower) {
   static const wchar_t* kNames[] = {
       L"clash-mini.exe",        L"clash mini.exe",
+      L"clash-mini-guard.exe",  L"clash-mini-guard-alt.exe",
       L"mini-mihomo.exe",       L"win-mihomo.exe",
       L"clash-verge-service.exe",
       L"clash-verge-service-install.exe",
@@ -216,8 +217,11 @@ bool is_own_path(const std::wstring& exe_path) {
     return lower(std::move(s));
   };
   const std::wstring p = norm(exe_path);
-  const std::wstring roots[] = {norm(util::dirs::exe_dir()),
-                                norm(util::dirs::app_home_dir())};
+  const std::wstring roots[] = {
+      norm(util::dirs::exe_dir()),
+      norm(util::dirs::app_home_dir()),
+      norm(guardian::resolve_isolated_guardian_dir().wstring()),
+  };
   for (const std::wstring& raw_root : roots) {
     if (raw_root.empty()) continue;
     std::wstring root = raw_root;
