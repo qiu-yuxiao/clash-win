@@ -27,7 +27,10 @@ using util::trim;
 namespace {
 
 constexpr uint64_t kDefaultTimeoutS = 20;  // ← PrfOption timeout_seconds 默认
-constexpr const char* kDefaultUserAgent = "clash-verge/v0.1.0";  // 应用版本 0.1.0
+// 默认订阅 User-Agent 锚定当前内置 Mihomo v1.19.33 同代的上游主流稳定版（clash-verge/v2.5.10），
+// 不绑定客户端 UI 版本号 kAppVersion（0.x 会触发机场“客户端过旧”假节点拦截，高频涨号亦会导致
+// 内核协议代际错判与指纹暴露；详见根目录《有关User-Agent的思考.md》）。
+constexpr const char* kDefaultUserAgent = config::consts::kSubscriptionCompatUserAgent;
 
 bool cancel_signaled(HANDLE ev) {
   if (!ev) return false;
@@ -746,7 +749,7 @@ Result<HttpResponse> http_request(const std::string& method_in,
     return static_cast<int>(std::max<int64_t>(0, left));
   };
 
-  // ← network.rs：User-Agent 默认 clash-verge/v{version}
+  // 默认采用与 UI 版本号解耦的 kSubscriptionCompatUserAgent（详见《有关User-Agent的思考.md》）
   const std::string ua = opts.user_agent.value_or(kDefaultUserAgent);
 
   // ← 代理三态（ProxyType::Localhost 端口经注入 resolver）

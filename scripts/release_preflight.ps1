@@ -53,10 +53,11 @@ $constPath = Join-Path $RepoRoot 'include\clashwin\config\constants.h'
 $nsiPath   = Join-Path $RepoRoot 'installer\clashwin.nsi'
 $rcPath    = Join-Path $RepoRoot 'src\clashwin.rc'
 
-$cVer = $null; $nsiVer = $null; $rcFileStr = $null; $rcProdStr = $null; $rcFileNum = $null; $rcProdNum = $null
+$cVer = $null; $cSubUa = $null; $nsiVer = $null; $rcFileStr = $null; $rcProdStr = $null; $rcFileNum = $null; $rcProdNum = $null
 if (Test-Path -LiteralPath $constPath) {
   $txt = Read-Utf8 $constPath
   if ($txt -match 'kAppVersion\s*=\s*"([^"]+)"') { $cVer = $Matches[1] }
+  if ($txt -match 'kSubscriptionCompatUserAgent\s*=\s*"([^"]+)"') { $cSubUa = $Matches[1] }
 }
 if (Test-Path -LiteralPath $nsiPath) {
   $txt = Read-Utf8 $nsiPath
@@ -71,7 +72,9 @@ if (Test-Path -LiteralPath $rcPath) {
 }
 
 $semVerPattern = '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$'
+$subUaPattern  = '^clash-verge/v([2-9]|[1-9][0-9]+)\.[0-9]+\.[0-9]+$'
 Check 'constants.h kAppVersion 存在且符合 SemVer' ([bool]($cVer -and ($cVer -match $semVerPattern))) "got='$cVer'"
+Check 'constants.h 订阅默认 UA 锚定上游 v2+ 纯净单段标识' ([bool]($cSubUa -and ($cSubUa -match $subUaPattern))) "got='$cSubUa'"
 Check 'clashwin.nsi VERSION == kAppVersion'       ($nsiVer -eq $cVer) "nsi='$nsiVer' expected='$cVer'"
 
 $baseVer = Get-BaseSemVer $cVer

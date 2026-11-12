@@ -64,6 +64,12 @@ inline constexpr double kWindowMaxHeight = 860.0;
 inline constexpr uint64_t kProfileTimeoutSeconds = 20;  // PrfOption 默认超时
 inline constexpr uint64_t kAllowAutoUpdateDefault = 1;  // true（prfitem.rs:748）
 inline constexpr size_t kSubscriptionMaxBytes = 50u << 20;
+// 远程订阅默认协议兼容 User-Agent（详见项目根目录《有关User-Agent的思考.md》）：
+// 机场面板依赖 User-Agent 判定输出格式（Clash YAML）并推断内置 Mihomo 内核支持的协议代际（如 AnyTLS/Hysteria2）。
+// 必须与本应用独立 UI 版本号 kAppVersion 彻底解耦：不能报 0.x（会被判为远古客户端拦截下发假节点），
+// 也不随分支高频发版无限上涨（避免超前误发未来未知协议、涨破 10.x 字典序比较 Bug 及唯一隐私指纹）。
+// 固定锚定在与当前内置 win-mihomo.exe（Mihomo v1.19.33）同代的上游主流正式版号，仅在升级内核大版本时同步调整。
+inline constexpr const char* kSubscriptionCompatUserAgent = "clash-verge/v2.5.10";
 
 // ----------profiles 文件名规则（← profiles.rs::is_profile_file + prfitem.rs） ----------
 // R/L/m/s/r/p/g + uid + 扩展名；全局保护件 Merge.yaml / Script.js

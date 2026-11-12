@@ -8,7 +8,8 @@
 //     Localhost=经 127.0.0.1:<mixed-port>（← network.rs verge_mixed_port →
 //     clash mixed-port 回退链，端口由注入的 resolver 提供）
 //   - 可中断：cancel_event 有信号时在阶段边界中止；各阶段有超时
-//   - User-Agent 可指定（默认 clash-verge/v0.1.0 ← kAppVersion）
+//   - User-Agent 可指定（未指定时默认采用 kSubscriptionCompatUserAgent = "clash-verge/v2.5.10"，
+//     对齐当前内置 Mihomo v1.19.x 协议代际并与 UI 版本号解耦；原因详见《有关User-Agent的思考.md》）
 //   - 响应大小上限 50MB（kSubscriptionMaxBytes），默认总超时 20s
 //     （connect 上限 min(t,10)，← network.rs connect_timeout）
 //   - 响应体必须为合法 UTF-8（← String::from_utf8 严格语义）
@@ -75,7 +76,7 @@ Result<UrlParts> parse_http_url(const std::string& url);
 struct HttpOptions {
   ProxyType proxy_type = ProxyType::None;
   std::optional<uint64_t> timeout_seconds;  // nullopt → 20（kProfileTimeoutSeconds）
-  std::optional<std::string> user_agent;    // nullopt → "clash-verge/v0.1.0"
+  std::optional<std::string> user_agent;    // nullopt → kSubscriptionCompatUserAgent（"clash-verge/v2.5.10"）
   bool accept_invalid_certs = false;        // ← danger_accept_invalid_certs
   size_t max_response_bytes = 50u << 20;    // 50MB
   int max_redirects = 10;                   // ← redirect::Policy::limited(10)

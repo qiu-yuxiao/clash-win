@@ -10,6 +10,7 @@
 #include <thread>
 #include <vector>
 
+#include "clashwin/config/constants.h"
 #include "system/net_http.h"
 #include "test_util.h"
 #include "util/str_utils.h"
@@ -32,8 +33,9 @@ void ensure_wsa() {
 struct MockHttp {
   SOCKET listener = INVALID_SOCKET;
   uint16_t port = 0;
-  std::vector<std::string> canned;      // 每连接一个完整响应（可为空串=只收不发）
-  std::vector<std::string> first_lines; // 收到的请求首行
+  std::vector<std::string> canned;       // 每连接一个完整响应（可为空串=只收不发）
+  std::vector<std::string> first_lines;  // 收到的请求首行
+  std::vector<std::string> raw_requests; // 收到的完整请求头块
   std::mutex mu;
   std::thread th;
   bool ok = false;
@@ -81,6 +83,7 @@ struct MockHttp {
         size_t eol = req.find("\r\n");
         first_lines.push_back(eol == std::string::npos ? req
                                                        : req.substr(0, eol));
+        raw_requests.push_back(req);
       }
       if (!canned[i].empty()) {
         send(c, canned[i].data(), (int)canned[i].size(), 0);
@@ -103,6 +106,16 @@ struct MockHttp {
 
   bool first_line_contains(size_t i, const std::string& needle) {
     return first_line(i).find(needle) != std::string::npos;
+  }
+
+  std::string raw_request(size_t i) {
+    std::lock_guard<std::mutex> lk(mu);
+    return i < raw_requests.size() ? raw_requests[i] : "<none>";
+  }
+
+  bool request_contains_ci(size_t i, const std::string& needle) {
+    return util::to_lower(raw_request(i)).find(util::to_lower(needle)) !=
+           std::string::npos;
   }
 };
 
@@ -356,6 +369,12 @@ UT_TEST(t06_net_http_user_agent_default_and_custom) {
   // 两个请求都被 mock 服务端受理（请求行为 HTTP/1.1 请求行）
   UT_CHECK(srv.first_line(0).find("HTTP/1.1") != std::string::npos);
   UT_CHECK(srv.first_line(1).find("HTTP/1.1") != std::string::npos);
+  // 断言真实发出的 User-Agent 请求头：默认锚定 kSubscriptionCompatUserAgent（与 UI 版本解耦），自定义选项按原样覆盖
+  UT_CHECK(srv.request_contains_ci(
+      0, std::string("User-Agent: ") +
+             config::consts::kSubscriptionCompatUserAgent + "\r\n"));
+  UT_CHECK(!srv.request_contains_ci(0, "clash-verge/v0."));
+  UT_CHECK(srv.request_contains_ci(1, "User-Agent: clash-mini-test/1.0\r\n"));
 }
 
 UT_TEST(t06_net_http_timeout_connect) {
