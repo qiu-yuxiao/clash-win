@@ -77,7 +77,7 @@ Clash Win preserves everything about Clash Mini — its minimalist zero-threshol
 
 | `STEP 1 / 2` · Smart Clipboard Sniffing & 1-Key Import<br/>剪贴板智能嗅探与回车一键导入 | `STEP 2 / 2` · Auto Proxy & Live Readiness Dashboard<br/>系统代理自动接管与实测就绪仪表盘 |
 | :---: | :---: |
-| <img src="docs/assets/screenshot_first_run_step1.png" alt="First-Run Onboarding Step 1 - Smart Clipboard Sniffing" width="320" /> | <img src="docs/assets/screenshot_first_run_step2.png" alt="First-Run Onboarding Step 2 - Live Readiness Dashboard" width="320" /> |
+| <img src="docs/assets/screenshot_first_run_step1.png" alt="First-Run Onboarding Step 1 - Smart Clipboard Sniffing" width="270" /> | <img src="docs/assets/screenshot_first_run_step2.png" alt="First-Run Onboarding Step 2 - Live Readiness Dashboard" width="270" /> |
 
 > Automatically pops up on first install, clean install, or fresh portable launch — sniffs subscription/19-protocol links straight from the clipboard (`Press Enter` to import), auto-enables System Proxy, benchmarks all nodes concurrently, and displays the winning route & latency in real time (reopen anytime via `? → 新手引导 / Getting Started`).
 
