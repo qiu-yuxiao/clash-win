@@ -146,7 +146,7 @@ UT_TEST(service_ready_wait) {
     }
   } ipc3;
   ipc3.pipe = true;
-  UT_CHECK(!wait_for_service_ready(ipc3, 80, 10));
+  UT_CHECK(!wait_for_service_ready(ipc3, 200, 10));  // Windows 默认 15.6ms 时钟粒度下 80ms 偶发不足 3 次
   UT_CHECK(ipc3.probe_calls >= 3);  // 轮询多次
 }
 
