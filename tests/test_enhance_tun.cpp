@@ -94,6 +94,66 @@ UT_TEST(t08_tun_disable_follows_user_ipv6) {
   UT_CHECK(!has_key(out["tun"], "inet6-address"));
 }
 
+UT_TEST(t08_tun_enable_sniffer_injection) {
+  YAML::Node config = YAML::Load("ipv6: false\ndns:\n  enable: true\ntun:\n  enable: false\n");
+  YAML::Node out = use_tun(config, true);
+
+  const YAML::Node sniffer = out["sniffer"];
+  UT_CHECK(sniffer && sniffer.IsMap());
+  UT_CHECK(sniffer["enable"].Scalar() == "true");
+  UT_CHECK(sniffer["force-dns-mapping"].Scalar() == "true");
+  UT_CHECK(sniffer["parse-pure-ip"].Scalar() == "true");
+  UT_CHECK(sniffer["override-destination"].Scalar() == "true");
+  UT_CHECK(sniffer["sniff"]["HTTP"]["override-destination"].Scalar() == "true");
+  UT_CHECK(sniffer["sniff"]["TLS"].IsDefined());
+  UT_CHECK(sniffer["sniff"]["QUIC"].IsDefined());
+
+  bool has_mijia = false, has_apple = false, has_lan = false, has_fe80 = false, has_fakeip = false;
+  for (const auto& s : sniffer["skip-domain"]) {
+    if (s.Scalar() == "Mijia Cloud") has_mijia = true;
+    if (s.Scalar() == "+.push.apple.com") has_apple = true;
+  }
+  for (const auto& s : sniffer["skip-dst-address"]) {
+    if (s.Scalar() == "192.168.0.0/16") has_lan = true;
+    if (s.Scalar() == "fe80::/10") has_fe80 = true;
+    if (s.Scalar() == "198.18.0.0/16") has_fakeip = true;
+  }
+  UT_CHECK(has_mijia && has_apple && has_lan && has_fe80 && !has_fakeip);
+}
+
+UT_TEST(t08_tun_enable_sniffer_merges_partial_without_duplicates) {
+  YAML::Node config = YAML::Load(
+      "ipv6: false\n"
+      "sniffer:\n"
+      "  enable: false\n"
+      "  override-destination: false\n"
+      "  skip-domain:\n"
+      "  - Mijia Cloud\n"
+      "  - '+.internal.example'\n"
+      "dns:\n  enable: true\n");
+  YAML::Node out = use_tun(config, true);
+  const YAML::Node sniffer = out["sniffer"];
+  UT_CHECK(sniffer["enable"].Scalar() == "true");
+  UT_CHECK(sniffer["override-destination"].Scalar() == "false");
+  UT_CHECK(sniffer["force-dns-mapping"].Scalar() == "true");
+  UT_CHECK(sniffer["parse-pure-ip"].Scalar() == "true");
+  int mijia_count = 0;
+  bool has_internal = false, has_apple = false;
+  for (const auto& s : sniffer["skip-domain"]) {
+    if (s.Scalar() == "Mijia Cloud") ++mijia_count;
+    if (s.Scalar() == "+.internal.example") has_internal = true;
+    if (s.Scalar() == "+.push.apple.com") has_apple = true;
+  }
+  UT_CHECK_EQ(mijia_count, 1);
+  UT_CHECK(has_internal && has_apple);
+}
+
+UT_TEST(t08_tun_disable_does_not_inject_sniffer) {
+  YAML::Node config = YAML::Load("ipv6: false\ndns:\n  enable: true\n");
+  YAML::Node out = use_tun(config, false);
+  UT_CHECK(!has_key(out, "sniffer"));
+}
+
 UT_TEST(t08_tun_enable_user_ipv6_true_syncs_dns) {
   YAML::Node config = YAML::Load("ipv6: true\ndns:\n  enable: true\n");
   YAML::Node out = use_tun(config, true);

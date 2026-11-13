@@ -114,6 +114,9 @@ YAML::Node use_tun(const YAML::Node& config, bool enable) {
       inet6.push_back(n);
     }
     tun_val["inet6-address"] = inet6;
+
+    // TUN 模式默认开启并补全 sniffer 域名嗅探（← ClashVerge enhance/tun.rs BUG-364）
+    detail::merge_tun_sniffer_defaults(cfg);
   } else {
     // 非 TUN：不注入 TUN 专属 DNS 字段；dns.ipv6 一律跟随开关（无论订阅是否自带 dns 段）
     const YAML::Node dns_src = static_cast<const YAML::Node&>(cfg)["dns"];
@@ -128,5 +131,115 @@ YAML::Node use_tun(const YAML::Node& config, bool enable) {
 
   return cfg;
 }
+
+namespace detail {
+
+namespace {
+
+bool has_str_key(const YAML::Node& map, const std::string& key) {
+  return static_cast<const YAML::Node&>(map)[key].IsDefined();
+}
+
+void insert_bool_if_missing(YAML::Node& map, const std::string& key, bool v) {
+  if (!has_str_key(map, key)) {
+    revise_bool(map, key, v);
+  }
+}
+
+void append_missing_str_items(YAML::Node& map, const std::string& key,
+                              const std::vector<const char*>& items) {
+  const YAML::Node existing = static_cast<const YAML::Node&>(map)[key];
+  YAML::Node seq(YAML::NodeType::Sequence);
+  if (existing && existing.IsSequence()) {
+    for (const auto& item : existing) {
+      seq.push_back(YAML::Clone(item));
+    }
+  }
+  for (const char* item : items) {
+    bool found = false;
+    for (const auto& cur : seq) {
+      if (cur.IsScalar() && cur.Scalar() == item) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      YAML::Node n(item);
+      n.SetTag("!");
+      seq.push_back(n);
+    }
+  }
+  revise(map, key, seq);
+}
+
+YAML::Node make_ports_proto(std::initializer_list<std::pair<const char*, bool>> ports,
+                            bool with_override_destination) {
+  YAML::Node proto(YAML::NodeType::Map);
+  YAML::Node seq(YAML::NodeType::Sequence);
+  for (const auto& [val, is_string] : ports) {
+    YAML::Node p(val);
+    if (is_string) p.SetTag("!");
+    seq.push_back(p);
+  }
+  proto["ports"] = seq;
+  if (with_override_destination) {
+    revise_bool(proto, "override-destination", true);
+  }
+  return proto;
+}
+
+}  // namespace
+
+void merge_tun_sniffer_defaults(YAML::Node& cfg) {
+  const YAML::Node sniffer_src = static_cast<const YAML::Node&>(cfg)["sniffer"];
+  YAML::Node sniffer = (sniffer_src && sniffer_src.IsMap())
+                           ? YAML::Clone(sniffer_src)
+                           : YAML::Node(YAML::NodeType::Map);
+
+  revise_bool(sniffer, "enable", true);
+  insert_bool_if_missing(sniffer, "force-dns-mapping", true);
+  insert_bool_if_missing(sniffer, "parse-pure-ip", true);
+  insert_bool_if_missing(sniffer, "override-destination", true);
+
+  const YAML::Node sniff_src = static_cast<const YAML::Node&>(sniffer)["sniff"];
+  YAML::Node sniff_map = (sniff_src && sniff_src.IsMap())
+                             ? YAML::Clone(sniff_src)
+                             : YAML::Node(YAML::NodeType::Map);
+  if (!has_str_key(sniff_map, "HTTP")) {
+    revise(sniff_map, "HTTP",
+           make_ports_proto({{"80", false}, {"8080-8880", true}}, true));
+  }
+  if (!has_str_key(sniff_map, "TLS")) {
+    revise(sniff_map, "TLS",
+           make_ports_proto({{"443", false}, {"8443", false}}, false));
+  }
+  if (!has_str_key(sniff_map, "QUIC")) {
+    revise(sniff_map, "QUIC",
+           make_ports_proto({{"443", false}, {"8443", false}}, false));
+  }
+  revise(sniffer, "sniff", sniff_map);
+
+  static const std::vector<const char*> kSkipDomains = {
+      "Mijia Cloud",
+      "+.push.apple.com",
+  };
+  static const std::vector<const char*> kSkipDstCidrs = {
+      "127.0.0.0/8",
+      "10.0.0.0/8",
+      "172.16.0.0/12",
+      "192.168.0.0/16",
+      "100.64.0.0/10",
+      "169.254.0.0/16",
+      "::1/128",
+      "fc00::/7",
+      "fe80::/10",
+  };
+  append_missing_str_items(sniffer, "skip-domain", kSkipDomains);
+  append_missing_str_items(sniffer, "skip-dst-address", kSkipDstCidrs);
+
+  revise(cfg, "sniffer", sniffer);
+}
+
+}  // namespace detail
 
 }  // namespace clashwin::enhance

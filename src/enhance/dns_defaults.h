@@ -14,3 +14,5 @@ YAML::Node apply_mandatory_dns_settings(const YAML::Node& config);
 YAML::Node sanitize_foreign_plain_dns_upstreams(const YAML::Node& config);
 
 }  // namespace clashwin::enhance
+
+#include "enhance/nameserver_policy.h"

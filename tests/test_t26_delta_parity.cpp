@@ -237,3 +237,79 @@ append-rules:
   UT_CHECK(has_custom);
   UT_CHECK(has_gfw);
 }
+
+// ================= BUG-364 nameserver-policy 卫生清理 =================
+UT_TEST(t26_nameserver_policy_prunes_unreachable_foreign_upstreams) {
+  YAML::Node cfg = YAML::Load(R"(
+dns:
+  enable: true
+  nameserver:
+    - https://doh.pub/dns-query
+  nameserver-policy:
+    "+.google.com": https://dns.cloudflare.com/dns-query
+    "+.github.com": 8.8.8.8
+    "+.mixed.example":
+      - https://dns.cloudflare.com/dns-query
+      - https://doh.pub/dns-query
+      - https://doh.pub/dns-query
+    "+.corp.local": 10.0.0.1
+    "geosite:cn": https://dns.alidns.com/dns-query
+    "*.lan": system
+)");
+  YAML::Node cleaned = enhance::sanitize_nameserver_policy(cfg);
+  const YAML::Node policy = cleaned["dns"]["nameserver-policy"];
+  UT_CHECK(policy && policy.IsMap());
+  UT_CHECK(!policy["+.google.com"].IsDefined());
+  UT_CHECK(!policy["+.github.com"].IsDefined());
+  UT_CHECK_EQ(policy["+.corp.local"].Scalar(), "10.0.0.1");
+  UT_CHECK_EQ(policy["geosite:cn"].Scalar(), "https://dns.alidns.com/dns-query");
+  UT_CHECK_EQ(policy["*.lan"].Scalar(), "system");
+
+  auto mixed = scalar_seq(policy["+.mixed.example"]);
+  UT_CHECK_EQ(mixed.size(), 1u);
+  UT_CHECK_EQ(mixed[0], "https://doh.pub/dns-query");
+}
+
+UT_TEST(t26_nameserver_policy_removes_empty_map) {
+  YAML::Node cfg = YAML::Load(R"(
+dns:
+  enable: true
+  nameserver-policy:
+    "+.google.com": https://dns.cloudflare.com/dns-query
+    "+.youtube.com": https://dns.google/dns-query
+)");
+  YAML::Node cleaned = enhance::sanitize_nameserver_policy(cfg);
+  UT_CHECK(!cleaned["dns"]["nameserver-policy"].IsDefined());
+}
+
+UT_TEST(t26_nameserver_policy_respect_rules_true_rewrites_and_adds_proxy_rules) {
+  YAML::Node cfg = YAML::Load(R"(
+dns:
+  enable: true
+  respect-rules: true
+  nameserver-policy:
+    "+.google.com": https://dns.cloudflare.com/dns-query
+    "+.github.com": 8.8.8.8
+    "+.blocked-direct.com": https://dns.google/dns-query#DIRECT
+    "+.local.lan": 192.168.1.1
+rules:
+  - RULE-SET,gfwlist,PROXY
+  - IP-CIDR,8.8.8.8/32,PROXY,no-resolve
+  - GEOIP,CN,DIRECT
+  - MATCH,DIRECT
+)");
+  YAML::Node cleaned = enhance::sanitize_nameserver_policy(cfg);
+  const YAML::Node policy = cleaned["dns"]["nameserver-policy"];
+  UT_CHECK_EQ(policy["+.google.com"].Scalar(), "https://dns.cloudflare.com/dns-query");
+  UT_CHECK_EQ(policy["+.github.com"].Scalar(), "https://8.8.8.8/dns-query");
+  UT_CHECK(!policy["+.blocked-direct.com"].IsDefined());
+  UT_CHECK_EQ(policy["+.local.lan"].Scalar(), "192.168.1.1");
+
+  auto rules = scalar_seq(cleaned["rules"]);
+  UT_CHECK_EQ(rules.size(), 5u);
+  UT_CHECK_EQ(rules[0], "RULE-SET,gfwlist,PROXY");
+  UT_CHECK_EQ(rules[1], "IP-CIDR,8.8.8.8/32,PROXY,no-resolve");
+  UT_CHECK_EQ(rules[2], "DOMAIN,dns.cloudflare.com,PROXY");
+  UT_CHECK_EQ(rules[3], "GEOIP,CN,DIRECT");
+  UT_CHECK_EQ(rules[4], "MATCH,DIRECT");
+}

@@ -92,6 +92,7 @@ add_library(clashwin_enhance STATIC
   src/enhance/chain.cpp
   src/enhance/mini_agreements.cpp
   src/enhance/dns_defaults.cpp
+  src/enhance/nameserver_policy.cpp
   src/enhance/js_engine.cpp
   src/enhance/enhance.cpp
   src/config/runtime_state.cpp

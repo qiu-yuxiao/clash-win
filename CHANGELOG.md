@@ -8,6 +8,20 @@ Format reference: `Changelog.md` in the Clash Mini repository (newest first, `##
 
 ---
 
+## v0.3.2 (2026-11-13)
+
+与 Clash Mini v3.2.8（`BUG-364`）1:1 语义同步：
+
+### 修复与加固
+
+- **TUN 模式默认注入并补全 `sniffer` 域名嗅探**：
+  - `enhance::use_tun(cfg, true)` 强制开启 `sniffer.enable: true` 并按缺补全 `force-dns-mapping: true`、`parse-pure-ip: true`、`override-destination: true`、`sniff`（`HTTP` `80, 8080-8880`；`TLS`/`QUIC` `443, 8443`）以及 `skip-domain`（`Mijia Cloud`、`+.push.apple.com`）与私网/回环/CGNAT/ULA/链路本地 `skip-dst-address` 免误伤列表；
+  - 根治常驻后台浏览器（如 Edge）在模式切换或路由器 IPv6 RA DNS 下持有真实/GFW 投毒裸 IP 绕过 Fake-IP、因无 `Host` 落入 `MATCH,DIRECT` 导致 TUN 无法代理出境的问题。
+- **新增 `dns.nameserver-policy` 卫生清理通道**：
+  - `enhance_core` 流水线尾部新增 `sanitize_nameserver_policy`：未开启 `respect-rules`（或条目显式标注 `#DIRECT`）时剔除海外被墙公共 DNS 上游（如 `https://dns.cloudflare.com/dns-query`、`8.8.8.8` 等）并清除空键/空映射，防止 `SERVFAIL`；保留国内/内网/`system` 策略；
+  - 开启 `respect-rules: true` 时复用 `BUG-308` 原则将 4 家境外公共 DNS 明文 UDP 改写为 DoH 并自动在 `GEOIP,CN` / `MATCH` 前补齐 `PROXY` 规则。
+- **单测与 Golden 基线同步**：新增 6 项 TUN 嗅探与 `nameserver-policy` 卫生回归单测，并同步更新 `expected_clash_win.yaml` golden 夹具基线。
+
 ## v0.3.1 (2026-11-13)
 
 ### 轻量模式与后台托盘防第三方清理软件误杀四重加固（BUG-363）

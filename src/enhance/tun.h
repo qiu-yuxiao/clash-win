@@ -9,4 +9,8 @@ namespace clashwin::enhance {
 
 YAML::Node use_tun(const YAML::Node& config, bool enable);
 
+namespace detail {
+void merge_tun_sniffer_defaults(YAML::Node& cfg);
+}  // namespace detail
+
 }  // namespace clashwin::enhance
