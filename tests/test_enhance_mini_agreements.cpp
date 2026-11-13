@@ -6,6 +6,7 @@
 
 #include "enhance/mini_agreements.h"
 #include "enhance/enhance.h"
+#include "enhance/nameserver_policy.h"
 #include "test_enhance_util.h"
 #include "test_util.h"
 
@@ -52,9 +53,9 @@ UT_TEST(t08_mini_agreements_rules_chain) {
   UT_CHECK(out["rule-providers"]["gfwlist"]["proxy"].Scalar() == "PROXY");
   UT_CHECK(out["rule-providers"]["gfwlist"]["interval"].Scalar() == "86400");
 
-  // ③ 规则链 23 条（无 dns fallback 规则）
+  // ③ 规则链 22 条（无 dns fallback 规则；v3.3.0 移除 IP-CIDR6,::/0,PROXY）
   const YAML::Node& rules = out["rules"];
-  UT_CHECK_EQ(rules.size(), size_t(23));
+  UT_CHECK_EQ(rules.size(), size_t(22));
   const char* expect[] = {
       "PROCESS-NAME,custom-process,DIRECT",
       "RULE-SET,gfwlist,PROXY",
@@ -77,10 +78,9 @@ UT_TEST(t08_mini_agreements_rules_chain) {
       "IP-CIDR6,::ffff:169.254.0.0/112,DIRECT,no-resolve",
       "DOMAIN,custom-domain,REJECT",
       "GEOIP,CN,DIRECT",
-      "IP-CIDR6,::/0,PROXY",
       "MATCH,DIRECT",
   };
-  for (size_t i = 0; i < 23; ++i) {
+  for (size_t i = 0; i < 22; ++i) {
     if (rules[i].Scalar() != expect[i]) {
       std::printf("    rule[%zu] = %s (expect %s)\n", i,
                   rules[i].Scalar().c_str(), expect[i]);
@@ -125,21 +125,26 @@ UT_TEST(t08_mini_agreements_filter_dummy_and_invalid_server) {
 }
 
 UT_TEST(t08_dns_fallback_rules) {
-  // ← mod.rs::dns_fallback_upstreams_are_forced_through_proxy
-  YAML::Node dns = YAML::Load(
-      "fallback:\n"
-      "- 'https://1.1.1.1/dns-query'\n"
-      "- 'https://8.8.8.8/dns-query#h3=true'\n"
-      "- 'tls://8.8.4.4:853'\n"
-      "- 'https://dns.google/dns-query'\n"
-      "- 'https://[2606:4700:4700::1111]/dns-query'\n"
-      "- '1.1.1.1'\n"
-      "- 'https://192.168.1.1/dns-query'\n"
-      "- '127.0.0.1'\n"
-      "- '10.0.0.1'\n"
-      "- 'https://[::1]/dns-query'\n"
-      "- 'https://[fe80::1]/dns-query'\n");
-  auto rules = dns_fallback_proxy_rules(dns);
+  // v3.3.0: PROXY 规则统一收口至 sanitize_dns_upstreams → inject_dns_proxy_rules
+  YAML::Node cfg = YAML::Load(
+      "dns:\n"
+      "  respect-rules: true\n"
+      "  fallback:\n"
+      "  - 'https://1.1.1.1/dns-query'\n"
+      "  - 'https://8.8.8.8/dns-query#h3=true'\n"
+      "  - 'tls://8.8.4.4:853'\n"
+      "  - 'https://dns.google/dns-query'\n"
+      "  - 'https://[2606:4700:4700::1111]/dns-query'\n"
+      "  - '1.1.1.1'\n"
+      "  - 'https://192.168.1.1/dns-query'\n"
+      "  - '127.0.0.1'\n"
+      "  - '10.0.0.1'\n"
+      "  - 'https://[::1]/dns-query'\n"
+      "  - 'https://[fe80::1]/dns-query'\n"
+      "rules:\n"
+      "- MATCH,DIRECT\n");
+  YAML::Node out = sanitize_dns_upstreams(cfg);
+  const YAML::Node rules = out["rules"];
   std::vector<std::string> expect{
       "IP-CIDR,1.1.1.1/32,PROXY,no-resolve",
       "IP-CIDR,1.0.0.1/32,PROXY,no-resolve",
@@ -147,36 +152,44 @@ UT_TEST(t08_dns_fallback_rules) {
       "IP-CIDR,8.8.4.4/32,PROXY,no-resolve",
       "DOMAIN,dns.google,PROXY",
       "IP-CIDR6,2606:4700:4700::1111/128,PROXY,no-resolve",
+      "IP-CIDR6,2606:4700:4700::1001/128,PROXY,no-resolve",
+      "MATCH,DIRECT",
   };
   UT_CHECK_EQ(rules.size(), expect.size());
   for (size_t i = 0; i < expect.size() && i < rules.size(); ++i) {
-    if (rules[i] != expect[i]) {
-      std::printf("    rules[%zu] = %s (expect %s)\n", i, rules[i].c_str(),
-                  expect[i].c_str());
-    }
-    UT_CHECK(rules[i] == expect[i]);
+    UT_CHECK_EQ(rules[i].Scalar(), expect[i]);
   }
 
   // 单 8.8.8.8 → 对偶补齐
-  YAML::Node single = YAML::Load("fallback: ['https://8.8.8.8/dns-query']");
-  auto single_rules = dns_fallback_proxy_rules(single);
-  UT_CHECK_EQ(single_rules.size(), size_t(2));
-  UT_CHECK(single_rules[0] == "IP-CIDR,8.8.8.8/32,PROXY,no-resolve");
-  UT_CHECK(single_rules[1] == "IP-CIDR,8.8.4.4/32,PROXY,no-resolve");
+  YAML::Node single = YAML::Load(
+      "dns:\n  respect-rules: true\n  fallback: ['https://8.8.8.8/dns-query']\n"
+      "rules:\n  - MATCH,DIRECT\n");
+  YAML::Node single_out = sanitize_dns_upstreams(single);
+  UT_CHECK_EQ(single_out["rules"].size(), size_t(3));
+  UT_CHECK_EQ(single_out["rules"][0].Scalar(),
+              std::string("IP-CIDR,8.8.8.8/32,PROXY,no-resolve"));
+  UT_CHECK_EQ(single_out["rules"][1].Scalar(),
+              std::string("IP-CIDR,8.8.4.4/32,PROXY,no-resolve"));
+  UT_CHECK_EQ(single_out["rules"][2].Scalar(), std::string("MATCH,DIRECT"));
 
   // 单 dns.google → DOMAIN + 落地 IP
-  YAML::Node dg = YAML::Load("fallback: ['https://dns.google/dns-query']");
-  auto dg_rules = dns_fallback_proxy_rules(dg);
-  UT_CHECK_EQ(dg_rules.size(), size_t(3));
-  UT_CHECK(dg_rules[0] == "DOMAIN,dns.google,PROXY");
-  UT_CHECK(dg_rules[1] == "IP-CIDR,8.8.8.8/32,PROXY,no-resolve");
-  UT_CHECK(dg_rules[2] == "IP-CIDR,8.8.4.4/32,PROXY,no-resolve");
+  YAML::Node dg = YAML::Load(
+      "dns:\n  respect-rules: true\n  fallback: ['https://dns.google/dns-query']\n"
+      "rules:\n  - MATCH,DIRECT\n");
+  YAML::Node dg_out = sanitize_dns_upstreams(dg);
+  UT_CHECK_EQ(dg_out["rules"].size(), size_t(4));
+  UT_CHECK_EQ(dg_out["rules"][0].Scalar(), std::string("DOMAIN,dns.google,PROXY"));
+  UT_CHECK_EQ(dg_out["rules"][1].Scalar(),
+              std::string("IP-CIDR,8.8.8.8/32,PROXY,no-resolve"));
+  UT_CHECK_EQ(dg_out["rules"][2].Scalar(),
+              std::string("IP-CIDR,8.8.4.4/32,PROXY,no-resolve"));
+  UT_CHECK_EQ(dg_out["rules"][3].Scalar(), std::string("MATCH,DIRECT"));
 
-  // 无 dns / 无 fallback → 空
-  YAML::Node empty;
-  UT_CHECK(dns_fallback_proxy_rules(empty).empty());
-  YAML::Node no_fb = YAML::Load("enable: true\n");
-  UT_CHECK(dns_fallback_proxy_rules(no_fb).empty());
+  // 无 dns / 无 fallback → rules 原样保留
+  YAML::Node empty = YAML::Load("rules: ['MATCH,DIRECT']\n");
+  UT_CHECK_EQ(sanitize_dns_upstreams(empty)["rules"].size(), size_t(1));
+  YAML::Node no_fb = YAML::Load("dns:\n  enable: true\nrules:\n  - MATCH,DIRECT\n");
+  UT_CHECK_EQ(sanitize_dns_upstreams(no_fb)["rules"].size(), size_t(1));
 }
 
 UT_TEST(t08_extract_upstream_host) {
@@ -231,4 +244,50 @@ UT_TEST(t08_merged_proxies_suffix) {
   UT_CHECK(n1 == "only1 (" + expect_suffix + ")");
   // HHMMSS 形态
   UT_CHECK_EQ(expect_suffix.size(), size_t(6));
+}
+
+UT_TEST(t08_sanitize_dns_upstreams_v330) {
+  auto contains_rule = [](const YAML::Node& rules, const std::string& target) {
+    for (const auto& r : rules) {
+      if (r.IsScalar() && r.Scalar() == target) return true;
+    }
+    return false;
+  };
+
+  YAML::Node cfg_rules = YAML::Load(
+      "dns:\n"
+      "  enable: true\n"
+      "  respect-rules: true\n"
+      "  nameserver:\n"
+      "    - 223.5.5.5\n"
+      "    - 8.8.8.8\n"
+      "rules:\n"
+      "  - MATCH,DIRECT\n");
+  YAML::Node out1 = sanitize_dns_upstreams(cfg_rules);
+  const YAML::Node ns1 = out1["dns"]["nameserver"];
+  UT_CHECK_EQ(ns1.size(), size_t(2));
+  UT_CHECK_EQ(ns1[0].Scalar(), std::string("223.5.5.5"));
+  UT_CHECK_EQ(ns1[1].Scalar(), std::string("https://8.8.8.8/dns-query"));
+  const YAML::Node r1 = out1["rules"];
+  UT_CHECK(contains_rule(r1, "IP-CIDR,8.8.8.8/32,PROXY,no-resolve"));
+  UT_CHECK(contains_rule(r1, "IP-CIDR,8.8.4.4/32,PROXY,no-resolve"));
+  UT_CHECK(!contains_rule(r1, "IP-CIDR,223.5.5.5/32,PROXY,no-resolve"));
+  size_t match_idx = r1.size();
+  size_t cidr_idx = r1.size();
+  for (size_t i = 0; i < r1.size(); ++i) {
+    if (r1[i].Scalar() == "IP-CIDR,8.8.8.8/32,PROXY,no-resolve") cidr_idx = i;
+    if (r1[i].Scalar() == "MATCH,DIRECT") match_idx = i;
+  }
+  UT_CHECK(cidr_idx < match_idx);
+
+  YAML::Node cfg_no_rules = YAML::Load(
+      "dns:\n"
+      "  enable: true\n"
+      "  respect-rules: false\n"
+      "  nameserver:\n"
+      "    - https://dns.google/dns-query\n");
+  YAML::Node out2 = sanitize_dns_upstreams(cfg_no_rules);
+  const YAML::Node ns2 = out2["dns"]["nameserver"];
+  UT_CHECK_EQ(ns2.size(), size_t(1));
+  UT_CHECK_EQ(ns2[0].Scalar(), std::string("https://doh.pub/dns-query"));
 }

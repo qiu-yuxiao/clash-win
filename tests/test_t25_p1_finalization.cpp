@@ -38,6 +38,7 @@
 #include "system/service_runner.h"
 #include "test_util.h"
 #include "ui/help_menu.h"
+#include "ui/scenes/settings_drawer.h"
 #include "util/dirs.h"
 #include "util/utf.h"
 
@@ -638,8 +639,9 @@ UT_TEST(t25_help_menu_action_dispatch) {
   ui::HelpMenu::execute_action(ui::HelpAction::CheckCoreUpdate);
   ui::HelpMenu::execute_action(ui::HelpAction::OpenConfigDir);
   ui::HelpMenu::execute_action(ui::HelpAction::OpenLogsDir);
+  ui::HelpMenu::execute_action(ui::HelpAction::AntivirusGuide);
 
-  UT_CHECK_EQ(dispatched.size(), 8u);
+  UT_CHECK_EQ(dispatched.size(), 9u);
   UT_CHECK_EQ(dispatched[0], ui::HelpAction::StarGithub);
   UT_CHECK_EQ(dispatched[1], ui::HelpAction::OpenWiki);
   UT_CHECK_EQ(dispatched[2], ui::HelpAction::ReviewGuide);
@@ -648,12 +650,13 @@ UT_TEST(t25_help_menu_action_dispatch) {
   UT_CHECK_EQ(dispatched[5], ui::HelpAction::CheckCoreUpdate);
   UT_CHECK_EQ(dispatched[6], ui::HelpAction::OpenConfigDir);
   UT_CHECK_EQ(dispatched[7], ui::HelpAction::OpenLogsDir);
+  UT_CHECK_EQ(dispatched[8], ui::HelpAction::AntivirusGuide);
 
   // Menu handle verification
   HMENU menu = ui::HelpMenu::create_menu_handle();
   UT_CHECK(menu != nullptr);
   int item_count = GetMenuItemCount(menu);
-  UT_CHECK(item_count >= 8);  // 8 actions + separators
+  UT_CHECK(item_count >= 9);  // 9+ actions/separators
   DestroyMenu(menu);
 
   ui::HelpMenu::set_action_handler_for_testing(nullptr);
@@ -698,6 +701,9 @@ UT_TEST(t25_i18n_13_locales_help_menu_sync) {
         UT_CHECK(!hm[key].get<std::string>().empty());
       }
     }
+    UT_CHECK(j["components"].contains("antivirus") &&
+             j["components"]["antivirus"].contains("menuLabel"));
+    UT_CHECK(!j["components"]["antivirus"]["menuLabel"].get<std::string>().empty());
   }
 }
 
@@ -773,4 +779,42 @@ UT_TEST(t25_service_state_pipe_present_but_stopped_not_ready) {
   UT_CHECK(st == core::service_mode::ServiceState::Stopped);
   UT_CHECK(st != core::service_mode::ServiceState::Ready);
   UT_CHECK(core::service_mode::state_requires_start(st));
+}
+
+UT_TEST(t25_v330_basic_card_tun_sniffer_three_state) {
+  ui::scene::SettingsDrawer drawer;
+  std::vector<std::pair<std::string, nlohmann::json>> patches;
+  drawer.on_patch_verge = [&](const std::string& key, const nlohmann::json& v) {
+    patches.emplace_back(key, v);
+  };
+  drawer.wire_callbacks();
+
+  auto* bc = drawer.basic_card();
+  UT_CHECK(bc != nullptr && bc->sniffer_seg_ != nullptr);
+  UT_CHECK_EQ(bc->sniffer_seg_->option_count(), size_t(3));
+
+  bc->set_tun_enabled(false);
+  UT_CHECK(!bc->sniffer_seg_->enabled());
+  bc->set_tun_enabled(true);
+  UT_CHECK(bc->sniffer_seg_->enabled());
+
+  drawer.sync_basic(false, false, false, false, 7897, std::nullopt);
+  UT_CHECK_EQ(bc->sniffer_seg_->selected(), 0);
+  drawer.sync_basic(false, false, false, false, 7897, true);
+  UT_CHECK_EQ(bc->sniffer_seg_->selected(), 1);
+  drawer.sync_basic(false, false, false, false, 7897, false);
+  UT_CHECK_EQ(bc->sniffer_seg_->selected(), 2);
+  UT_CHECK(patches.empty());
+
+  bc->sniffer_seg_->set_selected(1);
+  bc->sniffer_seg_->set_selected(2);
+  bc->sniffer_seg_->set_selected(0);
+
+  UT_CHECK_EQ(patches.size(), size_t(3));
+  UT_CHECK_EQ(patches[0].first, std::string("enable_tun_sniffer"));
+  UT_CHECK(patches[0].second.is_boolean() && patches[0].second.get<bool>() == true);
+  UT_CHECK_EQ(patches[1].first, std::string("enable_tun_sniffer"));
+  UT_CHECK(patches[1].second.is_boolean() && patches[1].second.get<bool>() == false);
+  UT_CHECK_EQ(patches[2].first, std::string("enable_tun_sniffer"));
+  UT_CHECK(patches[2].second.is_null());
 }

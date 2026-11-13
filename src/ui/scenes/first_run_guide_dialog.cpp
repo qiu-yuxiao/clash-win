@@ -430,6 +430,7 @@ void FirstRunGuideDialog::close() {
 
 void FirstRunGuideDialog::set_step(FirstRunStep s) {
   step_ = s;
+  ready_scroll_y_ = 0.0f;
   if (bounds().w > 0.0f && bounds().h > 0.0f) {
     on_arrange(bounds());
   }
@@ -719,8 +720,8 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
   status_h_ = kStatusH;
   star_title_h_ = kStarTitleH;
   star_body_h_ = kStarBodyH;
+  const float card_text_w = std::max(60.0f, cw - kTitlePadX * 2.0f - kCardPad * 2.0f);  // src: first-run-guide-dialog.tsx:866,1022
   if (step_ == FirstRunStep::Ready) {
-    const float card_text_w = std::max(60.0f, cw - kTitlePadX * 2.0f - kCardPad * 2.0f);  // src: first-run-guide-dialog.tsx:866,1022
     const bool ready = proxy_ready();
     const bool unconf = unconfirmed();
     if (ITextEngine* te = text_engine()) {
@@ -754,6 +755,30 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     star_h = kCardPad + star_title_h_ + kImportedMb + star_body_h_ + kStarBtnMt +
              kStarBtnH + kCardPad;
   }
+  const bool has_av = static_cast<bool>(on_open_whitelist_guide);
+  float av_h = 0.0f;
+  if (step_ == FirstRunStep::Ready && has_av) {
+    av_title_h_ = 19.0f;  // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1115
+    av_body_h_ = 58.0f;   // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1125
+    if (ITextEngine* te = text_engine()) {
+      TextStyle ats;
+      ats.size = 13.0f;  // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1114
+      ats.weight = 700;
+      ats.wrap = true;
+      const SizeF at_sz = te->measure_text(
+          L"🛡️ " + tr("layout.components.antivirus.briefTitle"), ats, card_text_w);
+      if (at_sz.h > 0) av_title_h_ = std::max(19.0f, at_sz.h + 2.0f);
+
+      TextStyle bts;
+      bts.size = kStarBodyFont;  // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1126
+      bts.wrap = true;
+      const SizeF ab_sz = te->measure_text(
+          tr("layout.components.antivirus.brief"), bts, card_text_w);
+      if (ab_sz.h > 0) av_body_h_ = std::max(38.0f, ab_sz.h + 4.0f);
+    }
+    av_h = kCardPad + av_title_h_ + kImportedMb + av_body_h_ + kStarBtnMt +
+           kStarBtnH + kCardPad;  // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1093-1155
+  }
   if (step_ == FirstRunStep::Ready) {
     const bool show_node = !active_node_name_.empty() && (proxy_ready() || unconfirmed());
     const bool show_retest = !proxy_ready() && (unconfirmed() || retesting_);
@@ -766,11 +791,12 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     if (show_warn) ny += kWarnMt + kWarnH;
     node_h = ny + kCardPad;  // 底部留白
   }
+  const float ready_cards_h =
+      node_h + kReadyGap + star_h + (has_av ? (kReadyGap + av_h) : 0.0f);
   float ch = step_ == FirstRunStep::Input
                  ? kInputStepH + (intro_h_ - kIntroH) + pills_extra +
                        (has_banner ? banner_h_ + kBannerMb : 0.0f)
-                 : kTitleBlockH + kContentPad + node_h + kReadyGap +
-                       star_h + kContentPad + kActionsH;
+                 : kTitleBlockH + kContentPad + ready_cards_h + kContentPad + kActionsH;
   ch = std::min(ch, area.h - 8.0f);  // 豁免: Mini 无对应物 — 窄高视口防溢出安全留边 4px×2
 
   const float cx = std::max(0.0f, (area.w - cw) / 2.0f);
@@ -782,6 +808,10 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
   const float content_y = cy + kTitleBlockH + kContentPad;
 
   if (step_ == FirstRunStep::Input) {
+    max_ready_scroll_ = 0.0f;
+    ready_scroll_y_ = 0.0f;
+    card_av_rect_ = {};
+    btn_av_open_rect_ = {};
     // ---- 三大特性胶囊：flex 1 1 auto + flexWrap:wrap + gap 6 ----
     // （src: :607-644）窄窗 + 长译文放不下一行时必须折行，
     //   行内按 flex-grow 均摊剩余宽度；早期实现平均三等分 → 文字互相压盖
@@ -812,13 +842,25 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
       url_field_->set_visible(false);
       url_field_->blur();
     }
+    const float pre_actions = cy + ch - kActionsH;
+    const float viewport_h = std::max(40.0f, (pre_actions - content_y) - kContentPad);
+    if (has_av) {
+      max_ready_scroll_ = std::max(0.0f, ready_cards_h - viewport_h);
+      ready_scroll_y_ = std::clamp(ready_scroll_y_, 0.0f, max_ready_scroll_);
+    } else {
+      max_ready_scroll_ = 0.0f;
+      ready_scroll_y_ = 0.0f;
+    }
+    const float scroll_off = ready_scroll_y_;
+
     // src: :863-1083 绿色仪表卡 → Star 卡（卡间 mb 12）；绿卡高度流式自增
-    card_node_rect_ = {inner_x, content_y, inner_w, node_h};
+    const float node_y = content_y - scroll_off;
+    card_node_rect_ = {inner_x, node_y, inner_w, node_h};
     // src: :984-999 重测按钮 fullWidth，仅 !ready && (unconfirmed||retesting) 出现
     const bool show_node = !active_node_name_.empty() && (proxy_ready() || unconfirmed());
     const bool show_retest = !proxy_ready() && (unconfirmed() || retesting_);
     const bool show_warn = !takeover_active_;  // 与 node_h 计算块同源，避免「检测中」态错位
-    float ny = content_y + kCardPad + kImportedH + kImportedMb + kStatusMt + status_h_;
+    float ny = node_y + kCardPad + kImportedH + kImportedMb + kStatusMt + status_h_;
     if (show_node) ny += kNodeMt + kNodePt + 1.0f + kNodeLabelH + kNodeGap + kNodeNameH;
     if (show_retest) {
       ny += kRetestMt;
@@ -830,9 +872,8 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     // 不依赖重测按钮是否出现，避免「检测中」态错位。
     warn_y_ = show_warn ? (ny + kWarnMt) : ny;
 
-    float star_y = content_y + node_h + kReadyGap;
-    const float pre_actions = cy + ch - kActionsH;
-    if (star_y + star_h > pre_actions - 4.0f) {
+    float star_y = node_y + node_h + kReadyGap;
+    if (!has_av && star_y + star_h > pre_actions - 4.0f) {
       const float avail = pre_actions - 4.0f - star_y;
       if (avail < 70.0f) {
         star_y = std::max(content_y + node_h + 2.0f, pre_actions - 4.0f - star_h);  // 豁免: 极矮视口下防底栏重叠
@@ -855,11 +896,41 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     btn_wiki_rect_ = {card_star_rect_.right() - kCardPad - wiki_w, wiki_y,
                       wiki_w, kStarBtnH};
 
+    if (has_av) {
+      // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1090-1157
+      const float av_y = card_star_rect_.bottom() + kReadyGap;
+      card_av_rect_ = {inner_x, av_y, inner_w, av_h};
+      float av_btn_w = kStarBtnW;
+      if (ITextEngine* te = text_engine()) {
+        TextStyle ats;
+        ats.size = kHintFont;  // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1144
+        ats.weight = 600;
+        const SizeF aws = te->measure_text(
+            L"📄 " + tr("layout.components.antivirus.briefOpen"), ats, 0);
+        av_btn_w = std::min(inner_w - kCardPad * 2.0f,
+                            std::max(90.0f, aws.w + 12.0f));  // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1149
+      }
+      const float av_btn_y = card_av_rect_.bottom() - kCardPad - kStarBtnH;
+      btn_av_open_rect_ = {card_av_rect_.right() - kCardPad - av_btn_w, av_btn_y,
+                           av_btn_w, kStarBtnH};
+    } else {
+      card_av_rect_ = {};
+      btn_av_open_rect_ = {};
+    }
 
     const float actions_top = cy + ch - kActionsH;
     btn_finish_star_rect_ = {inner_x, actions_top + kActionPadY, inner_w, kPrimaryBtnH};
     btn_finish_rect_ = {inner_x, btn_finish_star_rect_.bottom() + kActionGap, inner_w,
                         kSecondaryBtnH};
+  }
+}
+
+void FirstRunGuideDialog::set_ready_scroll_y(float y) {
+  const float clamped = std::clamp(y, 0.0f, max_ready_scroll_);
+  if (std::abs(clamped - ready_scroll_y_) > 0.1f) {
+    ready_scroll_y_ = clamped;
+    if (bounds().w > 0.0f && bounds().h > 0.0f) on_arrange(bounds());
+    invalidate();
   }
 }
 
@@ -1011,6 +1082,9 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
 
   } else {
     // ================= STEP 2：就绪仪表盘（src: :830-1119）=================
+    const float vp_top = card_rect_.y + kTitleBlockH;
+    const float vp_h = std::max(0.0f, card_rect_.bottom() - kActionsH - vp_top);
+    rt.push_clip({card_rect_.x, vp_top, card_rect_.w, vp_h});
     // ---- 绿色仪表卡（src: :864-1016）----
     const RectF& nc = card_node_rect_;
     // src: :868-876 bgcolor rgba(76,175,80,.08/.12) + 1px 边框
@@ -1122,6 +1196,42 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
               hover_wiki_ ? warning_color() : ThemeService::instance().primary(),
               AlignH::Right);
 
+    // ---- 卡片 3：安全软件白名单简要说明（src: :1090-1157）----
+    if (on_open_whitelist_guide && card_av_rect_.w > 0.0f) {
+      const RectF& ac = card_av_rect_;
+      // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1096-1105
+      const Color4f av_bg = is_retro()
+                                ? Color4f::hex(0xFFFFFF, 0.22f)
+                                : (is_light() ? Color4f::hex(0x000000, 0.04f)
+                                              : Color4f::hex(0x808080, 0.09f));
+      const Color4f av_bd = is_retro() ? Color4f::hex(0x7A3E00, 0.35f)
+                                       : divider_color();
+      Brush ab{av_bg};
+      rt.round_rect(ac, 8.0f, Pen{av_bd, 1.0f}, &ab);  // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1094
+
+      // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1108-1119
+      draw_text(rt, L"🛡️ " + tr("layout.components.antivirus.briefTitle"),
+                {ac.x + kCardPad, ac.y + kCardPad, ac.w - kCardPad * 2.0f, av_title_h_},
+                13.0f, 700, ThemeService::instance().palette().primary_text,
+                AlignH::Left, AlignV::Top, true);
+      // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1121-1130
+      const float av_body_y = ac.y + kCardPad + av_title_h_ + kImportedMb;
+      const float av_body_max_h = std::max(12.0f, btn_av_open_rect_.y - 2.0f - av_body_y);
+      draw_text(rt, tr("layout.components.antivirus.brief"),
+                {ac.x + kCardPad, av_body_y, ac.w - kCardPad * 2.0f, av_body_max_h},
+                kStarBodyFont, static_cast<int>(Weight::Normal), secondary_text(),
+                AlignH::Left, AlignV::Top, true, true);
+      // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1139-1154
+      draw_text(rt, L"📄 " + tr("layout.components.antivirus.briefOpen"),
+                {btn_av_open_rect_.x,
+                 btn_av_open_rect_.y + (pressed_av_open_ ? 1.0f : 0.0f),
+                 btn_av_open_rect_.w, btn_av_open_rect_.h},
+                kHintFont, 600,
+                hover_av_open_ ? warning_color() : ThemeService::instance().primary(),
+                AlignH::Right);
+    }
+    rt.pop_clip();
+
     // ---- 动作区（src: :1086-1119）----
     rt.fill_rect({card_rect_.x, card_rect_.y + card_rect_.h - kActionsH,
                   card_rect_.w, 1.0f},
@@ -1138,12 +1248,15 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
 bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
   if (!open_) return false;
   const PointF pt = e.pos;
+  const float vp_top = card_rect_.y + kTitleBlockH;
+  const float vp_h = std::max(0.0f, card_rect_.bottom() - kActionsH - vp_top);
+  const RectF clip_vp = {card_rect_.x, vp_top, card_rect_.w, vp_h};
 
   if (e.type == MouseEventType::Leave) {
     hover_banner_ = hover_paste_ = hover_submit_ = hover_later_ = hover_enter_ = false;
-    hover_retest_ = hover_wiki_ = hover_finish_star_ = hover_finish_ = false;
+    hover_retest_ = hover_wiki_ = hover_av_open_ = hover_finish_star_ = hover_finish_ = false;
     pressed_banner_ = pressed_paste_ = pressed_enter_ = pressed_submit_ = pressed_later_ = false;
-    pressed_retest_ = pressed_wiki_ = pressed_finish_star_ = pressed_finish_ = false;
+    pressed_retest_ = pressed_wiki_ = pressed_av_open_ = pressed_finish_star_ = pressed_finish_ = false;
     invalidate();
     return true;
   }
@@ -1159,11 +1272,16 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
       if (btn_submit_rect_.contains(pt.x, pt.y)) pressed_submit_ = true;
       if (btn_later_rect_.contains(pt.x, pt.y)) pressed_later_ = true;
     } else {
-      if (btn_retest_rect_.contains(pt.x, pt.y) &&
-          !proxy_ready() && (unconfirmed() || retesting_)) {
-        pressed_retest_ = true;
+      if (clip_vp.contains(pt.x, pt.y)) {
+        if (btn_retest_rect_.contains(pt.x, pt.y) &&
+            !proxy_ready() && (unconfirmed() || retesting_)) {
+          pressed_retest_ = true;
+        }
+        if (btn_wiki_rect_.contains(pt.x, pt.y)) pressed_wiki_ = true;
+        if (on_open_whitelist_guide && btn_av_open_rect_.contains(pt.x, pt.y)) {
+          pressed_av_open_ = true;
+        }
       }
-      if (btn_wiki_rect_.contains(pt.x, pt.y)) pressed_wiki_ = true;
       if (btn_finish_star_rect_.contains(pt.x, pt.y)) pressed_finish_star_ = true;
       if (btn_finish_rect_.contains(pt.x, pt.y)) pressed_finish_ = true;
     }
@@ -1189,15 +1307,19 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
         invalidate();
       }
     } else {
-      const bool hr = btn_retest_rect_.contains(pt.x, pt.y) &&
+      const bool in_vp = clip_vp.contains(pt.x, pt.y);
+      const bool hr = in_vp && btn_retest_rect_.contains(pt.x, pt.y) &&
                       !proxy_ready() && (unconfirmed() || retesting_);
-      const bool hw = btn_wiki_rect_.contains(pt.x, pt.y);
+      const bool hw = in_vp && btn_wiki_rect_.contains(pt.x, pt.y);
+      const bool hav = in_vp && on_open_whitelist_guide &&
+                       btn_av_open_rect_.contains(pt.x, pt.y);
       const bool hfs = btn_finish_star_rect_.contains(pt.x, pt.y);
       const bool hf = btn_finish_rect_.contains(pt.x, pt.y);
-      if (hr != hover_retest_ || hw != hover_wiki_ || hfs != hover_finish_star_ ||
-          hf != hover_finish_) {
+      if (hr != hover_retest_ || hw != hover_wiki_ || hav != hover_av_open_ ||
+          hfs != hover_finish_star_ || hf != hover_finish_) {
         hover_retest_ = hr;
         hover_wiki_ = hw;
+        hover_av_open_ = hav;
         hover_finish_star_ = hfs;
         hover_finish_ = hf;
         invalidate();
@@ -1206,9 +1328,18 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
     return true;
   }
 
+  if (e.type == MouseEventType::Wheel) {
+    if (step_ == FirstRunStep::Ready && max_ready_scroll_ > 0.0f &&
+        card_rect_.contains(pt.x, pt.y)) {
+      const float delta = static_cast<float>(e.wheel_delta) / 120.0f * 36.0f;  // 豁免: Mini 无对应物 — 桌面滚轮步长 36px（出处: first-run-guide-dialog.tsx:830）
+      set_ready_scroll_y(ready_scroll_y_ - delta);
+    }
+    return true;
+  }
+
   if (e.type == MouseEventType::Up) {
     pressed_banner_ = pressed_paste_ = pressed_enter_ = pressed_submit_ = pressed_later_ = false;
-    pressed_retest_ = pressed_wiki_ = pressed_finish_star_ = pressed_finish_ = false;
+    pressed_retest_ = pressed_wiki_ = pressed_av_open_ = pressed_finish_star_ = pressed_finish_ = false;
     invalidate();
 
     // src: :533-542 导入进行中点遮罩/Esc 均不关闭
@@ -1244,7 +1375,8 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
         return true;
       }
     } else {
-      if (btn_retest_rect_.contains(pt.x, pt.y) &&
+      if (clip_vp.contains(pt.x, pt.y) &&
+          btn_retest_rect_.contains(pt.x, pt.y) &&
           !proxy_ready() && (unconfirmed() || retesting_)) {
         // src: :189-205 重测并优选：retesting=true、gaveUp=false
         if (!retesting_) {
@@ -1252,8 +1384,6 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
           gave_up_ = false;
           ready_started_ms_ = 0;
           last_poll_ms_ = 0;
-    if (bounds().w > 0.0f && bounds().h > 0.0f) on_arrange(bounds());
-    invalidate();
           if (bounds().w > 0.0f && bounds().h > 0.0f) {
             on_arrange(bounds());
           }
@@ -1262,7 +1392,7 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
         }
         return true;
       }
-      if (btn_wiki_rect_.contains(pt.x, pt.y)) {
+      if (clip_vp.contains(pt.x, pt.y) && btn_wiki_rect_.contains(pt.x, pt.y)) {
         if (on_open_wiki) {
           on_open_wiki();
         } else {
@@ -1271,6 +1401,12 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
                         L"https://github.com/qiu-yuxiao/clash-win/wiki", nullptr,
                         nullptr, SW_SHOWNORMAL);
         }
+        return true;
+      }
+      if (on_open_whitelist_guide && clip_vp.contains(pt.x, pt.y) &&
+          btn_av_open_rect_.contains(pt.x, pt.y)) {
+        // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1142 打开白名单完整说明，不关闭引导弹窗
+        on_open_whitelist_guide();
         return true;
       }
       if (btn_finish_star_rect_.contains(pt.x, pt.y)) {
@@ -1390,7 +1526,7 @@ size_t FirstRunGuideDialog::a11y_virtual_child_count() const {
     return (!detected_clipboard_url_.empty() && url_.empty()) ? 5u : 4u;
   }
   const bool show_retest = !proxy_ready() && (unconfirmed() || retesting_);
-  return show_retest ? 5u : 4u;
+  return (show_retest ? 5u : 4u) + (on_open_whitelist_guide ? 1u : 0u);
 }
 
 A11ySubItem FirstRunGuideDialog::a11y_virtual_child(size_t idx) const {
@@ -1455,11 +1591,20 @@ A11ySubItem FirstRunGuideDialog::a11y_virtual_child(size_t idx) const {
     sub.local_bounds = btn_finish_rect_;
     sub.can_invoke = true;
   } else {
-    sub.role = A11yRole::Button;
-    sub.name = tr("layout.components.firstRun.retestNodes");
-    sub.local_bounds = btn_retest_rect_;
-    sub.can_invoke = !retesting_;
-    sub.enabled = !retesting_;
+    const bool show_retest = !proxy_ready() && (unconfirmed() || retesting_);
+    const size_t av_idx = show_retest ? 5u : 4u;
+    if (on_open_whitelist_guide && idx == av_idx) {
+      sub.role = A11yRole::Button;
+      sub.name = tr("layout.components.antivirus.briefOpen");
+      sub.local_bounds = btn_av_open_rect_;
+      sub.can_invoke = true;
+    } else {
+      sub.role = A11yRole::Button;
+      sub.name = tr("layout.components.firstRun.retestNodes");
+      sub.local_bounds = btn_retest_rect_;
+      sub.can_invoke = !retesting_;
+      sub.enabled = !retesting_;
+    }
   }
   return sub;
 }
@@ -1517,6 +1662,12 @@ bool FirstRunGuideDialog::a11y_invoke_virtual_child(size_t idx) {
   }
   if (idx == 3) {
     finish();
+    return true;
+  }
+  const bool show_retest = !proxy_ready() && (unconfirmed() || retesting_);
+  const size_t av_idx = show_retest ? 5u : 4u;
+  if (on_open_whitelist_guide && idx == av_idx) {
+    on_open_whitelist_guide();
     return true;
   }
   if (idx == 4 && !proxy_ready() && !retesting_) {

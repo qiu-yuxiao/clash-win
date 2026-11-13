@@ -18,7 +18,10 @@
 // 【测试铁律】全部走 hooks 注入 + tick_once 单步驱动，不触真线程/真内核。
 #include "core/monitor.h"
 
+#include <atomic>
+#include <chrono>
 #include <string>
+#include <thread>
 
 #include "test_util.h"
 #include "util/result.h"
@@ -94,7 +97,7 @@ UT_TEST(t27_switch_grace_blocks_fail_count_within_20s) {
 UT_TEST(t27_v324_bug315_timing_constants_and_bounds) {
   MonitorFixture f;
   auto& m = f.m;
-  UT_CHECK_EQ(CoreMonitor::kHealthDataFreshSecs, 20);
+  UT_CHECK_EQ(CoreMonitor::kHealthDataFreshSecs, 60);
   UT_CHECK_EQ(CoreMonitor::kDeadConfirmMinIntervalSecs, 10);
   UT_CHECK_EQ(m.params().switch_grace_ms, 20000);
   UT_CHECK_EQ(m.params().heal_cooldown_ms, 25000);
@@ -475,4 +478,30 @@ UT_TEST(t27_v324_throttled_net_probe_dual_frequency) {
   UT_CHECK_EQ(probes, 2);
   UT_CHECK(throttle.check(66000, probe_fn));
   UT_CHECK_EQ(probes, 3);
+}
+
+UT_TEST(t27_v330_monitor_guardian_tick_hook) {
+  auto& mon = CoreMonitor::instance();
+  mon.stop();
+  mon.reset_state();
+
+  std::atomic<int> ticks{0};
+  CoreMonitor::Hooks h{};
+  h.core_alive = [] { return true; };
+  h.api_alive = [] { return true; };
+  h.network_online = [] { return true; };
+  h.is_headless = [] { return true; };
+  h.current_uid = [] { return std::string(); };
+  h.on_guardian_tick = [&] { ticks.fetch_add(1); };
+  mon.set_hooks(h);
+
+  mon.start();
+  for (int i = 0; i < 50 && ticks.load() == 0; ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  mon.stop();
+
+  UT_CHECK(ticks.load() > 0);
+  mon.set_hooks({});
+  mon.reset_state();
 }

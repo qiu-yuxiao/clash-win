@@ -6,6 +6,8 @@
 #include <fstream>
 #include <string>
 
+#include "cmd/cmd_support.h"
+#include "cmd/verge_flags.h"
 #include "config/clash.h"
 #include "config/config.h"
 #include "clashwin/config/constants.h"
@@ -96,6 +98,7 @@ UT_TEST(t03_first_launch_verge_yaml_diff_empty) {
       "notice_position: top-right\n"
       "collapse_navbar: false\n"
       "enable_tun_mode: null\n"
+      "enable_tun_sniffer: null\n"
       "enable_auto_launch: false\n"
       "enable_silent_start: false\n"
       "enable_system_proxy: true\n"
@@ -306,4 +309,41 @@ UT_TEST(t03_installer_language_mapping) {
   // 注册表读取：只做「不抛、返回合法值」的健全性断言（值随本机安装历史变化）
   const std::string got = installer_language();
   UT_CHECK(got.empty() || got == "zh" || got == "en" || got == "ru");
+}
+
+UT_TEST(t03_verge_enable_tun_sniffer_patch_and_json_null_reset) {
+  const auto p_true =
+      cmd::iverge_from_json(nlohmann::json::parse(R"({"enable_tun_sniffer": true})"));
+  UT_CHECK(p_true.enable_tun_sniffer == std::optional<bool>(true));
+
+  const auto p_false =
+      cmd::iverge_from_json(nlohmann::json::parse(R"({"enable_tun_sniffer": false})"));
+  UT_CHECK(p_false.enable_tun_sniffer == std::optional<bool>(false));
+
+  const auto r_null =
+      cmd::parse_verge_patch_resets(nlohmann::json::parse(R"({"enable_tun_sniffer": null})"));
+  UT_CHECK(r_null.reset_tun_sniffer);
+
+  const auto r_bool =
+      cmd::parse_verge_patch_resets(nlohmann::json::parse(R"({"enable_tun_sniffer": false})"));
+  UT_CHECK(!r_bool.reset_tun_sniffer);
+
+  IVerge base;
+  base.enable_tun_mode = true;
+  base.enable_tun_sniffer = std::nullopt;
+  const uint16_t f_set = cmd::determine_update_flags(base, p_true, false);
+  UT_CHECK((f_set & cmd::kFClashConfig) != 0);
+  UT_CHECK((f_set & cmd::kFVergeConfig) != 0);
+
+  base.patch_config(p_true);
+  UT_CHECK(base.enable_tun_sniffer == std::optional<bool>(true));
+
+  IVerge empty_patch;
+  const uint16_t f_reset =
+      cmd::determine_update_flags(base, empty_patch, false, r_null);
+  UT_CHECK((f_reset & cmd::kFClashConfig) != 0);
+  UT_CHECK((f_reset & cmd::kFVergeConfig) != 0);
+
+  base.enable_tun_sniffer = std::nullopt;
+  UT_CHECK(!base.enable_tun_sniffer.has_value());
 }

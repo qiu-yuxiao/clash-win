@@ -66,9 +66,9 @@ constexpr float kCloseSize = 28.0f, kCloseTop = 3.0f, kCloseRight = 8.0f;
 constexpr float kComboH = 128;          // 60 + 52 + 两卡间距/边框累计
 constexpr float kComboTakeoverH = 60;   // 20.4+6+25.2+8
 constexpr float kComboRoutingH = 52;    // 20.4+6+25.2
-// src: basic-settings-card.tsx:89-99 无固定高，内容驱动：
-//   p16 + 标题 20.4 + mb4 + 2×24 + mt2 + 24 + p16 = 130.4
-constexpr float kBasicH = 130.4f;
+// src: src/pages/_layout/components/basic-settings-card.tsx:300-398 无固定高，内容驱动：
+//   p16 + 标题 20.4 + mb4 + 2×24 + mt2 + 24(tunSniffer) + mt2 + 24(mixedPort) + p16 = 156.4
+constexpr float kBasicH = 156.4f;
 // src: theme-settings-card.tsx:148-494 无固定高（flexShrink 0）：
 //   p8 + 标题 20.4 + mb4 + 2×23.2 + mt8 + 按钮24 + 页脚(pt8+18.3+16.6) + p8 = 161.7
 constexpr float kThemeH = 161.7f;
@@ -567,6 +567,29 @@ BasicCard::BasicCard() : Widget(nullptr) {
     sw->set_a11y_labelled_by(labels_[i]);
     add_child(std::move(sw));
   }
+  auto sl = std::make_unique<Label>();
+  sniffer_label_ = sl.get();
+  sniffer_label_->style.size = 13.0f;  // src: src/pages/_layout/components/basic-settings-card.tsx:41
+  sniffer_label_->style.weight = static_cast<int>(Weight::Bold);
+  sniffer_label_->style.align_v = AlignV::Center;  // src: src/pages/_layout/components/basic-settings-card.tsx:33
+  sniffer_label_->style.wrap = false;
+  sniffer_label_->style.ellipsis = true;
+  sniffer_label_->style.color = card_text();
+  sniffer_label_->set_hit_self(true);
+  sniffer_label_->set_i18n_text("settings.mini.tunSniffer");
+  add_child(std::move(sl));
+  auto ss = std::make_unique<Segmented>();
+  sniffer_seg_ = ss.get();
+  sniffer_seg_->set_options_i18n({"settings.mini.tunSnifferAuto",
+                                  "settings.mini.tunSnifferOn",
+                                  "settings.mini.tunSnifferOff"},
+                                 0);
+  style_gold_segmented(sniffer_seg_);
+  sniffer_seg_->radius_ = 4.0f;      // src: src/pages/_layout/components/basic-settings-card.tsx:327
+  sniffer_seg_->style_.size = 11.0f;  // src: src/pages/_layout/components/basic-settings-card.tsx:372
+  sniffer_seg_->set_a11y_labelled_by(sniffer_label_);
+  add_child(std::move(ss));
+  set_tun_enabled(false);
   auto pl = std::make_unique<Label>();
   port_label_ = pl.get();
   port_label_->style.size = 13;  // src: basic-settings-card.tsx:240 caption 13px
@@ -586,6 +609,23 @@ BasicCard::BasicCard() : Widget(nullptr) {
   save_btn_ = btn.get();
   btn->set_visible(false);
   add_child(std::move(btn));
+}
+
+void BasicCard::set_tun_enabled(bool tun) {
+  tun_enabled_ = tun;
+  const float op = tun ? 1.0f : 0.48f;  // src: src/pages/_layout/components/basic-settings-card.tsx:304
+  const char* tip_key = tun ? "settings.mini.tunSnifferTooltip"
+                            : "settings.mini.tunSnifferNeedTunTooltip";  // src: src/pages/_layout/components/basic-settings-card.tsx:287-295
+  if (sniffer_label_) {
+    sniffer_label_->set_opacity(op);
+    sniffer_label_->set_i18n_tooltip(tip_key);
+  }
+  if (sniffer_seg_) {
+    sniffer_seg_->set_enabled(tun);
+    sniffer_seg_->set_opacity(op);
+    sniffer_seg_->set_i18n_tooltip(tip_key);
+  }
+  invalidate();
 }
 
 void BasicCard::on_arrange(const RectF& area) {
@@ -637,8 +677,20 @@ void BasicCard::on_arrange(const RectF& area) {
     sws[i]->layout_tree(
         {cx + col_w - 5.0f - sw_w, cy + row_bottom_line - sw_body_bottom, sw_w, sw_h});
   }
-  // Mixed Port 行：grid 第 3 行跨两列，mt 0.25=2（src: :210-217）
-  const float mixed_y = grid_y + row_h * 2 + 2.0f;
+  // TUN 域名嗅探行：grid 第 3 行跨两列（src: src/pages/_layout/components/basic-settings-card.tsx:284-392）
+  const float sniffer_y = grid_y + row_h * 2 + 2.0f;  // src: src/pages/_layout/components/basic-settings-card.tsx:301
+  const float seg_w = 118.0f;  // src: src/pages/_layout/components/basic-settings-card.tsx:324
+  const float seg_h = 20.0f;   // src: src/pages/_layout/components/basic-settings-card.tsx:329
+  if (sniffer_label_) {
+    sniffer_label_->layout_tree(  // src: src/pages/_layout/components/basic-settings-card.tsx:31-38
+        {pad + 4.0f, sniffer_y, std::max(0.0f, area.w - pad * 2.0f - seg_w - 8.0f), 24.0f});
+  }
+  if (sniffer_seg_) {
+    sniffer_seg_->layout_tree(  // src: src/pages/_layout/components/basic-settings-card.tsx:324-329
+        {area.w - pad - 4.0f - seg_w, sniffer_y + (24.0f - seg_h) / 2.0f, seg_w, seg_h});
+  }
+  // Mixed Port 行：grid 第 4 行跨两列，mt 0.25=2（src: src/pages/_layout/components/basic-settings-card.tsx:398）
+  const float mixed_y = sniffer_y + 24.0f + 2.0f;
   // 标签宽 auto：整行余下空间（src: :218-220）
   port_label_->layout_tree({pad + 4.0f, mixed_y, area.w - pad - 84.0f, 24});
   // 输入框 src: basic-settings-card.tsx:238-251 width 80px，py 2 + 13*1.4375 ≈ 22.7
@@ -1194,6 +1246,8 @@ void SettingsDrawer::restyle_cards() {
   }
   if (basic_card_) {
     set(basic_card_->title_);
+    set(basic_card_->sniffer_label_);
+    restyle_seg(basic_card_->sniffer_seg_);
     set(basic_card_->port_label_);
     for (auto* l : basic_card_->labels_) set(l);  // 4 个开关文案
     if (basic_card_->port_field_) {
@@ -1257,8 +1311,12 @@ void SettingsDrawer::refresh_skin_cells() {
 }
 
 void SettingsDrawer::sync_takeover(bool sys_proxy, bool tun) {
-  if (!takeover_card_ || !takeover_card_->seg_) return;
-  takeover_card_->seg_->set_mode(tun ? "TUN" : (sys_proxy ? "SYS" : "MAN"));
+  if (takeover_card_ && takeover_card_->seg_) {
+    takeover_card_->seg_->set_mode(tun ? "TUN" : (sys_proxy ? "SYS" : "MAN"));
+  }
+  if (basic_card_) {
+    basic_card_->set_tun_enabled(tun);
+  }
 }
 
 void SettingsDrawer::sync_routing(const std::string& rule_fallback) {
@@ -1271,12 +1329,18 @@ void SettingsDrawer::sync_routing(const std::string& rule_fallback) {
 }
 
 void SettingsDrawer::sync_basic(bool auto_launch, bool silent, bool allow_lan,
-                                bool ipv6, int mixed_port) {
+                                bool ipv6, int mixed_port,
+                                std::optional<bool> tun_sniffer) {
   if (!basic_card_) return;
   basic_card_->sw_auto_launch_->set_checked(auto_launch, false);
   basic_card_->sw_silent_start_->set_checked(silent, false);
   basic_card_->sw_allow_lan_->set_checked(allow_lan, false);
   basic_card_->sw_allow_ipv6_->set_checked(ipv6, false);
+  if (basic_card_->sniffer_seg_) {
+    // src: src/pages/_layout/components/basic-settings-card.tsx:307-318 nullopt→auto(0), true→on(1), false→off(2)
+    const int sniffer_idx = !tun_sniffer.has_value() ? 0 : (*tun_sniffer ? 1 : 2);
+    basic_card_->sniffer_seg_->select_silent(sniffer_idx);
+  }
   if (mixed_port > 0) {
     basic_card_->port_current_ = mixed_port;
     basic_card_->port_field_->set_text(std::to_wstring(mixed_port));
@@ -1441,9 +1505,11 @@ void SettingsDrawer::open_help_menu() {
           ? std::wstring{}
           : L" (" + utf::utf8_to_utf16(format_core_version(core_version)) + L")";
   std::vector<MenuItem> its;
+  // src: src/pages/_layout/components/help-menu-button.tsx:114-205
   its.push_back({L"⭐ " + tr("layout.components.helpMenu.github"), false, false, L"", false});
   its.push_back({L"💡 " + tr("layout.components.helpMenu.wiki"), false, false, L"", false});
   its.push_back({L"🧭 " + tr("layout.components.helpMenu.firstRunGuide"), false, false, L"", false});
+  its.push_back({L"🛡️ " + tr("layout.components.antivirus.menuLabel"), false, false, L"", false});  // src: src/pages/_layout/components/help-menu-button.tsx:161-169
   its.push_back({L"", false, true, L"", false});
   its.push_back({L"📦 " + tr("layout.components.helpMenu.exportDiagnostics"), false, false, L"", false});
   its.push_back({L"", false, true, L"", false});
@@ -1458,9 +1524,10 @@ void SettingsDrawer::open_help_menu() {
       case 0: a = HelpAction::StarGithub; break;
       case 1: a = HelpAction::OpenWiki; break;
       case 2: a = HelpAction::ReviewGuide; break;
-      case 4: a = HelpAction::ExportDiagnostics; break;
-      case 6: a = HelpAction::CheckAppUpdate; break;
-      case 7: a = HelpAction::CheckCoreUpdate; break;
+      case 3: a = HelpAction::AntivirusGuide; break;
+      case 5: a = HelpAction::ExportDiagnostics; break;
+      case 7: a = HelpAction::CheckAppUpdate; break;
+      case 8: a = HelpAction::CheckCoreUpdate; break;
       default: return;
     }
     // Mini：检查更新走后端命令并弹出对应弹窗
@@ -1479,7 +1546,7 @@ void SettingsDrawer::open_help_menu() {
   RectF rb = bottom_help_ ? bottom_help_->bounds() : RectF{0, 0, 80, 24};
   if (bottom_row_visible_) {
     help_menu_->style_.max_h = std::max(120.0f, rb.y - 8.0f);  // src: src/pages/_layout/components/help-menu-button.tsx:110
-    help_menu_->open(its, {rb.x, rb.y - 330.0f - 4.0f});  // src: src/pages/_layout/components/help-menu-button.tsx:111
+    help_menu_->open(its, {rb.x, rb.y - 366.0f - 4.0f});  // src: src/pages/_layout/components/help-menu-button.tsx:161-169
   } else {
     const float menu_y = rb.bottom() + 4.0f;  // src: src/pages/_layout/components/help-menu-button.tsx:82
     help_menu_->style_.max_h = std::max(120.0f, bounds().h - menu_y - 8.0f);  // src: src/pages/_layout/components/help-menu-button.tsx:110
@@ -1743,6 +1810,18 @@ void SettingsDrawer::wire_callbacks() {
   basic_card_->sw_allow_ipv6_->on_change = [this](bool v) {
     if (on_patch_verge) on_patch_verge("clash_ipv6", v);
   };
+  if (basic_card_->sniffer_seg_) {
+    // src: src/pages/_layout/components/basic-settings-card.tsx:307-318
+    //   0=自动(null 回删落盘键), 1=开启(true), 2=关闭(false)
+    basic_card_->sniffer_seg_->on_change = [this](int i) {
+      if (!on_patch_verge) return;
+      if (i == 0) {
+        on_patch_verge("enable_tun_sniffer", nullptr);
+      } else {
+        on_patch_verge("enable_tun_sniffer", i == 1);
+      }
+    };
+  }
   // Mixed Port：Enter / 失焦提交（Mini 无保存钮；src: basic-settings-card.tsx:232）
   auto commit_port = [this] {
     std::wstring t = basic_card_->port_field_->text();

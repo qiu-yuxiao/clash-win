@@ -90,16 +90,18 @@ UT_TEST(guardian_parse_args_and_respawn_info) {
 }
 
 UT_TEST(guardian_compute_next_generation_backoff_and_reset) {
-  // 短时间连续崩溃（< 120s）：0 -> 1 -> 2 -> 3 -> nullopt（阻止无限拉起风暴）
-  UT_CHECK(compute_next_generation(0, 10) == std::optional<uint32_t>(1u));
-  UT_CHECK(compute_next_generation(1, 25) == std::optional<uint32_t>(2u));
-  UT_CHECK(compute_next_generation(2, 119) == std::optional<uint32_t>(3u));
-  UT_CHECK(!compute_next_generation(3, 5).has_value());
-  UT_CHECK(!compute_next_generation(3, 119).has_value());
+  // v3.3.0: 同一开机与会话纪元内累计自愈预算（0 -> 1 -> 2 -> 3 -> nullopt，无时间重置）
+  UT_CHECK(compute_next_generation(0) == std::optional<uint32_t>(1u));
+  UT_CHECK(compute_next_generation(1) == std::optional<uint32_t>(2u));
+  UT_CHECK(compute_next_generation(2) == std::optional<uint32_t>(3u));
+  UT_CHECK(!compute_next_generation(3).has_value());
+  UT_CHECK(!compute_next_generation(99).has_value());
 
-  // 稳定运行满 120s 后再次意外被杀：代数重置为 1（BUG-363）
-  UT_CHECK(compute_next_generation(3, 120) == std::optional<uint32_t>(1u));
-  UT_CHECK(compute_next_generation(2, 3600) == std::optional<uint32_t>(1u));
+  const RespawnSessionState st{"epoch-1", "boot:1000", 3, 1000, 4242};
+  UT_CHECK(!evaluate_respawn_budget(st, 3, "epoch-1", "boot:1000").has_value());
+  UT_CHECK(!evaluate_respawn_budget(st, 0, "epoch-2", "boot:1000").has_value());
+  UT_CHECK(evaluate_respawn_budget(st, 0, "epoch-1", "boot:2000") ==
+           std::optional<uint32_t>(1u));
 
   // 主进程监督看门狗重建退避阶梯（BUG-363）
   UT_CHECK_EQ(compute_guard_rebuild_backoff_ms(0), 1500u);
@@ -421,4 +423,74 @@ UT_TEST(guardian_monitor_transient_failure_recovery_closure) {
 
   mon.set_hooks({});
   mon.reset_state();
+}
+
+UT_TEST(guardian_v330_two_phase_exit_proof_and_fail_closed_respawn_budget) {
+  const auto temp_dir =
+      std::filesystem::temp_directory_path() /
+      (L"clashwin_guard_v330_test_" + std::to_wstring(::GetCurrentProcessId()) +
+       L"_" + std::to_wstring(::GetTickCount64()));
+  const auto guard_dir = temp_dir / L"guard";
+  const auto log_dir = temp_dir / L"logs";
+  std::error_code ec;
+  std::filesystem::remove_all(temp_dir, ec);
+  std::filesystem::create_directories(guard_dir, ec);
+  std::filesystem::create_directories(log_dir, ec);
+
+  const uint64_t base_ms = 100000ULL;
+  UT_CHECK(write_intentional_exit_proof_in(guard_dir, 4242u, "sess-1",
+                                           "prepared", "unit_prep", base_ms));
+  UT_CHECK(evaluate_intentional_exit_proof_in(guard_dir, 4242u, "sess-1",
+                                              base_ms + 10000ULL)
+               .status == IntentionalProofStatus::ValidPrepared);
+  UT_CHECK(evaluate_intentional_exit_proof_in(guard_dir, 4242u, "sess-1",
+                                              base_ms + 35000ULL)
+               .status == IntentionalProofStatus::Rejected);
+
+  UT_CHECK(write_intentional_exit_proof_in(guard_dir, 4242u, "sess-1",
+                                           "confirmed", "unit_quit", base_ms));
+  UT_CHECK(evaluate_intentional_exit_proof_in(guard_dir, 4242u, "sess-1",
+                                              base_ms + 100000ULL)
+               .status == IntentionalProofStatus::ValidConfirmed);
+  UT_CHECK(evaluate_intentional_exit_proof_in(guard_dir, 9999u, "sess-1",
+                                              base_ms + 1000ULL)
+               .status == IntentionalProofStatus::Rejected);
+  UT_CHECK(evaluate_intentional_exit_proof_in(guard_dir, 4242u, "sess-2",
+                                              base_ms + 1000ULL)
+               .status == IntentionalProofStatus::Rejected);
+  // 过期评估会顺带清理凭证文件，故放在 PID / session 校验之后
+  UT_CHECK(evaluate_intentional_exit_proof_in(guard_dir, 4242u, "sess-1",
+                                              base_ms + 130000ULL)
+               .status == IntentionalProofStatus::Rejected);
+
+  clear_intentional_exit_proof_in(guard_dir);
+  UT_CHECK(evaluate_intentional_exit_proof_in(guard_dir, 4242u, "sess-1",
+                                              base_ms + 1000ULL)
+               .status == IntentionalProofStatus::NotPresent);
+
+  reset_respawn_state_for_clean_start_in(guard_dir, log_dir, "epoch-a",
+                                         "boot:1000");
+  auto r1 = evaluate_and_record_respawn_in(guard_dir, "epoch-a", 0u, 4242u,
+                                           base_ms, "boot:1000", /*commit=*/true);
+  UT_CHECK(r1.is_ok() && r1.value() == std::optional<uint32_t>(1u));
+  auto r2 = evaluate_and_record_respawn_in(guard_dir, "epoch-a", 1u, 4242u,
+                                           base_ms + 1000ULL, "boot:1000", true);
+  UT_CHECK(r2.is_ok() && r2.value() == std::optional<uint32_t>(2u));
+  auto r3 = evaluate_and_record_respawn_in(guard_dir, "epoch-a", 2u, 4242u,
+                                           base_ms + 2000ULL, "boot:1000", true);
+  UT_CHECK(r3.is_ok() && r3.value() == std::optional<uint32_t>(3u));
+  auto r4 = evaluate_and_record_respawn_in(
+      guard_dir, "epoch-a", 3u, 4242u, base_ms + 600000ULL, "boot:1000", true);
+  UT_CHECK(r4.is_ok() && !r4.value().has_value());
+
+  {
+    std::ofstream ofs(guard_dir / L"respawn_state.json",
+                      std::ios::binary | std::ios::trunc);
+    ofs << "{corrupt-json";
+  }
+  auto r_bad = evaluate_and_record_respawn_in(
+      guard_dir, "epoch-a", 0u, 4242u, base_ms + 700000ULL, "boot:1000", true);
+  UT_CHECK(r_bad.is_err() || !r_bad.value().has_value());
+
+  std::filesystem::remove_all(temp_dir, ec);
 }

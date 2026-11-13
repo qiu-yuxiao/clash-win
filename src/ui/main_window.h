@@ -333,6 +333,7 @@ class MainWindow : public app::ILifecycleWindow {
   scene::UnlockDialog* unlock_page_ = nullptr;   // /unlock 整页（内部路由，无可见入口，同 Mini）
   scene::AddUrlDialog* add_url_ = nullptr;  // 代理方式第三段“添加网址”（Mini 同构）
   scene::FirstRunGuideDialog* first_run_ = nullptr;  // 首次运行向导（Mini 同构）
+  scene::AntivirusWhitelistModal* antivirus_modal_ = nullptr;  // 安全软件白名单说明弹窗（Mini 同构）
   // 帮助菜单「检查软件更新 / 检查内核更新」→ 弹窗（Mini: _layout.tsx:1948/1956）
   scene::ClientUpdateModal* client_update_ = nullptr;
   scene::CoreUpdateModal* core_update_ = nullptr;
@@ -346,6 +347,8 @@ class MainWindow : public app::ILifecycleWindow {
   uint64_t ws_sub_traffic_ = 0, ws_sub_conn_ = 0, ws_sub_logs_ = 0;
   uint64_t theme_sub_ = 0;  // ThemeService 热切换订阅（切皮肤/亮暗 → 全窗重绘）
   uint64_t bus_sub_core_upgrade_ = 0;  // kCoreUpgradeProgress → CoreUpdateModal + 结果通知
+  uint64_t bus_sub_open_guide_ = 0;    // ui:open_guide → 重开首次向导
+  uint64_t bus_sub_open_av_ = 0;       // ui:open_antivirus_guide → 打开安全软件白名单弹窗
   uint64_t postbox_sub_delay_ = 0;
   uint64_t postbox_sub_refresh_ = 0;
   uint64_t net_health_sub_ = 0;                 // BUG-359：network_health::* 顶栏胶囊订阅

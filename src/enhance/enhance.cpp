@@ -280,12 +280,11 @@ EnhanceOutput enhance_core(const EnhanceInput& input) {
   ma.rule_fallback = verge.rule_fallback.empty() ? "direct" : verge.rule_fallback;
   config = enforce_mini_agreements(config, ma);
 
-  // ⑧ use_tun → ⑨ use_sort → ⑩ apply_mandatory_dns_settings → ⑪ 境外明文 DNS 转 DoH → ⑫ nameserver-policy 卫生清理
-  config = use_tun(config, verge.enable_tun);
+  // ⑧ use_tun_with_sniffer → ⑨ use_sort → ⑩ apply_mandatory_dns_settings → ⑪ DNS 上游治理
+  config = use_tun_with_sniffer(config, verge.enable_tun, verge.enable_tun_sniffer);
   config = field::use_sort(config);
   config = apply_mandatory_dns_settings(config);
-  config = sanitize_foreign_plain_dns_upstreams(config);
-  config = sanitize_nameserver_policy(config);
+  config = sanitize_dns_upstreams(config);
 
   EnhanceOutput out;
   out.config = std::move(config);
@@ -303,6 +302,7 @@ Result<EnhanceOutput> run_enhance_full_from_config() {
   const auto& verge = *cfg.verge().latest_arc();
   input.verge.clash_core = verge.get_valid_clash_core();
   input.verge.enable_tun = verge.enable_tun_mode.value_or(false);
+  input.verge.enable_tun_sniffer = verge.enable_tun_sniffer;
   input.verge.enable_builtin = verge.enable_builtin_enhanced.value_or(true);
   input.verge.socks_enabled = verge.verge_socks_enabled.value_or(false);
   input.verge.http_enabled = verge.verge_http_enabled.value_or(false);

@@ -343,6 +343,7 @@ void CoreMonitor::start() {
               if (kick_.exchange(false)) break;
             }
             if (!running_.load()) break;
+            if (hooks_.on_guardian_tick) hooks_.on_guardian_tick();
             tick_once();
           }
         });

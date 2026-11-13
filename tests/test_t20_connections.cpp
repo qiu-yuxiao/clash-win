@@ -26,6 +26,7 @@
 #include "ui/scenes/connection_data.h"
 #include "ui/scenes/connection_detail_dialog.h"
 #include "ui/scenes/connections_panel.h"
+#include "ui/scenes/path_control.h"
 #include "ui/scenes/settings_drawer.h"
 #include "ui/theme/theme.h"
 #include "util/dirs.h"
@@ -323,16 +324,16 @@ UT_TEST(t20_quick_routing_rule_generation) {
   std::string r_ipv4 = build_rule_string(RuleType::Domain, "1.1.1.1", RuleTarget::Direct);
   UT_CHECK_EQ(r_ipv4, "IP-CIDR,1.1.1.1/32,DIRECT");
 
-  // IPv6 CIDR
+  // IPv6 CIDR (v3.3.0 改为精确 IP-CIDR6)
   std::string r_ipv6 = build_rule_string(RuleType::Domain, "2606:4700:4700::1111", RuleTarget::Reject);
-  UT_CHECK_EQ(r_ipv6, "IP-CIDR,2606:4700:4700::1111/128,REJECT");
+  UT_CHECK_EQ(r_ipv6, "IP-CIDR6,2606:4700:4700::1111/128,REJECT");
 
-  // 域名后缀
+  // 精确域名规则 (v3.3.0 quick_routing 生成精确 DOMAIN 规则而非通配后缀)
   std::string r_dom = build_rule_string(RuleType::Domain, "music.163.com", RuleTarget::Direct);
-  UT_CHECK_EQ(r_dom, "DOMAIN-SUFFIX,163.com,DIRECT");
+  UT_CHECK_EQ(r_dom, "DOMAIN,music.163.com,DIRECT");
 
   std::string r_dom_cn = build_rule_string(RuleType::Domain, "portal.gov.cn", RuleTarget::Proxy);
-  UT_CHECK_EQ(r_dom_cn, "DOMAIN-SUFFIX,portal.gov.cn,PROXY");
+  UT_CHECK_EQ(r_dom_cn, "DOMAIN,portal.gov.cn,PROXY");
 }
 
 // Test 6: Quick Routing Merge.yaml Injection
@@ -359,14 +360,14 @@ UT_TEST(t20_quick_routing_merge_yaml_injection) {
   auto res1 = core::quick_routing::add_quick_routing_rule(core::quick_routing::RuleType::Domain,
                                                           "github.com", core::quick_routing::RuleTarget::Proxy);
   UT_CHECK(res1.ok);
-  UT_CHECK_EQ(res1.rule, "DOMAIN-SUFFIX,github.com,PROXY");
+  UT_CHECK_EQ(res1.rule, "DOMAIN,github.com,PROXY");
 
   // 读取 Merge.yaml 验证置顶
   auto doc1 = util::load_yaml_file(merge_file);
   UT_CHECK(doc1.is_ok());
   auto rules1 = doc1.value()["prepend-rules"];
   UT_CHECK_EQ(rules1.size(), 2u);
-  UT_CHECK_EQ(rules1[0].as<std::string>(), "DOMAIN-SUFFIX,github.com,PROXY");
+  UT_CHECK_EQ(rules1[0].as<std::string>(), "DOMAIN,github.com,PROXY");
   UT_CHECK_EQ(rules1[1].as<std::string>(), "DOMAIN-SUFFIX,existing.org,DIRECT");
 
   // 对相同域名重新添加不同目标 (DIRECT) -> 验证原规则被覆盖去重且保持置顶
@@ -376,7 +377,7 @@ UT_TEST(t20_quick_routing_merge_yaml_injection) {
   auto doc2 = util::load_yaml_file(merge_file);
   auto rules2 = doc2.value()["prepend-rules"];
   UT_CHECK_EQ(rules2.size(), 2u);
-  UT_CHECK_EQ(rules2[0].as<std::string>(), "DOMAIN-SUFFIX,github.com,DIRECT");
+  UT_CHECK_EQ(rules2[0].as<std::string>(), "DOMAIN,github.com,DIRECT");
   UT_CHECK_EQ(rules2[1].as<std::string>(), "DOMAIN-SUFFIX,existing.org,DIRECT");
 
   // 清理临时环境
@@ -579,4 +580,85 @@ UT_TEST(t20_d2d_local_coordinates_no_double_offset) {
     }
   }
   UT_CHECK_EQ(displaced_pixels, 0);  // 绝无双偏移位移
+}
+
+UT_TEST(t20_v330_path_control_four_states_reconcile_and_managed_rows) {
+  const auto temp_dir =
+      std::filesystem::temp_directory_path() /
+      (L"clashwin_t20_pc_" + std::to_wstring(::GetCurrentProcessId()) + L"_" +
+       std::to_wstring(::GetTickCount64()));
+  std::error_code ec;
+  std::filesystem::remove_all(temp_dir, ec);
+  std::filesystem::create_directories(temp_dir, ec);
+
+  PathControlStore store;
+  store.load_from_file((temp_dir / L"path_control_state.json").wstring());
+
+  const int64_t disc_ms = parse_iso8601_utc_ms("2026-11-14T00:00:00Z");
+  UT_CHECK(disc_ms > 0);
+  ConnItem c_disc;
+  c_disc.id = "c_disc";
+  c_disc.host = "api.example.com:443";
+  c_disc.metadata.host = "api.example.com";
+  c_disc.metadata.destination_port = "443";
+  c_disc.chains = {"Proxy"};
+  c_disc.chains_cat = "Proxy";
+  store.mark_disconnected(c_disc, disc_ms);
+
+  std::vector<clashwin::core::quick_routing::ManagedMergeRule> rules;
+  {
+    clashwin::core::quick_routing::ManagedMergeRule r;
+    r.raw = "DOMAIN-SUFFIX,proxy.example.com,PROXY";
+    r.rule_type = "DOMAIN-SUFFIX";
+    r.value = "proxy.example.com";
+    r.match_key = "proxy.example.com";
+    r.target = clashwin::core::quick_routing::RuleTarget::Proxy;
+    rules.push_back(std::move(r));
+  }
+  {
+    clashwin::core::quick_routing::ManagedMergeRule r;
+    r.raw = "PROCESS-NAME,curl.exe,DIRECT";
+    r.rule_type = "PROCESS-NAME";
+    r.value = "curl.exe";
+    r.match_key = "curl.exe";
+    r.target = clashwin::core::quick_routing::RuleTarget::Direct;
+    rules.push_back(std::move(r));
+  }
+
+  const auto composed =
+      compose_active_path_control_connections({}, rules, store.state());
+  bool found_disc = false, found_proxy = false, found_direct = false;
+  for (const auto& item : composed) {
+    if (item.is_synthetic &&
+        item.control_status == PathControlStatus::Disconnected &&
+        item.target_value == "api.example.com") {
+      found_disc = true;
+    }
+    if (item.is_synthetic &&
+        item.control_status == PathControlStatus::Proxy &&
+        item.managed_rule.has_value() &&
+        item.managed_rule->match_key == "proxy.example.com") {
+      found_proxy = true;
+    }
+    if (item.is_synthetic &&
+        item.control_status == PathControlStatus::Direct &&
+        item.managed_rule.has_value() &&
+        item.managed_rule->match_key == "curl.exe") {
+      found_direct = true;
+    }
+  }
+  UT_CHECK(found_disc);
+  UT_CHECK(found_proxy);
+  UT_CHECK(found_direct);
+
+  ConnItem reconnected;
+  reconnected.id = "c_new";
+  reconnected.host = "api.example.com:443";
+  reconnected.metadata.host = "api.example.com";
+  reconnected.metadata.destination_port = "443";
+  reconnected.start = "2026-11-14T00:00:01Z";
+  UT_CHECK(store.reconcile({reconnected}));
+  UT_CHECK(store.state().records.empty());
+
+  std::filesystem::remove_all(temp_dir, ec);
 }

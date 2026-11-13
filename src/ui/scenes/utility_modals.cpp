@@ -1805,4 +1805,361 @@ bool LogViewerModal::a11y_set_virtual_child_value(size_t idx, const std::wstring
   return true;
 }
 
+// ==========================================
+// 6. AntivirusWhitelistModal —— 安全软件白名单说明弹窗
+//   src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx
+// ==========================================
+AntivirusWhitelistModal::AntivirusWhitelistModal(Widget* parent)
+    : Widget(parent) {
+  set_z_order(1020);  // src: src/pages/_layout.tsx:2051（置于 FirstRunGuideDialog(980) 之上）
+}
+
+void AntivirusWhitelistModal::open() {
+  open_ = true;
+  fade_.show();
+  scroll_y_ = 0.0f;
+  hover_close_ = false;
+  pressed_close_ = false;
+  if (bounds().w > 0.0f && bounds().h > 0.0f) {
+    on_arrange(bounds());
+  }
+  invalidate();
+}
+
+void AntivirusWhitelistModal::close() {
+  if (!open_) return;
+  open_ = false;
+  fade_.hide();
+  invalidate();
+  if (on_dismiss) on_dismiss();
+}
+
+void AntivirusWhitelistModal::rebuild_sections() const {
+  sections_.clear();
+  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:46-67
+  struct KeyPair {
+    const char* title_key;
+    const char* body_key;
+  };
+  static const KeyPair kKeys[5] = {
+      {"layout.components.antivirus.whyTitle", "layout.components.antivirus.why"},
+      {"layout.components.antivirus.benefitTitle", "layout.components.antivirus.benefit"},
+      {"layout.components.antivirus.optionalTitle", "layout.components.antivirus.optional"},
+      {"layout.components.antivirus.consequenceTitle", "layout.components.antivirus.consequence"},
+      {"layout.components.antivirus.howTitle", "layout.components.antivirus.how"},
+  };
+  for (const auto& kp : kKeys) {
+    SectionLayout sl;
+    sl.title = tr(kp.title_key);
+    sl.body = tr(kp.body_key);
+    sections_.push_back(std::move(sl));
+  }
+}
+
+void AntivirusWhitelistModal::on_arrange(const RectF& area) {
+  set_bounds(area);
+  rebuild_sections();
+
+  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:78-85
+  const float cw = std::min(520.0f, std::max(200.0f, area.w - 32.0f));
+  const float px = 14.0f;     // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:92 px: 1.75
+  const float py_tb = 12.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:93 py: 1.5
+  const float py_c = 14.0f;   // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:118 py: 1.75
+  const float sec_gap = 12.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:122 mb: 1.5
+  const float title_mb = 4.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:129 mb: 0.5
+  const float btn_h = 30.0f;    // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:163-164 py 0.7 + 12.5px
+
+  const float inner_w = std::max(80.0f, cw - px * 2.0f);
+  ITextEngine* te = text_engine();
+
+  title_h_ = 21.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:109-110
+  if (te) {
+    TextStyle tts;
+    tts.size = 15.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:109
+    tts.weight = static_cast<int>(Weight::Bold);
+    tts.wrap = true;
+    const SizeF sz =
+        te->measure_text(L"🛡️ " + tr("layout.components.antivirus.title"), tts, inner_w);
+    if (sz.h > 0.0f) title_h_ = std::max(21.0f, sz.h + 2.0f);
+  }
+
+  float y_rel = 0.0f;
+  for (size_t i = 0; i < sections_.size(); ++i) {
+    auto& sec = sections_[i];
+    sec.y_rel = y_rel;
+    sec.title_h = 19.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:130-131
+    sec.body_h = 20.0f;   // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:140-141
+    if (te) {
+      TextStyle sts;
+      sts.size = 13.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:130
+      sts.weight = static_cast<int>(Weight::Bold);
+      sts.wrap = true;
+      const SizeF st_sz = te->measure_text(sec.title, sts, inner_w);
+      if (st_sz.h > 0.0f) sec.title_h = std::max(19.0f, st_sz.h + 2.0f);
+
+      TextStyle bts;
+      bts.size = 12.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:141
+      bts.weight = static_cast<int>(Weight::Normal);
+      bts.wrap = true;
+      const SizeF sb_sz = te->measure_text(sec.body, bts, inner_w);
+      if (sb_sz.h > 0.0f) sec.body_h = std::max(20.0f, sb_sz.h + 4.0f);
+    }
+    y_rel += sec.title_h + title_mb + sec.body_h;
+    if (i + 1 < sections_.size()) y_rel += sec_gap;
+  }
+  total_sections_h_ = y_rel;
+
+  const float title_block_h = py_tb * 2.0f + title_h_ + 1.0f;
+  const float actions_block_h = 1.0f + py_tb * 2.0f + btn_h;
+  const float natural_h = title_block_h + py_c * 2.0f + total_sections_h_ + actions_block_h;
+  // 豁免: Mini 无对应物 — 矮视口下夹紧弹窗高度为 area.h - 16，并允许正文区垂直滚动（出处: antivirus-whitelist-dialog.tsx:118）
+  const float ch = std::min(natural_h, std::max(160.0f, area.h - 16.0f));
+  const float cx = std::max(0.0f, (area.w - cw) / 2.0f);
+  const float cy = std::max(0.0f, (area.h - ch) / 2.0f);
+  card_rect_ = {cx, cy, cw, ch};
+  title_rect_ = {cx, cy, cw, title_block_h};
+  actions_rect_ = {cx, cy + ch - actions_block_h, cw, actions_block_h};
+  content_rect_ = {cx, title_rect_.bottom(), cw,
+                   std::max(0.0f, actions_rect_.y - title_rect_.bottom())};
+  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:154-169 fullWidth 按钮
+  btn_close_rect_ = {cx + px, actions_rect_.y + 1.0f + py_tb, inner_w, btn_h};
+
+  const float ms = max_scroll();
+  if (scroll_y_ > ms) scroll_y_ = ms;
+  if (scroll_y_ < 0.0f) scroll_y_ = 0.0f;
+}
+
+float AntivirusWhitelistModal::max_scroll() const {
+  const float py_c = 14.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:118
+  return std::max(0.0f, (py_c * 2.0f + total_sections_h_) - content_rect_.h);
+}
+
+void AntivirusWhitelistModal::set_scroll_y(float y) {
+  const float clamped = std::clamp(y, 0.0f, max_scroll());
+  if (std::abs(clamped - scroll_y_) > 0.1f) {
+    scroll_y_ = clamped;
+    invalidate();
+  }
+}
+
+void AntivirusWhitelistModal::on_paint(IRenderTarget& rt) {
+  if (fade_.advance()) invalidate();
+  set_opacity(fade_.value());
+  if (fade_.hidden()) return;
+
+  if (card_rect_.w <= 0.0f && bounds().w > 0.0f && bounds().h > 0.0f) {
+    on_arrange(bounds());
+  }
+
+  const bool light = ThemeService::instance().is_light();
+  const bool retro = ThemeService::instance().skin() == theme::SkinId::Retro3d;
+  const auto& pal = ThemeService::instance().palette();
+
+  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:70 MUI Dialog backdrop rgba(0,0,0,.5)
+  rt.fill_rect({0.0f, 0.0f, bounds().w, bounds().h},
+               Brush{Color4f(0.0f, 0.0f, 0.0f, 0.5f)});
+
+  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:78-85 get3DCardStyle(theme, 'default') + radius 8
+  ::clashwin::ui::draw_card(rt, card_rect_,
+                            ThemeService::instance().card_paint("default"));
+
+  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:99 borderBottom palette.divider
+  const Color4f div_c =
+      light ? Color4f::hex(0x000000, 0.12f) : Color4f::hex(0xFFFFFF, 0.12f);
+  const float px = 14.0f;     // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:92
+  const float py_tb = 12.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:93
+  const float py_c = 14.0f;   // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:118
+  const float title_mb = 4.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:129
+
+  // Title block（src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:89-116）
+  TextStyle title_ts;
+  title_ts.size = 15.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:109
+  title_ts.weight = static_cast<int>(Weight::Bold);
+  title_ts.color = ThemeService::instance().card_paint("default").text_color;
+  title_ts.align_h = AlignH::Center;
+  title_ts.align_v = AlignV::Center;
+  title_ts.wrap = true;
+  rt.draw_text(L"🛡️ " + tr("layout.components.antivirus.title"),
+               {title_rect_.x + px, title_rect_.y + py_tb,
+                std::max(0.0f, title_rect_.w - px * 2.0f), title_h_},
+               title_ts);
+  rt.fill_rect({card_rect_.x, title_rect_.bottom() - 1.0f, card_rect_.w, 1.0f},
+               Brush{div_c});
+
+  // Content block（5 sections，src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:118-149）
+  const Color4f sec_body_c =
+      retro ? Color4f::hex(0x2C1F03, 0.78f) : pal.secondary_text;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:44
+  const float inner_w = std::max(0.0f, content_rect_.w - px * 2.0f);
+  rt.push_clip(content_rect_);
+  for (const auto& sec : sections_) {
+    const float sy = content_rect_.y + py_c + sec.y_rel - scroll_y_;
+    const float sh_total = sec.title_h + title_mb + sec.body_h;
+    if (sy + sh_total < content_rect_.y || sy > content_rect_.bottom()) continue;
+
+    TextStyle st_ts;
+    st_ts.size = 13.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:130
+    st_ts.weight = 700;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:127
+    st_ts.color = pal.primary_text;
+    st_ts.align_h = AlignH::Left;
+    st_ts.align_v = AlignV::Top;
+    st_ts.wrap = true;
+    rt.draw_text(sec.title, {content_rect_.x + px, sy, inner_w, sec.title_h}, st_ts);
+
+    TextStyle sb_ts;
+    sb_ts.size = 12.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:141
+    sb_ts.weight = static_cast<int>(Weight::Normal);
+    sb_ts.color = sec_body_c;
+    sb_ts.align_h = AlignH::Left;
+    sb_ts.align_v = AlignV::Top;
+    sb_ts.wrap = true;
+    rt.draw_text(sec.body,
+                 {content_rect_.x + px, sy + sec.title_h + title_mb, inner_w, sec.body_h},
+                 sb_ts);
+  }
+  rt.pop_clip();
+
+  // Actions block（src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:151-170）
+  rt.fill_rect({card_rect_.x, actions_rect_.y, card_rect_.w, 1.0f}, Brush{div_c});
+  const auto bp = ThemeService::instance().button_paint("default", true);  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:162
+  RectF br = btn_close_rect_;
+  if (pressed_close_) br.y += 1.0f;
+  if (bp.has_shadow) {
+    draw_soft_shadow(rt, br, bp.radius, bp.shadow_color, bp.shadow_dy, bp.shadow_blur);
+  }
+  if (bp.use_grad) {
+    const GradientStop* gs = hover_close_ ? bp.grad_hover : bp.grad;
+    rt.fill_round_rect_gradient_angle(br, bp.radius, gs, bp.grad_count, bp.grad_angle);
+  } else {
+    Brush b{hover_close_ ? bp.fill_hover : bp.fill};
+    rt.round_rect(br, bp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &b);
+  }
+  if (bp.border_w > 0.01f) {
+    rt.round_rect(br, bp.radius, Pen{bp.border, bp.border_w}, nullptr);
+  }
+  TextStyle bts;
+  bts.size = 12.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:164
+  bts.weight = bp.weight;
+  bts.color = bp.text;
+  bts.align_h = AlignH::Center;
+  bts.align_v = AlignV::Center;
+  rt.draw_text(tr("layout.components.antivirus.close"), br, bts);
+}
+
+bool AntivirusWhitelistModal::on_mouse(const MouseEvent& e) {
+  if (!open_) return false;
+  const PointF pt = e.pos;
+
+  if (e.type == MouseEventType::Leave) {
+    if (hover_close_ || pressed_close_) {
+      hover_close_ = false;
+      pressed_close_ = false;
+      invalidate();
+    }
+    return true;
+  }
+
+  if (e.type == MouseEventType::Move) {
+    const bool hc = btn_close_rect_.contains(pt.x, pt.y);
+    if (hc != hover_close_) {
+      hover_close_ = hc;
+      invalidate();
+    }
+    return true;
+  }
+
+  if (e.type == MouseEventType::Wheel) {
+    if (content_rect_.contains(pt.x, pt.y) || card_rect_.contains(pt.x, pt.y)) {
+      const float delta = static_cast<float>(e.wheel_delta) / 120.0f * 36.0f;  // 豁免: Mini 无对应物 — 桌面滚轮步长 36px（出处: antivirus-whitelist-dialog.tsx:118）
+      set_scroll_y(scroll_y_ - delta);
+    }
+    return true;
+  }
+
+  if (e.type == MouseEventType::Down) {
+    if (btn_close_rect_.contains(pt.x, pt.y)) {
+      pressed_close_ = true;
+      invalidate();
+    }
+    return true;
+  }
+
+  if (e.type == MouseEventType::Up) {
+    const bool was_pressed = pressed_close_;
+    pressed_close_ = false;
+    invalidate();
+    if (was_pressed && btn_close_rect_.contains(pt.x, pt.y)) {
+      close();
+      return true;
+    }
+    if (!card_rect_.contains(pt.x, pt.y)) {
+      close();
+      return true;
+    }
+    return true;
+  }
+
+  return true;
+}
+
+bool AntivirusWhitelistModal::on_key(const KeyEvent& e) {
+  if (!open_) return false;
+  if (e.type == KeyEventType::Down) {
+    if (e.key == VK_ESCAPE || e.key == 27 || e.key == VK_RETURN || e.key == 13) {
+      close();
+      return true;
+    }
+    if (e.key == VK_DOWN) {
+      set_scroll_y(scroll_y_ + 36.0f);
+      return true;
+    }
+    if (e.key == VK_UP) {
+      set_scroll_y(scroll_y_ - 36.0f);
+      return true;
+    }
+    if (e.key == VK_NEXT) {
+      set_scroll_y(scroll_y_ + std::max(40.0f, content_rect_.h * 0.8f));
+      return true;
+    }
+    if (e.key == VK_PRIOR) {
+      set_scroll_y(scroll_y_ - std::max(40.0f, content_rect_.h * 0.8f));
+      return true;
+    }
+  }
+  return false;
+}
+
+std::wstring AntivirusWhitelistModal::a11y_default_name() const {
+  return tr("layout.components.antivirus.title");
+}
+
+A11ySubItem AntivirusWhitelistModal::a11y_virtual_child(size_t idx) const {
+  if (sections_.empty()) rebuild_sections();
+  A11ySubItem sub;
+  if (idx < 5u && idx < sections_.size()) {
+    const auto& sec = sections_[idx];
+    sub.role = A11yRole::Text;
+    sub.name = sec.title + L"\n" + sec.body;
+    const float sy = content_rect_.y + 14.0f + sec.y_rel - scroll_y_;
+    const float sh = sec.title_h + 4.0f + sec.body_h;
+    sub.local_bounds = {content_rect_.x + 14.0f, sy,
+                        std::max(0.0f, content_rect_.w - 28.0f), sh};
+  } else {
+    sub.role = A11yRole::Button;
+    sub.name = tr("layout.components.antivirus.close");
+    sub.local_bounds = btn_close_rect_;
+    sub.can_invoke = true;
+    sub.focusable = true;
+  }
+  return sub;
+}
+
+bool AntivirusWhitelistModal::a11y_invoke_virtual_child(size_t idx) {
+  if (!open_ || !enabled()) return false;
+  if (idx == 5u) {
+    close();
+    return true;
+  }
+  return false;
+}
+
 }  // namespace clashwin::ui::scene

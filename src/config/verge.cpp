@@ -259,6 +259,8 @@ YAML::Node IVerge::to_yaml() const {
                   : set_null(m, "collapse_navbar");
   enable_tun_mode ? set_bool(m, "enable_tun_mode", *enable_tun_mode)
                   : set_null(m, "enable_tun_mode");
+  enable_tun_sniffer ? set_bool(m, "enable_tun_sniffer", *enable_tun_sniffer)
+                     : set_null(m, "enable_tun_sniffer");
   enable_auto_launch ? set_bool(m, "enable_auto_launch", *enable_auto_launch)
                      : set_null(m, "enable_auto_launch");
   enable_silent_start ? set_bool(m, "enable_silent_start", *enable_silent_start)
@@ -464,6 +466,7 @@ IVerge IVerge::from_yaml(const YAML::Node& m) {
   v.notice_position = opt_str(m, "notice_position");
   v.collapse_navbar = opt_bool(m, "collapse_navbar");
   v.enable_tun_mode = opt_bool(m, "enable_tun_mode");
+  v.enable_tun_sniffer = opt_bool(m, "enable_tun_sniffer");
   v.enable_auto_launch = opt_bool(m, "enable_auto_launch");
   v.enable_silent_start = opt_bool(m, "enable_silent_start");
   v.enable_system_proxy = opt_bool(m, "enable_system_proxy");
@@ -556,6 +559,7 @@ void IVerge::patch_config(const IVerge& p) {
   if (p.notice_position) notice_position = p.notice_position;
   if (p.collapse_navbar) collapse_navbar = p.collapse_navbar;
   if (p.enable_tun_mode) enable_tun_mode = p.enable_tun_mode;
+  if (p.enable_tun_sniffer) enable_tun_sniffer = p.enable_tun_sniffer;
   if (p.enable_auto_launch) enable_auto_launch = p.enable_auto_launch;
   if (p.enable_silent_start) enable_silent_start = p.enable_silent_start;
   if (p.enable_hover_jump_navigator)

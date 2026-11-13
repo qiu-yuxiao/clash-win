@@ -27,9 +27,21 @@ namespace {
 std::mutex& verge_patch_lock() { static std::mutex m; return m; }
 }  // namespace
 
-// ← feat/config.rs:102-173 determine_update_flags 逐字段（含 BUG-305 TUN 切换）
+VergePatchResets parse_verge_patch_resets(const nlohmann::json& payload) {
+  VergePatchResets resets;
+  if (payload.is_object()) {
+    auto it = payload.find("enable_tun_sniffer");
+    if (it != payload.end() && it->is_null()) {
+      resets.reset_tun_sniffer = true;
+    }
+  }
+  return resets;
+}
+
+// ← feat/config.rs:108-210 determine_update_flags 逐字段（含 BUG-305 TUN 切换与 tun_sniffer）
 uint16_t determine_update_flags(const IVerge& old_config, const IVerge& patch,
-                                bool running_service) {
+                                bool running_service,
+                                VergePatchResets resets) {
   uint16_t f = 0;
 
   // 契约 1.3（v3.1.3 BUG-305）：TUN 与系统服务生命周期严格绑定。
@@ -51,12 +63,14 @@ uint16_t determine_update_flags(const IVerge& old_config, const IVerge& patch,
                         patch.verge_mixed_port.has_value() ||
                         patch.enable_external_controller.has_value() || tun_changed;
   if (restart_needed) f |= kFRestartCore;
-  if (patch.enable_tun_mode.has_value() || patch.rule_fallback.has_value() ||
+  if (patch.enable_tun_mode.has_value() || patch.enable_tun_sniffer.has_value() ||
+      resets.reset_tun_sniffer || patch.rule_fallback.has_value() ||
       patch.enable_builtin_enhanced.has_value()) {
     f |= kFClashConfig | kFGroupSysTray;
   }
   if (patch.home_cards.has_value() || patch.theme_mode.has_value() ||
-      patch.theme_setting.has_value()) {
+      patch.theme_setting.has_value() || patch.enable_tun_sniffer.has_value() ||
+      resets.reset_tun_sniffer) {
     f |= kFVergeConfig;
   }
   if (patch.enable_auto_launch.has_value()) f |= kFLaunch;
@@ -214,10 +228,16 @@ void install_cmd_verge(CommandService& svc) {
       "patch_verge_config",
       {[](const Json& args) -> CmdResult {
          std::lock_guard<std::mutex> lock(verge_patch_lock());
+         const VergePatchResets resets = parse_verge_patch_resets(args);
          IVerge patch = iverge_from_json(args);
          auto& verge = config::Config::instance().verge();
          IVerge old = *verge.latest_arc();
-         verge.edit_draft([&patch](IVerge& d) { d.patch_config(patch); });
+         verge.edit_draft([&patch, resets](IVerge& d) {
+           d.patch_config(patch);
+           if (resets.reset_tun_sniffer) {
+             d.enable_tun_sniffer = std::nullopt;
+           }
+         });
 
          // BUG-328: 用户显式变更 TUN 或系统代理开关时，解除本次会话的临时 TUN 降级快照，
          // 允许真实意图正常写入 verge.yaml（若后续 start_auto 再次遭遇瞬态故障则会重新进入快照）。
@@ -227,7 +247,8 @@ void install_cmd_verge(CommandService& svc) {
 
          uint16_t flags = determine_update_flags(
              old, patch,
-             core::CoreManager::instance().running_mode() == core::RunningMode::Service);
+             core::CoreManager::instance().running_mode() == core::RunningMode::Service,
+             resets);
          auto processed = process_flags(flags, patch);
          if (processed.is_err()) {
            verge.discard();  // ← 失败丢弃 draft

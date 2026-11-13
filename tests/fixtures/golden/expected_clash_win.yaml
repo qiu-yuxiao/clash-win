@@ -41,15 +41,30 @@ sniffer:
   - Mijia Cloud
   - +.push.apple.com
   skip-dst-address:
+  - 0.0.0.0/8
   - 127.0.0.0/8
   - 10.0.0.0/8
   - 172.16.0.0/12
   - 192.168.0.0/16
   - 100.64.0.0/10
   - 169.254.0.0/16
+  - 224.0.0.0/4
+  - 255.255.255.255/32
+  - ::/128
   - ::1/128
   - fc00::/7
   - fe80::/10
+  - ff00::/8
+  - ::ffff:127.0.0.0/104
+  - ::ffff:10.0.0.0/104
+  - ::ffff:172.16.0.0/108
+  - ::ffff:192.168.0.0/112
+  - ::ffff:100.64.0.0/106
+  - ::ffff:169.254.0.0/112
+  - 223.5.5.5/32
+  - 223.6.6.6/32
+  - 114.114.114.114/32
+  - 119.29.29.29/32
 tun:
   enable: true
   stack: gvisor
@@ -67,10 +82,10 @@ tun:
 rules:
 - DOMAIN-SUFFIX,Google.com,PROXY
 - RULE-SET,gfwlist,PROXY
-- IP-CIDR,1.1.1.1/32,PROXY,no-resolve
-- IP-CIDR,1.0.0.1/32,PROXY,no-resolve
 - IP-CIDR,8.8.8.8/32,PROXY,no-resolve
 - IP-CIDR,8.8.4.4/32,PROXY,no-resolve
+- IP-CIDR,1.1.1.1/32,PROXY,no-resolve
+- IP-CIDR,1.0.0.1/32,PROXY,no-resolve
 - DOMAIN,dns.google,PROXY
 - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
 - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
@@ -90,7 +105,6 @@ rules:
 - IP-CIDR6,::ffff:100.64.0.0/106,DIRECT,no-resolve
 - IP-CIDR6,::ffff:169.254.0.0/112,DIRECT,no-resolve
 - GEOIP,CN,DIRECT
-- IP-CIDR6,::/0,PROXY
 - MATCH,DIRECT
 external-controller-pipe: \\.\pipe\mini-mihomo-win
 external-controller-cors:

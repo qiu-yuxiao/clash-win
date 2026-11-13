@@ -131,7 +131,7 @@ UT_TEST(t08_tun_enable_sniffer_merges_partial_without_duplicates) {
       "  - Mijia Cloud\n"
       "  - '+.internal.example'\n"
       "dns:\n  enable: true\n");
-  YAML::Node out = use_tun(config, true);
+  YAML::Node out = use_tun_with_sniffer(config, true, true);
   const YAML::Node sniffer = out["sniffer"];
   UT_CHECK(sniffer["enable"].Scalar() == "true");
   UT_CHECK(sniffer["override-destination"].Scalar() == "false");
@@ -158,4 +158,45 @@ UT_TEST(t08_tun_enable_user_ipv6_true_syncs_dns) {
   YAML::Node config = YAML::Load("ipv6: true\ndns:\n  enable: true\n");
   YAML::Node out = use_tun(config, true);
   UT_CHECK(out["dns"]["ipv6"].Scalar() == "true");
+}
+
+UT_TEST(t08_tun_sniffer_three_state_and_24_skip_cidrs) {
+  YAML::Node sub_explicit_false = YAML::Load(
+      "ipv6: false\n"
+      "sniffer:\n"
+      "  enable: false\n"
+      "dns:\n  enable: true\n");
+  YAML::Node out_auto_respects =
+      use_tun_with_sniffer(sub_explicit_false, true, std::nullopt);
+  UT_CHECK(out_auto_respects["sniffer"]["enable"].Scalar() == "false");
+
+  YAML::Node no_sniffer = YAML::Load("ipv6: false\ndns:\n  enable: true\n");
+  YAML::Node out_auto_defaults =
+      use_tun_with_sniffer(no_sniffer, true, std::nullopt);
+  UT_CHECK(out_auto_defaults["sniffer"]["enable"].Scalar() == "true");
+  const YAML::Node skip_dst = out_auto_defaults["sniffer"]["skip-dst-address"];
+  UT_CHECK(skip_dst && skip_dst.IsSequence());
+  UT_CHECK_EQ(skip_dst.size(), size_t(24));
+  auto has_cidr = [&](const std::string& cidr) {
+    for (const auto& s : skip_dst) {
+      if (s.Scalar() == cidr) return true;
+    }
+    return false;
+  };
+  UT_CHECK(has_cidr("223.5.5.5/32"));
+  UT_CHECK(has_cidr("223.6.6.6/32"));
+  UT_CHECK(has_cidr("114.114.114.114/32"));
+  UT_CHECK(has_cidr("119.29.29.29/32"));
+
+  YAML::Node out_forced_on = use_tun_with_sniffer(sub_explicit_false, true, true);
+  UT_CHECK(out_forced_on["sniffer"]["enable"].Scalar() == "true");
+
+  YAML::Node sub_explicit_true = YAML::Load(
+      "ipv6: false\n"
+      "sniffer:\n"
+      "  enable: true\n"
+      "dns:\n  enable: true\n");
+  YAML::Node out_forced_off =
+      use_tun_with_sniffer(sub_explicit_true, true, false);
+  UT_CHECK(out_forced_off["sniffer"]["enable"].Scalar() == "false");
 }

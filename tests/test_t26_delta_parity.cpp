@@ -174,7 +174,7 @@ rule-providers:
   enhance::EnhanceOutput out = enhance::enhance_core(in);
   auto ns = scalar_seq(out.config["dns"]["nameserver"]);
   UT_CHECK(!ns.empty());
-  UT_CHECK_EQ(ns[0], "https://8.8.8.8/dns-query");
+  UT_CHECK_EQ(ns[0], "https://doh.pub/dns-query");
 
   const YAML::Node providers = out.config["rule-providers"];
   UT_CHECK(providers && providers.IsMap());
@@ -259,8 +259,8 @@ dns:
   YAML::Node cleaned = enhance::sanitize_nameserver_policy(cfg);
   const YAML::Node policy = cleaned["dns"]["nameserver-policy"];
   UT_CHECK(policy && policy.IsMap());
-  UT_CHECK(!policy["+.google.com"].IsDefined());
-  UT_CHECK(!policy["+.github.com"].IsDefined());
+  UT_CHECK_EQ(policy["+.google.com"].Scalar(), "https://doh.pub/dns-query");
+  UT_CHECK_EQ(policy["+.github.com"].Scalar(), "https://doh.pub/dns-query");
   UT_CHECK_EQ(policy["+.corp.local"].Scalar(), "10.0.0.1");
   UT_CHECK_EQ(policy["geosite:cn"].Scalar(), "https://dns.alidns.com/dns-query");
   UT_CHECK_EQ(policy["*.lan"].Scalar(), "system");
@@ -279,7 +279,10 @@ dns:
     "+.youtube.com": https://dns.google/dns-query
 )");
   YAML::Node cleaned = enhance::sanitize_nameserver_policy(cfg);
-  UT_CHECK(!cleaned["dns"]["nameserver-policy"].IsDefined());
+  const YAML::Node policy = cleaned["dns"]["nameserver-policy"];
+  UT_CHECK(policy && policy.IsMap());
+  UT_CHECK_EQ(policy["+.google.com"].Scalar(), "https://doh.pub/dns-query");
+  UT_CHECK_EQ(policy["+.youtube.com"].Scalar(), "https://doh.pub/dns-query");
 }
 
 UT_TEST(t26_nameserver_policy_respect_rules_true_rewrites_and_adds_proxy_rules) {
@@ -302,14 +305,17 @@ rules:
   const YAML::Node policy = cleaned["dns"]["nameserver-policy"];
   UT_CHECK_EQ(policy["+.google.com"].Scalar(), "https://dns.cloudflare.com/dns-query");
   UT_CHECK_EQ(policy["+.github.com"].Scalar(), "https://8.8.8.8/dns-query");
-  UT_CHECK(!policy["+.blocked-direct.com"].IsDefined());
+  UT_CHECK_EQ(policy["+.blocked-direct.com"].Scalar(), "https://doh.pub/dns-query");
   UT_CHECK_EQ(policy["+.local.lan"].Scalar(), "192.168.1.1");
 
   auto rules = scalar_seq(cleaned["rules"]);
-  UT_CHECK_EQ(rules.size(), 5u);
+  UT_CHECK_EQ(rules.size(), 8u);
   UT_CHECK_EQ(rules[0], "RULE-SET,gfwlist,PROXY");
   UT_CHECK_EQ(rules[1], "IP-CIDR,8.8.8.8/32,PROXY,no-resolve");
   UT_CHECK_EQ(rules[2], "DOMAIN,dns.cloudflare.com,PROXY");
-  UT_CHECK_EQ(rules[3], "GEOIP,CN,DIRECT");
-  UT_CHECK_EQ(rules[4], "MATCH,DIRECT");
+  UT_CHECK_EQ(rules[3], "IP-CIDR,1.1.1.1/32,PROXY,no-resolve");
+  UT_CHECK_EQ(rules[4], "IP-CIDR,1.0.0.1/32,PROXY,no-resolve");
+  UT_CHECK_EQ(rules[5], "IP-CIDR,8.8.4.4/32,PROXY,no-resolve");
+  UT_CHECK_EQ(rules[6], "GEOIP,CN,DIRECT");
+  UT_CHECK_EQ(rules[7], "MATCH,DIRECT");
 }

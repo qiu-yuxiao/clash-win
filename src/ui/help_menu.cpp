@@ -61,6 +61,9 @@ void HelpMenu::execute_action(HelpAction action, HWND hwnd) {
     case HelpAction::ReviewGuide:
       events::EventBus::instance().publish("ui:open_guide", "");
       break;
+    case HelpAction::AntivirusGuide:
+      events::EventBus::instance().publish("ui:open_antivirus_guide", "");
+      break;
     case HelpAction::ExportDiagnostics: {
       // ← help-menu-button.tsx:156-180：常驻 info「正在生成诊断包」→ success「已导出：{{path}}」
       //   （隐藏 info 在 finally 里，与源码 hideNotice(waitId) 同序）
@@ -116,13 +119,15 @@ HMENU HelpMenu::create_menu_handle() {
   HMENU menu = CreatePopupMenu();
   if (!menu) return nullptr;
 
-  // src: help-menu-button.tsx:114-205 6 项 + 2 分隔线；文案 locales/zh/layout.json:32-39
+  // src: src/pages/_layout/components/help-menu-button.tsx:114-205 7 项 + 2 分隔线；文案 locales/zh/layout.json:32-39
   AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::StarGithub),
               (L"⭐ " + tr("layout.components.helpMenu.github")).c_str());
   AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::OpenWiki),
               (L"💡 " + tr("layout.components.helpMenu.wiki")).c_str());
   AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::ReviewGuide),
               (L"🧭 " + tr("layout.components.helpMenu.firstRunGuide")).c_str());
+  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::AntivirusGuide),
+              (L"🛡️ " + tr("layout.components.antivirus.menuLabel")).c_str());
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::ExportDiagnostics),
               (L"📦 " + tr("layout.components.helpMenu.exportDiagnostics")).c_str());

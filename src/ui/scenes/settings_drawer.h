@@ -27,6 +27,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -120,6 +121,10 @@ class BasicCard : public Widget {
   // ← use-minimal-settings.ts:96/:106 setMixedPortVal(currentPort())
   int port_current_ = 0;
   Label* title_ = nullptr;
+  Label* sniffer_label_ = nullptr;
+  Segmented* sniffer_seg_ = nullptr;
+  bool tun_enabled_ = false;
+  void set_tun_enabled(bool tun);
   Label* port_label_ = nullptr;
   Label* labels_[4] = {nullptr, nullptr, nullptr, nullptr};
 };
@@ -254,7 +259,8 @@ class SettingsDrawer : public Stack {
   void sync_takeover(bool sys_proxy, bool tun);
   void sync_routing(const std::string& rule_fallback);
   void sync_basic(bool auto_launch, bool silent, bool allow_lan, bool ipv6,
-                  int mixed_port);
+                  int mixed_port,
+                  std::optional<bool> tun_sniffer = std::nullopt);
   static std::wstring fmt_factor(float v);
 
  private:

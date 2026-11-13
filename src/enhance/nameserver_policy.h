@@ -1,11 +1,13 @@
 #pragma once
-// ← ClashVerge src-tauri/src/enhance/mod.rs::sanitize_nameserver_policy 全量移植（BUG-364）：
-// 当 dns.respect-rules 未启用（或条目带 #DIRECT）时剔除不可达海外公共 DNS 策略条目；
-// 当 respect-rules: true 时改写 4 家境外公共 DNS 明文 UDP 为 DoH 并补齐前置 PROXY 规则。
+// ← ClashVerge src-tauri/src/enhance/mod.rs::sanitize_dns_upstreams 全量移植（BUG-308 / BUG-364 / A9 / C10-C12）：
+// 统一治理 dns.nameserver、dns.fallback 与 dns.nameserver-policy（绝不触碰 default-nameserver）：
+// - respect-rules: false 或 #DIRECT 时，不可达海外上游就地改写为由 nameserver 推导的可达境内 DoH 并去重；
+// - respect-rules: true 时，将境外明文公共 DNS 升级为 DoH，并在 RULE-SET,gfwlist,PROXY 之后注入对偶 PROXY 规则。
 #include <yaml-cpp/yaml.h>
 
 namespace clashwin::enhance {
 
+YAML::Node sanitize_dns_upstreams(const YAML::Node& config);
 YAML::Node sanitize_nameserver_policy(const YAML::Node& config);
 
 }  // namespace clashwin::enhance

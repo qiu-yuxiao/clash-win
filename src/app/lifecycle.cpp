@@ -240,8 +240,8 @@ bool Lifecycle::exit_lightweight_mode() {
 }
 
 void Lifecycle::prepare_exit() {
-  // ★ 第一时间通知伴生看门狗系主动退出（← shutdown.rs:106-112，v3.2.5 BUG-316）
-  system::guardian::notify_intentional_exit();
+  // ★ 双阶段主动退出：prepared（30s TTL）+ 内核事件带回读置位（← shutdown.rs / guardian.rs v3.3.0）
+  system::guardian::notify_intentional_exit_with_reason("lifecycle_prepare_exit");
   state_.store(static_cast<uint8_t>(LifecycleState::PreparingExit), std::memory_order_release);
   CWLOG_INFO("Lifecycle::prepare_exit: Step 1 to Step 4 starting");
 
@@ -422,7 +422,8 @@ bool Lifecycle::quit(int* out_exit_code) {
   CWLOG_INFO(std::format("Lifecycle::quit: cleanup finished, exit code: {}", exit_code));
   if (out_exit_code) *out_exit_code = exit_code;
 
-  // Step 7: Flush logs and terminate
+  // Step 7: Flush logs, upgrade intentional exit proof to confirmed (120s TTL), and terminate
+  system::guardian::confirm_intentional_exit_with_reason("lifecycle_quit");
   if (hooks_.flush_logs) hooks_.flush_logs();
 
   state_.store(static_cast<uint8_t>(LifecycleState::Exited), std::memory_order_release);
@@ -493,7 +494,8 @@ bool Lifecycle::restart_app() {
     }
   }
 
-  // Step 7 flush logs
+  // Step 7 flush logs and upgrade intentional exit proof to confirmed
+  system::guardian::confirm_intentional_exit_with_reason("lifecycle_restart");
   if (hooks_.flush_logs) hooks_.flush_logs();
 
   state_.store(static_cast<uint8_t>(LifecycleState::Exited), std::memory_order_release);

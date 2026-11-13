@@ -18,123 +18,6 @@ bool has_key(const YAML::Node& map, const std::string& key) {
   return v.IsDefined();
 }
 
-// IPv4 字面量解析（严格 a.b.c.d，每段 0-255）
-bool parse_ipv4(const std::string& s, unsigned (&out)[4]) {
-  if (s.empty()) return false;
-  int idx = 0;
-  unsigned cur = 0;
-  int digits = 0;
-  for (char c : s) {
-    if (c >= '0' && c <= '9') {
-      cur = cur * 10 + static_cast<unsigned>(c - '0');
-      if (++digits > 3 || cur > 255) return false;
-    } else if (c == '.') {
-      if (digits == 0 || idx == 3) return false;
-      out[idx++] = cur;
-      cur = 0;
-      digits = 0;
-    } else {
-      return false;
-    }
-  }
-  if (digits == 0 || idx != 3) return false;
-  out[idx] = cur;
-  return true;
-}
-
-bool ipv4_is_private(const unsigned o[4]) {
-  if (o[0] == 10) return true;                               // 10/8
-  if (o[0] == 172 && o[1] >= 16 && o[1] <= 31) return true;  // 172.16/12
-  if (o[0] == 192 && o[1] == 168) return true;               // 192.168/16
-  return false;
-}
-bool ipv4_is_loopback(const unsigned o[4]) { return o[0] == 127; }
-bool ipv4_is_link_local(const unsigned o[4]) {
-  return o[0] == 169 && o[1] == 254;
-}
-
-// IPv6 字面量解析（含 :: 压缩、可含尾部 IPv4 段；与 std::net::Ipv6Addr::from_str
-// 接受域近似对齐）
-bool parse_ipv6(const std::string& in, unsigned (&out)[8]) {
-  std::string s = in;
-  if (s.empty() || s.find(':') == std::string::npos) return false;
-
-  // 尾部内嵌 IPv4 → 十六段化
-  size_t dot = s.rfind('.');
-  if (dot != std::string::npos && s.back() != ':') {
-    size_t last_colon = s.rfind(':');
-    if (last_colon == std::string::npos) return false;
-    unsigned v4[4];
-    if (!parse_ipv4(s.substr(last_colon + 1), v4)) return false;
-    char buf[16];
-    std::snprintf(buf, sizeof buf, "%x:%x", v4[0] * 256 + v4[1],
-                  v4[2] * 256 + v4[3]);
-    s = s.substr(0, last_colon + 1) + buf;
-  }
-
-  unsigned segs[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-  int seg = 0;
-  int gap = -1;
-  const size_t n = s.size();
-  size_t p = 0;
-  while (p < n) {
-    if (s[p] == ':') {
-      if (p + 1 < n && s[p + 1] == ':') {
-        if (gap >= 0) return false;
-        gap = seg;
-        p += 2;
-        if (p == n) break;
-        if (s[p] == ':') return false;
-        continue;
-      }
-      ++p;
-      continue;
-    }
-    unsigned v = 0;
-    int digits = 0;
-    size_t q = p;
-    while (q < n && std::isxdigit(static_cast<unsigned char>(s[q])) &&
-           digits < 4) {
-      char c = s[q];
-      int d = (c <= '9') ? c - '0' : std::tolower(c) - 'a' + 10;
-      v = v * 16 + static_cast<unsigned>(d);
-      ++digits;
-      ++q;
-    }
-    if (digits == 0) return false;
-    if (q < n && std::isxdigit(static_cast<unsigned char>(s[q]))) return false;
-    if (seg >= 8) return false;
-    segs[seg++] = v;
-    p = q;
-  }
-
-  if (gap >= 0) {
-    if (seg == 8) return false;
-    int left_n = gap;
-    int right_n = seg - gap;
-    for (int k = 0; k < left_n; ++k) out[k] = segs[k];
-    for (int k = 0; k < right_n; ++k) out[8 - right_n + k] = segs[gap + k];
-    for (int k = left_n; k < 8 - right_n; ++k) out[k] = 0;
-  } else {
-    if (seg != 8) return false;
-    for (int k = 0; k < 8; ++k) out[k] = segs[k];
-  }
-  return true;
-}
-
-bool ipv6_is_loopback(const unsigned s[8]) {
-  for (int i = 0; i < 6; ++i) {
-    if (s[i] != 0) return false;
-  }
-  return s[6] == 0 && s[7] == 1;
-}
-bool ipv6_is_unspecified(const unsigned s[8]) {
-  for (int i = 0; i < 8; ++i) {
-    if (s[i] != 0) return false;
-  }
-  return true;
-}
-
 }  // namespace
 
 std::string extract_upstream_host(const std::string& raw) {
@@ -168,61 +51,6 @@ std::string extract_upstream_host(const std::string& raw) {
   e = host.find_last_not_of(" \t\r\n");
   host = (b == std::string::npos) ? "" : host.substr(b, e - b + 1);
   return host;
-}
-
-std::vector<std::string> dns_fallback_proxy_rules(const YAML::Node& dns) {
-  std::vector<std::string> rules;
-  std::unordered_set<std::string> seen;
-  if (!dns || !dns.IsMap()) return rules;
-
-  const YAML::Node fallback = static_cast<const YAML::Node&>(dns)["fallback"];
-  if (!fallback.IsDefined()) return rules;
-
-  auto process_server = [&](const YAML::Node& server) {
-    if (!field::is_string_key(server)) return;  // serde Value::as_str 语义
-    std::string host = extract_upstream_host(server.Scalar());
-    if (host.empty()) return;
-
-    std::vector<std::string> candidates;
-    unsigned v4[4];
-    unsigned v6[8];
-    if (parse_ipv4(host, v4)) {
-      if (ipv4_is_private(v4) || ipv4_is_loopback(v4) || ipv4_is_link_local(v4))
-        return;
-      candidates.push_back("IP-CIDR," + host + "/32,PROXY,no-resolve");
-      // 公共 DNS 对偶补齐（消除辅 IP 漏入 MATCH,DIRECT 造成的超时）
-      if (host == "8.8.8.8") {
-        candidates.push_back("IP-CIDR,8.8.4.4/32,PROXY,no-resolve");
-      } else if (host == "8.8.4.4") {
-        candidates.push_back("IP-CIDR,8.8.8.8/32,PROXY,no-resolve");
-      } else if (host == "1.1.1.1") {
-        candidates.push_back("IP-CIDR,1.0.0.1/32,PROXY,no-resolve");
-      } else if (host == "1.0.0.1") {
-        candidates.push_back("IP-CIDR,1.1.1.1/32,PROXY,no-resolve");
-      }
-    } else if (parse_ipv6(host, v6)) {
-      if (ipv6_is_loopback(v6) || ipv6_is_unspecified(v6)) return;
-      if ((v6[0] & 0xfe00) == 0xfc00) return;  // ULA
-      if ((v6[0] & 0xffc0) == 0xfe80) return;  // 链路本地
-      candidates.push_back("IP-CIDR6," + host + "/128,PROXY,no-resolve");
-    } else {
-      candidates.push_back("DOMAIN," + host + ",PROXY");
-      if (host == "dns.google") {
-        candidates.push_back("IP-CIDR,8.8.8.8/32,PROXY,no-resolve");
-        candidates.push_back("IP-CIDR,8.8.4.4/32,PROXY,no-resolve");
-      }
-    }
-    for (const auto& r : candidates) {
-      if (seen.insert(r).second) rules.push_back(r);
-    }
-  };
-
-  if (fallback.IsSequence()) {
-    for (const auto& server : fallback) process_server(server);
-  } else {
-    process_server(fallback);
-  }
-  return rules;
 }
 
 YAML::Node enforce_mini_agreements(const YAML::Node& config,
@@ -368,12 +196,8 @@ YAML::Node enforce_mini_agreements(const YAML::Node& config,
 
   push_text("RULE-SET,gfwlist,PROXY");
 
-  // DNS fallback 上游保通（境外 DoH 走代理，救活防投毒链路；规则由真实
-  // dns.fallback 推导，订阅换上游时自动跟随）
-  {
-    const YAML::Node dns = static_cast<const YAML::Node&>(cfg)["dns"];
-    for (const auto& r : dns_fallback_proxy_rules(dns)) push_text(r);
-  }
+  // DNS 上游 PROXY 规则已统一收口至 sanitize_dns_upstreams → inject_dns_proxy_rules
+  // 单一真源（覆盖 nameserver + fallback + nameserver-policy），此处不再重复注入（B-1/F-2）。
 
   // IPv4 私网/环回/链路本地 DIRECT（防「代理所有流量」下本地流量误转远端）
   push_text("IP-CIDR,127.0.0.0/8,DIRECT,no-resolve");
@@ -406,14 +230,13 @@ YAML::Node enforce_mini_agreements(const YAML::Node& config,
     if (append.IsDefined()) cfg.remove("append-rules");
   }
 
-  // MATCH 兜底方向随 rule_fallback；IPv6 兜底（GEOIP,CN + ::/0）仅在 GFWList
-  // 模式生效；GEOIP 而非 GEOIP6（mihomo 不支持后者）；刻意不带 no-resolve
-  // （域名目标先解析再判定，否则漏到 MATCH,DIRECT）
+  // MATCH 兜底方向随 rule_fallback；默认 GFWList 模式保持 GEOIP,CN,DIRECT +
+  // MATCH,DIRECT 对称直连兜底（已移除 IP-CIDR6,::/0,PROXY 防境内 IPv6 偷跑流量）；
+  // GEOIP 而非 GEOIP6（mihomo 不支持后者）；刻意不带 no-resolve
   if (opt.rule_fallback == "proxy") {
     push_text("MATCH,PROXY");
   } else {
     push_text("GEOIP,CN,DIRECT");
-    push_text("IP-CIDR6,::/0,PROXY");
     push_text("MATCH,DIRECT");
   }
 

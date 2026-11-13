@@ -52,6 +52,7 @@ void SignalHandler::uninstall() {
 
 bool SignalHandler::handle_session_query_end(uintptr_t /*lparam*/) {
   CWLOG_INFO("SignalHandler: handle_session_query_end called");
+  guardian::notify_intentional_exit_with_reason("wm_queryendsession");
   return true;
 }
 
@@ -59,12 +60,14 @@ void SignalHandler::handle_session_end(bool session_ending, uintptr_t /*lparam*/
   CWLOG_INFO(std::format("SignalHandler: handle_session_end session_ending={}", session_ending));
   if (session_ending) {
     dispatch(SignalType::SessionEnd);
+  } else {
+    guardian::cancel_intentional_exit("wm_endsession_cancelled");
   }
 }
 
 void SignalHandler::dispatch(SignalType sig) {
-  // ★ 系统关机/注销/控制台终止信号：第一时间通知伴生看门狗系主动退出（← shutdown.rs:106-112）
-  guardian::notify_intentional_exit();
+  // ★ 系统关机/注销/控制台终止信号：升级 confirmed 主动退出凭证（120s TTL）
+  guardian::confirm_intentional_exit_with_reason("signal_dispatch");
 
   bool expected = false;
   if (!is_cleaning_up_.compare_exchange_strong(expected, true)) {

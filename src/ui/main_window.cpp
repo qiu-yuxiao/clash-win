@@ -168,6 +168,14 @@ MainWindow::~MainWindow() {
     events::EventBus::instance().unsubscribe(bus_sub_core_upgrade_);
     bus_sub_core_upgrade_ = 0;
   }
+  if (bus_sub_open_guide_) {
+    events::EventBus::instance().unsubscribe(bus_sub_open_guide_);
+    bus_sub_open_guide_ = 0;
+  }
+  if (bus_sub_open_av_) {
+    events::EventBus::instance().unsubscribe(bus_sub_open_av_);
+    bus_sub_open_av_ = 0;
+  }
   if (postbox_sub_delay_) {
     UiPostbox::instance().unsubscribe(postbox_sub_delay_);
     postbox_sub_delay_ = 0;
@@ -498,6 +506,21 @@ void MainWindow::build_widget_tree() {
           }
         });
       });
+  bus_sub_open_guide_ = events::EventBus::instance().subscribe(
+      "ui:open_guide",
+      [this](const events::Payload&) {
+        UiPostbox::instance().post([this] {
+          if (settings_drawer_) settings_drawer_->set_open(false);
+          if (first_run_) first_run_->open();
+        });
+      });
+  bus_sub_open_av_ = events::EventBus::instance().subscribe(
+      "ui:open_antivirus_guide",
+      [this](const events::Payload&) {
+        UiPostbox::instance().post([this] {
+          if (antivirus_modal_) antivirus_modal_->open();
+        });
+      });
 
   auto tb = std::make_unique<TitleBar>(this);
   title_bar_ = tb.get();
@@ -794,6 +817,7 @@ bool MainWindow::is_any_overlay_open() const {
          (add_url_ && add_url_->is_open()) ||
          (log_viewer_ && log_viewer_->is_open()) ||
          (first_run_ && first_run_->is_open()) ||
+         (antivirus_modal_ && antivirus_modal_->is_open()) ||
          (unlock_page_ && unlock_page_->visible()) ||
          (client_update_ && client_update_->is_open()) ||
          (core_update_ && core_update_->is_open());
@@ -2058,7 +2082,18 @@ void MainWindow::build_scene() {
       fr->on_dismiss_later = [this] {
         if (settings_drawer_) settings_drawer_->set_open(true);
       };
+      // src: src/pages/_layout.tsx:2049 Ready 步 Card 3 打开安全软件白名单弹窗
+      fr->on_open_whitelist_guide = [this] {
+        if (antivirus_modal_) antivirus_modal_->open();
+      };
       root_.add_child(std::move(fr));
+    }
+    // 安全软件白名单说明弹窗（src: src/pages/_layout.tsx:2051-2054）
+    {
+      auto av = std::make_unique<scene::AntivirusWhitelistModal>();
+      antivirus_modal_ = av.get();
+      av->set_z_order(1020);
+      root_.add_child(std::move(av));
     }
     // 帮助菜单已改自绘（SettingsDrawer::open_help_menu → ContextMenu），
     //   不再走原生 HMENU（TrackPopupMenu 无法截图/样式不一致）。
@@ -2113,7 +2148,8 @@ void MainWindow::build_scene() {
       settings_drawer_->sync_basic(real_auto_launch,
                                    v.enable_silent_start.value_or(false),
                                    allow_lan, ipv6,
-                                   static_cast<int>(v.verge_mixed_port.value_or(0)));
+                                   static_cast<int>(v.verge_mixed_port.value_or(0)),
+                                   v.enable_tun_sniffer);
       // 通知位置：verge.notice_position（缺省 top-right，verge.rs:353）
       if (snackbar_)
         snackbar_->set_position(v.notice_position.value_or("top-right"));
@@ -2231,7 +2267,8 @@ void MainWindow::resync_settings_ui() {
     settings_drawer_->sync_basic(real_auto_launch,
                                  v.enable_silent_start.value_or(false),
                                  allow_lan, ipv6,
-                                 static_cast<int>(v.verge_mixed_port.value_or(0)));
+                                 static_cast<int>(v.verge_mixed_port.value_or(0)),
+                                 v.enable_tun_sniffer);
   } catch (...) {}
 }
 
@@ -3029,6 +3066,13 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       if (ime_composing_ && wp == VK_RETURN) {
         update_ime_position();
         return 0;
+      }
+      // 安全软件白名单弹窗：Esc / Enter 关闭（置顶于 FirstRunGuideDialog 之上）
+      if (antivirus_modal_ && antivirus_modal_->is_open() && msg == WM_KEYDOWN) {
+        if (wp == VK_ESCAPE || wp == VK_RETURN) {
+          antivirus_modal_->close();
+          return 0;
+        }
       }
       // 首启引导弹窗：Esc 关闭、就绪步 Enter 完成（src: :533-542 / :417-446）。
       // 订阅框 TextField 已吞掉输入步的字符/Enter（on_submit），此处仅在就绪步

@@ -78,7 +78,7 @@ target_include_directories(clashwin_system PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(clashwin_system PUBLIC clashwin_util winhttp wininet rasapi32 shell32 user32 ws2_32)
+target_link_libraries(clashwin_system PUBLIC clashwin_util nlohmann_json bcrypt winhttp wininet rasapi32 shell32 user32 ws2_32)
 target_compile_options(clashwin_system PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
 # 通用 URI 解析器（T06）+ enhance 配置流水线（T08：enhance/merge/seq/field/
@@ -204,6 +204,7 @@ add_library(clashwin_ui STATIC
   src/ui/theme/palettes.cpp
   src/ui/theme/theme.cpp
   src/ui/scenes/connection_data.cpp
+  src/ui/scenes/path_control.cpp
   src/ui/scenes/connections_view.cpp
   src/ui/scenes/connections_panel.cpp
   src/ui/scenes/connection_detail_dialog.cpp

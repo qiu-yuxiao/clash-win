@@ -73,7 +73,7 @@ system::Sysopt::VergeView make_startup_sysproxy_view(uint16_t pac_port) {
 App::App() = default;
 
 App::~App() {
-  system::guardian::notify_intentional_exit();
+  system::guardian::confirm_intentional_exit_with_reason("app_destructor");
   system::SignalHandler::instance().uninstall();
   // T18：退出清理（← census §74 quit：prepare_exit → reset_sysproxy →
   //   停内核 → 停 Timer/monitor；CoreManager 停止沿既有路径）
@@ -188,9 +188,11 @@ bool App::init() {
     app::Lifecycle::instance().set_hooks(hooks);
   }
 
-  // 判断静默启动（--silent 参数与配置，或 --guardian-respawn 伴生看门狗静默自愈拉起）
+  // A5 形态保真：仅当 `--guardian-respawn --silent`（轻量/托盘隐身崩溃）时静默进托盘；
+  // 普通 GUI 态崩溃仅 `--guardian-respawn`，恢复可见主窗口且同样走 Wintun 保护与无感内核重挂。
   bool has_silent_arg = false;
-  const bool is_guardian_respawn = system::guardian::is_guardian_respawn();
+  const bool is_guardian_silent_respawn =
+      system::guardian::is_guardian_silent_respawn();
   int argc = 0;
   LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
   if (argv) {
@@ -204,7 +206,7 @@ bool App::init() {
   }
   auto verge = config::Config::instance().verge().latest_arc();
   bool is_silent_start = verge ? verge->enable_silent_start.value_or(false) : false;
-  bool should_silent = is_guardian_respawn || (is_silent_start && has_silent_arg);
+  bool should_silent = is_guardian_silent_respawn || (is_silent_start && has_silent_arg);
 
   // F-D01 ← MF:services/preload.ts:62-97 preloadLanguage / MF:main.tsx:105-110
   //   bootstrap：初始语言优先级「缓存 → verge.language → 浏览器语言 → zh」，
@@ -514,6 +516,10 @@ bool App::init() {
              !IsWindowVisible(main_window_->hwnd());
     };
     mh.now_ms = [] { return static_cast<int64_t>(GetTickCount64()); };
+    mh.on_guardian_tick = [] {
+      system::guardian::ensure_guardian_supervisor();
+      system::guardian::record_main_heartbeat_if_due();
+    };
     monitor.set_hooks(std::move(mh));
 
     // ← clash.rs::start_core（启动收敛）：主动重生成运行时配置并拉起内核。

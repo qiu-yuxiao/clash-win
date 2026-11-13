@@ -66,6 +66,7 @@ struct IVerge {
   std::optional<std::string> notice_position;          // skip
   std::optional<bool> collapse_navbar;
   std::optional<bool> enable_tun_mode;
+  std::optional<bool> enable_tun_sniffer;
   std::optional<bool> enable_auto_launch;
   std::optional<bool> enable_silent_start;
   std::optional<bool> enable_system_proxy;

@@ -2,9 +2,9 @@
 // T22 内核守护（CoreMonitor）：
 // 对照源：ClashVerge src-tauri/src/module/monitor.rs
 //
-// 间隔/判死/自愈/升级参数（对齐 Clash Mini v3.2.4 / BUG-315）：
+// 间隔/判死/自愈/升级参数（对齐 Clash Mini v3.3.0 / Sync-1）：
 //   - 体检间隔 15s（重试 3s / 物理网络离线 5s）
-//   - 健康数据新鲜度 20s（HEALTH_DATA_FRESH_SECS = 20）；死节点复核最小间隔 10s
+//   - 健康数据新鲜度 60s（HEALTH_DATA_FRESH_SECS = 60）；死节点复核最小间隔 10s
 //   - 节点切换宽限期 20s（SWITCH_GRACE_PERIOD_SECS = 20）
 //   - 活跃节点连续 2 次判死 → 自愈选点（AutoSelect::trigger）
 //   - 内核 API 连续 3 次不可达 → 自愈选点
@@ -37,8 +37,8 @@ namespace clashwin::core {
 
 class CoreMonitor {
  public:
-  // ← monitor.rs:63 HEALTH_DATA_FRESH_SECS = 20（v3.2.4 BUG-315 由 60s 缩短至 20s）
-  static constexpr int64_t kHealthDataFreshSecs = 20;
+  // ← monitor.rs:42 HEALTH_DATA_FRESH_SECS = 60（Sync-1：v3.3.0 从 20s 回调至 60s 避免频繁后台测速）
+  static constexpr int64_t kHealthDataFreshSecs = 60;
   // ← monitor.rs:70 DEAD_CONFIRM_MIN_INTERVAL_SECS = 10
   static constexpr int64_t kDeadConfirmMinIntervalSecs = 10;
   // ← monitor.rs:1277-1280 物理网络双频探测间隔（在线 60s / 离线 5s）
@@ -100,6 +100,8 @@ class CoreMonitor {
     std::function<bool()> is_headless;
     // 时钟（Unix 毫秒；测试注入虚拟时钟）
     std::function<int64_t()> now_ms;
+    // 伴生看门狗巡检与宿主心跳保活（A2/A6，生产装配）
+    std::function<void()> on_guardian_tick;
   };
 
   static CoreMonitor& instance();

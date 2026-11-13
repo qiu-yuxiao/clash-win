@@ -38,8 +38,16 @@ std::vector<std::pair<std::wstring, std::wstring>> ConnectionDetailDialog::field
   // 字段标签与取值顺序照 Mini：src: connection-detail.tsx:104-151
   //   标签源 locales/zh/connections.json:7-17（下载量/上传量见 shared.json:45-46）
 
-  // 1. host → 主机
-  res.emplace_back(tr("connections.components.fields.host"), utf::utf8_to_utf16(item_.host_formatted()));
+  // 1. host → 主机（空兜底 "--"，src: connection-detail.tsx:97-105）
+  std::string raw_host = item_.metadata.host;
+  if (raw_host.empty()) raw_host = item_.metadata.remote_destination;
+  if (raw_host.empty()) raw_host = item_.metadata.destination_ip;
+  if (raw_host.empty()) raw_host = item_.metadata.process;
+  if (raw_host.empty()) raw_host = "--";
+  std::string host_disp = item_.metadata.destination_port.empty()
+                              ? raw_host
+                              : (raw_host + ":" + item_.metadata.destination_port);
+  res.emplace_back(tr("connections.components.fields.host"), utf::utf8_to_utf16(host_disp));
 
   // 2. downloaded → 下载量（shared.json:45）
   auto [dv, du] = util::parse_traffic(item_.download);
@@ -67,18 +75,24 @@ std::vector<std::pair<std::wstring, std::wstring>> ConnectionDetailDialog::field
   res.emplace_back(tr("connections.components.fields.process"), utf::utf8_to_utf16(item_.process_formatted()));
 
   // 9. time → 连接时间
-  res.emplace_back(tr("connections.components.fields.time"), utf::utf8_to_utf16(item_.start));
+  res.emplace_back(tr("connections.components.fields.time"),
+                   utf::utf8_to_utf16(item_.start.empty() ? std::string("--") : item_.start));
 
   // 10. source → 源地址
-  std::string src = item_.metadata.source_ip;
-  if (!item_.metadata.source_port.empty()) {
-    src += ":" + item_.metadata.source_port;
-  }
+  std::string src = item_.metadata.source_ip.empty()
+                        ? std::string("--")
+                        : (item_.metadata.source_ip +
+                           (item_.metadata.source_port.empty()
+                                ? std::string()
+                                : (":" + item_.metadata.source_port)));
   res.emplace_back(tr("connections.components.fields.source"), utf::utf8_to_utf16(src));
 
   // 11. destination → 目标地址
-  std::string dst = item_.metadata.destination_ip.empty() ? item_.metadata.remote_destination
-                                                          : item_.metadata.destination_ip;
+  std::string dst = !item_.metadata.destination_ip.empty()
+                        ? item_.metadata.destination_ip
+                        : (!item_.metadata.remote_destination.empty()
+                               ? item_.metadata.remote_destination
+                               : std::string("--"));
   res.emplace_back(tr("connections.components.fields.destination"), utf::utf8_to_utf16(dst));
 
   // 12. destinationPort → 目标端口
@@ -201,8 +215,9 @@ void ConnectionDetailDialog::on_paint(IRenderTarget& rt) {
     row_y += row_h;
   }
 
-  // 5. 底部按钮
-  if (!closed_) {
+  // 5. 底部按钮（关闭弹窗或合成行均隐藏断开连接按钮）
+  const bool can_close_conn = !closed_ && !item_.is_synthetic;
+  if (can_close_conn) {
     // 断开连接按钮（错误色红底或描边）
     Color4f btn_bg = hover_close_conn_ ? Color4f::hex(0xD32F2F)  // src: MUI red[700]
                                         : Color4f::hex(0xEF5350);  // src: MUI red[400]
@@ -236,7 +251,8 @@ bool ConnectionDetailDialog::on_mouse(const MouseEvent& e) {
   PointF pt = e.pos;
 
   if (e.type == MouseEventType::Move) {
-    bool hc = !closed_ && btn_close_conn_rect_.contains(pt.x, pt.y);
+    const bool can_close_conn = !closed_ && !item_.is_synthetic;
+    bool hc = can_close_conn && btn_close_conn_rect_.contains(pt.x, pt.y);
     bool hd = btn_dismiss_rect_.contains(pt.x, pt.y);
     if (hc != hover_close_conn_ || hd != hover_dismiss_) {
       hover_close_conn_ = hc;
@@ -247,7 +263,8 @@ bool ConnectionDetailDialog::on_mouse(const MouseEvent& e) {
   }
 
   if (e.type == MouseEventType::Up) {
-    if (!closed_ && btn_close_conn_rect_.contains(pt.x, pt.y)) {
+    const bool can_close_conn = !closed_ && !item_.is_synthetic;
+    if (can_close_conn && btn_close_conn_rect_.contains(pt.x, pt.y)) {
       if (on_close_connection) on_close_connection(item_.id);
       close();
       return true;
@@ -286,7 +303,8 @@ std::wstring ConnectionDetailDialog::a11y_default_name() const {
 }
 
 size_t ConnectionDetailDialog::a11y_virtual_child_count() const {
-  return closed_ ? 2u : 3u;
+  const bool can_close_conn = !closed_ && !item_.is_synthetic;
+  return can_close_conn ? 3u : 2u;
 }
 
 A11ySubItem ConnectionDetailDialog::a11y_virtual_child(size_t idx) const {
@@ -304,7 +322,8 @@ A11ySubItem ConnectionDetailDialog::a11y_virtual_child(size_t idx) const {
   }
   sub.role = A11yRole::Button;
   sub.can_invoke = enabled();
-  if (!closed_ && idx == 1) {
+  const bool can_close_conn = !closed_ && !item_.is_synthetic;
+  if (can_close_conn && idx == 1) {
     sub.name = tr("connections.components.actions.closeConnection");
     sub.local_bounds = btn_close_conn_rect_;
   } else {
@@ -316,7 +335,8 @@ A11ySubItem ConnectionDetailDialog::a11y_virtual_child(size_t idx) const {
 
 bool ConnectionDetailDialog::a11y_invoke_virtual_child(size_t idx) {
   if (!open_ || !enabled() || idx == 0) return false;
-  if (!closed_ && idx == 1) {
+  const bool can_close_conn = !closed_ && !item_.is_synthetic;
+  if (can_close_conn && idx == 1) {
     if (on_close_connection) on_close_connection(item_.id);
     close();
     return true;

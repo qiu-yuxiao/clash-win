@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "clashwin/config/models.h"
+#include "nlohmann/json.hpp"
 
 namespace clashwin::cmd {
 
@@ -23,9 +24,19 @@ enum UpdateFlags : uint16_t {
   kFGroupSysTray = kFSysTrayIcon,
 };
 
+// ← feat/config.rs:102-106：显式 null 重置标志（如 enable_tun_sniffer: null 回退自动态）
+struct VergePatchResets {
+  bool reset_tun_sniffer = false;
+  bool operator==(const VergePatchResets&) const = default;
+};
+
+// ← cmd/verge.rs:5-11 parse_verge_patch_resets
+VergePatchResets parse_verge_patch_resets(const nlohmann::json& payload);
+
 // running_service = CoreManager::running_mode() == RunningMode::Service
 uint16_t determine_update_flags(const config::IVerge& old_config,
                                 const config::IVerge& patch,
-                                bool running_service);
+                                bool running_service,
+                                VergePatchResets resets = {});
 
 }  // namespace clashwin::cmd

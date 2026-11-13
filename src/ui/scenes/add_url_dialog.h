@@ -37,6 +37,8 @@ class AddUrlDialog : public Widget {
 
   const std::string& error_message() const { return error_message_; }
 
+  static void set_clipboard_reader_for_test(std::function<std::wstring()> fn);
+
   std::function<void(const std::string& rule)> on_rule_added;
   std::function<void()> on_dismiss;
 

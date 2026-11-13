@@ -1,6 +1,7 @@
 #include "system/diagnostic_bundle.h"
 
 #include <windows.h>
+#include <tlhelp32.h>
 
 #include <algorithm>
 #include <chrono>
@@ -15,6 +16,7 @@
 
 #include "config/config.h"
 #include "clashwin/config/constants.h"
+#include "system/guardian.h"
 #include "util/dirs.h"
 #include "util/log.h"
 #include "util/str_utils.h"
@@ -41,11 +43,13 @@ const char* kBundleReadme =
     "=================\n\n"
     "本包由「设置 → 帮助 → 导出诊断包」生成，用于问题排查。\n\n"
     "内容：\n"
-    "  logs/                     最近的轮转日志：应用主日志 + service/sidecar 内核日志\n"
+    "  logs/                         轮转日志（含应用主日志 + guardian.log + 内核日志）\n"
+    "  guard/                        守护心跳与退出凭证/熔断状态 JSON（已脱敏）\n"
+    "  wer-crash-report.txt          WER 崩溃事件 / CrashDumps / 360 进程与白名单只读排查摘要\n"
     "  runtime-config.redacted.yaml  内核运行时配置（已脱敏）\n"
     "  verge.yaml.redacted.yaml      应用配置（已脱敏）\n"
     "  profiles.yaml.redacted.yaml   订阅配置（已脱敏）\n"
-    "  system-info.txt           版本与运行摘要\n\n"
+    "  system-info.txt               版本与运行摘要（含 TUN 嗅探 / 守护状态）\n\n"
     "脱敏说明：\n"
     "  配置文件已整体脱敏；日志正文已按敏感字段名（password / token / secret /\n"
     "  uuid 等）与 URL 用户信息脱敏。节点密码 / UUID / 密钥 / 订阅链接 / 内核\n"
@@ -231,6 +235,93 @@ std::string DiagnosticBundle::collect_system_info() {
     } catch (...) {}
   }
 
+  auto get_env_w = [](const wchar_t* name) -> std::wstring {
+    wchar_t* val = nullptr;
+    size_t len = 0;
+    if (_wdupenv_s(&val, &len, name) == 0 && val) {
+      std::wstring out(val, len > 0 ? len - 1 : 0);
+      std::free(val);
+      return out;
+    }
+    return {};
+  };
+
+  auto check_ini_whitelist = [](const std::filesystem::path& ini) -> int {
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(ini, ec)) return -1;
+    std::ifstream ifs(ini, std::ios::binary);
+    if (!ifs.is_open()) return -1;
+    std::string raw((std::istreambuf_iterator<char>(ifs)),
+                    std::istreambuf_iterator<char>());
+    std::string low = to_lower(raw);
+    return (low.find("clashwin") != std::string::npos ||
+            low.find("clash-win") != std::string::npos ||
+            low.find("win-mihomo") != std::string::npos)
+               ? 1
+               : 0;
+  };
+
+  int av_proc_count = 0;
+  {
+    HANDLE snap = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap != INVALID_HANDLE_VALUE) {
+      PROCESSENTRY32W pe{};
+      pe.dwSize = sizeof(pe);
+      if (::Process32FirstW(snap, &pe)) {
+        do {
+          std::string n = to_lower(utf16_to_utf8(pe.szExeFile));
+          if (n == "360tray.exe" || n == "360sd.exe" || n == "zhudongfangyu.exe" ||
+              n == "360rp.exe" || n == "360safe.exe") {
+            ++av_proc_count;
+          }
+        } while (::Process32NextW(snap, &pe));
+      }
+      ::CloseHandle(snap);
+    }
+  }
+
+  int wl_status = -1;
+  {
+    const std::wstring appdata = get_env_w(L"APPDATA");
+    const std::vector<std::filesystem::path> candidates = {
+        std::filesystem::path(appdata) / L"360Safe" / L"Safelive" / L"useroptm2.ini",
+        L"C:\\ProgramData\\360safe\\Safelive\\useroptm2.ini",
+        std::filesystem::path(appdata) / L"360sd" / L"useroptm2.ini",
+        L"C:\\ProgramData\\360sd\\useroptm2.ini",
+    };
+    for (const auto& p : candidates) {
+      int r = check_ini_whitelist(p);
+      if (r >= 0) {
+        wl_status = std::max(wl_status, r);
+      }
+    }
+  }
+
+  int dump_count = 0;
+  {
+    const std::wstring localapp = get_env_w(L"LOCALAPPDATA");
+    if (!localapp.empty()) {
+      std::error_code ec;
+      const auto dump_dir = std::filesystem::path(localapp) / L"CrashDumps";
+      if (std::filesystem::is_directory(dump_dir, ec)) {
+        for (const auto& e : std::filesystem::directory_iterator(dump_dir, ec)) {
+          if (ec) break;
+          std::string fn = to_lower(e.path().filename().string());
+          if (fn.find("clashwin") != std::string::npos ||
+              fn.find("clash-win") != std::string::npos ||
+              fn.find("win-mihomo") != std::string::npos) {
+            ++dump_count;
+          }
+        }
+      }
+    }
+  }
+
+  const char* sniffer_desc = "自动 (默认开启，尊重订阅显式关闭)";
+  if (verge->enable_tun_sniffer.has_value()) {
+    sniffer_desc = *verge->enable_tun_sniffer ? "强制开启" : "强制关闭";
+  }
+
   std::ostringstream ss;
   ss << "生成时间        : " << time_buf << "\n"
      << "应用版本        : " << config::consts::kAppVersion << "\n"
@@ -240,12 +331,211 @@ std::string DiagnosticBundle::collect_system_info() {
      << "clash 配置版本  : " << clash_ver
      << "（程序支持 " << config::consts::kCurrentClashVersion << "）\n"
      << "TUN 模式        : " << (verge->enable_tun_mode.value_or(false) ? "true" : "false") << "\n"
+     << "TUN 域名嗅探    : " << sniffer_desc << "\n"
      << "系统代理        : " << (verge->enable_system_proxy.value_or(false) ? "true" : "false") << "\n"
      << "Allow IPv6      : " << (clash_info.ipv6 ? "true" : "false") << "\n"
      << "规则兜底        : " << (verge->rule_fallback.has_value() ? *verge->rule_fallback : "") << "\n"
      << "日志级别        : " << (verge->app_log_level.has_value() ? *verge->app_log_level : "") << "\n"
      << "日志轮转        : " << verge->app_log_max_size.value_or(128) << " KB × " << verge->app_log_max_count.value_or(40) << " 个\n"
-     << "节点总数        : " << node_count << "\n";
+     << "节点总数        : " << node_count << "\n"
+     << "守护状态        : " << guardian::get_diagnostic_summary() << "\n"
+     << "A4 环境排查     : 360进程数=" << av_proc_count
+     << ", 360白名单=" << (wl_status == 1 ? "已命中" : (wl_status == 0 ? "未命中" : "未检测到配置"))
+     << ", CrashDumps匹配=" << dump_count << " 个（详见 wer-crash-report.txt）\n";
+  return ss.str();
+}
+
+std::string DiagnosticBundle::collect_wer_and_av_report() {
+  std::ostringstream ss;
+  ss << "Clash Win A4 崩溃与安全软件只读排查报告\n"
+     << "========================================\n\n";
+
+  auto get_env_w = [](const wchar_t* name) -> std::wstring {
+    wchar_t* val = nullptr;
+    size_t len = 0;
+    if (_wdupenv_s(&val, &len, name) == 0 && val) {
+      std::wstring out(val, len > 0 ? len - 1 : 0);
+      std::free(val);
+      return out;
+    }
+    return {};
+  };
+
+  // 1) 360 相关进程快照（只读）
+  ss << "[1] 安全软件进程快照（只读）\n";
+  std::vector<std::string> found_av;
+  {
+    HANDLE snap = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap != INVALID_HANDLE_VALUE) {
+      PROCESSENTRY32W pe{};
+      pe.dwSize = sizeof(pe);
+      if (::Process32FirstW(snap, &pe)) {
+        do {
+          std::string n = to_lower(utf16_to_utf8(pe.szExeFile));
+          if (n == "360tray.exe" || n == "360sd.exe" || n == "zhudongfangyu.exe" ||
+              n == "360rp.exe" || n == "360safe.exe") {
+            found_av.push_back(n + " (pid=" + std::to_string(pe.th32ProcessID) + ")");
+          }
+        } while (::Process32NextW(snap, &pe));
+      }
+      ::CloseHandle(snap);
+    }
+  }
+  if (found_av.empty()) {
+    ss << "  未检测到常见 360 常驻进程。\n\n";
+  } else {
+    for (const auto& item : found_av) ss << "  - " << item << "\n";
+    ss << "\n";
+  }
+
+  // 2) 360 信任区只读核验（仅输出命中/未命中布尔摘要，绝不泄露原文件正文）
+  ss << "[2] 360 信任区只读检测\n";
+  const std::wstring appdata = get_env_w(L"APPDATA");
+  const std::vector<std::filesystem::path> ini_paths = {
+      std::filesystem::path(appdata) / L"360Safe" / L"Safelive" / L"useroptm2.ini",
+      L"C:\\ProgramData\\360safe\\Safelive\\useroptm2.ini",
+      std::filesystem::path(appdata) / L"360sd" / L"useroptm2.ini",
+      L"C:\\ProgramData\\360sd\\useroptm2.ini",
+  };
+  bool any_ini = false;
+  for (const auto& p : ini_paths) {
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(p, ec)) continue;
+    any_ini = true;
+    std::ifstream ifs(p, std::ios::binary);
+    bool hit = false;
+    if (ifs.is_open()) {
+      std::string raw((std::istreambuf_iterator<char>(ifs)),
+                      std::istreambuf_iterator<char>());
+      std::string low = to_lower(raw);
+      hit = (low.find("clashwin") != std::string::npos ||
+             low.find("clash-win") != std::string::npos ||
+             low.find("clashwin-guard") != std::string::npos ||
+             low.find("win-mihomo") != std::string::npos);
+    }
+    ss << "  - " << utf16_to_utf8(p.wstring()) << ": "
+       << (hit ? "已命中 Clash Win 条目" : "未发现 Clash Win 条目") << "\n";
+  }
+  if (!any_ini) {
+    ss << "  未发现 360 useroptm2.ini 白名单配置文件。\n";
+  }
+  ss << "\n";
+
+  // 3) %LOCALAPPDATA%\CrashDumps 元数据
+  ss << "[3] 本地 CrashDumps 匹配摘要\n";
+  const std::wstring localapp = get_env_w(L"LOCALAPPDATA");
+  bool any_dump = false;
+  if (!localapp.empty()) {
+    std::error_code ec;
+    const auto dump_dir = std::filesystem::path(localapp) / L"CrashDumps";
+    if (std::filesystem::is_directory(dump_dir, ec)) {
+      for (const auto& e : std::filesystem::directory_iterator(dump_dir, ec)) {
+        if (ec) break;
+        std::string fn = to_lower(e.path().filename().string());
+        if (fn.find("clashwin") != std::string::npos ||
+            fn.find("clash-win") != std::string::npos ||
+            fn.find("win-mihomo") != std::string::npos) {
+          any_dump = true;
+          auto sz = e.file_size(ec);
+          ss << "  - " << e.path().filename().string() << " (" << sz << " bytes)\n";
+        }
+      }
+    }
+  }
+  if (!any_dump) {
+    ss << "  CrashDumps 目录无匹配转储文件。\n";
+  }
+  ss << "\n";
+
+  // 4) WER Application 事件 (EventID 1000/1001/1002，最多 15 条，4 秒超时)
+  ss << "[4] Windows 应用程序崩溃事件（wevtutil EventID 1000/1001/1002）\n";
+  SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
+  HANDLE read_pipe = nullptr, write_pipe = nullptr;
+  if (::CreatePipe(&read_pipe, &write_pipe, &sa, 0)) {
+    ::SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0);
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    si.hStdOutput = write_pipe;
+    si.hStdError = write_pipe;
+    std::wstring cmd =
+        L"wevtutil.exe qe Application \"/q:*[System[(EventID=1000 or EventID=1001 or EventID=1002)]]\" /c:15 /rd:true /f:text";
+    PROCESS_INFORMATION pi{};
+    if (::CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE,
+                         CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+      ::CloseHandle(write_pipe);
+      write_pipe = nullptr;
+
+      std::string raw_out;
+      const ULONGLONG deadline = ::GetTickCount64() + 4000ULL;
+      bool timed_out = false;
+      for (;;) {
+        DWORD avail = 0;
+        if (::PeekNamedPipe(read_pipe, nullptr, 0, nullptr, &avail, nullptr) &&
+            avail > 0) {
+          char buf[4096];
+          DWORD read_n = 0;
+          if (::ReadFile(read_pipe, buf, sizeof(buf), &read_n, nullptr) && read_n > 0) {
+            if (raw_out.size() < 256 * 1024) {
+              raw_out.append(buf, read_n);
+            }
+          }
+          continue;
+        }
+        if (::WaitForSingleObject(pi.hProcess, 40) == WAIT_OBJECT_0) {
+          // 排空管道残留
+          while (::PeekNamedPipe(read_pipe, nullptr, 0, nullptr, &avail, nullptr) &&
+                 avail > 0) {
+            char buf[4096];
+            DWORD read_n = 0;
+            if (!::ReadFile(read_pipe, buf, sizeof(buf), &read_n, nullptr) ||
+                read_n == 0) {
+              break;
+            }
+            if (raw_out.size() < 256 * 1024) raw_out.append(buf, read_n);
+          }
+          break;
+        }
+        if (::GetTickCount64() >= deadline) {
+          timed_out = true;
+          ::TerminateProcess(pi.hProcess, 1);
+          break;
+        }
+      }
+      ::CloseHandle(pi.hProcess);
+      ::CloseHandle(pi.hThread);
+
+      // 按 "Event[" 分块过滤仅含 clashwin / clash-win / win-mihomo 的记录并脱敏
+      size_t pos = 0;
+      int matched = 0;
+      while (pos < raw_out.size()) {
+        size_t next = raw_out.find("Event[", pos + 6);
+        std::string block = (next == std::string::npos)
+                                ? raw_out.substr(pos)
+                                : raw_out.substr(pos, next - pos);
+        std::string low = to_lower(block);
+        if (low.find("clashwin") != std::string::npos ||
+            low.find("clash-win") != std::string::npos ||
+            low.find("win-mihomo") != std::string::npos) {
+          ss << redact_log_text(block) << "\n";
+          ++matched;
+        }
+        if (next == std::string::npos) break;
+        pos = next;
+      }
+      if (matched == 0) {
+        ss << "  近期 Application EventID 1000/1001/1002 无 Clash Win 相关崩溃事件。\n";
+      }
+      if (timed_out) {
+        ss << "  [注意] wevtutil 查询超过 4000ms 上限已终止，结果可能不完整。\n";
+      }
+    } else {
+      ss << "  无法启动 wevtutil.exe 进行查询。\n";
+    }
+    if (write_pipe) ::CloseHandle(write_pipe);
+    if (read_pipe) ::CloseHandle(read_pipe);
+  }
   return ss.str();
 }
 
@@ -444,8 +734,29 @@ Result<std::string> DiagnosticBundle::export_diagnostic_bundle() {
     }
   }
 
-  // 3) System Info
+  // 2.5) Guardian state JSONs under guard/ (if present)
+  {
+    const auto guard_dir = guardian::resolve_isolated_guardian_dir();
+    const wchar_t* guard_files[] = {
+        guardian::kMainHeartbeatFilename,
+        guardian::kGuardHeartbeatFilename,
+        guardian::kRespawnStateFilename,
+        guardian::kIntentionalExitFilename,
+    };
+    for (const wchar_t* gf : guard_files) {
+      const auto gp = guard_dir / gf;
+      std::ifstream gfs(gp, std::ios::binary);
+      if (gfs.is_open()) {
+        std::string raw((std::istreambuf_iterator<char>(gfs)),
+                        std::istreambuf_iterator<char>());
+        entries.push_back({"guard/" + utf16_to_utf8(gf), redact_log_text(raw)});
+      }
+    }
+  }
+
+  // 3) System Info + A4 WER & AV report
   entries.push_back({"system-info.txt", collect_system_info()});
+  entries.push_back({"wer-crash-report.txt", collect_wer_and_av_report()});
 
   // 4) README.txt
   entries.push_back({"README.txt", kBundleReadme});

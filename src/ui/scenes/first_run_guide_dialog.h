@@ -97,6 +97,8 @@ class FirstRunGuideDialog : public Widget {
   // ★ ❌9「稍后配置」：点「稍后」完成引导后，宿主自动滑开左侧设置抽屉指引订阅卡位置
   //   （← Mini first-run-guide-dialog.tsx:469-473 handleDismissLater 自动滑开抽屉）。
   std::function<void()> on_dismiss_later;
+  // Ready 步 Card 3「查看完整说明」回调（src: src/pages/_layout/components/first-run-guide-dialog.tsx:58）
+  std::function<void()> on_open_whitelist_guide;
 
   void submit_import();
   void finish();
@@ -137,10 +139,14 @@ class FirstRunGuideDialog : public Widget {
   RectF submit_btn_rect() const { return btn_submit_rect_; }
   RectF later_btn_rect() const { return btn_later_rect_; }
   RectF star_card_rect() const { return card_star_rect_; }
+  RectF antivirus_card_rect() const { return card_av_rect_; }
+  RectF antivirus_btn_rect() const { return btn_av_open_rect_; }
   RectF retest_btn_rect() const { return btn_retest_rect_; }
   RectF wiki_btn_rect() const { return btn_wiki_rect_; }
   float star_title_h() const { return star_title_h_; }
   float star_body_h() const { return star_body_h_; }
+  float ready_scroll_y() const { return ready_scroll_y_; }
+  void set_ready_scroll_y(float y);
   TextField* url_field() const { return url_field_; }
   ContextMenu* url_menu() const { return url_menu_; }
 
@@ -186,12 +192,18 @@ class FirstRunGuideDialog : public Widget {
   RectF btn_retest_rect_;
   RectF card_star_rect_;
   RectF btn_wiki_rect_;
+  RectF card_av_rect_;
+  RectF btn_av_open_rect_;
   RectF btn_finish_star_rect_;
   RectF btn_finish_rect_;
   float warn_y_ = 0.0f;  // 接管提示绘制 y（随绿色卡内部块流式定位，不再依赖重测按钮）
   float status_h_ = 37.5f;      // src: first-run-guide-dialog.tsx:909 动态测量折行高
   float star_title_h_ = 19.6f;  // src: first-run-guide-dialog.tsx:1041 动态测量折行高
   float star_body_h_ = 58.2f;   // src: first-run-guide-dialog.tsx:1052 动态测量折行高
+  float av_title_h_ = 19.0f;    // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1115 动态测量折行高
+  float av_body_h_ = 58.0f;     // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1125 动态测量折行高
+  float ready_scroll_y_ = 0.0f;
+  float max_ready_scroll_ = 0.0f;
 
   bool hover_banner_ = false;
   bool hover_paste_ = false;
@@ -199,6 +211,7 @@ class FirstRunGuideDialog : public Widget {
   bool hover_later_ = false;
   bool hover_retest_ = false;
   bool hover_wiki_ = false;
+  bool hover_av_open_ = false;
   bool hover_finish_star_ = false;
   bool hover_finish_ = false;
   bool hover_enter_ = false;
@@ -209,6 +222,7 @@ class FirstRunGuideDialog : public Widget {
   bool pressed_later_ = false;
   bool pressed_retest_ = false;
   bool pressed_wiki_ = false;
+  bool pressed_av_open_ = false;
   bool pressed_finish_star_ = false;
   bool pressed_finish_ = false;
   bool pressed_enter_ = false;

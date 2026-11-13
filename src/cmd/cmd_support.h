@@ -76,6 +76,9 @@ mihomo::MihomoClient& mihomo_unchecked();
 // run_from_config → 落盘 clash-win.yaml → check 副本校验 →（valid 且内核运行时）
 // 热应用 apply_config。返回四分类 outcome；核心侧失败折叠进 invalid。
 core::validate::ValidationOutcome run_enhance_pipeline();
+// 在 run_enhance_pipeline() 基础上，若 valid 且内核运行则热应用 apply_config，
+// 并广播 EventBus::refresh_clash()（供 quick_routing 等调用）。
+core::validate::ValidationOutcome enhance_profiles_live();
 
 // ---------- 环境探针 ----------
 bool is_admin();

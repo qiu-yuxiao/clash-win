@@ -337,4 +337,71 @@ class LogViewerModal : public Widget {
   bool hover_clear_ = false;
 };
 
+// ============================================================================
+// 6. AntivirusWhitelistModal —— 安全软件白名单说明弹窗
+//   src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx
+// ============================================================================
+class AntivirusWhitelistModal : public Widget {
+ public:
+  explicit AntivirusWhitelistModal(Widget* parent = nullptr);
+
+  void open();
+  void close();
+  bool is_open() const { return open_; }
+
+  std::function<void()> on_dismiss;
+
+  void on_arrange(const RectF& area) override;
+  void on_paint(IRenderTarget& rt) override;
+  bool on_mouse(const MouseEvent& e) override;
+  bool on_key(const KeyEvent& e) override;
+
+  bool hit_self(PointF local) const override {
+    return open_ && Widget::hit_self(local);
+  }
+  bool a11y_subtree_visible() const override {
+    return open_ && visible() && !a11y_hidden();
+  }
+  bool a11y_is_modal() const override { return open_; }
+  A11yRole a11y_default_role() const override { return A11yRole::Dialog; }
+  std::wstring a11y_default_name() const override;
+  size_t a11y_virtual_child_count() const override { return 6u; }
+  A11ySubItem a11y_virtual_child(size_t idx) const override;
+  bool a11y_invoke_virtual_child(size_t idx) override;
+
+  RectF card_rect() const { return card_rect_; }
+  RectF content_rect() const { return content_rect_; }
+  RectF close_button_rect() const { return btn_close_rect_; }
+  float scroll_y() const { return scroll_y_; }
+  void set_scroll_y(float y);
+  float max_scroll() const;
+
+ private:
+  struct SectionLayout {
+    std::wstring title;
+    std::wstring body;
+    float y_rel = 0.0f;
+    float title_h = 19.0f;
+    float body_h = 20.0f;
+  };
+  void rebuild_sections() const;
+
+  bool open_ = false;
+  OverlayFade fade_;  // ← MUI Dialog 缺省 Fade（enter 225 / leave 195）
+
+  RectF card_rect_{};
+  RectF title_rect_{};
+  RectF content_rect_{};
+  RectF actions_rect_{};
+  RectF btn_close_rect_{};
+
+  float title_h_ = 21.0f;
+  float total_sections_h_ = 0.0f;
+  float scroll_y_ = 0.0f;
+  mutable std::vector<SectionLayout> sections_;
+
+  bool hover_close_ = false;
+  bool pressed_close_ = false;
+};
+
 }  // namespace clashwin::ui::scene

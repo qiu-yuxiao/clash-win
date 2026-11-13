@@ -41,11 +41,12 @@ void Segmented::set_tooltips_i18n(std::vector<const char*> keys) {
 }
 
 std::wstring Segmented::tooltip_text() const {
+  if (!enabled()) return Widget::tooltip_text();
   if (hover_ >= 0 && hover_ < static_cast<int>(tooltip_keys_.size()))
     return tr(tooltip_keys_[static_cast<size_t>(hover_)].c_str());
-  return hover_ >= 0 && hover_ < static_cast<int>(tooltips_.size())
-             ? tooltips_[static_cast<size_t>(hover_)]
-             : std::wstring();
+  if (hover_ >= 0 && hover_ < static_cast<int>(tooltips_.size()))
+    return tooltips_[static_cast<size_t>(hover_)];
+  return Widget::tooltip_text();
 }
 
 std::optional<RectF> Segmented::tooltip_anchor_rect() const {
@@ -98,6 +99,14 @@ int Segmented::hit_segment(const PointF& local) const {
 }
 
 bool Segmented::on_mouse(const MouseEvent& e) {
+  if (!enabled()) {
+    if (hover_ != -1 || pressed_ != -1) {
+      hover_ = -1;
+      pressed_ = -1;
+      invalidate();
+    }
+    return false;
+  }
   if (e.type == MouseEventType::Leave) {
     if (hover_ != -1) { hover_ = -1; invalidate(); }
     return false;

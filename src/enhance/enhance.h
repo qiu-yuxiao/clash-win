@@ -27,6 +27,7 @@ namespace clashwin::enhance {
 struct EnhanceVergeOptions {
   std::string clash_core = "win-mihomo";   // get_valid_clash_core()
   bool enable_tun = false;                  // enable_tun_mode
+  std::optional<bool> enable_tun_sniffer;   // enable_tun_sniffer（nullopt = 自动）
   bool enable_builtin = true;               // enable_builtin_enhanced
   bool socks_enabled = false;               // verge_socks_enabled
   bool http_enabled = false;                // verge_http_enabled

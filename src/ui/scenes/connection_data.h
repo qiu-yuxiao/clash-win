@@ -15,10 +15,13 @@
 #include <deque>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include <nlohmann/json.hpp>
+
+#include "core/quick_routing.h"
 
 namespace clashwin::ui::scene {
 
@@ -37,6 +40,13 @@ struct ConnMetadata {
   std::string process_path;
 };
 
+enum class PathControlStatus {
+  Direct,
+  Proxy,
+  Reject,
+  Disconnected,
+};
+
 struct ConnItem {
   std::string id;
   std::string host;        // host:port（host 空 → remoteDestination）
@@ -49,6 +59,15 @@ struct ConnItem {
   std::vector<std::string> chains;
   std::string rule;
   std::string rule_payload;
+
+  // v3.3.0 路径控制扩展字段
+  PathControlStatus control_status = PathControlStatus::Proxy;
+  bool is_synthetic = false;
+  std::optional<core::quick_routing::ManagedMergeRule> managed_rule;
+  std::optional<core::quick_routing::RuleType> target_type;
+  std::string target_value;
+  std::string target_key;
+  std::string disconnected_key;
 
   std::string host_formatted() const;
   std::string chains_category() const;

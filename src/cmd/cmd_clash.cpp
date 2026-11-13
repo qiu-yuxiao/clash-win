@@ -334,6 +334,22 @@ void install_cmd_clash(CommandService& svc) {
        },
        consts::kTimeoutProbe});
 
+  // ---- close_connection（← clash.rs:93 close_connection）----
+  svc.register_command(
+      "close_connection",
+      {[](const Json& args) -> CmdResult {
+         const auto* id = find_arg(args, {"id", "connectionId"});
+         if (!id || !id->is_string() || id->get<std::string>().empty()) {
+           return CmdResult::err({errs::kBadArgs, "close_connection requires id"});
+         }
+         auto client = mihomo();
+         if (client.is_err()) return CmdResult::err(client.error());
+         auto r = client.value()->close_connection(id->get<std::string>());
+         if (r.is_err()) return CmdResult::err(r.error());
+         return CmdResult::ok(Json::object());
+       },
+       consts::kTimeoutProbe});
+
   // ---- close_all_connections（← clash.rs:93-99）----
   svc.register_command(
       "close_all_connections",

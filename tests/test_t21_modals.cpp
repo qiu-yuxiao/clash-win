@@ -944,3 +944,30 @@ UT_TEST(t21_first_run_guide_pills_wrap_no_overlap) {
 
   set_text_engine(nullptr);
 }
+
+UT_TEST(t21_v330_antivirus_modal_and_first_run_ready_card3) {
+  make_offscreen(640, 680, 96);
+  set_text_engine(nullptr);
+
+  AntivirusWhitelistModal av;
+  UT_CHECK(!av.is_open());
+  av.open();
+  UT_CHECK(av.is_open());
+  av.layout_tree({0, 0, 640, 680});
+  UT_CHECK_EQ(av.a11y_virtual_child_count(), size_t(6));
+  av.set_scroll_y(99999.0f);
+  UT_CHECK(av.scroll_y() <= av.max_scroll() + 0.5f);
+  av.on_key(KeyEvent{KeyEventType::Down, VK_ESCAPE});
+  UT_CHECK(!av.is_open());
+
+  FirstRunGuideDialog dlg;
+  bool guide_opened = false;
+  dlg.on_open_whitelist_guide = [&] { guide_opened = true; };
+  dlg.open();
+  dlg.set_step(FirstRunStep::Ready);
+  dlg.layout_tree({0, 0, 640, 520});
+  UT_CHECK(dlg.antivirus_card_rect().h > 0.0f);
+  UT_CHECK(dlg.antivirus_btn_rect().h > 0.0f);
+  UT_CHECK(!guide_opened);
+  set_text_engine(nullptr);
+}

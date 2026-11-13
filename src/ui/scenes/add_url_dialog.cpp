@@ -37,7 +37,45 @@ Color4f card_text() {
   return theme::ThemeService::instance().card_paint("default").text_color;
 }
 
+std::function<std::wstring()>& test_clipboard_reader() {
+  static std::function<std::wstring()> fn;
+  return fn;
+}
+
+std::string read_clipboard_utf8_normalized() {
+  std::wstring wtext;
+  if (test_clipboard_reader()) {
+    wtext = test_clipboard_reader()();
+  } else {
+    if (!OpenClipboard(nullptr)) return "";
+    if (HANDLE h = GetClipboardData(CF_UNICODETEXT)) {
+      if (const auto* p = static_cast<const wchar_t*>(GlobalLock(h))) {
+        wtext = p;
+        GlobalUnlock(h);
+      }
+    }
+    CloseClipboard();
+  }
+  if (wtext.empty()) return "";
+  std::string utf8 = utf::utf16_to_utf8(wtext);
+  std::string out;
+  out.reserve(utf8.size());
+  for (size_t i = 0; i < utf8.size(); ++i) {
+    if (utf8[i] == '\r') {
+      out.push_back('\n');
+      if (i + 1 < utf8.size() && utf8[i + 1] == '\n') ++i;
+    } else {
+      out.push_back(utf8[i]);
+    }
+  }
+  return out;
+}
+
 }  // namespace
+
+void AddUrlDialog::set_clipboard_reader_for_test(std::function<std::wstring()> fn) {
+  test_clipboard_reader() = std::move(fn);
+}
 
 AddUrlDialog::AddUrlDialog(Widget* parent) : Widget(parent) {
   set_z_order(960);
@@ -292,7 +330,19 @@ bool AddUrlDialog::on_key(const KeyEvent& e) {
       }
       return true;
     }
+    // src: add-url-dialog.tsx:253-324 支持 Ctrl+V / Shift+Insert 多行粘贴
+    if (input_focused_ &&
+        ((e.ctrl && (e.key == 'V' || e.key == 'v')) ||
+         (e.shift && e.key == VK_INSERT))) {
+      std::string pasted = read_clipboard_utf8_normalized();
+      if (!pasted.empty()) {
+        payload_ += pasted;
+        invalidate();
+      }
+      return true;
+    }
   } else if (e.type == KeyEventType::Char && input_focused_) {
+    if (e.ctrl) return false;
     if (e.ch >= 32 && e.ch < 127) {
       payload_.push_back(static_cast<char>(e.ch));
       invalidate();

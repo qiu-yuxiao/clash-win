@@ -24,7 +24,8 @@ enum class HelpAction {
   // Mini 菜单无「打开配置/日志目录」入口（help-menu-button.tsx:114-205 6 项），
   // 已从菜单移除；枚举保留给命令链/测试直调
   OpenConfigDir = 7,     // 非菜单项
-  OpenLogsDir = 8        // 非菜单项
+  OpenLogsDir = 8,       // 非菜单项
+  AntivirusGuide = 9     // 9. 🛡️ 安全软件白名单说明
 };
 
 class HelpMenu {

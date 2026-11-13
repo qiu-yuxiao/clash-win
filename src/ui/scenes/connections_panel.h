@@ -5,6 +5,7 @@
 // - connection-table.tsx（Host 列 flex:1、Chains 列固定 64px 居中、▲/▼ 循环排序、右键 6 项菜单、行点击详情）
 // - ScrollList 虚拟滚动，hidden scrollbar（show_scrollbar = false），支持平滑滚轮
 // - 严格遵守 Direct2D 局部坐标规则（以 {0, y} 相对本控件绘制，禁止 double offset）
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <string>
@@ -17,6 +18,8 @@
 #include "../widget.h"
 #include "connection_data.h"
 #include "connection_detail_dialog.h"
+#include "core/quick_routing.h"
+#include "path_control.h"
 
 namespace clashwin::ui::scene {
 
@@ -133,19 +136,34 @@ class ConnectionsPanel : public Widget {
   bool a11y_invoke_virtual_child(size_t idx) override;
 
   void refresh_visible();
+  void reload_managed_rules();
+  void apply_disconnect_item(const ConnItem& item);
+  void apply_restore_default(const ConnItem& item);
+  void apply_quick_route(const ConnItem& item, int target);
+
+  PathControlStore& path_store() { return path_store_; }
+  const PathControlStore& path_store() const { return path_store_; }
+  const std::vector<core::quick_routing::ManagedMergeRule>& managed_rules() const {
+    return managed_rules_;
+  }
 
  private:
   void show_context_menu(const ConnItem& item, PointF anchor, RectF row_global);
-  void apply_quick_route(const ConnItem& item, int target);
 
   ConnectionData* data_ = nullptr;
   uint64_t data_sub_ = 0;
+  uint64_t bus_sub_clash_ = 0;
+  uint64_t bus_sub_profile_ = 0;
+  std::shared_ptr<std::atomic<bool>> alive_ = std::make_shared<std::atomic<bool>>(true);
 
   Tab tab_ = Tab::Active;
   std::string filter_;
   SortCol sort_col_ = SortCol::None;
   SortDir sort_dir_ = SortDir::None;
 
+  PathControlStore path_store_;
+  std::vector<core::quick_routing::ManagedMergeRule> managed_rules_;
+  size_t active_composed_count_ = 0;
   std::vector<ConnItem> visible_items_;
 
   // 子控件

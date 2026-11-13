@@ -3,19 +3,46 @@
 #include <windows.h>
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <thread>
 
+#include "cmd/cmd_support.h"
 #include "core/quick_routing.h"
 #include "events/event_bus.h"
+#include "events/event_names.h"
 #include "events/notice.h"
+#include "mihomo/mihomo_client.h"
 #include "ui/icon_w.h"
 #include "ui/theme/theme.h"
 #include "ui/soft_shadow.h"
+#include "ui/ui_postbox.h"
+#include "util/log.h"
 #include "util/utf.h"
 #include "ui/i18n_text.h"  // F-D01
 
 namespace clashwin::ui::scene {
 
 namespace {
+std::wstring status_label_for(PathControlStatus st) {
+  switch (st) {
+    case PathControlStatus::Direct:
+      return tr("connections.components.miniTable.chainsDirect");
+    case PathControlStatus::Reject:
+      return tr("connections.components.miniTable.chainsReject");
+    case PathControlStatus::Disconnected:
+      return tr("connections.components.miniTable.chainsDisconnected");
+    case PathControlStatus::Proxy:
+    default:
+      return tr("connections.components.miniTable.chainsProxy");
+  }
+}
+
+std::string row_host_display(const ConnItem& item) {
+  std::string base = format_path_control_host_label(item);
+  if (item.metadata.destination_port.empty()) return base;
+  return base + ":" + item.metadata.destination_port;
+}
+
 void copy_address_to_clipboard(const std::string& address) {
   if (OpenClipboard(nullptr)) {
     EmptyClipboard();
@@ -67,50 +94,57 @@ void ConnPanelRowWidget::on_paint(IRenderTarget& rt) {
   // 底边框 1px
   rt.fill_rect({0, bounds().h - 1, bounds().w, 1}, Brush{vars.divider_color});
 
-  // 2. 路由分类色点 (Proxy=primary / Direct=#06943D / Reject=#FF3B30)
-  std::string cat = item_.chains_category();
-  Color4f dot_color;
-  if (cat == "Proxy") {
-    dot_color = theme.primary();
-  } else if (cat == "Reject") {
-    dot_color = Color4f::hex(0xFF3B30);  // src: _theme.tsx:8 error_color
-  } else {
-    dot_color = Color4f::hex(0x06943D);  // src: _theme.tsx:10 success_color
+  // 2. 4 态路径控制色点 + 状态文字（src: connection-table.tsx:42 STATUS_COLOR_MAP）
+  Color4f status_color = pal.primary_color;
+  switch (item_.control_status) {
+    case PathControlStatus::Direct:
+      status_color = pal.success_color;
+      break;
+    case PathControlStatus::Reject:
+      status_color = pal.error_color;
+      break;
+    case PathControlStatus::Disconnected:
+      status_color = pal.warning_color;
+      break;
+    case PathControlStatus::Proxy:
+    default:
+      status_color = pal.primary_color;
+      break;
   }
-  Brush dot_brush{dot_color};
+  Brush dot_brush{status_color};
+  // src: connection-table.tsx:192-194
   rt.round_rect({4.0f, 6.0f, 8.0f, 8.0f}, 4.0f, {}, &dot_brush);
 
-  // 3. Host 文本（flex 1，左对齐，省略号）
-  float host_w = bounds().w - 64.0f;
+  // 3. Host 文本（flex 1，左对齐，省略号，src: connection-table.tsx:393-397 / :471-473）
+  float host_w = bounds().w - 74.0f;
   TextStyle host_ts;
   host_ts.size = 11.0f;
   host_ts.color = pal.primary_text;
   host_ts.align_v = AlignV::Center;
   host_ts.ellipsis = true;
-  rt.draw_text(utf::utf8_to_utf16(item_.host_formatted()), {16.0f, 0, host_w - 20.0f, bounds().h},
-               host_ts);
+  rt.draw_text(utf::utf8_to_utf16(row_host_display(item_)),
+               {16.0f, 0, host_w - 20.0f, bounds().h}, host_ts);
 
-  // 4. Host 与 Chains 间垂直分割线（右侧 64px 处）
-  rt.fill_rect({bounds().w - 64.0f, 0, 1.0f, bounds().h}, Brush{vars.divider_color});
+  // 4. Host 与 Chains 间垂直分割线（右侧 74px 处，src: connection-table.tsx:471-473）
+  rt.fill_rect({bounds().w - 74.0f, 0, 1.0f, bounds().h}, Brush{vars.divider_color});
 
-  // 5. Chains 列（固定 64px，居中）
-  float chains_x = bounds().w - 64.0f;
-  bool show_close = (!is_closed_ && hover_);
-  float chains_w = show_close ? 44.0f : 64.0f;
+  // 5. Chains 列（固定 74px 居中，src: connection-table.tsx:415 / :471-473）
+  float chains_x = bounds().w - 74.0f;
+  bool show_close = (!is_closed_ && !item_.is_synthetic && hover_);
+  float chains_w = show_close ? 54.0f : 74.0f;
 
   TextStyle chains_ts;
   chains_ts.size = 11.0f;
-  chains_ts.color = pal.secondary_text;
+  chains_ts.weight = 600;  // src: connection-table.tsx:415
+  chains_ts.color = status_color;
   chains_ts.align_h = AlignH::Center;
   chains_ts.align_v = AlignV::Center;
   chains_ts.ellipsis = true;
-  // src: locales/zh/connections.json:37-39 chainsDirect/Reject/Proxy = 直连/封锁/代理
-  std::wstring cat_text = tr("connections.components.miniTable.chainsProxy");
-  if (cat == "Direct") cat_text = tr("connections.components.miniTable.chainsDirect");
-  else if (cat == "Reject") cat_text = tr("connections.components.miniTable.chainsReject");
+  // src: locales/zh/connections.json:37-40 chainsDirect/Reject/Proxy/Disconnected
+  std::wstring cat_text = status_label_for(item_.control_status);
   rt.draw_text(cat_text, {chains_x, 0, chains_w, bounds().h}, chains_ts);
 
-  // 6. 悬停关闭按钮 ✕ (活跃连接时在最右侧 18px 呈现)
+  // 6. 悬停关闭按钮 ✕ (非合成的活跃连接时在最右侧 18px 呈现)
   if (show_close) {
     RectF close_rect{bounds().w - 18.0f, 2.0f, 16.0f, 16.0f};
     if (close_hover_) {
@@ -129,9 +163,10 @@ void ConnPanelRowWidget::on_paint(IRenderTarget& rt) {
 
 bool ConnPanelRowWidget::on_mouse(const MouseEvent& e) {
   PointF pt = e.pos;
+  const bool can_close = !is_closed_ && !item_.is_synthetic;
 
   if (e.type == MouseEventType::Move) {
-    bool ch = (!is_closed_ && pt.x >= bounds().w - 20.0f);
+    bool ch = (can_close && pt.x >= bounds().w - 20.0f);
     if (!hover_ || close_hover_ != ch) {
       hover_ = true;
       close_hover_ = ch;
@@ -161,7 +196,7 @@ bool ConnPanelRowWidget::on_mouse(const MouseEvent& e) {
     if (e.buttons & kMouseRight) {
       return true;
     }
-    if (!is_closed_ && pt.x >= bounds().w - 20.0f) {
+    if (can_close && pt.x >= bounds().w - 20.0f) {
       if (on_close) on_close(item_);
     } else {
       if (on_click) on_click(item_, global_bounds());
@@ -213,6 +248,7 @@ ConnectionsPanel::ConnectionsPanel(Widget* parent) : Widget(parent) {
   btn_clear_history_->text_style.size = 11.0f;  // src: connections-panel.tsx:206 fontSize '11px'
   btn_clear_history_->text_style.weight = 700;  // src: connections-panel.tsx:207 fontWeight 700
   btn_clear_history_->on_click = [this] {
+    path_store_.clear_all();
     if (on_clear_history) on_clear_history();
     refresh_visible();
   };
@@ -241,12 +277,50 @@ ConnectionsPanel::ConnectionsPanel(Widget* parent) : Widget(parent) {
   auto detail = std::make_unique<ConnectionDetailDialog>();
   detail_dialog_ = detail.get();
   detail_dialog_->on_close_connection = [this](const std::string& id) {
+    for (const auto& it : visible_items_) {
+      if (it.id == id) {
+        apply_disconnect_item(it);
+        return;
+      }
+    }
     if (on_close_one) on_close_one(id);
   };
   add_child(std::move(detail));
+
+  // 7. 初始化 4 态路径控制状态并监听 Merge / Clash 配置刷新
+  path_store_.load_default();
+  reload_managed_rules();
+  auto alive = alive_;
+  bus_sub_clash_ = events::EventBus::instance().subscribe(
+      events::names::kRefreshClash,
+      [this, alive](const events::Payload&) {
+        UiPostbox::instance().post([this, alive] {
+          if (!alive->load(std::memory_order_acquire)) return;
+          reload_managed_rules();
+          refresh_visible();
+        });
+      });
+  bus_sub_profile_ = events::EventBus::instance().subscribe(
+      events::names::kProfileChanged,
+      [this, alive](const events::Payload&) {
+        UiPostbox::instance().post([this, alive] {
+          if (!alive->load(std::memory_order_acquire)) return;
+          reload_managed_rules();
+          refresh_visible();
+        });
+      });
 }
 
 ConnectionsPanel::~ConnectionsPanel() {
+  alive_->store(false, std::memory_order_release);
+  if (bus_sub_clash_ != 0) {
+    events::EventBus::instance().unsubscribe(bus_sub_clash_);
+    bus_sub_clash_ = 0;
+  }
+  if (bus_sub_profile_ != 0) {
+    events::EventBus::instance().unsubscribe(bus_sub_profile_);
+    bus_sub_profile_ = 0;
+  }
   if (data_ && data_sub_ != 0) {
     data_->unsubscribe(data_sub_);
     data_sub_ = 0;
@@ -315,19 +389,32 @@ void ConnectionsPanel::cycle_sort_chains() {
   invalidate();
 }
 
+void ConnectionsPanel::reload_managed_rules() {
+  managed_rules_ = core::quick_routing::read_managed_merge_rules();
+}
+
 void ConnectionsPanel::refresh_visible() {
   visible_items_.clear();
   if (table_overlay_) table_overlay_->empty = true;
   if (!data_) {
+    active_composed_count_ = 0;
     list_->set_content(0, kConnPanelRowH, nullptr);
     return;
   }
 
-  // 1. 获取源列表
+  // 1. 对账已断连目标 & 合成 4 态活跃 / 历史连接列表（← use-path-control.ts:102-143）
+  const auto& raw_active = data_->active();
+  path_store_.reconcile(raw_active);
+  auto composed_active = compose_active_path_control_connections(
+      raw_active, managed_rules_, path_store_.state());
+  active_composed_count_ = composed_active.size();
+
   if (tab_ == Tab::Active) {
-    visible_items_ = data_->active();
+    visible_items_ = std::move(composed_active);
   } else {
-    visible_items_.assign(data_->closed().begin(), data_->closed().end());
+    std::vector<ConnItem> raw_closed(data_->closed().begin(), data_->closed().end());
+    visible_items_ = enrich_closed_path_control_connections(
+        raw_closed, managed_rules_, path_store_.state());
   }
 
   // 2. 过滤
@@ -337,7 +424,7 @@ void ConnectionsPanel::refresh_visible() {
 
     std::vector<ConnItem> filtered;
     for (const auto& it : visible_items_) {
-      std::string h = it.host_formatted();
+      std::string h = row_host_display(it);
       std::string p = it.metadata.process;
       std::string c = it.chains_formatted();
       std::string dst = it.metadata.destination_ip;
@@ -358,14 +445,16 @@ void ConnectionsPanel::refresh_visible() {
   if (sort_col_ == SortCol::Host && sort_dir_ != SortDir::None) {
     std::stable_sort(visible_items_.begin(), visible_items_.end(),
                      [this](const ConnItem& a, const ConnItem& b) {
-                       return sort_dir_ == SortDir::Asc ? (a.host_formatted() < b.host_formatted())
-                                                        : (a.host_formatted() > b.host_formatted());
+                       std::string ha = row_host_display(a);
+                       std::string hb = row_host_display(b);
+                       return sort_dir_ == SortDir::Asc ? (ha < hb) : (ha > hb);
                      });
   } else if (sort_col_ == SortCol::Chains && sort_dir_ != SortDir::None) {
     std::stable_sort(visible_items_.begin(), visible_items_.end(),
                      [this](const ConnItem& a, const ConnItem& b) {
-                       return sort_dir_ == SortDir::Asc ? (a.chains_category() < b.chains_category())
-                                                        : (a.chains_category() > b.chains_category());
+                       std::string sa = path_control_status_key(a.control_status);
+                       std::string sb = path_control_status_key(b.control_status);
+                       return sort_dir_ == SortDir::Asc ? (sa < sb) : (sa > sb);
                      });
   }
 
@@ -382,7 +471,7 @@ void ConnectionsPanel::refresh_visible() {
                          detail_dialog_->open(it, tab_ == Tab::Closed, row_global);
                        };
                        row->on_close = [this](const ConnItem& it) {
-                         if (on_close_one) on_close_one(it.id);
+                         apply_disconnect_item(it);
                        };
                        row->on_context_menu = [this](const ConnItem& it, PointF pt,
                                                      RectF row_global) {
@@ -396,59 +485,124 @@ void ConnectionsPanel::refresh_visible() {
 
 void ConnectionsPanel::show_context_menu(const ConnItem& item, PointF anchor, RectF row_global) {
   std::vector<MenuItem> items;
-  // src: locales/zh/connections.json:42-47 六项文案（connection-table.tsx:493-534，无快捷键列）
+  // src: locales/zh/connections.json:42-49 六/七项文案（connection-table.tsx:566-623）
   items.push_back({tr("connections.components.contextMenu.setDirect"), false, false, L""});
   items.push_back({tr("connections.components.contextMenu.setProxy"), false, false, L""});
   items.push_back({tr("connections.components.contextMenu.setReject"), false, false, L""});
-  items.push_back({tr("connections.components.contextMenu.disconnect"), tab_ == Tab::Closed, false, L""});
+  const bool disc_disabled = (tab_ == Tab::Closed || item.is_synthetic);
+  items.push_back({tr("connections.components.contextMenu.disconnect"), disc_disabled, false, L""});
+  const bool has_restore =
+      item.managed_rule.has_value() || item.control_status == PathControlStatus::Disconnected;
+  if (has_restore) {
+    items.push_back({tr("connections.components.contextMenu.restoreDefault"), false, false, L""});
+  }
   items.push_back({tr("connections.components.contextMenu.copyAddress"), false, false, L""});
   items.push_back({tr("connections.components.contextMenu.viewDetail"), false, false, L""});
 
   context_menu_->open(items, to_local(anchor));
-  context_menu_->on_select = [this, item, row_global](int idx) {
-    switch (idx) {
-      case 0:
-        apply_quick_route(item, 0);  // Direct
-        break;
-      case 1:
-        apply_quick_route(item, 1);  // Proxy
-        break;
-      case 2:
-        apply_quick_route(item, 2);  // Reject
-        break;
-      case 3:
-        if (on_close_one) on_close_one(item.id);
-        break;
-      case 4:
-        copy_address_to_clipboard(item.host_formatted());
-        break;
-      case 5:
+  context_menu_->on_select = [this, item, row_global, has_restore](int idx) {
+    if (idx == 0) {
+      apply_quick_route(item, 0);
+    } else if (idx == 1) {
+      apply_quick_route(item, 1);
+    } else if (idx == 2) {
+      apply_quick_route(item, 2);
+    } else if (idx == 3) {
+      apply_disconnect_item(item);
+    } else if (has_restore && idx == 4) {
+      apply_restore_default(item);
+    } else {
+      const int copy_idx = has_restore ? 5 : 4;
+      const int detail_idx = has_restore ? 6 : 5;
+      if (idx == copy_idx) {
+        std::string addr = row_host_display(item);
+        if (addr == "--") addr.clear();
+        if (!addr.empty()) copy_address_to_clipboard(addr);
+      } else if (idx == detail_idx) {
         detail_dialog_->open(item, tab_ == Tab::Closed, row_global);
-        break;
+      }
     }
   };
 }
 
-void ConnectionsPanel::apply_quick_route(const ConnItem& item, int target_code) {
-  core::quick_routing::RuleTarget target = core::quick_routing::RuleTarget::Direct;
-  if (target_code == 1) target = core::quick_routing::RuleTarget::Proxy;
-  if (target_code == 2) target = core::quick_routing::RuleTarget::Reject;
+void ConnectionsPanel::apply_disconnect_item(const ConnItem& item) {
+  if (item.is_synthetic) return;
+  auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch())
+                    .count();
+  path_store_.mark_disconnected(item, now_ms);
+  refresh_visible();
+  if (on_close_one) on_close_one(item.id);
+}
 
-  core::quick_routing::QuickRouteResult res{false, "", ""};
-  if (!item.metadata.host.empty()) {
-    res = core::quick_routing::add_quick_routing_rule(
-        core::quick_routing::RuleType::Domain, item.metadata.host, target);
-  } else if (!item.metadata.destination_ip.empty()) {
-    res = core::quick_routing::add_quick_routing_rule(
-        core::quick_routing::RuleType::Domain, item.metadata.destination_ip, target);
-  } else if (!item.metadata.process.empty()) {
-    res = core::quick_routing::add_quick_routing_rule(
-        core::quick_routing::RuleType::Process, item.metadata.process, target);
-  } else if (!item.host.empty()) {
-    res = core::quick_routing::add_quick_routing_rule(
-        core::quick_routing::RuleType::Domain, item.host, target);
+void ConnectionsPanel::apply_restore_default(const ConnItem& item) {
+  auto target = extract_connection_target(item, item.managed_rule);
+  if (item.managed_rule.has_value()) {
+    auto res = core::quick_routing::remove_quick_routing_rule(item.managed_rule->raw);
+    if (!res.ok && !res.error.empty()) {
+      events::NoticeService::instance().push("error", res.error);
+    }
   }
-  if (!res.ok && !res.error.empty()) {
+  const std::string tkey =
+      target.has_value() ? target->key : item.disconnected_key;
+  path_store_.clear_disconnected_target(tkey, item.id);
+  reload_managed_rules();
+  refresh_visible();
+}
+
+void ConnectionsPanel::apply_quick_route(const ConnItem& item, int target_code) {
+  core::quick_routing::RuleTarget rule_target = core::quick_routing::RuleTarget::Direct;
+  if (target_code == 1) rule_target = core::quick_routing::RuleTarget::Proxy;
+  if (target_code == 2) rule_target = core::quick_routing::RuleTarget::Reject;
+
+  auto target = extract_connection_target(item, item.managed_rule);
+  if (!target.has_value()) return;
+
+  std::vector<std::string> replace_raw;
+  if (item.is_synthetic && item.managed_rule.has_value()) {
+    replace_raw.push_back(item.managed_rule->raw);
+  }
+  auto res = core::quick_routing::add_quick_routing_rule(
+      target->type, target->value, rule_target, replace_raw);
+  if (res.ok) {
+    path_store_.clear_disconnected_target(target->key, item.id);
+    reload_managed_rules();
+    refresh_visible();
+
+    ConnectionTarget close_target = *target;
+    std::vector<ConnItem> snapshot_active =
+        data_ ? data_->active() : std::vector<ConnItem>{};
+    std::thread([close_target, snapshot_active = std::move(snapshot_active)] {
+      auto mc = cmd::mihomo();
+      if (!mc.is_ok()) return;
+      std::vector<std::string> match_ids;
+      auto conns = mc.value()->get_connections(1500);
+      if (conns.is_ok()) {
+        for (const auto& c : conns.value().connections) {
+          ConnItem probe;
+          probe.id = c.id;
+          probe.metadata.host = c.metadata.host;
+          probe.metadata.destination_ip = c.metadata.destination_ip;
+          probe.metadata.remote_destination = c.metadata.remote_destination;
+          probe.metadata.process = c.metadata.process;
+          if (matches_connection_target(probe, close_target) &&
+              !c.id.empty() && c.id.rfind("synthetic:", 0) != 0) {
+            match_ids.push_back(c.id);
+          }
+        }
+      } else {
+        for (const auto& c : snapshot_active) {
+          if (matches_connection_target(c, close_target) &&
+              !c.id.empty() && c.id.rfind("synthetic:", 0) != 0) {
+            match_ids.push_back(c.id);
+          }
+        }
+      }
+      for (const auto& id : match_ids) {
+        (void)mc.value()->close_connection(id, 1500);
+      }
+    }).detach();
+  } else if (!res.error.empty()) {
     events::NoticeService::instance().push("error", res.error);
   }
 }
@@ -524,9 +678,9 @@ void ConnectionsPanel::on_arrange(const RectF& area) {
     btn_clear_history_->set_visible(false);
   }
 
-  // 3. 表头行 (高 20px, y = 48px): Host (flex 1) + Chains (64px)
-  header_host_rect_ = {0, 48.0f, area.w - 64.0f, 20.0f};
-  header_chains_rect_ = {area.w - 64.0f, 48.0f, 64.0f, 20.0f};
+  // 3. 表头行 (高 20px, y = 48px): Host (flex 1) + Chains (74px, src: connection-table.tsx:192-194)
+  header_host_rect_ = {0, 48.0f, area.w - 74.0f, 20.0f};
+  header_chains_rect_ = {area.w - 74.0f, 48.0f, 74.0f, 20.0f};
 
   // 4. 虚拟列表 (y = 68px, 高 area.h - 68px)
   float list_h = area.h - 68.0f;
@@ -610,7 +764,7 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
     draw_glow(rt, pill, sp.active_radius, sp.active_glow_color, sp.active_glow_blur);
   }
 
-  size_t act_num = data_ ? data_->active().size() : 0;
+  size_t act_num = data_ ? active_composed_count_ : 0;
   size_t cls_num = data_ ? data_->closed().size() : 0;
 
   std::wstring act_text = tr("settings.mini.connectionsActive") + L" (" +
@@ -651,12 +805,13 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   th_host_ts.weight = static_cast<int>(Weight::Bold);
   th_host_ts.color = pal.secondary_text;
   th_host_ts.align_v = AlignV::Center;
-  rt.draw_text(host_title, {16.0f, 48.0f, bounds().w - 64.0f - 20.0f, 20.0f}, th_host_ts);
+  // src: connection-table.tsx:192-194 Chains 宽 74px
+  rt.draw_text(host_title, {16.0f, 48.0f, bounds().w - 74.0f - 20.0f, 20.0f}, th_host_ts);
 
   // 表头垂直分割线
-  rt.fill_rect({bounds().w - 64.0f, 48.0f, 1.0f, 20.0f}, Brush{vars.divider_color});
+  rt.fill_rect({bounds().w - 74.0f, 48.0f, 1.0f, 20.0f}, Brush{vars.divider_color});
 
-  // Chains 表头 (固定 64px 居中)
+  // Chains 表头 (固定 74px 居中)
   std::wstring chains_title = tr("connections.components.miniTable.chainsColumn");
   if (sort_col_ == SortCol::Chains) {
     if (sort_dir_ == SortDir::Asc) chains_title += L" ▲";
@@ -668,7 +823,8 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   th_chains_ts.color = pal.secondary_text;
   th_chains_ts.align_h = AlignH::Center;
   th_chains_ts.align_v = AlignV::Center;
-  rt.draw_text(chains_title, {bounds().w - 64.0f, 48.0f, 64.0f, 20.0f}, th_chains_ts);
+  // src: connection-table.tsx:192-194
+  rt.draw_text(chains_title, {bounds().w - 74.0f, 48.0f, 74.0f, 20.0f}, th_chains_ts);
 
   // 空态：src: locales/zh/shared.json:52 「"empty": "空空如也"」（base-empty.tsx:16 textKey）
   if (false && visible_items_.empty()) {
@@ -719,11 +875,8 @@ std::wstring ConnTableOverlay::a11y_default_name() const {
 }
 
 std::wstring ConnPanelRowWidget::a11y_default_name() const {
-  std::string cat = item_.chains_category();
-  std::wstring cat_text = tr("connections.components.miniTable.chainsProxy");
-  if (cat == "Direct") cat_text = tr("connections.components.miniTable.chainsDirect");
-  else if (cat == "Reject") cat_text = tr("connections.components.miniTable.chainsReject");
-  return utf::utf8_to_utf16(item_.host_formatted()) + L" - " + cat_text;
+  return utf::utf8_to_utf16(row_host_display(item_)) + L" - " +
+         status_label_for(item_.control_status);
 }
 
 std::wstring ConnectionsPanel::a11y_default_name() const {
@@ -733,7 +886,7 @@ std::wstring ConnectionsPanel::a11y_default_name() const {
 A11ySubItem ConnectionsPanel::a11y_virtual_child(size_t idx) const {
   A11ySubItem sub;
   sub.can_invoke = enabled();
-  size_t act_num = data_ ? data_->active().size() : 0;
+  size_t act_num = data_ ? active_composed_count_ : 0;
   size_t cls_num = data_ ? data_->closed().size() : 0;
   if (idx == 0) {
     sub.role = A11yRole::TabItem;

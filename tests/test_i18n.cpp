@@ -130,3 +130,27 @@ UT_TEST(i18n_hot_switch_and_listener) {
   UT_CHECK(!i.set_language("klingon"));
   UT_CHECK_EQ(i.language(), "zh");
 }
+
+UT_TEST(i18n_v330_antivirus_sniffer_and_path_control_13_locales) {
+  auto& i = I18n::instance();
+  UT_CHECK(i.init(exe_locales_dir(), "zh"));
+  const std::vector<std::string> keys = {
+      "layout.components.antivirus.menuLabel",
+      "layout.components.antivirus.title",
+      "settings.mini.tunSniffer",
+      "settings.mini.tunSnifferAuto",
+      "settings.mini.tunSnifferOn",
+      "settings.mini.tunSnifferOff",
+      "connections.components.contextMenu.restoreDefault",
+      "connections.components.miniTable.chainsDisconnected",
+  };
+  for (const auto& lang : I18n::supported_languages()) {
+    UT_CHECK(i.set_language(lang));
+    for (const auto& key : keys) {
+      const std::string val = i.t(key);
+      UT_CHECK_MSG(!val.empty() && val != key,
+                   ("Missing/untranslated key " + key + " in locale " + lang).c_str());
+    }
+  }
+  UT_CHECK(i.set_language("zh"));
+}

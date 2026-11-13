@@ -363,7 +363,7 @@ UT_TEST(t08_golden_fixture) {
   UT_CHECK(diffs.empty());  // 回退判定：enhance 输出必须与 golden 夹具逐行一致
 
   // 关键结构逐条断言（与 T08 验收的实机产物形态一致）
-  UT_CHECK_EQ(out.config["rules"].size(), size_t(27));
+  UT_CHECK_EQ(out.config["rules"].size(), size_t(26));
   UT_CHECK_EQ(out.config["proxy-groups"][0]["proxies"].size(), size_t(21));
   UT_CHECK(out.config["proxy-groups"][0]["name"].Scalar() == "PROXY");
   UT_CHECK(out.config["proxy-groups"][1]["name"].Scalar() == "PROXY__METRICS");

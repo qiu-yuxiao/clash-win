@@ -111,9 +111,11 @@ constexpr NoticeRule kRules[] = {
     {"reinstall_service::error", "error", nullptr, nullptr, 0},
     // ← core/manager/lifecycle.rs:237 Handle::notice_message("warning", ...)
     {"warning", "warning", nullptr, nullptr, 0},
-    // BUG-342: 快速路由规则置顶生效提示（← src/utils/quick-routing.ts:106）
+    // BUG-342: 快速路由规则置顶生效提示（← src/utils/quick-routing.ts:382 / :432）
     {"quick_rule_added", "success",
-     "profiles.page.feedback.notifications.quickRuleAdded", "rule", 2500},  // src: src/utils/quick-routing.ts:106
+     "profiles.page.feedback.notifications.quickRuleAdded", "rule", 2500},  // src: src/utils/quick-routing.ts:382
+    {"quick_rule_removed", "success",
+     "profiles.page.feedback.notifications.quickRuleRemoved", "rule", 2500},  // src: src/utils/quick-routing.ts:432
     // src: src/utils/quick-routing.ts:106 兼容历史 status 串
     {"profile_switched", "success",
      "profiles.page.feedback.notifications.quickRuleAdded", "rule", 2500},  // src: src/utils/quick-routing.ts:106

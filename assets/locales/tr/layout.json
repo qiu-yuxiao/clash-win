@@ -28,6 +28,24 @@
       "openGithubStar": "Bağlantıyı Test Et ve ⭐ Star Ver",
       "retestNodes": "Yeniden Test Et ve En İyi Düğümü Seç"
     },
+    "antivirus": {
+      "menuLabel": "Antivirüs beyaz listesi rehberi",
+      "title": "Antivirüs yazılımları ile Clash Win uyumu",
+      "whyTitle": "Antivirüsler Clash Win'yi neden kaldırıyor?",
+      "why": "Clash Win bir «süreç bekçisi» içerir: proxy çekirdeği beklenmedik biçimde kapanırsa, ağ kopmasın diye onu otomatik olarak yeniden başlatır. Tam da bu «arka plan süreçlerini otomatik oluşturma» davranışı, 360 gibi güvenlik yazılımlarının yakından izlediği bir örüntüdür; şüpheli olarak yanlış tanınabilir ve «temizleme/hızlandırma» sırasında tepsi simgesi veya arka plan süreci de kapatılabilir. Bu bir yanlış alarmdır — Clash Win açık kaynaklıdır, tüm kodu denetlenebilir ve gizli bir davranışı yoktur.",
+      "benefitTitle": "Güven listesine eklemenin faydası nedir?",
+      "benefit": "Clash Win'yi 360'ın «Güven Bölgesi / beyaz listesine» ekledikten sonra:/n· Tepsi simgesi kararlı biçimde kalır, hafif modda bile;\n· Çekirdek çökme sonrası otomatik yeniden başlar — kurtarma daha güvenilir olur;\n· Clash Win'yi hedefleyen engelleme veya «temizlendi» bildirimleri bir daha görünmez.",
+      "optionalTitle": "Beyaz listeye eklememek mümkün mü?",
+      "optional": "Elbette, bu tamamen sizin kararınız:/n· 360 kullanmıyorsanız (veya antivirüsünüz Clash Win'yi engellemiyorsa) yapmanız gereken bir şey yok;\n· 360 kurulu olsa bile beyaz liste olmadan proxy'nin temel işlevi etkilenmez: siz Clash Win'yi kendiniz açtığınız sürece normal çalışır.",
+      "consequenceTitle": "Beyaz liste olmadan ne olur?",
+      "consequence": "360 kullanıp Clash Win'yi güven bölgesine eklemezseniz şunlar olabilir:/n· 360'un «temizleme» işleminden sonra tepsi simgesinin kaybolması (hafif modda en belirgin);\n· Çekirdek çökmesinden sonra otomatik yeniden başlatma olmaması — Clash Win'yi elle yeniden açmanız gerekir.\nBunların hepsi 360'un engellemesinden kaynaklanır; Clash Win'yi yeniden açmak her şeyi geri getirir. Programın kendisi bozulmaz.",
+      "howTitle": "Clash Win, 360 Güven Bölgesi'ne nasıl eklenir?",
+      "how": "360 Safety Guard'ı açın → «Truva Atı Güvenlik Duvarı / Güven ve Koruma» → «Güven Bölgesi» → Clash Win kurulum klasöründeki clashwin.exe dosyasını ekleyin (varsayılan: C:\\Program Files\\ClashWin\\). Bölüm adları 360 sürümlerine göre az farklıdır; ayarlarında «Güven Bölgesi» veya «beyaz liste» aratın.",
+      "briefTitle": "360 veya başka bir antivirüs mü kullanıyorsunuz?",
+      "brief": "«Temizleme» özelliği Clash Win'nin tepsi simgesini kaldırabilir (hafif modda en belirgin). Güven listesine eklemek bunu tamamen önler; eklemeseniz de proxy normal çalışır — simge yalnızca arada kaybolur, yeniden açmak yeter.",
+      "briefOpen": "Tam açıklamayı gör",
+      "close": "Anladım"
+    },
     "helpMenu": {
       "github": "GitHub üzerinde ⭐ Star Ver",
       "wiki": "Yardım Rehberi (Wiki)",

@@ -137,6 +137,7 @@ IVerge iverge_from_json(const Json& j) {
   take(j, "menu_icon", v.menu_icon);
   take(j, "collapse_navbar", v.collapse_navbar);
   take(j, "enable_tun_mode", v.enable_tun_mode);
+  take(j, "enable_tun_sniffer", v.enable_tun_sniffer);
   take(j, "enable_auto_launch", v.enable_auto_launch);
   take(j, "enable_silent_start", v.enable_silent_start);
   take(j, "enable_system_proxy", v.enable_system_proxy);
@@ -548,6 +549,26 @@ Result<void> open_url_checked(const std::string& url) {
 // ---------- 注册表自启状态 ----------
 Result<bool> get_auto_launch_status_impl() {
   return core::AutostartManager::instance().get_launch_status();
+}
+
+core::validate::ValidationOutcome enhance_profiles_live() {
+  auto outcome = run_enhance_pipeline();
+  if (outcome.is_valid()) {
+    if (is_core_running()) {
+      auto& mgr = core::CoreManager::instance();
+      core::CoreApiClientAdapter api(&mihomo_unchecked());
+      core::CoreOps ops;
+      ops.start = [] { return Result<void>::err(Error{0, "restart not wired"}); };
+      ops.stop = [] { return Result<void>::err(Error{0, "restart not wired"}); };
+      auto r = mgr.apply_config(
+          api, utf::utf16_to_utf8(util::dirs::clash_mini_path()), ops);
+      if (r.is_err()) {
+        CWLOG_WARN("enhance_profiles_live apply_config failed: " + r.error().message);
+      }
+    }
+    events::EventBus::refresh_clash();
+  }
+  return outcome;
 }
 
 }  // namespace clashwin::cmd
