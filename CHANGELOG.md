@@ -2,11 +2,28 @@
 
 All notable changes to **Clash Win** are documented here.
 
-Version format follows the project's **own** line starting at `0.1.0` (constitution §5.3): Clash Win versions increment independently and are **not** bound to Clash Mini's `3.x` numbering (`v3.2.2` was the initial port reference anchor, with subsequent releases continuously synced through `v3.2.6`).
+Version format follows the project's **own** line starting at `0.1.0` (constitution §5.3): Clash Win versions increment independently and are **not** bound to Clash Mini's `3.x` numbering (`v3.2.2` was the initial port reference anchor, with subsequent releases continuously synced through `v3.3.0`).
 
 Format reference: `Changelog.md` in the Clash Mini repository (newest first, `## vX.Y.Z` headings with grouped change bullets). Content here is Clash Win's own history, not a copy of Mini's entries.
 
 ---
+
+## v0.3.3 (2026-11-14)
+
+### Guardian & Diagnostics Convergence
+- **Minimal Guardian Isolation Architecture**: Converged cross-tree isolation to `CREATE_BREAKAWAY_FROM_JOB` without same-job fallback, preventing silent failure masking and enforcing fail-closed behavior across guarded launches.
+- **Two-Phase Exit Proof & Boot/Epoch Respawn Budget**: Added prepared/confirmed `intentional_exit.json` verification, `respawn_state.json` fail-closed persistence under boot fingerprint and session epoch checks, and main-process guardian supervision with exponential rebuild backoff (1.5s–30s).
+- **Safe File Replacement**: Fixed Windows handle retention in `evaluate_and_record_respawn_in` so `MoveFileExW` atomic updates succeed reliably on active state files.
+- **Antivirus & Crash Observability**: Added 360/security-software process detection, whitelist heuristic signals, and Windows Error Reporting (WER) crash record collection to diagnostic bundles.
+
+### Antivirus Whitelist User Guide
+- **Integrated Whitelist Guide (`docs/antivirus-whitelist.md`)**: Added an entry in the Help menu, a dedicated first-run guide card, and a five-section transparent dialog explaining why antivirus cleaners may misclassify process-guardian respawns, how to whitelist `clashwin.exe`, and how recovery works, synced across all 13 locales.
+
+### DNS, TUN Sniffer & Routing Hardening
+- **3-State TUN Domain Sniffer (`Auto` / `On` / `Off`)**: Added `enable_tun_sniffer` setting and segmented control in Settings, routing config generation through the single `use_tun_with_sniffer` pipeline with 24 skip-dst exclusions.
+- **Unified `sanitize_dns_upstreams` & `respect-rules` Safety**: Unified DNS upstream sanitization across `nameserver`, `fallback`, and `nameserver-policy` (stripping `#DIRECT`/`#PROXY` pseudo-fragments while preserving native `#h3=true`), rewriting unreachable foreign upstreams in-place rather than pruning keys, and removing fallback `IP-CIDR6,::/0,PROXY` leakage in GFWList mode.
+- **Exact Quick-Routing & 4-State Path Control**: Switched quick-routing actions and URL rule creation to exact `DOMAIN` / `IP-CIDR` / `IP-CIDR6` / `PROCESS-NAME` rules, added managed rule tracking, in-table `Disconnected` (`ChainsDisconnected`) state retention, and in-place `RestoreDefault` across all 13 locales.
+- **Monitor Freshness Tuning**: Adjusted `CoreMonitor::kHealthDataFreshSecs` back to 60s to prevent excessive background latency probes.
 
 ## v0.3.2 (2026-11-13)
 
