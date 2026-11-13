@@ -1,12 +1,12 @@
 {
-  "version": "0.3.1",
-  "notes": "### 轻量模式与后台托盘防第三方清理软件误杀四重加固（BUG-363）\n- **伴生看门狗二进制异名异目录物理隔离（`clashwin-guard.exe`）**：针对 360 安全卫士加速球等清理工具在匹配主进程清理规则时会按映像名或安装目录将同名看门狗一并加入同批次强杀列表（导致看门狗与主进程在 `0ms` 内被同时 `TerminateProcess(99)` 连坐秒杀）的问题，启动看门狗前将程序自动同步至独立的 `%LOCALAPPDATA%\\io.github.clash-win.clash-win\\guard\\clashwin-guard.exe`（通过 `.staging` 原子替换并在主槽位锁定时自动回退至 `clashwin-guard-alt.exe`），并通过 `--target-exe` 显式指向主程序路径——使伴生看门狗在进程名与磁盘目录两个维度与主进程彻底解耦。\n- **主进程与伴生看门狗双向互锁监督与退避重建**：改变看门狗单次发射后不复检的模型，主进程新增后台监督线程（`WaitForMultipleObjects` 同时等待伴生进程句柄与主动退出事件，日常 `0% CPU`）；正常退出时毫秒级唤醒收尾，若看门狗在运行期被外部误杀则按 `1.5s -> 2s -> 5s -> 15s -> 30s` 阶梯退避自动重新同步并拉起伴生进程，形成「看门狗守主进程 + 主进程守看门狗」的双向自愈闭环。\n- **主屏工作区 `1×1` 极微透明（`alpha=1`）鼠标穿透哨兵窗与消息泵保活**：升级防清理哨兵窗口对 `create_sentinel_window_pair`——将 `1×1` `WS_POPUP | WS_VISIBLE` 哨兵窗置于主显示器工作区左上角（`SPI_GETWORKAREA`，确保 `MonitorFromWindow != NULL`）、赋予非空窗口标题、将分层透明度由 `alpha=0` 提升至肉眼完全不可见的 `alpha=1`（`1/255`，规避针对屏幕外坐标与全透明 `alpha=0` 假窗口的启发式剔除），同时在窗口过程中对 `WM_NCHITTEST` 恒定返回 `HTTRANSPARENT` 确保绝对不拦截任何鼠标点击；伴生看门狗同样挂载独立哨兵窗并改用 `MsgWaitForMultipleObjects(..., QS_ALLINPUT)` 泵送窗口消息，确保 `IsHungAppWindow` 恒为 `FALSE`。\n- **稳态运行计数复位延长与安装/卸载/双端互斥全链路清理**：将看门狗判定主进程稳定运行以重置自愈代数（`generation`）的阈值从 `60s` 上调至 `120s`；主窗口无论是否开启自动轻量模式，在隐藏至托盘时均同步置位轻量模式守护信令、唤醒显示时复位；并在 NSIS 安装、升级、卸载脚本及双端互斥接管流程中补齐隔离看门狗进程与缓存目录的自动清理。",
-  "pub_date": "2026-11-12T19:50:23Z",
+  "version": "0.3.2",
+  "notes": "与 Clash Mini v3.2.8（`BUG-364`）1:1 语义同步：\n\n### 修复与加固\n\n- **TUN 模式默认注入并补全 `sniffer` 域名嗅探**：\n  - `enhance::use_tun(cfg, true)` 强制开启 `sniffer.enable: true` 并按缺补全 `force-dns-mapping: true`、`parse-pure-ip: true`、`override-destination: true`、`sniff`（`HTTP` `80, 8080-8880`；`TLS`/`QUIC` `443, 8443`）以及 `skip-domain`（`Mijia Cloud`、`+.push.apple.com`）与私网/回环/CGNAT/ULA/链路本地 `skip-dst-address` 免误伤列表；\n  - 根治常驻后台浏览器（如 Edge）在模式切换或路由器 IPv6 RA DNS 下持有真实/GFW 投毒裸 IP 绕过 Fake-IP、因无 `Host` 落入 `MATCH,DIRECT` 导致 TUN 无法代理出境的问题。\n- **新增 `dns.nameserver-policy` 卫生清理通道**：\n  - `enhance_core` 流水线尾部新增 `sanitize_nameserver_policy`：未开启 `respect-rules`（或条目显式标注 `#DIRECT`）时剔除海外被墙公共 DNS 上游（如 `https://dns.cloudflare.com/dns-query`、`8.8.8.8` 等）并清除空键/空映射，防止 `SERVFAIL`；保留国内/内网/`system` 策略；\n  - 开启 `respect-rules: true` 时复用 `BUG-308` 原则将 4 家境外公共 DNS 明文 UDP 改写为 DoH 并自动在 `GEOIP,CN` / `MATCH` 前补齐 `PROXY` 规则。\n- **单测与 Golden 基线同步**：新增 6 项 TUN 嗅探与 `nameserver-policy` 卫生回归单测，并同步更新 `expected_clash_win.yaml` golden 夹具基线。",
+  "pub_date": "2026-11-13T04:00:37Z",
   "platforms": {
     "windows-x86_64": {
-      "url": "https://github.com/qiu-yuxiao/clash-win/releases/download/v0.3.1/ClashWin_0.3.1_x64-setup.exe",
-      "sha256": "e8cf6a145673a4833be1be83fbca45f94c978f5538bb5469ae95e0907807e948",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIG1pbmlzaWduIHNlY3JldCBrZXkKUlVTdHVzTXdmNGo2dmpsRlRRZ3dzSnFyVmxEZUxLRXdTUjE5ZjdHV2l2cXpVY0MxbmNoVlZDVGIxd1FtaUNqb2w0bkxXdEsxNUxTd2JlMGJ2ZytUQlRmT0VSWTdmZ0NoVXdzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NTEzMDIzCWZpbGU6Q2xhc2hXaW5fMC4zLjFfeDY0LXNldHVwLmV4ZQloYXNoZWQKd0h4MkhrUHdQdDNnT3pPdC93bXRGL2J6RXNRZW93bnpNUFpSS0JWMVRvdTlJOWlEZUNyVW9ZaGdnTUdUaGczSmp2QUwvR01OVllWYnRlUWdPWTdWQXc9PQ=="
+      "url": "https://github.com/qiu-yuxiao/clash-win/releases/download/v0.3.2/ClashWin_0.3.2_x64-setup.exe",
+      "sha256": "0f1e57c87c3f3f84fe3d290547bc41f9b400b5de2d6a62607d9b6cd2b4e91be3",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIG1pbmlzaWduIHNlY3JldCBrZXkKUlVTdHVzTXdmNGo2dm5TVHV0Rm9RNUFDSTVIQjhLSGM2d2JWWFpNMmJvcWRWb2tOeUNRWE9yYXMyWm5XbnZNUVd2UDZiMHpSbndWSndyZlJZc0FOelE5dmdLN3NUK0U1R3dRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NTQyNDM3CWZpbGU6Q2xhc2hXaW5fMC4zLjJfeDY0LXNldHVwLmV4ZQloYXNoZWQKN3VYTGtwMlkxb3cwM2JmM1lFM1Jnc1BtaE0rZ2ZKdTI1S1RwMWs5dDExYmdwVTcxWXNwSWh1Y3d1c3djUHFsZmVRWVViMUNxU3Z3NThIakU5aHAxQ1E9PQ=="
     }
   }
 }
