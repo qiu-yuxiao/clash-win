@@ -4,6 +4,7 @@
 #include "cmd/cmd_support.h"
 #include "clashwin/config/constants.h"
 #include "core/delay_manager.h"
+#include "core/monitor.h"
 #include "util/node.h"
 #include "cmd/command_service.h"
 #include "config/config.h"
@@ -187,6 +188,7 @@ void install_cmd_clash(CommandService& svc) {
          ops.stop = [] { return core::CoreManager::instance().stop(); };
          auto r = mgr.restart_with_restore(api, ops);
          if (r.is_err()) return CmdResult::err(r.error());
+         core::CoreMonitor::instance().kick();
          events::EventBus::refresh_clash();
          return CmdResult::ok(Json::object());
        },

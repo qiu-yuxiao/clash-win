@@ -8,6 +8,7 @@
 #include "clashwin/config/constants.h"
 #include "config/config.h"
 #include "config/proxy_head_state.h"
+#include "core/monitor.h"
 #include "core/service_mode.h"
 #include "clashwin/core/core_updater.h"
 #include "events/event_bus.h"
@@ -17,6 +18,7 @@
 #include "util/dirs.h"
 #include "util/log.h"
 #include "util/node.h"
+#include "util/str_utils.h"
 #include "util/utf.h"
 #include "yaml-cpp/yaml.h"
 
@@ -401,23 +403,49 @@ std::string read_filter_text_lower() {
   }
 }
 
-std::string pick_fallback_node(const std::vector<std::string>& all, const std::string& filter_lower) {
-  auto non_dummy = [](const std::string& n) { return !clashwin::util::is_dummy_node(n); };
+std::string pick_subset_fallback_node(
+    const std::vector<std::string>& all, const std::string& filter_text,
+    const std::function<bool(const std::string&)>& is_valid,
+    const std::function<bool(const std::string&)>& is_verified) {
+  const std::string trimmed = util::trim(filter_text);
+  auto check_valid = [&](const std::string& n) {
+    return !n.empty() && (is_valid ? is_valid(n)
+                                   : (!util::is_dummy_node(n) &&
+                                      !util::is_confirmed_fake_node(n)));
+  };
+  auto check_verified = [&](const std::string& n) {
+    return is_verified ? is_verified(n) : util::is_verified_true_node(n);
+  };
   for (const auto& n : all) {
-    if (!non_dummy(n)) continue;
-    if (filter_lower.empty() ||
-        n.size() >= filter_lower.size()) {  // contains 语义（ASCII lower 对比）
-      std::string low = n;
-      std::transform(low.begin(), low.end(), low.begin(), [](unsigned char c) {
-        return static_cast<char>(::tolower(c));
-      });
-      if (filter_lower.empty() || low.find(filter_lower) != std::string::npos) return n;
+    if (check_valid(n) && check_verified(n) &&
+        util::match_node_filter(n, trimmed)) {
+      return n;
     }
   }
   for (const auto& n : all) {
-    if (non_dummy(n)) return n;
+    if (check_valid(n) && util::match_node_filter(n, trimmed)) {
+      return n;
+    }
+  }
+  if (trimmed.empty()) {
+    for (const auto& n : all) {
+      if (check_valid(n)) return n;
+    }
   }
   return {};
+}
+
+std::string pick_fallback_node(const std::vector<std::string>& all,
+                               const std::string& filter_lower) {
+  return pick_subset_fallback_node(
+      all, filter_lower,
+      [](const std::string& n) {
+        return !clashwin::util::is_dummy_node(n) &&
+               !clashwin::util::is_confirmed_fake_node(n);
+      },
+      [](const std::string& n) {
+        return clashwin::util::is_verified_true_node(n);
+      });
 }
 
 std::string select_fallback_in_subset(ICoreApiClient& api, const std::string& filter_lower) {
@@ -985,7 +1013,7 @@ std::optional<std::string> CoreManager::read_persisted_proxy_selection(
   if (!item || !item->selected) return std::nullopt;
   for (const auto& s : *item->selected) {
     if (s.name.value_or("") == group && s.now.has_value() && !s.now->empty()) {
-      if (!util::is_dummy_node(*s.now)) {
+      if (!util::is_dummy_node(*s.now) && !util::is_confirmed_fake_node(*s.now)) {
         return *s.now;
       }
     }
@@ -1016,18 +1044,20 @@ Result<void> CoreManager::restart_with_restore(ICoreApiClient& api, const CoreOp
     }
     select_fallback_in_subset(api, read_filter_text_lower());
   }
+  CoreMonitor::instance().kick();
   return Result<void>::ok();
 }
 
 std::optional<std::string> CoreManager::snapshot_proxy_group_now(ICoreApiClient& api) {
-  // ← lifecycle.rs:284-302 + BUG-335：读取失败 / now 空 / 伪节点 → 交由持久化保底或子集恢复
+  // ← lifecycle.rs:284-302 + BUG-335：读取失败 / now 空 / 伪节点 / 已拉黑假节点 → 交由持久化保底或子集恢复
   auto group = api.get_group_by_name("PROXY");
   if (group.is_err()) {
     CWLOG_WARN("snapshot PROXY group failed (ignored, no restore): " + group.error().message);
     return std::nullopt;
   }
   const auto& now = group.value().now;
-  if (now.has_value() && !now->empty() && !util::is_dummy_node(*now)) {
+  if (now.has_value() && !now->empty() && !util::is_dummy_node(*now) &&
+      !util::is_confirmed_fake_node(*now)) {
     CWLOG_INFO("snapshot PROXY group now: " + *now);
     return *now;
   }
@@ -1065,9 +1095,10 @@ void CoreManager::restore_proxy_group_now(ICoreApiClient& api, const std::string
     std::this_thread::sleep_for(std::chrono::milliseconds(t.group_fill_poll_ms));
   }
 
-  // 3) 内置出站 / 不在组内 → 跳过注定失败的 select，直接子集兜底
-  if (is_builtin_outbound(node)) {
-    CWLOG_INFO("skip PROXY restore: " + node + " is builtin outbound, fallback to subset");
+  // 3) 内置出站 / 已拉黑假节点 / 不在组内 → 跳过注定失败的 select，直接子集兜底
+  if (is_builtin_outbound(node) || util::is_confirmed_fake_node(node)) {
+    CWLOG_INFO("skip PROXY restore: " + node +
+               " is builtin outbound or confirmed fake, fallback to subset");
     select_fallback_in_subset(api, read_filter_text_lower());
     return;
   }

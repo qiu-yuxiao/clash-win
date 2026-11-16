@@ -209,6 +209,9 @@ void ensure_t16_hooks() {
   ah.is_dummy = [](const std::string& name) {
     return clashwin::util::is_dummy_node(name);
   };
+  ah.is_confirmed_fake = [](const std::string& name) {
+    return clashwin::util::is_confirmed_fake_node(name);
+  };
   ah.select_node = [get_client](const std::string& group,
                                 const std::string& node) {
     auto* c = get_client();
@@ -347,6 +350,9 @@ void install_cmd_profile(CommandService& svc) {
          SwitchGuard guard(switching_lock());
          const Json* index = find_arg(args, {"index"});
          if (!index || !index->is_string()) return CmdResult::err({errs::kBadArgs, "index required"});
+         const Json* auto_arg = find_arg(args, {"auto_trigger", "auto"});
+         const bool is_manual_trigger =
+             !(auto_arg && auto_arg->is_boolean() && auto_arg->get<bool>());
          auto latest = config::Config::instance().profiles().latest_arc();
          const config::PrfItem* old = latest->get_item(index->get<std::string>());
          if (!old || !old->url) {
@@ -403,6 +409,9 @@ void install_cmd_profile(CommandService& svc) {
            if (r.is_ok()) item_opt = item.value();
          });
          if (!item_opt) {
+           if (is_manual_trigger && util::clear_unverified_https_failures() > 0) {
+             events::EventBus::refresh_proxies();
+           }
            const std::string detail =
                profile_name + " - " + (last_err.empty() ? "更新订阅失败（原文已保留）" : last_err);
            events::EventBus::notice_message("update_failed_even_with_clash", detail);
@@ -415,13 +424,17 @@ void install_cmd_profile(CommandService& svc) {
          if (auto save = profiles.data_arc()->save_file(); !save.is_ok()) {
            return CmdResult::err({errs::kIo, save.error().message});
          }
+         const size_t cleared_quarantine =
+             is_manual_trigger ? util::clear_unverified_https_failures() : 0;
          {
            auto outcome = update_config_forced();
            if (outcome.is_valid()) {
              events::EventBus::refresh_clash();
+             events::EventBus::refresh_proxies();
              if (item_opt->uid)
                events::EventBus::notify_profile_changed(*item_opt->uid);
            } else {
+             if (cleared_quarantine > 0) events::EventBus::refresh_proxies();
              notify_invalid(outcome);
            }
          }
@@ -439,6 +452,9 @@ void install_cmd_profile(CommandService& svc) {
          SwitchGuard guard(switching_lock());
          const Json* index = find_arg(args, {"index"});
          if (!index || !index->is_string()) return CmdResult::err({errs::kBadArgs, "index required"});
+         const Json* auto_arg = find_arg(args, {"auto_trigger", "auto"});
+         const bool is_manual_trigger =
+             !(auto_arg && auto_arg->is_boolean() && auto_arg->get<bool>());
          auto& profiles = config::Config::instance().profiles();
          // 运行时配置合并全部 remote/local 订阅节点（get_merged_proxies），
          // 删除任一 remote/local 档案都会改变产物 → 必须重建并重载内核
@@ -502,6 +518,9 @@ void install_cmd_profile(CommandService& svc) {
       {[](const Json& args) -> CmdResult {
          const Json* index = find_arg(args, {"index"});
          if (!index || !index->is_string()) return CmdResult::err({errs::kBadArgs, "index required"});
+         const Json* auto_arg = find_arg(args, {"auto_trigger", "auto"});
+         const bool is_manual_trigger =
+             !(auto_arg && auto_arg->is_boolean() && auto_arg->get<bool>());
          auto latest = config::Config::instance().profiles().latest_arc();
          const config::PrfItem* item = latest->get_item(index->get<std::string>());
          if (!item || !item->file) return CmdResult::err({errs::kBadArgs, "the file field is null"});
@@ -520,6 +539,9 @@ void install_cmd_profile(CommandService& svc) {
       {[](const Json& args) -> CmdResult {
          const Json* index = find_arg(args, {"index"});
          if (!index || !index->is_string()) return CmdResult::err({errs::kBadArgs, "index required"});
+         const Json* auto_arg = find_arg(args, {"auto_trigger", "auto"});
+         const bool is_manual_trigger =
+             !(auto_arg && auto_arg->is_boolean() && auto_arg->get<bool>());
          auto latest = config::Config::instance().profiles().latest_arc();
          const config::PrfItem* item = latest->get_item(index->get<std::string>());
          if (!item) return CmdResult::err({errs::kBadArgs, "profile not found"});
@@ -750,6 +772,8 @@ void install_cmd_profile(CommandService& svc) {
              uid->get<std::string>(), nodes, sort_type, select);
          if (outcome.busy)
            return CmdResult::err({errs::kBadArgs, "AUTO_SELECT_BUSY"});
+         if (outcome.preempted)
+           return CmdResult::err({errs::kBadArgs, "AUTO_SELECT_MANUAL_PREEMPTED"});
          Json arr = Json::array();
          for (auto& [name, delay] : outcome.display) arr.push_back({name, delay});
          return CmdResult::ok(arr);

@@ -114,8 +114,16 @@ bool is_builtin_outbound(const std::string& name);
 // state[uid]["PROXY"]["filterText"]，trim + lowercase
 std::string extract_filter_text(const nlohmann::json& state, const std::string& uid);
 
-// 纯函数（可测）：filterText 子集兜底选点（← lifecycle.rs:444-453）。
-// 优先「含 filter 子串的首个非 dummy 节点」；filter 为空或无匹配 → 首个非 dummy；全 dummy → 空。
+// 纯函数（可测，BUG-388）：filterText + 真 HTTPS 验真优先的子集兜底选点（← lifecycle.rs:515-540）。
+// 按优先级：1) valid && verified && match_node_filter；2) valid && match_node_filter；
+// 3) 仅当 filter_text trim 后为空时回退首个 valid 节点，非空过滤绝不越界切出范围。
+std::string pick_subset_fallback_node(
+    const std::vector<std::string>& all,
+    const std::string& filter_text,
+    const std::function<bool(const std::string&)>& is_valid,
+    const std::function<bool(const std::string&)>& is_verified);
+
+// 兼容便捷入口（委托 pick_subset_fallback_node，builtin is_dummy/is_confirmed_fake + is_verified_true）
 std::string pick_fallback_node(const std::vector<std::string>& all, const std::string& filter_lower);
 
 // 子集兜底选点并 select（← lifecycle.rs select_fallback_in_subset）；

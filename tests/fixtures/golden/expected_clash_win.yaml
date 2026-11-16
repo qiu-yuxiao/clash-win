@@ -497,6 +497,7 @@ proxy-groups:
   - 中转线路1-马来西亚01 (010459)
   url: https://cp.cloudflare.com/generate_204
   interval: 300
+  lazy: false
 rule-providers:
   gfwlist:
     type: http

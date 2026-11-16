@@ -35,6 +35,8 @@ struct AutoSelectHooks {
   std::function<std::string()> filter_text;
   // dummy 节点判定（← util/node is_dummy_node）
   std::function<bool(const std::string& name)> is_dummy;
+  // 已确认假节点/拓扑连坐判定（← util/node is_confirmed_fake_node）
+  std::function<bool(const std::string& name)> is_confirmed_fake;
   // 切换节点（PUT /proxies/PROXY）
   std::function<bool(const std::string& group, const std::string& node)>
       select_node;
@@ -70,7 +72,8 @@ class AutoSelect {
   struct Outcome {
     std::vector<std::pair<std::string, uint32_t>> display;
     bool selected = false;
-    bool busy = false;  // AUTO_SELECT_RUNNING 占用（返回繁忙）
+    bool busy = false;       // AUTO_SELECT_RUNNING 占用（返回繁忙）
+    bool preempted = false;  // BUG-388: 测速期间被手动切节点抢占
     std::string selected_node;
     DelayResultSource source = DelayResultSource::NotExecuted;
   };

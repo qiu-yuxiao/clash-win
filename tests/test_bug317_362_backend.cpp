@@ -1191,6 +1191,12 @@ UT_TEST(bug336_353_359_362_manual_switch_supervisor_health_and_prf_merge) {
   // (C) BUG-359: 网络健康状态去重广播序列（offline -> offline 去重 -> all_dead -> ok -> ok 去重）
   {
     ms.m.reset_state();
+    // 先在 t=60000 以在线健康态运行 1 轮建立活跃节点基线，随后跨过 20s 切换宽限期再断网
+    online = true;
+    node_ok = true;
+    clock = 60000;
+    ms.m.tick_once();
+
     std::vector<std::pair<std::string, std::string>> notices;
     uint64_t sub = events::EventBus::instance().subscribe(
         events::names::kNoticeMessage, [&](const nlohmann::json& p) {
@@ -1201,20 +1207,27 @@ UT_TEST(bug336_353_359_362_manual_switch_supervisor_health_and_prf_merge) {
         });
 
     online = false;
+    clock = 85000;
     ms.m.tick_once();
     ms.m.tick_once();  // 连续离线去重
     UT_CHECK_EQ(notices.size(), 1u);
     UT_CHECK_EQ(notices[0].first, "warning");
     UT_CHECK_EQ(notices[0].second, "network_health::offline");
 
-    // 恢复在线触发 heal 失败 -> network_health::all_dead
+    // 恢复在线 → 遵循 v3.5.0 S3 NetworkRecovered=Wait：第 1 次仅发 ok 并累计第 1 次失败，
+    // 连续第 2 次判死才进入 heal 失败 → network_health::all_dead
     online = true;
     node_ok = false;
     clock = 100000;
     ms.m.tick_once();
     UT_CHECK_EQ(notices.size(), 2u);
-    UT_CHECK_EQ(notices[1].first, "warning");
-    UT_CHECK_EQ(notices[1].second, "network_health::all_dead");
+    UT_CHECK_EQ(notices[1].first, "info");
+    UT_CHECK_EQ(notices[1].second, "network_health::ok");
+    UT_CHECK_EQ(ms.m.node_fail_count(), 1);
+    ms.m.tick_once();
+    UT_CHECK_EQ(notices.size(), 3u);
+    UT_CHECK_EQ(notices[2].first, "warning");
+    UT_CHECK_EQ(notices[2].second, "network_health::all_dead");
 
     // 节点恢复健康 -> network_health::ok（连续健康去重）
     node_ok = true;
@@ -1222,9 +1235,9 @@ UT_TEST(bug336_353_359_362_manual_switch_supervisor_health_and_prf_merge) {
     ms.m.tick_once();
     ms.m.tick_once();
     events::EventBus::instance().unsubscribe(sub);
-    UT_CHECK_EQ(notices.size(), 3u);
-    UT_CHECK_EQ(notices[2].first, "info");
-    UT_CHECK_EQ(notices[2].second, "network_health::ok");
+    UT_CHECK_EQ(notices.size(), 4u);
+    UT_CHECK_EQ(notices[3].first, "info");
+    UT_CHECK_EQ(notices[3].second, "network_health::ok");
   }
 
   // (D) BUG-362: PrfOption::merge_opt 全量保留全部 12 个字段（含关联子项与代理拉取配置）

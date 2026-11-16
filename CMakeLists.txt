@@ -34,7 +34,7 @@ target_include_directories(clashwin_util PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(clashwin_util PUBLIC yaml-cpp nlohmann_json shell32 ws2_32)
+target_link_libraries(clashwin_util PUBLIC yaml-cpp nlohmann_json shell32 ws2_32 bcrypt)
 
 # config 配置体系（T03：持久化层 + serde 兼容序列化 + Draft + 迁移；
 # T06 扩展：from_url 订阅下载 + from_url_direct 直连导入 + SSRF 校验）
@@ -359,6 +359,7 @@ add_executable(clashwin_test
   tests/test_coexist.cpp
   tests/test_bug317_362_backend.cpp
   tests/test_bug317_362_ui.cpp
+  tests/test_v350_backend_parity.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_app clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32 bcrypt)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)

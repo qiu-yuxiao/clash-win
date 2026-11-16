@@ -9,6 +9,7 @@
 #include "cmd/cmd_support.h"
 #include "config/config.h"
 #include "config/prfitem.h"
+#include "config/proxy_head_state.h"
 #include "config/verge.h"
 #include "core/auto_select.h"
 #include "core/autostart.h"
@@ -250,7 +251,7 @@ bool App::init() {
     });
     timer.set_update_fn([](const std::string& uid) {
       auto r = cmd::CommandService::instance().invoke(
-          "update_profile", {{"index", uid}});
+          "update_profile", {{"index", uid}, {"auto_trigger", true}});
       return r.is_ok();
     });
     timer.set_event_emitter([](const std::string& uid, bool is_start) {
@@ -381,7 +382,117 @@ bool App::init() {
         return core::CoreMonitor::is_physical_network_online(2, test_url);
       });
     };
-    mh.node_healthy = []() -> bool {
+    struct MonitorRuntimeState {
+      std::mutex probe_mu;
+      std::optional<core::CoreMonitor::ActiveTrafficTracker> traffic_tracker;
+      std::optional<core::CoreMonitor::UiActiveSyncState> ui_sync;
+      core::CoreMonitor::ActiveTrafficState last_traffic =
+          core::CoreMonitor::ActiveTrafficState::Idle;
+      int64_t last_active_verify_ms = -1;
+      int64_t last_https_all_failed_ms = -1;
+    };
+    auto mstate = std::make_shared<MonitorRuntimeState>();
+
+    auto parse_proxy_delay_age = [](const mihomo::ProxyItem& p)
+        -> std::pair<std::optional<uint32_t>, std::optional<uint64_t>> {
+      if (p.history.empty()) return {std::nullopt, std::nullopt};
+      const uint32_t delay = p.history.back().delay;
+      const std::string& t = p.history.back().time;
+      std::optional<uint64_t> age;
+      if (t.size() >= 19) {
+        std::tm tm{};
+        std::istringstream iss(t.substr(0, 19));
+        iss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
+        if (!iss.fail()) {
+          const int64_t rec_sec = static_cast<int64_t>(_mkgmtime(&tm));
+          const int64_t now_sec = static_cast<int64_t>(std::time(nullptr));
+          age = static_cast<uint64_t>(now_sec > rec_sec ? (now_sec - rec_sec) : 0);
+        }
+      }
+      return {delay, age};
+    };
+
+    auto read_current_filter_text = []() -> std::string {
+      try {
+        auto latest = config::Config::instance().profiles().latest_arc();
+        if (!latest || !latest->current) return {};
+        auto st = config::proxy_head_state::load();
+        if (auto gs = config::proxy_head_state::get_group_state(
+                st, *latest->current, "PROXY")) {
+          return gs->filter_text;
+        }
+      } catch (...) {
+      }
+      return {};
+    };
+
+    auto run_https_verify_pass = [mstate](const std::vector<std::string>& candidates,
+                                          const char* reason) {
+      if (!util::has_pending_unverified_nodes(candidates)) return;
+      const int64_t now_ms = static_cast<int64_t>(GetTickCount64());
+      if (mstate->last_https_all_failed_ms >= 0) {
+        const int64_t elapsed_secs =
+            (now_ms - mstate->last_https_all_failed_ms) / 1000;
+        if (core::CoreMonitor::is_https_verify_backoff_active(elapsed_secs)) {
+          return;
+        }
+      }
+      if (!core::CoreMonitor::is_physical_network_online(
+              2, "https://cp.cloudflare.com/generate_204")) {
+        return;
+      }
+      auto& client = cmd::mihomo_unchecked();
+      std::map<std::string, uint32_t> delays;
+      {
+        std::lock_guard<std::mutex> lock(mstate->probe_mu);
+        auto r1 = client.delay_group(
+            "PROXY__METRICS", core::CoreMonitor::kVerifyHttpsUrlPrimary,
+            core::kNodeDelayMaxMs, 5000);
+        if (r1.is_ok() && !r1.value().empty()) {
+          delays = std::move(r1.value());
+        } else {
+          auto r2 = client.delay_group(
+              "PROXY__METRICS", core::CoreMonitor::kVerifyHttpsUrlFallback,
+              core::kNodeDelayMaxMs, 5000);
+          if (r2.is_err()) {
+            mstate->last_https_all_failed_ms = now_ms;
+            return;
+          }
+          delays = std::move(r2.value());
+        }
+      }
+      std::vector<std::string> passed;
+      for (const auto& [name, d] : delays) {
+        if (d >= core::kNodeDelayMinMs && d < core::kNodeDelayMaxMs) {
+          passed.push_back(name);
+        }
+      }
+      if (passed.empty()) {
+        mstate->last_https_all_failed_ms = now_ms;
+        return;
+      }
+      mstate->last_https_all_failed_ms = -1;
+      std::vector<std::string> failed;
+      for (const auto& c : candidates) {
+        if (std::find(passed.begin(), passed.end(), c) == passed.end() &&
+            !util::is_dummy_node(c) && !util::is_confirmed_fake_node(c)) {
+          failed.push_back(c);
+        }
+      }
+      auto outcome = util::record_https_verify_results(passed, failed);
+      if (outcome.newly_verified > 0 || outcome.newly_confirmed_fake > 0) {
+        CWLOG_INFO(std::format(
+            "[HTTPS验真/{}] 通过 {} (新验真 {}), 未通过 {}, 新确认软隔离(24h) {}",
+            reason, passed.size(), outcome.newly_verified, failed.size(),
+            outcome.newly_confirmed_fake));
+      }
+      if (outcome.newly_confirmed_fake > 0 &&
+          !events::EventBus::instance().lightweight_filter()) {
+        events::EventBus::refresh_proxies();
+      }
+    };
+
+    mh.node_healthy = [parse_proxy_delay_age]() -> bool {
       auto& client = cmd::mihomo_unchecked();
       auto grp = client.get_group_by_name("PROXY");
       if (grp.is_err() || !grp.value().now || grp.value().now->empty())
@@ -390,53 +501,207 @@ bool App::init() {
       if (active == "DIRECT" || active == "REJECT") return true;
       auto px = client.get_proxy_by_name(active);
       if (px.is_err()) return false;
-      if (!px.value().alive) return false;
-      if (px.value().history.empty()) return false;
-      uint32_t delay = px.value().history.back().delay;
-      if (delay < core::kNodeDelayMinMs || delay >= core::kNodeDelayMaxMs)
-        return false;
-      return true;
+      auto [delay, age] = parse_proxy_delay_age(px.value());
+      auto st = core::CoreMonitor::classify_node_status(px.value().alive, delay, age);
+      return st.kind != core::CoreMonitor::NodeStatusKind::Dead;
     };
     mh.active_node_name = []() -> std::string {
       auto grp = cmd::mihomo_unchecked().get_group_by_name("PROXY");
       if (grp.is_err() || !grp.value().now) return std::string();
       return *grp.value().now;
     };
-    mh.is_dummy_active = []() -> bool {
+    mh.periodic_https_verify = [run_https_verify_pass]() {
       auto grp = cmd::mihomo_unchecked().get_group_by_name("PROXY");
-      if (grp.is_err() || !grp.value().now || grp.value().now->empty())
-        return false;
-      return util::is_dummy_node(*grp.value().now);
+      if (grp.is_err() || !grp.value().all) return;
+      std::vector<std::string> members;
+      for (const auto& n : *grp.value().all) {
+        if (!util::is_dummy_node(n) && !util::is_confirmed_fake_node(n)) {
+          members.push_back(n);
+        }
+      }
+      run_https_verify_pass(members, "后台定期验真");
     };
-    mh.probe_metrics_with_fallback = []() -> bool {
+    mh.persisted_exit_usable = [read_current_filter_text]() -> bool {
+      auto grp = cmd::mihomo_unchecked().get_group_by_name("PROXY");
+      if (grp.is_err()) return false;
+      const auto& now = grp.value().now;
+      const bool fake = now.has_value() && !now->empty() &&
+                        util::is_confirmed_fake_node(*now);
+      const std::vector<std::string>* all_ptr =
+          grp.value().all ? &(*grp.value().all) : nullptr;
+      return core::CoreMonitor::persisted_exit_is_usable(
+          now, all_ptr, read_current_filter_text(), fake);
+    };
+    mh.auto_select_with_mode = [](bool select) -> Result<bool> {
+      auto latest = config::Config::instance().profiles().latest_arc();
+      std::string uid = latest && latest->current ? *latest->current : "";
+      if (uid.empty()) return Result<bool>::err(Error{1, "no active profile"});
+      auto out = core::AutoSelect::instance().trigger(
+          uid, std::nullopt, /*sort_type=*/0, select, /*skip_wait_ready=*/false);
+      if (out.busy) return Result<bool>::err(Error{-2, "AUTO_SELECT_BUSY"});
+      if (out.preempted) {
+        return Result<bool>::err(Error{-3, "AUTO_SELECT_MANUAL_PREEMPTED"});
+      }
+      return Result<bool>::ok(out.selected);
+    };
+    mh.confirm_dead_gate = [parse_proxy_delay_age](const std::string& dead_node) -> bool {
+      auto px = cmd::mihomo_unchecked().get_proxy_by_name(dead_node);
+      if (px.is_err()) return false;
+      auto [delay, age] = parse_proxy_delay_age(px.value());
+      auto st = core::CoreMonitor::classify_node_status(px.value().alive, delay, age);
+      return core::CoreMonitor::should_proceed_with_self_heal(st);
+    };
+    mh.api_recovery_keep_alive = [parse_proxy_delay_age]() -> bool {
       auto& client = cmd::mihomo_unchecked();
       auto grp = client.get_group_by_name("PROXY");
-      if (grp.is_ok() && grp.value().now && !grp.value().now->empty()) {
-        const std::string& active = *grp.value().now;
-        if (active != "DIRECT" && active != "REJECT") {
-          auto px = client.get_proxy_by_name(active);
-          if (px.is_ok()) {
-            const auto& p = px.value();
-            int64_t rec_sec = -1;
-            if (!p.history.empty()) {
-              const std::string& t = p.history.back().time;
-              if (t.size() >= 19) {
-                std::tm tm{};
-                std::istringstream iss(t.substr(0, 19));
-                iss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
-                if (!iss.fail()) rec_sec = static_cast<int64_t>(_mkgmtime(&tm));
-              }
+      if (grp.is_err() || !grp.value().now || grp.value().now->empty()) {
+        return false;
+      }
+      const std::string& active = *grp.value().now;
+      if (active == "DIRECT" || active == "REJECT" ||
+          util::is_dummy_node(active) || util::is_confirmed_fake_node(active)) {
+        return false;
+      }
+      auto px = client.get_proxy_by_name(active);
+      if (px.is_err()) return false;
+      auto [delay, age] = parse_proxy_delay_age(px.value());
+      auto st = core::CoreMonitor::classify_node_status(px.value().alive, delay, age);
+      return core::CoreMonitor::should_keep_alive_on_api_recovery(true, st);
+    };
+    mh.is_dummy_active = [mstate, parse_proxy_delay_age, read_current_filter_text,
+                          run_https_verify_pass]() -> bool {
+      auto& client = cmd::mihomo_unchecked();
+      auto grp = client.get_group_by_name("PROXY");
+      if (grp.is_err() || !grp.value().now || grp.value().now->empty())
+        return false;
+      const std::string& active = *grp.value().now;
+      if (util::is_dummy_node(active) || util::is_confirmed_fake_node(active)) {
+        return true;
+      }
+      if (!core::CoreMonitor::should_allow_https_migration(mstate->last_traffic) ||
+          util::is_verified_true_node(active)) {
+        return false;
+      }
+      const int64_t now_ms = static_cast<int64_t>(GetTickCount64());
+      if (mstate->last_active_verify_ms < 0 ||
+          (now_ms - mstate->last_active_verify_ms) >=
+              core::CoreMonitor::kActiveVerifyCooldownSecs * 1000) {
+        mstate->last_active_verify_ms = now_ms;
+        if (grp.value().all) {
+          std::vector<std::string> members;
+          for (const auto& n : *grp.value().all) {
+            if (!util::is_dummy_node(n) && !util::is_confirmed_fake_node(n)) {
+              members.push_back(n);
             }
-            int64_t now_sec = static_cast<int64_t>(std::time(nullptr));
-            if (p.alive && rec_sec >= 0 &&
-                (now_sec - rec_sec) < core::CoreMonitor::kHealthDataFreshSecs)
-              return true;
-            if (!p.alive && rec_sec >= 0 &&
-                (now_sec - rec_sec) <
-                    core::CoreMonitor::kDeadConfirmMinIntervalSecs)
-              return true;
+          }
+          run_https_verify_pass(members, "活跃节点即时验真");
+        }
+      }
+      if (!util::has_verify_failure_node(active) || !grp.value().all) return false;
+      auto proxies_res = client.get_proxies();
+      if (proxies_res.is_err()) return false;
+      const std::string filter = read_current_filter_text();
+      for (const auto& n : *grp.value().all) {
+        if (n == active || util::is_dummy_node(n) ||
+            util::is_confirmed_fake_node(n) || !util::is_verified_true_node(n) ||
+            !util::match_node_filter(n, filter)) {
+          continue;
+        }
+        auto it = proxies_res.value().proxies.find(n);
+        if (it == proxies_res.value().proxies.end()) continue;
+        auto [d, age] = parse_proxy_delay_age(it->second);
+        auto st = core::CoreMonitor::classify_node_status(it->second.alive, d, age);
+        if (st.kind == core::CoreMonitor::NodeStatusKind::Alive) {
+          CWLOG_INFO("CoreMonitor: 当前节点 " + active +
+                     " 验真失败且子集内存在已验真健康节点，触发迁移");
+          return true;
+        }
+      }
+      return false;
+    };
+    mh.probe_metrics_with_fallback = [mstate, parse_proxy_delay_age]() -> bool {
+      auto& client = cmd::mihomo_unchecked();
+      auto grp = client.get_group_by_name("PROXY");
+      if (grp.is_err() || !grp.value().now || grp.value().now->empty()) {
+        return true;
+      }
+      const std::string& active = *grp.value().now;
+      if (active == "DIRECT" || active == "REJECT") return true;
+
+      const int64_t now_ms = static_cast<int64_t>(GetTickCount64());
+      bool stall_cd = false;
+      core::CoreMonitor::ActiveTrafficState traffic =
+          core::CoreMonitor::ActiveTrafficState::Idle;
+      if (auto conns_res = client.get_connections(3000); conns_res.is_ok()) {
+        std::vector<std::tuple<std::string, uint64_t, uint64_t>> cur_conns;
+        for (const auto& c : conns_res.value().connections) {
+          if (std::find(c.chains.begin(), c.chains.end(), active) != c.chains.end()) {
+            cur_conns.emplace_back(c.id, c.upload, c.download);
           }
         }
+        auto [ts, scd] = core::CoreMonitor::update_active_traffic_state(
+            mstate->traffic_tracker, active, cur_conns, now_ms);
+        traffic = ts;
+        stall_cd = scd;
+        mstate->last_traffic = traffic;
+      }
+
+      auto proxies_res = client.get_proxies();
+      if (proxies_res.is_err()) return false;
+      auto active_it = proxies_res.value().proxies.find(active);
+      if (active_it == proxies_res.value().proxies.end()) return true;
+
+      auto [delay, age] = parse_proxy_delay_age(active_it->second);
+      const auto active_status = core::CoreMonitor::classify_node_status(
+          active_it->second.alive, delay, age);
+      const bool need_probe = core::CoreMonitor::should_probe_active_node(
+          active_status, age, traffic, stall_cd);
+
+      if (!need_probe) {
+        if (active_status.kind == core::CoreMonitor::NodeStatusKind::Alive &&
+            !events::EventBus::instance().lightweight_filter()) {
+          const std::string hist_time = active_it->second.history.empty()
+                                            ? std::string()
+                                            : active_it->second.history.back().time;
+          const std::string* hist_ptr = hist_time.empty() ? nullptr : &hist_time;
+          const bool health_not_ok =
+              core::CoreMonitor::instance().last_notified_health_for_test() !=
+              "network_health::ok";
+          if (core::CoreMonitor::should_sync_alive_ui(
+                  health_not_ok,
+                  mstate->ui_sync ? &(*mstate->ui_sync) : nullptr, active,
+                  hist_ptr) &&
+              grp.value().all) {
+            std::vector<std::pair<std::string, uint32_t>> fresh_alive;
+            for (const auto& n : *grp.value().all) {
+              if (util::is_dummy_node(n) || util::is_confirmed_fake_node(n)) continue;
+              auto pit = proxies_res.value().proxies.find(n);
+              if (pit == proxies_res.value().proxies.end()) continue;
+              auto [nd, nage] = parse_proxy_delay_age(pit->second);
+              auto nst = core::CoreMonitor::classify_node_status(
+                  pit->second.alive, nd, nage);
+              if (nst.kind == core::CoreMonitor::NodeStatusKind::Alive &&
+                  nage.has_value() &&
+                  *nage < static_cast<uint64_t>(
+                              core::CoreMonitor::kPassiveTrafficMaxSkipSecs)) {
+                fresh_alive.emplace_back(n, nst.delay_ms);
+              }
+            }
+            if (!fresh_alive.empty()) {
+              events::EventBus::backend_delay_results("PROXY", fresh_alive, true);
+              events::EventBus::refresh_proxies();
+              mstate->ui_sync = core::CoreMonitor::UiActiveSyncState{
+                  active, hist_time.empty() ? std::nullopt : std::optional(hist_time),
+                  true};
+            }
+          }
+        }
+        return true;
+      }
+
+      if (traffic == core::CoreMonitor::ActiveTrafficState::Stalled &&
+          mstate->traffic_tracker.has_value()) {
+        mstate->traffic_tracker->last_stall_probe_ms = now_ms;
       }
 
       std::string main_url = "https://cp.cloudflare.com/generate_204";
@@ -445,30 +710,71 @@ bool App::init() {
         main_url = verge.default_latency_test.value_or(main_url);
       } catch (...) {
       }
-      auto r = client.delay_group("PROXY__METRICS", main_url,
-                                  core::kNodeDelayMaxMs, 5000);
-      if (r.is_ok()) {
-        std::vector<std::pair<std::string, uint32_t>> vec;
-        for (const auto& [name, ms] : r.value()) vec.emplace_back(name, ms);
-        events::EventBus::backend_delay_results("PROXY", vec,
-                                                /*from_probe=*/true);
-        return true;
+      const std::string fallback_url = "https://www.gstatic.com/generate_204";
+      std::map<std::string, uint32_t> probed_delays;
+      bool distorted = false;
+      bool link_ok = false;
+      {
+        std::lock_guard<std::mutex> lock(mstate->probe_mu);
+        auto r = client.delay_group("PROXY__METRICS", main_url,
+                                    core::kNodeDelayMaxMs, 5000);
+        if (r.is_ok()) {
+          probed_delays = std::move(r.value());
+          link_ok = true;
+          if (core::CoreMonitor::should_recheck_with_fallback(
+                  probed_delays, {active})) {
+            auto rfb = client.delay_group("PROXY__METRICS", fallback_url,
+                                          core::kNodeDelayMaxMs, 5000);
+            if (rfb.is_ok()) {
+              probed_delays = core::CoreMonitor::merge_probe_delays(
+                  std::move(probed_delays), rfb.value());
+            } else if (probed_delays.empty()) {
+              link_ok = false;
+            }
+          }
+        } else {
+          CWLOG_WARN("CoreMonitor: 主测速地址整体失败，改用备用地址复核: " + main_url);
+          auto r2 = client.delay_group("PROXY__METRICS", fallback_url,
+                                       core::kNodeDelayMaxMs, 5000);
+          if (r2.is_ok()) {
+            CWLOG_INFO("CoreMonitor: 备用测速地址可用 → 判定为主测速地址失真，本轮不判死");
+            probed_delays = std::move(r2.value());
+            distorted = true;
+            link_ok = true;
+          }
+        }
       }
-      CWLOG_WARN("CoreMonitor: 主测速地址整体失败，改用备用地址复核: " + main_url);
-      auto r2 = client.delay_group("PROXY__METRICS",
-                                   "https://www.gstatic.com/generate_204",
-                                   core::kNodeDelayMaxMs, 5000);
-      if (r2.is_ok()) {
-        CWLOG_INFO(
-            "CoreMonitor: 备用测速地址可用 → 判定为主测速地址失真，节点侧正常");
-        std::vector<std::pair<std::string, uint32_t>> vec;
-        for (const auto& [name, ms] : r2.value()) vec.emplace_back(name, ms);
-        events::EventBus::backend_delay_results("PROXY", vec,
-                                                /*from_probe=*/true);
-        return true;
+
+      if (!link_ok) {
+        CWLOG_WARN("CoreMonitor: 主/备测速地址均整体失败 → 测速链路不可用");
+        if (traffic == core::CoreMonitor::ActiveTrafficState::Stalled &&
+            !events::EventBus::instance().lightweight_filter()) {
+          events::EventBus::backend_delay_results(
+              "PROXY", {{active, 0}}, /*from_probe=*/false);
+          events::EventBus::refresh_proxies();
+          mstate->ui_sync = core::CoreMonitor::UiActiveSyncState{
+              active, std::nullopt, false};
+        }
+        return false;
       }
-      CWLOG_WARN("CoreMonitor: 主/备测速地址均整体失败 → 测速链路不可用");
-      return false;
+
+      const std::vector<std::string> all_members =
+          grp.value().all.value_or(std::vector<std::string>{});
+      auto display = core::CoreMonitor::build_probe_ui_display(
+          all_members, probed_delays, distorted);
+      if (!display.empty() && !events::EventBus::instance().lightweight_filter()) {
+        events::EventBus::backend_delay_results("PROXY", display, true);
+        events::EventBus::refresh_proxies();
+        std::optional<std::string> active_hist_time;
+        if (auto post_px = client.get_proxy_by_name(active);
+            post_px.is_ok() && !post_px.value().history.empty()) {
+          active_hist_time = post_px.value().history.back().time;
+        }
+        mstate->ui_sync = core::CoreMonitor::compute_next_ui_active_sync(
+            active, display, active_hist_time,
+            mstate->ui_sync ? &(*mstate->ui_sync) : nullptr);
+      }
+      return !distorted;
     };
     mh.auto_select_trigger = []() -> Result<bool> {
       auto latest = config::Config::instance().profiles().latest_arc();
@@ -477,8 +783,11 @@ bool App::init() {
       auto out = core::AutoSelect::instance().trigger(uid, std::nullopt,
                                                       /*sort_type=*/0,
                                                       /*select=*/true,
-                                                      /*skip_wait=*/false);
+                                                      /*skip_wait_ready=*/false);
       if (out.busy) return Result<bool>::err(Error{-2, "AUTO_SELECT_BUSY"});
+      if (out.preempted) {
+        return Result<bool>::err(Error{-3, "AUTO_SELECT_MANUAL_PREEMPTED"});
+      }
       if (!out.selected)
         return Result<bool>::err(Error{2, "auto_select failed"});
       return Result<bool>::ok(true);

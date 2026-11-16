@@ -4,9 +4,11 @@
 #include <cstdio>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "enhance/field.h"
+#include "util/log.h"
 #include "util/node.h"
 
 namespace clashwin::enhance {
@@ -57,33 +59,61 @@ YAML::Node enforce_mini_agreements(const YAML::Node& config,
                                    const MiniAgreementOptions& opt) {
   YAML::Node cfg = config;
 
-  // 1. 收集 proxies 名单（dummy 与 server 无效节点不入组；节点定义保留在 proxies）
-  std::vector<std::string> proxy_names;
+  // 1. 收集 proxies 名单（先采集有效条目并做拓扑连坐去重；持久化 HTTPS 黑名单跳过入组）
+  std::vector<util::RawProxyEntry> raw_entries;
+  std::unordered_map<std::string, std::string> raw_fp_map;
   {
     const YAML::Node proxies = static_cast<const YAML::Node&>(cfg)["proxies"];
     if (proxies && proxies.IsSequence()) {
       for (const auto& p : proxies) {
         if (!p.IsMap()) {
           // 纯字符串形式（"- 节点名"）没有 server 字段，沿用名字过滤
-          if (field::is_string_key(p) && !util::is_dummy_node(p.Scalar())) {
-            proxy_names.push_back(p.Scalar());
+          if (field::is_string_key(p)) {
+            util::RawProxyEntry e;
+            e.name = p.Scalar();
+            e.is_dummy = util::is_dummy_node(e.name);
+            raw_entries.push_back(std::move(e));
           }
           continue;
         }
         const YAML::Node name = p["name"];
         if (!field::is_string_key(name)) continue;
         const std::string& name_s = name.Scalar();
-        if (util::is_dummy_node(name_s)) continue;
         // BUG-301：占位假节点的 server 藏不住 —— 按有效性拦截入组
         const YAML::Node server = p["server"];
         if (field::is_string_key(server) &&
             !util::is_valid_node_server(server.Scalar())) {
           continue;
         }
-        proxy_names.push_back(name_s);
+        auto fp = util::proxy_endpoint_fingerprint(p);
+        if (fp.has_value()) {
+          raw_fp_map[name_s] = *fp;
+          // 仅按持久化 HTTPS 验真状态预过滤（拓扑连坐由本次订阅独立重算）
+          if (util::is_https_quarantined_fp(*fp)) {
+            CWLOG_INFO("跳过真 HTTPS 验真已确认拉黑的假节点: " + name_s);
+            continue;
+          }
+        }
+        util::RawProxyEntry e;
+        e.name = name_s;
+        e.fingerprint = std::move(fp);
+        e.is_dummy = util::is_dummy_node(name_s);
+        raw_entries.push_back(std::move(e));
       }
     }
   }
+  auto topology = util::resolve_proxy_clone_topology(raw_entries);
+  util::set_runtime_node_fingerprints(std::move(raw_fp_map));
+  util::set_runtime_tainted_banner_fps(std::move(topology.tainted_fps));
+  if (topology.tainted_banner_removed > 0) {
+    CWLOG_INFO("订阅拓扑净化：同指纹横幅连坐剔除寄生节点 " +
+               std::to_string(topology.tainted_banner_removed) + " 个");
+  }
+  if (topology.clone_removed > 0) {
+    CWLOG_INFO("订阅入组去重：折叠同 server:port 同配置克隆节点 " +
+               std::to_string(topology.clone_removed) + " 个");
+  }
+  std::vector<std::string> proxy_names = std::move(topology.names);
 
   // 2. 收集 proxy-providers 名单
   std::vector<std::string> provider_names;
@@ -150,6 +180,7 @@ YAML::Node enforce_mini_agreements(const YAML::Node& config,
     metrics_group["url"] = n;
   }
   metrics_group["interval"] = YAML::Node("300");
+  metrics_group["lazy"] = YAML::Node(false);
 
   YAML::Node groups(YAML::NodeType::Sequence);
   groups.push_back(single_group);

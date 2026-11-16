@@ -12,6 +12,7 @@
 #include "events/notice.h"
 #include "ui/i18n_text.h"
 #include "util/log.h"
+#include "util/node.h"
 
 namespace clashwin::core {
 
@@ -21,13 +22,6 @@ AutoSelect& AutoSelect::instance() {
 }
 
 void AutoSelect::set_hooks(AutoSelectHooks hooks) { hooks_ = std::move(hooks); }
-
-namespace {
-std::string to_lower(std::string s) {
-  for (auto& c : s) c = static_cast<char>(std::tolower((unsigned char)c));
-  return s;
-}
-}  // namespace
 
 void AutoSelect::sort_display_delays(
     std::vector<std::pair<std::string, uint32_t>>& display, int sort_type) {
@@ -109,9 +103,8 @@ std::string AutoSelect::calibrate_selected(
   (void)uid;
   auto selected = read_selected ? read_selected(uid) : std::nullopt;
   if (selected) {
-    // 子集校验：selected 需匹配 filter_text（子串语义，lowercase）
-    if (filter_text_lower.empty() ||
-        to_lower(*selected).find(filter_text_lower) != std::string::npos) {
+    // 子集校验：selected 需匹配 filter_text（支持多关键词/OR/排除语法）
+    if (util::match_node_filter(*selected, filter_text_lower)) {
       return *selected;  // 子集内 → 正常
     }
     // 越界（被污染的持久选择）→ 不写回内核，回写实际节点
@@ -146,6 +139,8 @@ AutoSelect::Outcome AutoSelect::trigger(
     out.busy = true;
     return out;
   }
+  const uint64_t start_manual_epoch =
+      CoreMonitor::instance().manual_switch_epoch();
   // T18 转正：内核就绪等待（← monitor.rs trigger_backend_auto_select 的
   //   wait_for_clash_ready 前置；skip_wait_ready 时跳过——静默测速场景已就绪）。
   //   等待失败（超时）不阻断，与原版「尽力而为」一致。
@@ -159,25 +154,26 @@ AutoSelect::Outcome AutoSelect::trigger(
     }
   }
 
-  // 1. 节点子集确定（← :826-844）：显式子集剔除 dummy；全量走组信息+filter
-  //    （组信息读取由调用方经 node_names 传入——本层不做 IO，保持可测）
+  // 1. 节点子集确定（← :1923-1956）：显式子集剔除 dummy/假节点；全量走组信息+filter
   const bool is_frontend_subset = node_names.has_value() && !node_names->empty();
+  auto is_excluded = [&](const std::string& n) {
+    return n.empty() || (hooks_.is_dummy && hooks_.is_dummy(n)) ||
+           (hooks_.is_confirmed_fake && hooks_.is_confirmed_fake(n));
+  };
   std::vector<std::string> nodes;
   if (is_frontend_subset) {
-    for (const auto& n : *node_names)
-      if (!hooks_.is_dummy || !hooks_.is_dummy(n)) nodes.push_back(n);
+    for (const auto& n : *node_names) {
+      if (!is_excluded(n)) nodes.push_back(n);
+    }
   } else if (hooks_.group_nodes) {
     auto all = hooks_.group_nodes("PROXY");
-    std::string filter = hooks_.filter_text ? to_lower(hooks_.filter_text()) : "";
-    std::vector<std::string> non_dummy;
+    const std::string filter = hooks_.filter_text ? hooks_.filter_text() : "";
     for (const auto& n : all) {
-      if (n.empty() || (hooks_.is_dummy && hooks_.is_dummy(n))) continue;
-      non_dummy.push_back(n);
-      if (filter.empty() || to_lower(n).find(filter) != std::string::npos) {
+      if (is_excluded(n)) continue;
+      if (util::match_node_filter(n, filter)) {
         nodes.push_back(n);
       }
     }
-    if (nodes.empty()) nodes = std::move(non_dummy);
   }
   if (nodes.empty()) {
     out.display = {};
@@ -212,28 +208,46 @@ AutoSelect::Outcome AutoSelect::trigger(
   }
   sort_display_delays(out.display, effective_sort);
 
-  // 4. select：双重校验 current_uid → 择优 → 切换 → 回写（子集校验）
+  // 4. select：过滤重检 → 择优 → 双重校验 current_uid → 手动抢占检查 → 切换 → 回写
   if (select) {
+    const std::string latest_filter =
+        hooks_.filter_text ? hooks_.filter_text() : "";
+    std::vector<std::pair<std::string, uint32_t>> matched_display;
+    matched_display.reserve(out.display.size());
+    for (const auto& entry : out.display) {
+      if (is_frontend_subset ||
+          util::match_node_filter(entry.first, latest_filter)) {
+        matched_display.push_back(entry);
+      }
+    }
     auto fastest = pick_fastest(
-        out.display, hooks_.failed_servers, hooks_.node_server_map);
+        matched_display, hooks_.failed_servers, hooks_.node_server_map);
     if (!fastest) {
       events::EventBus::refresh_proxies();
       return out;
     }
     auto cur = hooks_.current_uid ? hooks_.current_uid() : std::nullopt;
     if (cur.has_value() && !profile_uid.empty() && *cur != profile_uid) {
-      // 活动配置已被更改 → 舍弃切换（← monitor.rs:1046-1056）
+      // 活动配置已被更改 → 舍弃切换（← monitor.rs:2185）
       CWLOG_INFO("AutoSelect: 活动配置已更改，舍弃切换");
+      return out;
+    }
+    // 【BUG-388 · 手动切点抢占护栏】测速期间用户手动切换过节点 → 禁止覆盖
+    const uint64_t cur_manual_epoch =
+        CoreMonitor::instance().manual_switch_epoch();
+    if (CoreMonitor::is_manual_switch_preempted(start_manual_epoch,
+                                                 cur_manual_epoch)) {
+      CWLOG_INFO("AutoSelect: 选点期间检测到用户手动切点，放弃覆盖当前选择");
+      out.preempted = true;
+      events::EventBus::refresh_proxies();
       return out;
     }
     if (hooks_.select_node && hooks_.select_node("PROXY", *fastest)) {
       out.selected = true;
       out.selected_node = *fastest;
       CoreMonitor::instance().emit_network_health_notice("network_health::ok");
-      // 【关键修复】回写 profile.selected（filterText 子集校验 ← :1080-1096）
-      std::string filter = hooks_.filter_text ? to_lower(hooks_.filter_text())
-                                              : "";
-      if (filter.empty() || to_lower(*fastest).find(filter) != std::string::npos) {
+      // 【关键修复】回写 profile.selected（filterText 子集校验 ← :2250）
+      if (util::match_node_filter(*fastest, latest_filter)) {
         if (hooks_.write_selected) hooks_.write_selected(profile_uid, *fastest);
       } else {
         CWLOG_WARN("AutoSelect: 最快节点越界 filterText 子集，不写回 selected");

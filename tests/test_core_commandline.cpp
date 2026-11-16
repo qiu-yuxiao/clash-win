@@ -98,8 +98,8 @@ UT_TEST(pick_fallback_rules) {
   // filter 匹配优先
   UT_CHECK_EQ(pick_fallback_node(all, "jp"), std::string("JP-02"));
   UT_CHECK_EQ(pick_fallback_node(all, "us-"), std::string("US-03"));
-  // filter 无匹配 → 首个非 dummy 兜底
-  UT_CHECK_EQ(pick_fallback_node(all, "sg"), std::string("HK-01"));
+  // BUG-388 / v3.5.0：非空 filter 无匹配 → 严禁越界切出筛选范围（返回空串）
+  UT_CHECK(pick_fallback_node(all, "sg").empty());
   // 全 dummy → 空
   UT_CHECK(pick_fallback_node({"官网", "流量套餐"}, "").empty());
   UT_CHECK(pick_fallback_node({}, "").empty());

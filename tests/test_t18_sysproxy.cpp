@@ -319,13 +319,13 @@ UT_TEST(t18_monitor_offline_and_recovery) {
   // 离线 → 跳过检测（不探 API）
   m.tick_once();
   UT_CHECK_EQ(api_calls, 0);
-  // 恢复在线 → 计数清零（was_offline 转移）
+  // 恢复在线 → 遵循 S3 NetworkRecovered=Wait：复位计数并落入常规探测（api_calls=1, Idle）
   online = true;
   auto a = m.tick_once();
-  UT_CHECK_EQ(api_calls, 0);  // 转移步走恢复自愈路径（uid 空 → Idle）
+  UT_CHECK_EQ(api_calls, 1);
   UT_CHECK(a == CoreMonitor::Action::Idle);
   m.tick_once();  // 下一轮正常检测
-  UT_CHECK_EQ(api_calls, 1);
+  UT_CHECK_EQ(api_calls, 2);
 }
 
 UT_TEST(t18_monitor_failed_servers_cooldown) {

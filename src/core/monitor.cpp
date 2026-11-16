@@ -15,9 +15,12 @@
 #include <future>
 
 #include "core/core_manager.h"
+#include "core/delay_manager.h"
 #include "events/event_bus.h"
-#include "util/log.h"
 #include "util/dirs.h"
+#include "util/log.h"
+#include "util/node.h"
+#include "util/str_utils.h"
 #include "yaml-cpp/yaml.h"
 
 #pragma comment(lib, "ws2_32.lib")
@@ -268,6 +271,8 @@ void CoreMonitor::reset_runtime_loop_state() {
   was_offline_.store(false);
   last_heal_ms_.store(0);
   last_tick_ms_.store(0);
+  last_https_verify_ms_.store(-1);
+  manual_switch_epoch_.store(0, std::memory_order_release);
   last_node_change_ms_.store(0);
   has_node_change_.store(false);
   manual_switch_wake_.store(false);
@@ -279,6 +284,10 @@ void CoreMonitor::reset_runtime_loop_state() {
   {
     std::lock_guard<std::mutex> lock(last_node_m_);
     last_active_node_.clear();
+  }
+  {
+    std::lock_guard<std::mutex> lock(switch_rate_m_);
+    recent_auto_switches_ms_.clear();
   }
   {
     std::lock_guard<std::mutex> lock(health_m_);
@@ -308,12 +317,19 @@ void CoreMonitor::start() {
                 if (hooks_.api_alive && hooks_.api_alive()) break;
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
               }
-              // 若无窗口可见（托盘启动），执行一次初始化自动选点
+              // 若无窗口可见（托盘启动），执行一次 Continuity-First 初始化探测/选点
               if (hooks_.is_headless && hooks_.is_headless()) {
                 std::string uid =
                     hooks_.current_uid ? hooks_.current_uid() : "";
-                if (!uid.empty() && hooks_.auto_select_trigger) {
-                  hooks_.auto_select_trigger();
+                if (!uid.empty()) {
+                  const bool keep_persisted =
+                      hooks_.persisted_exit_usable &&
+                      hooks_.persisted_exit_usable();
+                  if (keep_persisted && hooks_.auto_select_with_mode) {
+                    hooks_.auto_select_with_mode(/*select=*/false);
+                  } else if (!keep_persisted && hooks_.auto_select_trigger) {
+                    hooks_.auto_select_trigger();
+                  }
                 }
               }
             }
@@ -354,6 +370,7 @@ void CoreMonitor::kick() {
 }
 
 void CoreMonitor::notify_manual_node_switched() {
+  manual_switch_epoch_.fetch_add(1, std::memory_order_acq_rel);
   int64_t now = 0;
   {
     std::lock_guard<std::mutex> lock(m_);
@@ -481,7 +498,9 @@ CoreMonitor::SelfHealAction CoreMonitor::complete_restart_core_attempt(
   return SelfHealAction::FireAlert;
 }
 
-CoreMonitor::Action CoreMonitor::heal(const std::string& uid) {
+CoreMonitor::Action CoreMonitor::heal(const std::string& uid,
+                                      SelfHealOrigin origin,
+                                      const std::string& dead_node) {
   Hooks h;
   Params p;
   {
@@ -489,15 +508,61 @@ CoreMonitor::Action CoreMonitor::heal(const std::string& uid) {
     h = hooks_;
     p = params_;
   }
-  int64_t now = h.now_ms ? h.now_ms()
-                         : static_cast<int64_t>(GetTickCount64());
-  int64_t last = last_heal_ms_.load();
+  const int64_t now = h.now_ms ? h.now_ms()
+                               : static_cast<int64_t>(GetTickCount64());
+  const int64_t last = last_heal_ms_.load();
   if (last != 0 && now - last < p.heal_cooldown_ms) {
     CWLOG_INFO(std::format(
         "CoreMonitor: 自愈选点在 {} 秒冷却中（已过 {} 秒），跳过本次",
         p.heal_cooldown_ms / 1000, (now - last) / 1000));
     return Action::Idle;
   }
+
+  // S4 原节点确已死门检（ConfirmedDead 适用；NodeMigration / ApiChannelDown 跳过）
+  if (self_heal_requires_dead_gate(origin) && !dead_node.empty() &&
+      h.confirm_dead_gate && !h.confirm_dead_gate(dead_node)) {
+    CWLOG_INFO("CoreMonitor: 自愈门检确认原节点未确死（" + dead_node +
+               "），放弃本次切点");
+    return Action::Idle;
+  }
+
+  // S4 / BUG-388 自愈切换速率限制（ConfirmedDead 豁免；NodeMigration / ApiChannelDown 受限）
+  if (self_heal_subject_to_switch_rate_limit(origin)) {
+    std::optional<int64_t> last_switch_age_secs;
+    size_t recent_count = 0;
+    {
+      std::lock_guard<std::mutex> lock(switch_rate_m_);
+      const int64_t win_ms = kAutoSwitchWindowSecs * 1000;
+      recent_auto_switches_ms_.erase(
+          std::remove_if(recent_auto_switches_ms_.begin(),
+                         recent_auto_switches_ms_.end(),
+                         [&](int64_t ts) { return (now - ts) >= win_ms; }),
+          recent_auto_switches_ms_.end());
+      if (!recent_auto_switches_ms_.empty()) {
+        const int64_t delta_ms =
+            (now >= recent_auto_switches_ms_.back())
+                ? (now - recent_auto_switches_ms_.back())
+                : 0;
+        last_switch_age_secs = delta_ms / 1000;
+      }
+      recent_count = recent_auto_switches_ms_.size();
+    }
+    if (!auto_switch_permitted(last_switch_age_secs, recent_count)) {
+      CWLOG_WARN("CoreMonitor: 自愈切换速率保护（间隔 < 120s 或 600s 内满 3 次），跳过本次切点");
+      return Action::Idle;
+    }
+  }
+
+  // BUG-388 API 通道恢复保活门检
+  if (origin == SelfHealOrigin::ApiChannelDown && h.api_recovery_keep_alive &&
+      h.api_recovery_keep_alive()) {
+    auto_select_fail_count_.store(0);
+    api_dead_heal_fail_count_.store(0);
+    emit_network_health_notice("network_health::ok");
+    CWLOG_INFO("CoreMonitor: API 通道恢复且当前活跃真节点健康，保活现状并跳过切点");
+    return Action::Idle;
+  }
+
   last_heal_ms_.store(now);
   if (!h.auto_select_trigger || uid.empty()) return Action::Idle;
 
@@ -509,11 +574,18 @@ CoreMonitor::Action CoreMonitor::heal(const std::string& uid) {
     auto_select_fail_count_.store(0);
     api_dead_heal_fail_count_.store(0);
     emit_network_health_notice("network_health::ok");
+    const bool switched =
+        dead_node.empty() || !h.active_node_name ||
+        h.active_node_name() != dead_node;
+    if (switched) {
+      std::lock_guard<std::mutex> lock(switch_rate_m_);
+      recent_auto_switches_ms_.push_back(now);
+    }
     return Action::Healed;
   }
   if ((r.is_ok() && !r.value()) ||
-      (r.is_err() && r.error().message == "AUTO_SELECT_BUSY")) {
-    // BUSY（AutoSelect 占用）→ 不计入失败、回退冷却时间戳允许下次重试
+      (r.is_err() && is_benign_auto_select_abort(r.error().message))) {
+    // BUSY / MANUAL_PREEMPTED → 不计入失败、回退冷却时间戳允许下次重试
     last_heal_ms_.store(last);
     return Action::Idle;
   }
@@ -608,10 +680,11 @@ CoreMonitor::Action CoreMonitor::tick_once() {
   const auto now_fn = [&]() -> int64_t {
     return h.now_ms ? h.now_ms() : static_cast<int64_t>(GetTickCount64());
   };
-  last_tick_ms_.store(now_fn());
+  const int64_t now_tick = now_fn();
+  last_tick_ms_.store(now_tick);
 
   // BUG-336 Checkpoint #1：任何提前返回（进程未跑 / 物理断网 / API 失败）前先吸收手动切换信号
-  absorb_pending_manual_switch(now_fn());
+  absorb_pending_manual_switch(now_tick);
 
   // 1. 进程级直检：进程死 → 立即重启
   if (h.core_alive && !h.core_alive()) {
@@ -627,41 +700,57 @@ CoreMonitor::Action CoreMonitor::tick_once() {
     emit_network_health_notice("network_health::offline");
     return Action::Idle;
   }
-  // 离线 → 在线转移：清零计数并自愈
+  // 离线 → 在线转移（S3 统一裁决 NetworkRecovered = Wait）：
+  // 复位计数并通知 ok，交由本周期后续正常体检路径重新测量，绝不直接切点
   if (was_offline_.exchange(false)) {
     api_fail_count_.store(0);
     node_fail_count_.store(0);
-    std::string uid = h.current_uid ? h.current_uid() : std::string();
-    if (!uid.empty()) return heal(uid);
     emit_network_health_notice("network_health::ok");
-    return Action::Idle;
+    CWLOG_INFO("CoreMonitor: 物理网络恢复，交由常规体检路径重新测量（不立即自愈）");
   }
 
-  // 3. API 存活：连续 3 次不可达 → 自愈
+  // 3. API 存活：连续 3 次不可达且复核仍不可达 → 自愈
   bool api_ok = h.api_alive ? h.api_alive() : true;
   if (!api_ok) {
     int fails = api_fail_count_.fetch_add(1) + 1;
     if (fails >= p.api_fail_threshold) {
+      const bool api_recheck = h.api_alive ? h.api_alive() : false;
       api_fail_count_.store(0);
-      std::string uid = h.current_uid ? h.current_uid() : std::string();
-      return heal(uid);
+      if (decide_self_heal(
+              {SelfHealTrigger::Kind::ApiUnreachable,
+               static_cast<uint32_t>(fails), api_recheck},
+              p.node_dead_threshold, p.api_fail_threshold) ==
+          SelfHealDecision::Allow) {
+        std::string uid = h.current_uid ? h.current_uid() : std::string();
+        return heal(uid, SelfHealOrigin::ApiChannelDown, {});
+      }
+      CWLOG_INFO("CoreMonitor: API 复核已恢复可达，复位计数交下一周期重测");
     }
     return Action::Idle;
   }
   api_fail_count_.store(0);
 
-  // BUG-336 Checkpoint #2：观测 active_node_name 前再次吸收，若已被手动切换精确标记，
-  // 后续观测到节点名变化时保留真实点击时间戳而不二次顺延宽限期。
+  // 定期真 HTTPS 验真（每 180s 周期一次；有未决节点才实际发包）
+  if (h.periodic_https_verify) {
+    const int64_t last_v = last_https_verify_ms_.load();
+    if (last_v < 0 || (now_tick - last_v) >= kHttpsVerifyIntervalSecs * 1000) {
+      last_https_verify_ms_.store(now_tick);
+      h.periodic_https_verify();
+    }
+  }
+
+  // BUG-336 Checkpoint #2：观测 active_node_name 前再次吸收
   absorb_pending_manual_switch(now_fn());
 
   // ★ §5.1 活跃节点切换检测（← Mini monitor.rs:1358-1370）
+  std::string observed_active;
   if (h.active_node_name) {
-    const std::string active = h.active_node_name();
+    observed_active = h.active_node_name();
     bool changed = false;
     {
       std::lock_guard<std::mutex> lock(last_node_m_);
-      if (active != last_active_node_) {
-        last_active_node_ = active;
+      if (observed_active != last_active_node_) {
+        last_active_node_ = observed_active;
         changed = true;
       }
     }
@@ -679,28 +768,30 @@ CoreMonitor::Action CoreMonitor::tick_once() {
     }
   }
 
-  // ★ §5.4 第 3 道铁锁：假/广告节点 → 直接判需重选（← Mini monitor.rs:663-666）
+  // ★ §5.4 第 3 道铁锁：假/广告/验真失败迁移节点 → 直接判需迁移（NodeMigration）
   if (h.is_dummy_active) {
     if (h.is_dummy_active()) {
-      CWLOG_WARN("CoreMonitor: 活跃节点是伪节点（广告/公告节点），触发重选");
+      CWLOG_WARN("CoreMonitor: 活跃节点为伪节点/已确认假节点/待迁移节点，触发不可信迁移");
       node_fail_count_.store(0);
       std::string uid = h.current_uid ? h.current_uid() : std::string();
-      if (!uid.empty()) return heal(uid);
+      if (!uid.empty()) {
+        return heal(uid, SelfHealOrigin::NodeMigration, observed_active);
+      }
       return Action::Idle;
     }
   }
 
-  // ★ §5.8 测速失真复核（← Mini monitor.rs:685-703）
+  // ★ §5.8 测速失真复核（← Mini monitor.rs:1526-1670）：不可用或主 URL 失真 → 本轮不判死
   if (h.probe_metrics_with_fallback) {
     if (!h.probe_metrics_with_fallback()) {
       CWLOG_WARN(
-          "CoreMonitor: 测速链路不可用（主/备测速地址均整体失败），本轮不判定节点死活");
+          "CoreMonitor: 测速链路不可用或主测速地址失真，本轮不判定节点死活");
       node_fail_count_.store(0);
       return Action::Idle;
     }
   }
 
-  // 4. 节点健康：连续 2 次判死 → 自愈
+  // 4. 节点健康：连续 2 次判死 → 自愈（ConfirmedDead）
   bool node_ok = h.node_healthy ? h.node_healthy() : true;
   if (!node_ok) {
     // BUG-336 Checkpoint #3：耗时拨测返回后立即吸收拨测期间发生的手动切节点信号
@@ -712,10 +803,14 @@ CoreMonitor::Action CoreMonitor::tick_once() {
       return Action::Idle;
     }
     int fails = node_fail_count_.fetch_add(1) + 1;
-    if (fails >= p.node_dead_threshold) {
+    if (decide_self_heal(
+            {SelfHealTrigger::Kind::NodeConfirmedDead,
+             static_cast<uint32_t>(fails), false},
+            p.node_dead_threshold, p.api_fail_threshold) ==
+        SelfHealDecision::Allow) {
       node_fail_count_.store(0);
-      std::string dead_node;
-      if (h.active_node_name) {
+      std::string dead_node = observed_active;
+      if (dead_node.empty() && h.active_node_name) {
         dead_node = h.active_node_name();
       }
       if (!dead_node.empty()) {
@@ -727,7 +822,7 @@ CoreMonitor::Action CoreMonitor::tick_once() {
         }
       }
       std::string uid = h.current_uid ? h.current_uid() : std::string();
-      return heal(uid);
+      return heal(uid, SelfHealOrigin::ConfirmedDead, dead_node);
     }
     return Action::Idle;
   }
@@ -923,6 +1018,304 @@ bool CoreMonitor::wait_for_clash_ready(const ReadyHooks& h) {
   if (!poll(h.group_ready, 20000)) return false;
   if (!poll(h.network_online, 15000)) return false;
   return true;
+}
+
+bool CoreMonitor::is_manual_switch_preempted(uint64_t start_epoch,
+                                             uint64_t current_epoch) {
+  return current_epoch != start_epoch;
+}
+
+bool CoreMonitor::is_benign_auto_select_abort(const std::string& err_msg) {
+  return err_msg == "AUTO_SELECT_BUSY" ||
+         err_msg == "AUTO_SELECT_MANUAL_PREEMPTED";
+}
+
+CoreMonitor::NodeStatus CoreMonitor::classify_node_status(
+    bool alive, std::optional<uint32_t> last_delay,
+    std::optional<uint64_t> age_secs) {
+  if (!last_delay.has_value()) {
+    return {NodeStatusKind::Unknown, 0};
+  }
+  const uint32_t delay = *last_delay;
+  const bool valid_delay =
+      (delay >= kNodeDelayMinMs && delay < kNodeDelayMaxMs);
+  if (alive && valid_delay) {
+    return {NodeStatusKind::Alive, delay};
+  }
+  if (!alive && valid_delay && age_secs.has_value() &&
+      *age_secs < kSuspectWindowSecs) {
+    return {NodeStatusKind::Suspect, 0};
+  }
+  return {NodeStatusKind::Dead, 0};
+}
+
+bool CoreMonitor::should_proceed_with_self_heal(const NodeStatus& status) {
+  return status.kind == NodeStatusKind::Dead;
+}
+
+std::pair<CoreMonitor::ActiveTrafficState,
+          std::map<std::string, std::pair<uint64_t, uint64_t>>>
+CoreMonitor::classify_active_traffic_delta(
+    const std::optional<std::string>& prev_node,
+    const std::string& active_node,
+    const std::map<std::string, std::pair<uint64_t, uint64_t>>& prev_conns,
+    const std::vector<std::tuple<std::string, uint64_t, uint64_t>>&
+        current_conns) {
+  std::map<std::string, std::pair<uint64_t, uint64_t>> next_map;
+  for (const auto& [id, up, down] : current_conns) {
+    next_map[id] = {up, down};
+  }
+  if (!prev_node.has_value() || *prev_node != active_node) {
+    return {ActiveTrafficState::Idle, std::move(next_map)};
+  }
+
+  uint64_t delta_up = 0;
+  uint64_t delta_down = 0;
+  for (const auto& [id, up, down] : current_conns) {
+    auto it = prev_conns.find(id);
+    if (it != prev_conns.end()) {
+      const auto [prev_up, prev_down] = it->second;
+      if (up > prev_up) delta_up += (up - prev_up);
+      if (down > prev_down) delta_down += (down - prev_down);
+    } else {
+      delta_up += up;
+      delta_down += down;
+    }
+  }
+  ActiveTrafficState state = ActiveTrafficState::Idle;
+  if (delta_down > 0) {
+    state = ActiveTrafficState::Flowing;
+  } else if (delta_up > 0) {
+    state = ActiveTrafficState::Stalled;
+  }
+  return {state, std::move(next_map)};
+}
+
+std::pair<CoreMonitor::ActiveTrafficState, bool>
+CoreMonitor::update_active_traffic_state(
+    std::optional<ActiveTrafficTracker>& tracker_slot,
+    const std::string& active_node,
+    const std::vector<std::tuple<std::string, uint64_t, uint64_t>>&
+        current_conns,
+    int64_t now_ms) {
+  if (!tracker_slot.has_value()) {
+    tracker_slot = ActiveTrafficTracker{};
+  }
+  auto& tracker = *tracker_slot;
+  if (!tracker.active_node.has_value() || *tracker.active_node != active_node) {
+    tracker.last_stall_probe_ms = -1;
+  }
+  const bool stall_cooldown_active =
+      tracker.last_stall_probe_ms >= 0 &&
+      (now_ms - tracker.last_stall_probe_ms) < kStallReprobeCooldownSecs * 1000;
+
+  auto [state, next_map] = classify_active_traffic_delta(
+      tracker.active_node, active_node, tracker.conn_bytes, current_conns);
+  tracker.active_node = active_node;
+  tracker.conn_bytes = std::move(next_map);
+  return {state, stall_cooldown_active};
+}
+
+bool CoreMonitor::should_probe_active_node(const NodeStatus& status,
+                                           std::optional<uint64_t> age_secs,
+                                           ActiveTrafficState traffic,
+                                           bool stall_cooldown_active) {
+  if (status.kind != NodeStatusKind::Alive) return true;
+  if (!age_secs.has_value()) return true;
+  const int64_t age = static_cast<int64_t>(*age_secs);
+  switch (traffic) {
+    case ActiveTrafficState::Flowing:
+      return age >= kPassiveTrafficMaxSkipSecs;
+    case ActiveTrafficState::Stalled:
+      return !stall_cooldown_active || age >= kIdleHealthFreshSecs;
+    case ActiveTrafficState::Idle:
+      return age >= kIdleHealthFreshSecs;
+  }
+  return true;
+}
+
+bool CoreMonitor::should_allow_https_migration(ActiveTrafficState traffic) {
+  return traffic != ActiveTrafficState::Flowing;
+}
+
+bool CoreMonitor::should_recheck_with_fallback(
+    const std::map<std::string, uint32_t>& primary_delays,
+    const std::vector<std::string>& expected_nodes) {
+  auto valid = [](uint32_t d) {
+    return d >= kNodeDelayMinMs && d < kNodeDelayMaxMs;
+  };
+  if (!expected_nodes.empty()) {
+    for (const auto& name : expected_nodes) {
+      auto it = primary_delays.find(name);
+      if (it != primary_delays.end() && valid(it->second)) return false;
+    }
+    return true;
+  }
+  for (const auto& [name, d] : primary_delays) {
+    if (!util::is_dummy_node(name) && !util::is_confirmed_fake_node(name) &&
+        valid(d)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::map<std::string, uint32_t> CoreMonitor::merge_probe_delays(
+    std::map<std::string, uint32_t> primary,
+    const std::map<std::string, uint32_t>& fallback) {
+  auto valid = [](uint32_t d) {
+    return d >= kNodeDelayMinMs && d < kNodeDelayMaxMs;
+  };
+  for (const auto& [name, fb_delay] : fallback) {
+    if (valid(fb_delay)) {
+      primary[name] = fb_delay;
+    } else {
+      auto it = primary.find(name);
+      if (it == primary.end()) {
+        primary[name] = fb_delay;
+      }
+    }
+  }
+  return primary;
+}
+
+std::vector<std::pair<std::string, uint32_t>>
+CoreMonitor::build_probe_ui_display_with(
+    const std::vector<std::string>& all_nodes,
+    const std::map<std::string, uint32_t>& probed_delays,
+    bool primary_url_distorted,
+    const std::function<bool(const std::string&)>& is_fake_node) {
+  std::vector<std::pair<std::string, uint32_t>> out;
+  for (const auto& n : all_nodes) {
+    if (util::is_dummy_node(n)) continue;
+    if (is_fake_node && is_fake_node(n)) continue;
+    auto it = probed_delays.find(n);
+    if (primary_url_distorted) {
+      if (it != probed_delays.end() && it->second >= kNodeDelayMinMs &&
+          it->second < kNodeDelayMaxMs) {
+        out.emplace_back(n, it->second);
+      }
+    } else {
+      out.emplace_back(n, (it != probed_delays.end()) ? it->second : 0u);
+    }
+  }
+  return out;
+}
+
+std::vector<std::pair<std::string, uint32_t>>
+CoreMonitor::build_probe_ui_display(
+    const std::vector<std::string>& all_nodes,
+    const std::map<std::string, uint32_t>& probed_delays,
+    bool primary_url_distorted) {
+  return build_probe_ui_display_with(
+      all_nodes, probed_delays, primary_url_distorted,
+      [](const std::string& n) { return util::is_confirmed_fake_node(n); });
+}
+
+std::optional<CoreMonitor::UiActiveSyncState>
+CoreMonitor::compute_next_ui_active_sync(
+    const std::string& active_node,
+    const std::vector<std::pair<std::string, uint32_t>>& display,
+    const std::optional<std::string>& active_hist_time,
+    const UiActiveSyncState* prev) {
+  std::optional<uint32_t> delay;
+  for (const auto& [n, d] : display) {
+    if (n == active_node) {
+      delay = d;
+      break;
+    }
+  }
+  if (!delay.has_value()) {
+    if (prev) return *prev;
+    return std::nullopt;
+  }
+  const bool reported_alive =
+      (*delay >= kNodeDelayMinMs && *delay < kNodeDelayMaxMs);
+  std::optional<std::string> hist_time;
+  if (reported_alive) {
+    if (active_hist_time.has_value()) {
+      hist_time = active_hist_time;
+    } else if (prev && prev->node_name == active_node && prev->reported_alive) {
+      hist_time = prev->history_time;
+    }
+  }
+  return UiActiveSyncState{active_node, std::move(hist_time), reported_alive};
+}
+
+bool CoreMonitor::should_sync_alive_ui(bool health_not_ok,
+                                       const UiActiveSyncState* last_sync,
+                                       const std::string& active_node,
+                                       const std::string* active_hist_time) {
+  if (health_not_ok || !last_sync) return true;
+  if (last_sync->node_name != active_node || !last_sync->reported_alive) {
+    return true;
+  }
+  if (!active_hist_time) return false;
+  return !last_sync->history_time.has_value() ||
+         *last_sync->history_time != *active_hist_time;
+}
+
+CoreMonitor::SelfHealDecision CoreMonitor::decide_self_heal(
+    const SelfHealTrigger& trigger, int node_dead_threshold,
+    int api_fail_threshold) {
+  switch (trigger.kind) {
+    case SelfHealTrigger::Kind::NodeConfirmedDead:
+      return (trigger.count >= static_cast<uint32_t>(node_dead_threshold))
+                 ? SelfHealDecision::Allow
+                 : SelfHealDecision::Wait;
+    case SelfHealTrigger::Kind::NetworkRecovered:
+      return SelfHealDecision::Wait;
+    case SelfHealTrigger::Kind::ApiUnreachable:
+      return (trigger.count >= static_cast<uint32_t>(api_fail_threshold) &&
+              !trigger.api_alive_on_recheck)
+                 ? SelfHealDecision::Allow
+                 : SelfHealDecision::Wait;
+  }
+  return SelfHealDecision::Wait;
+}
+
+bool CoreMonitor::self_heal_requires_dead_gate(SelfHealOrigin origin) {
+  return origin == SelfHealOrigin::ConfirmedDead;
+}
+
+bool CoreMonitor::self_heal_subject_to_switch_rate_limit(
+    SelfHealOrigin origin) {
+  return origin != SelfHealOrigin::ConfirmedDead;
+}
+
+bool CoreMonitor::auto_switch_permitted(
+    std::optional<int64_t> last_switch_age_secs,
+    size_t recent_switch_count) {
+  if (last_switch_age_secs.has_value() &&
+      *last_switch_age_secs < kMinAutoSwitchIntervalSecs) {
+    return false;
+  }
+  return recent_switch_count < kMaxAutoSwitchesPerWindow;
+}
+
+bool CoreMonitor::should_keep_alive_on_api_recovery(bool is_valid_real_node,
+                                                    const NodeStatus& status) {
+  return is_valid_real_node && status.kind == NodeStatusKind::Alive;
+}
+
+bool CoreMonitor::persisted_exit_is_usable(
+    const std::optional<std::string>& now,
+    const std::vector<std::string>* all, const std::string& filter_text,
+    bool confirmed_fake) {
+  if (!now.has_value() || now->empty()) return false;
+  if (*now == "DIRECT" || *now == "REJECT" || util::is_dummy_node(*now) ||
+      confirmed_fake) {
+    return false;
+  }
+  if (!util::match_node_filter(*now, util::trim(filter_text))) return false;
+  if (!all) return false;
+  return std::find(all->begin(), all->end(), *now) != all->end();
+}
+
+bool CoreMonitor::is_https_verify_backoff_active(
+    std::optional<int64_t> elapsed_secs) {
+  return elapsed_secs.has_value() &&
+         *elapsed_secs < kHttpsVerifyAllFailedBackoffSecs;
 }
 
 }  // namespace clashwin::core

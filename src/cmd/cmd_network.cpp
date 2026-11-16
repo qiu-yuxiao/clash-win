@@ -15,6 +15,7 @@
 #include "enhance/enhance.h"
 #include "system/sysproxy.h"
 #include "util/dirs.h"
+#include "util/node.h"
 #include "util/utf.h"
 
 #include <fstream>
@@ -151,6 +152,14 @@ void install_cmd_proxy(CommandService& svc) {
       {[](const Json&) -> CmdResult {
          core::CoreMonitor::instance().notify_manual_node_switched();
          return CmdResult::ok(nullptr);
+       },
+       consts::kTimeoutProbe});
+
+  // ---- get_confirmed_fake_proxy_names（← proxy.rs:134-136：软隔离/拓扑连坐假节点列表）----
+  svc.register_command(
+      "get_confirmed_fake_proxy_names",
+      {[](const Json&) -> CmdResult {
+         return CmdResult::ok(Json(util::confirmed_fake_node_names()));
        },
        consts::kTimeoutProbe});
 }

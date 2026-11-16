@@ -83,4 +83,12 @@ QuickRouteResult remove_quick_routing_rule(
 // 批量添加网址规则（以换行/逗号/分号分割），全量以 PROXY 规则置顶写入 Merge.yaml 并热重载
 int add_quick_routing_rules(const std::string& raw_text);
 
+// 导出/导入自定义分流规则 YAML 备份（← src/utils/quick-routing.ts v3.5.0）
+std::string serialize_custom_routing_backup(
+    const std::vector<std::string>& rules,
+    const std::string& exported_at_iso = "");
+std::vector<std::string> parse_custom_routing_backup(const std::string& content);
+// 从备份内容导入规则至 Merge.yaml prepend-rules 并触发 live enhance，返回导入条数（无效/空返回 0）
+int import_custom_routing_rules_from_content(const std::string& content);
+
 }  // namespace clashwin::core::quick_routing

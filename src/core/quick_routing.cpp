@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
 #include <mutex>
 #include <sstream>
 #include <unordered_set>
@@ -574,6 +577,127 @@ int add_quick_routing_rules(const std::string& raw_text) {
 
   cmd::enhance_profiles_live();
   return added_count;
+}
+
+std::string serialize_custom_routing_backup(
+    const std::vector<std::string>& rules,
+    const std::string& exported_at_iso) {
+  std::vector<std::string> rule_lines;
+  std::unordered_set<std::string> seen_keys;
+  for (const auto& item : rules) {
+    const std::string raw = trim_copy(item);
+    if (raw.empty() || raw[0] == '#') continue;
+    auto parsed = parse_managed_merge_rule_line(raw);
+    if (!parsed) continue;
+    std::string key = get_rule_identity_key(parsed->raw);
+    if (key.empty()) key = parsed->raw;
+    if (!seen_keys.insert(key).second) continue;
+    rule_lines.push_back(parsed->raw);
+  }
+
+  std::string iso = exported_at_iso;
+  if (iso.empty()) {
+    using namespace std::chrono;
+    const auto now = system_clock::now();
+    const auto t = system_clock::to_time_t(now);
+    const auto ms =
+        duration_cast<milliseconds>(now.time_since_epoch()).count() % 1000;
+    std::tm utc{};
+    gmtime_s(&utc, &t);
+    std::ostringstream oss;
+    oss << std::put_time(&utc, "%Y-%m-%dT%H:%M:%S") << '.'
+        << std::setw(3) << std::setfill('0') << ms << 'Z';
+    iso = oss.str();
+  }
+
+  YAML::Emitter out;
+  out << YAML::BeginMap;
+  out << YAML::Key << "version" << YAML::Value << 1;
+  out << YAML::Key << "exportedAt" << YAML::Value << iso;
+  out << YAML::Key << "prepend-rules" << YAML::Value << YAML::BeginSeq;
+  for (const auto& r : rule_lines) out << r;
+  out << YAML::EndSeq;
+  out << YAML::EndMap;
+  return std::string("# Clash Mini Custom Routing Rules Backup\n") +
+         out.c_str() + "\n";
+}
+
+std::vector<std::string> parse_custom_routing_backup(const std::string& content) {
+  const std::string trimmed = trim_copy(content);
+  if (trimmed.empty()) return {};
+
+  std::vector<std::string> candidates;
+  try {
+    YAML::Node parsed = YAML::Load(trimmed);
+    YAML::Node list;
+    if (parsed && parsed.IsSequence()) {
+      list = parsed;
+    } else if (parsed && parsed.IsMap()) {
+      const YAML::Node pr =
+          static_cast<const YAML::Node&>(parsed)["prepend-rules"];
+      const YAML::Node ru = static_cast<const YAML::Node&>(parsed)["rules"];
+      if (pr && pr.IsSequence()) {
+        list = pr;
+      } else if (ru && ru.IsSequence()) {
+        list = ru;
+      }
+    }
+    if (list && list.IsSequence()) {
+      for (const auto& item : list) {
+        if (item && item.IsScalar() && !item.IsNull()) {
+          candidates.push_back(item.Scalar());
+        }
+      }
+    }
+  } catch (...) {
+    return {};
+  }
+
+  std::vector<std::string> valid_rules;
+  std::unordered_set<std::string> seen_keys;
+  for (const auto& c : candidates) {
+    const std::string line = trim_copy(c);
+    if (line.empty() || line[0] == '#') continue;
+    auto parsed_rule = parse_managed_merge_rule_line(line);
+    if (!parsed_rule) continue;
+    std::string key = get_rule_identity_key(parsed_rule->raw);
+    if (key.empty()) key = parsed_rule->raw;
+    if (!seen_keys.insert(key).second) continue;
+    valid_rules.push_back(parsed_rule->raw);
+  }
+  return valid_rules;
+}
+
+int import_custom_routing_rules_from_content(const std::string& content) {
+  auto imported_rules = parse_custom_routing_backup(content);
+  if (imported_rules.empty()) return 0;
+
+  std::wstring merge_path = util::dirs::app_profiles_dir() + L"\\Merge.yaml";
+  {
+    std::lock_guard<std::mutex> lock(merge_file_mutex());
+    YAML::Node doc;
+    auto load_res = util::load_yaml_file(merge_path);
+    if (load_res.is_ok() && load_res.value().IsMap()) {
+      doc = load_res.value();
+    } else {
+      doc = YAML::Node(YAML::NodeType::Map);
+    }
+    std::vector<std::string> next_rules = read_merge_prepend_rules_from_node(doc);
+    for (auto it = imported_rules.rbegin(); it != imported_rules.rend(); ++it) {
+      next_rules = upsert_prepend_rule(next_rules, *it);
+    }
+    doc["prepend-rules"] = next_rules;
+    auto save_res = util::save_yaml_file(merge_path, doc);
+    if (!save_res.is_ok()) {
+      CWLOG_ERROR("Failed to save Merge.yaml on import: " + save_res.error().message);
+      return 0;
+    }
+  }
+
+  cmd::enhance_profiles_live();
+  events::EventBus::notice_message(
+      "quick_rules_imported", std::to_string(imported_rules.size()));
+  return static_cast<int>(imported_rules.size());
 }
 
 }  // namespace clashwin::core::quick_routing

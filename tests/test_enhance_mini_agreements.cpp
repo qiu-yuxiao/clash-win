@@ -39,6 +39,7 @@ UT_TEST(t08_mini_agreements_rules_chain) {
   UT_CHECK(g1["type"].Scalar() == "url-test");
   UT_CHECK(g1["url"].Scalar() == "https://cp.cloudflare.com/generate_204");
   UT_CHECK(g1["interval"].Scalar() == "300");
+  UT_CHECK(g1["lazy"].Scalar() == "false");
   UT_CHECK_EQ(g0["proxies"].size(), size_t(2));
   UT_CHECK(g0["proxies"][0].Scalar() == "node-A");
   UT_CHECK(g0["proxies"][1].Scalar() == "node-B");

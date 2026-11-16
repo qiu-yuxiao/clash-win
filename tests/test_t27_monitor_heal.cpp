@@ -125,22 +125,20 @@ UT_TEST(t27_v324_bug315_timing_constants_and_bounds) {
   f.clock += 1;
   UT_CHECK(!m.in_switch_grace());  // 20.000s → 宽限期结束
 
-  // 再验证 25s 自愈冷却边界：24.999s 内跳过，25.000s 放行
-  h.api_alive = [] { return false; };
+  // 再验证 25s 自愈冷却边界（使用豁免 120s 速率上限的 ConfirmedDead 节点故障路径）：
+  // 24.999s 内跳过，25.000s 放行
+  h.node_healthy = [] { return false; };
   m.set_hooks(h);
-  m.tick_once();
   m.tick_once();
   UT_CHECK(m.tick_once() == CoreMonitor::Action::Healed);
   UT_CHECK_EQ(heals, 1);
 
   f.clock += 24999;
   m.tick_once();
-  m.tick_once();
   UT_CHECK(m.tick_once() == CoreMonitor::Action::Idle);  // 24.999s 仍在冷却
   UT_CHECK_EQ(heals, 1);
 
   f.clock += 1;  // 累计满 25000ms
-  m.tick_once();
   m.tick_once();
   UT_CHECK(m.tick_once() == CoreMonitor::Action::Healed);  // 25.000s 放行自愈
   UT_CHECK_EQ(heals, 2);

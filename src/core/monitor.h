@@ -41,6 +41,22 @@ class CoreMonitor {
   static constexpr int64_t kHealthDataFreshSecs = 60;
   // ← monitor.rs:70 DEAD_CONFIRM_MIN_INTERVAL_SECS = 10
   static constexpr int64_t kDeadConfirmMinIntervalSecs = 10;
+  // ← monitor.rs v3.5.0 Continuity-First & Traffic Liveness 常量
+  static constexpr uint64_t kSuspectWindowSecs = 30;
+  static constexpr int64_t kPassiveTrafficMaxSkipSecs = 480;
+  static constexpr int64_t kIdleHealthFreshSecs = 300;
+  static constexpr int64_t kStallReprobeCooldownSecs = 60;
+  static constexpr int64_t kMinAutoSwitchIntervalSecs = 120;
+  static constexpr int64_t kAutoSwitchWindowSecs = 600;
+  static constexpr size_t kMaxAutoSwitchesPerWindow = 3;
+  static constexpr int64_t kHttpsVerifyIntervalSecs = 180;
+  static constexpr int64_t kActiveVerifyCooldownSecs = 60;
+  static constexpr int64_t kHttpsVerifyAllFailedBackoffSecs = 600;
+  static constexpr bool kDeadConnCleanupEnabled = false;
+  static constexpr const char* kVerifyHttpsUrlPrimary =
+      "https://github.githubassets.com/favicons/favicon.svg";
+  static constexpr const char* kVerifyHttpsUrlFallback =
+      "https://www.wikipedia.org/static/favicon/wikipedia.ico";
   // ← monitor.rs:1277-1280 物理网络双频探测间隔（在线 60s / 离线 5s）
   static constexpr int64_t kOnlineProbeIntervalMs = 60000;
   static constexpr int64_t kOfflineProbeIntervalMs = 5000;
@@ -98,6 +114,16 @@ class CoreMonitor {
     std::function<std::string()> current_uid;
     // 托盘/无窗口纯后台启动判定（无窗口可见时由后台执行首次初始化选点）
     std::function<bool()> is_headless;
+    // ← v3.5.0 Continuity-First：当前持久出口是否结构有效（有效时冷启动只测不切）
+    std::function<bool()> persisted_exit_usable;
+    // ← v3.5.0 可选指定 select 参数的初始化选点（缺失时回退 auto_select_trigger）
+    std::function<Result<bool>(bool select)> auto_select_with_mode;
+    // ← v3.5.0 S4 ConfirmedDead 切点前同一权威来源复核（返回 false = 放弃本次切点）
+    std::function<bool(const std::string& dead_node)> confirm_dead_gate;
+    // ← v3.5.0 BUG-388 API 恢复保活门检（返回 true = 当前活跃真节点已健康，保活跳过切点）
+    std::function<bool()> api_recovery_keep_alive;
+    // ← v3.5.0 后台定期真 HTTPS 验真（每 180s 周期调用，可选）
+    std::function<void()> periodic_https_verify;
     // 时钟（Unix 毫秒；测试注入虚拟时钟）
     std::function<int64_t()> now_ms;
   };
@@ -179,6 +205,109 @@ class CoreMonitor {
 
   // ---- BUG-336：手动切节点即时刷新宽限期 ----
   void notify_manual_node_switched();
+  // ---- BUG-388：手动切点代际号（AutoSelect 期间若被手动切点抢占则放弃写回） ----
+  uint64_t manual_switch_epoch() const {
+    return manual_switch_epoch_.load(std::memory_order_acquire);
+  }
+  static bool is_manual_switch_preempted(uint64_t start_epoch,
+                                         uint64_t current_epoch);
+  static bool is_benign_auto_select_abort(const std::string& err_msg);
+
+  // ---- v3.5.0 Continuity-First 纯判定与状态机辅助（← monitor.rs） ----
+  enum class NodeStatusKind { Unknown, Suspect, Dead, Alive };
+  struct NodeStatus {
+    NodeStatusKind kind = NodeStatusKind::Unknown;
+    uint32_t delay_ms = 0;
+  };
+  static NodeStatus classify_node_status(
+      bool alive, std::optional<uint32_t> last_delay,
+      std::optional<uint64_t> age_secs);
+  static bool should_proceed_with_self_heal(const NodeStatus& status);
+
+  enum class ActiveTrafficState { Flowing, Stalled, Idle };
+  struct ActiveTrafficTracker {
+    std::optional<std::string> active_node;
+    std::map<std::string, std::pair<uint64_t, uint64_t>> conn_bytes;
+    int64_t last_stall_probe_ms = -1;
+  };
+  static std::pair<ActiveTrafficState,
+                   std::map<std::string, std::pair<uint64_t, uint64_t>>>
+  classify_active_traffic_delta(
+      const std::optional<std::string>& prev_node,
+      const std::string& active_node,
+      const std::map<std::string, std::pair<uint64_t, uint64_t>>& prev_conns,
+      const std::vector<std::tuple<std::string, uint64_t, uint64_t>>&
+          current_conns);
+  static std::pair<ActiveTrafficState, bool> update_active_traffic_state(
+      std::optional<ActiveTrafficTracker>& tracker_slot,
+      const std::string& active_node,
+      const std::vector<std::tuple<std::string, uint64_t, uint64_t>>&
+          current_conns,
+      int64_t now_ms);
+  static bool should_probe_active_node(const NodeStatus& status,
+                                       std::optional<uint64_t> age_secs,
+                                       ActiveTrafficState traffic,
+                                       bool stall_cooldown_active);
+  static bool should_allow_https_migration(ActiveTrafficState traffic);
+
+  struct MetricsProbeOutcome {
+    std::map<std::string, uint32_t> delays;
+    bool primary_url_distorted = false;
+  };
+  static bool should_recheck_with_fallback(
+      const std::map<std::string, uint32_t>& primary_delays,
+      const std::vector<std::string>& expected_nodes);
+  static std::map<std::string, uint32_t> merge_probe_delays(
+      std::map<std::string, uint32_t> primary,
+      const std::map<std::string, uint32_t>& fallback);
+  static std::vector<std::pair<std::string, uint32_t>>
+  build_probe_ui_display_with(
+      const std::vector<std::string>& all_nodes,
+      const std::map<std::string, uint32_t>& probed_delays,
+      bool primary_url_distorted,
+      const std::function<bool(const std::string&)>& is_fake_node);
+  static std::vector<std::pair<std::string, uint32_t>> build_probe_ui_display(
+      const std::vector<std::string>& all_nodes,
+      const std::map<std::string, uint32_t>& probed_delays,
+      bool primary_url_distorted);
+
+  struct UiActiveSyncState {
+    std::string node_name;
+    std::optional<std::string> history_time;
+    bool reported_alive = false;
+  };
+  static std::optional<UiActiveSyncState> compute_next_ui_active_sync(
+      const std::string& active_node,
+      const std::vector<std::pair<std::string, uint32_t>>& display,
+      const std::optional<std::string>& active_hist_time,
+      const UiActiveSyncState* prev);
+  static bool should_sync_alive_ui(bool health_not_ok,
+                                   const UiActiveSyncState* last_sync,
+                                   const std::string& active_node,
+                                   const std::string* active_hist_time);
+
+  enum class SelfHealOrigin { ConfirmedDead, NodeMigration, ApiChannelDown };
+  struct SelfHealTrigger {
+    enum class Kind { NodeConfirmedDead, NetworkRecovered, ApiUnreachable };
+    Kind kind = Kind::NodeConfirmedDead;
+    uint32_t count = 0;
+    bool api_alive_on_recheck = false;
+  };
+  enum class SelfHealDecision { Allow, Wait };
+  static SelfHealDecision decide_self_heal(const SelfHealTrigger& trigger,
+                                           int node_dead_threshold = 2,
+                                           int api_fail_threshold = 3);
+  static bool self_heal_requires_dead_gate(SelfHealOrigin origin);
+  static bool self_heal_subject_to_switch_rate_limit(SelfHealOrigin origin);
+  static bool auto_switch_permitted(std::optional<int64_t> last_switch_age_secs,
+                                    size_t recent_switch_count);
+  static bool should_keep_alive_on_api_recovery(bool is_valid_real_node,
+                                                const NodeStatus& status);
+  static bool persisted_exit_is_usable(
+      const std::optional<std::string>& now,
+      const std::vector<std::string>* all, const std::string& filter_text,
+      bool confirmed_fake);
+  static bool is_https_verify_backoff_active(std::optional<int64_t> elapsed_secs);
 
   // ---- BUG-359：网络健康状态去重广播（network_health::ok / offline / all_dead） ----
   void emit_network_health_notice(const std::string& health_msg);
@@ -232,7 +361,9 @@ class CoreMonitor {
 
  private:
   CoreMonitor() = default;
-  Action heal(const std::string& uid);  // 自愈记账核心（tick 内调用）
+  Action heal(const std::string& uid,
+              SelfHealOrigin origin = SelfHealOrigin::ConfirmedDead,
+              const std::string& dead_node = {});  // 自愈记账核心（tick 内调用）
   void absorb_pending_manual_switch(int64_t fallback_now_ms);
   void reset_runtime_loop_state();
 
@@ -249,6 +380,8 @@ class CoreMonitor {
   std::atomic<bool> was_offline_{false};
   std::atomic<int64_t> last_heal_ms_{0};
   std::atomic<int64_t> last_tick_ms_{0};
+  std::atomic<int64_t> last_https_verify_ms_{-1};
+  std::atomic<uint64_t> manual_switch_epoch_{0};
   // ★ §5.1 切换宽限期：最近一次「活跃节点发生变化」的时刻（ms）
   //   ← Mini monitor.rs:1174 last_node_change_time
   //   ★ 用独立标志位而非「值 != 0」判别：测试虚拟时钟可能从 0 起算，
@@ -265,6 +398,10 @@ class CoreMonitor {
   int64_t pending_manual_switch_ms_{-1};
   std::atomic<bool> manual_switch_wake_{false};
   std::atomic<bool> manual_grace_unmatched_{false};
+
+  // v3.5.0 S4：自愈切换速率窗口（120s 最小间隔，600s 内上限 3 次；仅记录实际切换）
+  std::mutex switch_rate_m_;
+  std::vector<int64_t> recent_auto_switches_ms_;
 
   // BUG-359：去重记录最近广播的网络健康状态
   mutable std::mutex health_m_;
