@@ -473,10 +473,6 @@ TakeoverCard::TakeoverCard() : Widget(nullptr) {
   hint_ = hint.get();
   hint_->set_visible(false);
   add_child(std::move(hint));
-  auto ub = std::make_unique<Button>(L"🔓 解锁检测");
-  unlock_btn_ = ub.get();
-  ub->set_visible(false);
-  add_child(std::move(ub));
 }
 
 void TakeoverCard::on_arrange(const RectF& area) {

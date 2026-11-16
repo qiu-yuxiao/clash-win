@@ -1,10 +1,10 @@
 #pragma once
 // ← ClashVerge src-tauri/src/enhance/mod.rs::enhance() 流水线全量移植
 // ①收集 clash.yaml+当前订阅 → ②get_merged_proxies（重名 ` #n (HHMMSS)` 后缀）
-// → ③全局 Merge/Script → ④profile 级 Rules/Proxies/Merge/Script →
+// → ③全局 Merge → ④profile 级 Rules/Proxies/Merge →
 // ⑤merge_default_config（clash.yaml 键覆盖；tun 深合并；dns/profile 仅补缺；
 //   socks/http 未启用删键；redir/tproxy 跳过；config_version 剥离；
-//   external-controller 受开关控制）→ ⑥内置脚本 → ⑦enforce_mini_agreements
+//   external-controller 受开关控制）→ ⑥原生 C++ 内建卫兵 → ⑦enforce_mini_agreements
 // → ⑧use_tun → ⑨use_sort → ⑩apply_mandatory_dns_settings → ⑪境外明文 DNS→DoH
 //
 // 设计：enhance_core 为纯函数（EnhanceInput 全量注入，测试友好，G3 golden 轨
@@ -18,7 +18,6 @@
 
 #include "clashwin/config/models.h"
 #include "enhance/chain.h"
-#include "enhance/js_engine.h"
 #include "util/result.h"
 
 namespace clashwin::enhance {
@@ -39,13 +38,11 @@ struct EnhanceVergeOptions {
 // ← mod.rs::ProfileItems（profile 级链条项）
 struct EnhanceProfileItems {
   YAML::Node config;          // 当前订阅 mapping（无 current → 空 map）
-  std::string profile_name;   // item.name（"" 允许）
+  std::string profile_name;   // 保留兼容（无脚本引擎后不再传参）
   ChainItem merge_item;       // profile 级 Merge
-  ChainItem script_item;      // profile 级 Script
   ChainItem rules_item;       // profile 级 Rules
   ChainItem proxies_item;     // profile 级 Proxies
   ChainItem global_merge;     // 全局 Merge（uid "Merge"）
-  ChainItem global_script;    // 全局 Script（uid "Script"）
 };
 
 // get_merged_proxies 的输入：items 全集 + profiles 目录
@@ -70,9 +67,13 @@ struct EnhanceInput {
 struct EnhanceOutput {
   YAML::Node config;
   std::unordered_set<std::string> exists_keys;
-  // uid → [(level, message)]（script 执行日志；exception 为错误）
-  std::vector<std::pair<std::string, std::vector<ScriptLog>>> script_logs;
 };
+
+// ← mod.rs::apply_builtin_guards：原生 C++ 内建卫兵
+// （mode: script -> rule；hysteria 字符串 alpn -> 单元素数组）
+YAML::Node apply_builtin_guards(YAML::Node config,
+                                const std::string& clash_core,
+                                bool enable_builtin);
 
 // ← mod.rs::enhance() 核心（纯函数）
 EnhanceOutput enhance_core(const EnhanceInput& input);

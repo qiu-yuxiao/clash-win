@@ -90,11 +90,7 @@ UT_TEST(t08_enhance_core_synthetic) {
   input.profile.global_merge.kind = ChainItem::Kind::Merge;
   input.profile.global_merge.merge = YAML::Load(
       "prepend-rules:\n- DOMAIN-SUFFIX,google.com,PROXY\n");
-  input.profile.global_script.kind = ChainItem::Kind::Script;
-  input.profile.global_script.script = consts::kItemScript;
   input.profile.merge_item.kind = ChainItem::Kind::Merge;
-  input.profile.script_item.kind = ChainItem::Kind::Script;
-  input.profile.script_item.script = consts::kItemScript;
   input.profile.rules_item.kind = ChainItem::Kind::Rules;
   input.profile.proxies_item.kind = ChainItem::Kind::Proxies;
   input.merged_proxies_source.profiles_dir = dir + L"\\profiles";
@@ -179,11 +175,7 @@ UT_TEST(t08_enhance_core_empty_profile) {
   input.verge.enable_tun = false;
   input.profile.config = YAML::Node(YAML::NodeType::Map);
   input.profile.global_merge.kind = ChainItem::Kind::Merge;
-  input.profile.global_script.kind = ChainItem::Kind::Script;
-  input.profile.global_script.script = consts::kItemScript;
   input.profile.merge_item.kind = ChainItem::Kind::Merge;
-  input.profile.script_item.kind = ChainItem::Kind::Script;
-  input.profile.script_item.script = consts::kItemScript;
   input.profile.rules_item.kind = ChainItem::Kind::Rules;
   input.profile.proxies_item.kind = ChainItem::Kind::Proxies;
 
@@ -295,15 +287,11 @@ bool build_input_from_home(const std::wstring& home, EnhanceInput& input) {
       ChainItem e;
       e.kind = k;
       e.uid = u;
-      if (k == ChainItem::Kind::Script) e.script = consts::kItemScript;
       return e;
     };
     input.profile.merge_item =
         load_chain(cur->option ? cur->option->merge : std::nullopt, "Merge",
                    ChainItem::Kind::Merge);
-    input.profile.script_item =
-        load_chain(cur->option ? cur->option->script : std::nullopt, "Script",
-                   ChainItem::Kind::Script);
     input.profile.rules_item =
         load_chain(cur->option ? cur->option->rules : std::nullopt, "Rules",
                    ChainItem::Kind::Rules);
@@ -313,8 +301,6 @@ bool build_input_from_home(const std::wstring& home, EnhanceInput& input) {
   }
   input.profile.global_merge =
       chain_item_load(home + L"\\profiles", "Merge", "merge", "Merge.yaml");
-  input.profile.global_script =
-      chain_item_load(home + L"\\profiles", "Script", "script", "Script.js");
 
   input.merged_proxies_source.profiles_dir = home + L"\\profiles";
   if (profiles.items) {
@@ -472,4 +458,57 @@ UT_TEST(t08_golden_live_probe) {
         "[live-drift] lines above; informational only (real machine may be "
         "running a newer build with changed enhance semantics)\n");
   }
+}
+
+UT_TEST(t08_apply_builtin_guards_mode_and_hysteria_alpn) {
+  const std::string yaml_str =
+      "mode: script\n"
+      "proxies:\n"
+      "  - name: hy1\n"
+      "    type: hysteria\n"
+      "    server: 198.51.100.1\n"
+      "    port: 443\n"
+      "    alpn: h3\n"
+      "  - name: hy_arr\n"
+      "    type: hysteria\n"
+      "    server: 198.51.100.2\n"
+      "    port: 443\n"
+      "    alpn:\n"
+      "      - h3\n"
+      "  - name: hy2\n"
+      "    type: hysteria2\n"
+      "    server: 198.51.100.3\n"
+      "    port: 443\n"
+      "    alpn: h3\n";
+  YAML::Node input = YAML::Load(yaml_str);
+
+  // enable_builtin = false 时不做任何改写
+  YAML::Node disabled =
+      apply_builtin_guards(YAML::Clone(input), "win-mihomo", false);
+  UT_CHECK_EQ(disabled["mode"].Scalar(), "script");
+
+  // 启用内建卫兵：mode: script -> rule；hysteria 字符串 alpn -> 单元素数组；其余不变
+  YAML::Node guarded =
+      apply_builtin_guards(YAML::Clone(input), "win-mihomo", true);
+  UT_CHECK_EQ(guarded["mode"].Scalar(), "rule");
+  YAML::Node proxies = guarded["proxies"];
+  UT_CHECK(proxies[0]["alpn"].IsSequence());
+  UT_CHECK_EQ(proxies[0]["alpn"].size(), size_t(1));
+  UT_CHECK_EQ(proxies[0]["alpn"][0].Scalar(), "h3");
+  UT_CHECK(proxies[1]["alpn"].IsSequence());
+  UT_CHECK_EQ(proxies[1]["alpn"].size(), size_t(1));
+  UT_CHECK_EQ(proxies[2]["alpn"].IsScalar(), true);
+  UT_CHECK_EQ(proxies[2]["alpn"].Scalar(), "h3");
+
+  // 历史 script itype 加载兼容为无操作，不崩溃
+  auto noop_script =
+      chain_item_load(L".", "Script", "script", "Script.js");
+  UT_CHECK(noop_script.kind == ChainItem::Kind::Merge);
+  UT_CHECK_EQ(noop_script.merge.size(), size_t(0));
+
+  // 其他有效 mode 不被覆盖
+  YAML::Node rule_cfg(YAML::NodeType::Map);
+  rule_cfg["mode"] = "global";
+  YAML::Node kept = apply_builtin_guards(std::move(rule_cfg), "", true);
+  UT_CHECK_EQ(kept["mode"].Scalar(), "global");
 }

@@ -21,8 +21,6 @@ enum class ValidationErrorKind {
   FileRead,
   YamlSyntax,
   YamlMapping,
-  ScriptSyntax,
-  ScriptMissingMain,
   CoreRejected,
   ProcessTerminated,
   Timeout,
@@ -86,10 +84,10 @@ class Validator {
 Result<std::wstring> make_check_copy(const std::wstring& source);
 
 // ---------- 校验失败通知状态（← validate.rs:527-583）----------
-// 校验对象：Runtime=运行配置、Merge=覆写碎片、Script=JavaScript 覆写脚本。
+// 校验对象：Runtime=运行配置、Merge=覆写碎片。
 // 同一种错误在不同对象上要给出不同文案（例：YamlSyntax 在 Merge 上是「覆写文件语法错误」，
-// 在 Script 上是「脚本文件错误」，在 Runtime 上是「YAML 语法错误」）。
-enum class ValidationNoticeTarget { Runtime, Merge, Script };
+// 在 Runtime 上是「YAML 语法错误」）。
+enum class ValidationNoticeTarget { Runtime, Merge };
 
 // ← validate.rs:531-553 const fn notice_key：kind × target → 状态串
 const char* notice_status(ValidationErrorKind kind, ValidationNoticeTarget target);

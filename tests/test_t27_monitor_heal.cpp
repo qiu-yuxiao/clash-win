@@ -479,29 +479,3 @@ UT_TEST(t27_v324_throttled_net_probe_dual_frequency) {
   UT_CHECK(throttle.check(66000, probe_fn));
   UT_CHECK_EQ(probes, 3);
 }
-
-UT_TEST(t27_v330_monitor_guardian_tick_hook) {
-  auto& mon = CoreMonitor::instance();
-  mon.stop();
-  mon.reset_state();
-
-  std::atomic<int> ticks{0};
-  CoreMonitor::Hooks h{};
-  h.core_alive = [] { return true; };
-  h.api_alive = [] { return true; };
-  h.network_online = [] { return true; };
-  h.is_headless = [] { return true; };
-  h.current_uid = [] { return std::string(); };
-  h.on_guardian_tick = [&] { ticks.fetch_add(1); };
-  mon.set_hooks(h);
-
-  mon.start();
-  for (int i = 0; i < 50 && ticks.load() == 0; ++i) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-  mon.stop();
-
-  UT_CHECK(ticks.load() > 0);
-  mon.set_hooks({});
-  mon.reset_state();
-}

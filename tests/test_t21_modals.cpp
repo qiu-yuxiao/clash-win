@@ -6,9 +6,7 @@
 // 4. t21_first_run_guide_step2_ready_and_star_card：就绪态仪表盘、2.5s 测速超时与暖金 GitHub Star 应援卡
 // 5. t21_addurl_modal_layout_and_fields：360×290 自定义规则弹窗几何布局与三段策略开关
 // 6. t21_addurl_merge_yaml_injection：Merge.yaml prepend-rules 规则置顶注入与 enhance 触发
-// 7. t21_unlock_modal_layout_and_12_platforms：360×620 流媒体 AI 解锁 12 平台布局与状态指示器
-// 8. t21_unlock_cache_persistence：Mock 隔离零网络检测、unlock_cache.json 落盘与去重
-// 9. t21_utility_modals_edit_and_updates：配置编辑、客户端更新、内核升级 (EventBus 5->100) 弹窗
+// 7. t21_utility_modals_edit_and_updates：配置编辑、客户端更新、内核升级 (EventBus 5->100) 弹窗
 // 10. t21_log_viewer_modal_batching_and_clamp：50ms 批处理刷新、1000 行环形截断、级别与搜索过滤
 // 11. t21_text_viewer_consolas_line_numbers_wrap：Consolas 字体、行号栏与分割线、自动换行与编辑器动作
 // 12. t21_d2d_local_coordinates_no_double_offset：局部坐标规则与离屏像素断言（零双偏移）
@@ -26,12 +24,10 @@
 
 #include "core/quick_routing.h"
 #include "events/event_bus.h"
-#include "system/unlock_checker.h"
 #include "test_ui_helper.h"
 #include "test_util.h"
 #include "ui/scenes/add_url_dialog.h"
 #include "ui/scenes/first_run_guide_dialog.h"
-#include "ui/scenes/unlock_dialog.h"
 #include "ui/scenes/utility_modals.h"
 #include "ui/snackbar_w.h"
 #include "ui/notice_handler.h"
@@ -67,31 +63,6 @@ struct TempHomeGuard {
     _wputenv_s(L"CLASHWIN_HOME_OVERRIDE", L"");
     std::error_code ec;
     fs::remove_all(dir, ec);
-  }
-};
-
-class MockZeroNetworkTransport : public system::IUnlockTransport {
- public:
-  system::UnlockCheckResponse check(const system::UnlockCheckRequest& req, uint16_t) override {
-    system::UnlockCheckResponse resp;
-    resp.ok = true;
-    if (req.platform_name == "Bahamut 动画疯") {
-      resp.status = "No";
-      resp.region = "twTW";
-    } else if (req.platform_name == "Google Gemini") {
-      resp.status = "Yes";
-      resp.region = "jpJP";
-    } else if (req.platform_name == "YouTube Premium") {
-      resp.status = "Yes";
-      resp.region = "sgSG";
-    } else if (req.platform_name == "Bilibili 大陆" || req.platform_name == "Prime Video") {
-      resp.status = "Yes";
-      resp.region = std::nullopt;
-    } else {
-      resp.status = "Yes";
-      resp.region = "usUS";
-    }
-    return resp;
   }
 };
 
@@ -384,76 +355,7 @@ UT_TEST(t21_addurl_batch_multiline_and_no_change) {
   UT_CHECK(has_info);
 }
 
-// Test 7: UnlockDialog 12 Platforms & Badges
-UT_TEST(t21_unlock_modal_layout_and_12_platforms) {
-  UnlockDialog dialog;
-  dialog.open();
-  UT_CHECK(dialog.is_open());
-
-  dialog.on_arrange({0, 0, 800, 700});
-
-  // src: pages/unlock.tsx:388-517 Grid md:3 列（:388 spacing=1.5 → 12px 间距），
-  //   Card radius16 / p1.3 / 高约 93；纸面宽取 520（3 列 × 156 + 24 + 28）
-  UT_CHECK_EQ(dialog.card_rect().w, 520.0f);
-  UT_CHECK_EQ(dialog.card_rect().h, 468.0f);  // 44 + 4*93 + 3*12 + 16
-
-  // 平台列表恰好为 12 项
-  const auto& items = dialog.items();
-  UT_CHECK_EQ(items.size(), 12);
-
-  // 验证关键平台名称覆盖
-  bool has_chatgpt = false;
-  bool has_claude = false;
-  bool has_gemini = false;
-  bool has_youtube = false;
-  bool has_bahamut = false;
-
-  for (const auto& it : items) {
-    if (it.name.find("ChatGPT") != std::string::npos) has_chatgpt = true;
-    if (it.name.find("Claude") != std::string::npos) has_claude = true;
-    if (it.name.find("Gemini") != std::string::npos) has_gemini = true;
-    if (it.name.find("YouTube") != std::string::npos) has_youtube = true;
-    if (it.name.find("Bahamut") != std::string::npos) has_bahamut = true;
-  }
-
-  UT_CHECK(has_chatgpt);
-  UT_CHECK(has_claude);
-  UT_CHECK(has_gemini);
-  UT_CHECK(has_youtube);
-  UT_CHECK(has_bahamut);
-
-  dialog.close();
-}
-
-// Test 8: UnlockCache Persistence & Mock Transport (Zero Real Network)
-UT_TEST(t21_unlock_cache_persistence) {
-  auto& checker = system::UnlockChecker::instance();
-  auto mock_tp = std::make_shared<MockZeroNetworkTransport>();
-  checker.set_transport(mock_tp);
-
-  // 执行并发检测，严格由 mock 处理，零网络出站
-  auto results = checker.check_all(0);
-  UT_CHECK_EQ(results.size(), 12);
-
-  // 验证结果状态与地区映射
-  for (const auto& it : results) {
-    if (it.name == "Bahamut 动画疯") {
-      UT_CHECK_EQ(it.status, "No");
-      UT_CHECK(it.region.has_value());
-      UT_CHECK_EQ(*it.region, "twTW");
-    } else if (it.name == "Google Gemini") {
-      UT_CHECK_EQ(it.status, "Yes");
-      UT_CHECK(it.region.has_value());
-      UT_CHECK_EQ(*it.region, "jpJP");
-    }
-  }
-
-  // 验证从 unlock_cache.json 读回
-  auto loaded = checker.load_cached_items();
-  UT_CHECK_EQ(loaded.size(), 12);
-}
-
-// Test 9: Utility Modals (EditProfile, ClientUpdate, CoreUpdate)
+// Test 7: Utility Modals (EditProfile, ClientUpdate, CoreUpdate)
 UT_TEST(t21_utility_modals_edit_and_updates) {
   // 1. EditProfileModal
   {

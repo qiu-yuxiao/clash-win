@@ -33,47 +33,4 @@ inline const char* const kDefaultFakeIpFilter[] = {
     "+.pool.ntp.org",
 };
 
-// ← constants.rs::timing::INTERNAL_CONTROL_TIMEOUT_MS（脚本执行看门狗）
-inline constexpr int kScriptTimeoutMs = 3000;
-
-// ← script.rs 输出限制
-inline constexpr size_t kMaxOutputs = 1000;
-inline constexpr size_t kMaxOutputSize = 1024 * 1024;        // 1MB
-inline constexpr size_t kMaxJsonSize = 10 * 1024 * 1024;     // 10MB
-
-// ← tmpl.rs::ITEM_SCRIPT（默认脚本模板）
-inline constexpr const char* kItemScript =
-    "// Define main function (script entry)\n"
-    "\n"
-    "function main(config, profileName) {\n"
-    "  return config;\n"
-    "}\n";
-
-// ← chain.rs::builtin（内置脚本，ChainSupport::ClashMeta）
-// meta_hy_alpn.js：hysteria alpn 字符串转数组（meta 1.13.2 兼容）
-inline constexpr const char* kBuiltinScriptHyAlpn = R"JS(// This function is exported for use by the Clash core
-// eslint-disable-next-line unused-imports/no-unused-vars
-function main(config, _name) {
-  if (Array.isArray(config.proxies)) {
-    config.proxies.forEach((p, i) => {
-      if (p.type === 'hysteria' && typeof p.alpn === 'string') {
-        config.proxies[i].alpn = [p.alpn]
-      }
-    })
-  }
-  return config
-}
-)JS";
-
-// meta_guard.js：mode=script → rule 归一
-inline constexpr const char* kBuiltinScriptMetaGuard = R"JS(// This function is exported for use by the Clash core
-// eslint-disable-next-line unused-imports/no-unused-vars
-function main(config, _name) {
-  if (config.mode === 'script') {
-    config.mode = 'rule'
-  }
-  return config
-}
-)JS";
-
 }  // namespace clashwin::enhance::consts

@@ -9,7 +9,7 @@
 
 #include "minisign_vector.h"
 #include "config/update_keys.h"
-#include "update/client_updater.h"
+#include "clashwin/update/client_updater.h"
 #include "util/base64.h"
 
 using clashwin::update::verify_installer_signature;

@@ -102,16 +102,6 @@ void HelpMenu::execute_action(HelpAction action, HWND hwnd) {
         if (!res.is_ok()) CWLOG_WARN("check_core_update failed: " + res.error().message);
       });
       break;
-    case HelpAction::OpenConfigDir:
-      run_command_async("open_app_dir", [] {
-        (void)cmd::CommandService::instance().invoke("open_app_dir", {});
-      });
-      break;
-    case HelpAction::OpenLogsDir:
-      run_command_async("open_logs_dir", [] {
-        (void)cmd::CommandService::instance().invoke("open_logs_dir", {});
-      });
-      break;
   }
 }
 

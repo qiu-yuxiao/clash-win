@@ -8,7 +8,6 @@
 
 #include "clashwin/config/constants.h"
 #include "migrate.h"
-#include "system/network_info.h"
 #include "util/dirs.h"
 #include "util/log.h"
 #include "util/str_utils.h"

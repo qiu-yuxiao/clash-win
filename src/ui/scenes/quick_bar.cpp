@@ -369,7 +369,7 @@ void QuickBar::set_badge(int delay, bool has_node) {
   }
   delay_label_->set_visible(show);
   if (testing)
-    delay_label_->set_text(tr("tests.unlock.page.actions.testing"));  // src: locales/zh/settings.json:549 statusTesting
+    delay_label_->set_text(tr("settings.mini.statusTesting"));  // src: locales/zh/settings.json:549 statusTesting
   else if (show)
     delay_label_->set_text(format_delay(delay));  // -1 → '-'；与节点表同源
   if (bounds().w > 0) on_arrange(bounds());  // 徽章显隐/位数变化 → 名称可用宽重算

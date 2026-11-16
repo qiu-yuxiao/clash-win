@@ -56,7 +56,7 @@ UT_TEST(t03_profiles_filename_rules) {
   UT_CHECK(!profiles::is_profile_file("Merge.yaml"));        // 无前缀数字
   UT_CHECK(!profiles::is_profile_file("R.yaml"));            // 空 uid 体
   UT_CHECK(profiles::is_protected_global_file("Merge.yaml"));
-  UT_CHECK(profiles::is_protected_global_file("Script.js"));
+  UT_CHECK(!profiles::is_protected_global_file("Script.js"));
   UT_CHECK(!profiles::is_protected_global_file("R12345678.yaml"));
 }
 
@@ -76,10 +76,10 @@ UT_TEST(t03_profiles_from_local_appends_with_subitems) {
   // 文件名规则：L + uid + .yaml
   UT_CHECK(local.uid && local.uid->rfind("L", 0) == 0);
   UT_CHECK(local.file && *local.file == *local.uid + ".yaml");
-  // 子项自动挂载 merge/script/rules/proxies（groups 不创建）
+  // 子项自动挂载 merge/rules/proxies（不新建 script / groups）
   UT_CHECK(local.option.has_value());
   UT_CHECK(local.option->merge.has_value());
-  UT_CHECK(local.option->script.has_value());
+  UT_CHECK(!local.option->script.has_value());
   UT_CHECK(local.option->rules.has_value());
   UT_CHECK(local.option->proxies.has_value());
   UT_CHECK(!local.option->groups.has_value());
@@ -88,11 +88,10 @@ UT_TEST(t03_profiles_from_local_appends_with_subitems) {
   UT_CHECK_EQ(*local.file_data, std::string(tmpl::kItemLocal));
 
   // 追加：current 自动激活（首个 local/remote 项）。
-  // 注意：ensure_enhance_items 已先向 p 追加 m/s/r/p 四个子项（与 Rust 全局
-  // profiles 行为一致），故 items 共 5 项。
+  // 注意：ensure_enhance_items 已先向 p 追加 m/r/p 三个子项，故 items 共 4 项。
   UT_CHECK(p.append_item(local).is_ok());
   UT_CHECK(p.current.has_value() && *p.current == *local.uid);
-  UT_CHECK(p.items && p.items->size() == 5);
+  UT_CHECK(p.items && p.items->size() == 4);
   // 内容落盘
   UT_CHECK(file_exists(util::dirs::app_profiles_dir() + L"\\" +
                        utf::utf8_to_utf16(*local.file)));
@@ -251,12 +250,11 @@ UT_TEST(t03_profiles_reorder_and_cleanup_orphans) {
     f << "x";
   };
   touch("Raaa.yaml"); touch("Lbbb.yaml"); touch("Rorphan.yaml");
-  touch("Merge.yaml"); touch("Script.js");
+  touch("Merge.yaml");
   UT_CHECK(p.cleanup_orphaned_files().is_ok());
   UT_CHECK(file_exists(util::dirs::app_profiles_dir() + L"\\Raaa.yaml"));
   UT_CHECK(file_exists(util::dirs::app_profiles_dir() + L"\\Lbbb.yaml"));
   UT_CHECK(file_exists(util::dirs::app_profiles_dir() + L"\\Merge.yaml"));
-  UT_CHECK(file_exists(util::dirs::app_profiles_dir() + L"\\Script.js"));
   UT_CHECK(!file_exists(util::dirs::app_profiles_dir() + L"\\Rorphan.yaml"));
 }
 
@@ -394,28 +392,5 @@ UT_TEST(t_bug362_prf_option_custom_user_agent_normalization_and_merge) {
   UT_CHECK(got != nullptr && got->option.has_value());
   if (got && got->option) {
     UT_CHECK(!got->option->user_agent.has_value());
-  }
-}
-
-UT_TEST(t_bug333_copy_clash_env_default_mixed_port_constant) {
-  _putenv_s("CLASH_VERGE_REV_IP", "");
-  IVerge v_default;
-  auto ps = cmd::build_clash_env_text(v_default);
-  UT_CHECK(ps.is_ok());
-  if (ps.is_ok()) {
-    const std::string expected_port = std::to_string(consts::kDefaultMixed);
-    UT_CHECK(ps.value().find("127.0.0.1:" + expected_port) != std::string::npos);
-    UT_CHECK(ps.value().find("7897") == std::string::npos);
-  }
-
-  IVerge v_custom;
-  v_custom.proxy_host = "192.168.50.2";
-  v_custom.verge_mixed_port = 10899;
-  v_custom.env_type = "sh";
-  auto sh = cmd::build_clash_env_text(v_custom);
-  UT_CHECK(sh.is_ok());
-  if (sh.is_ok()) {
-    UT_CHECK(sh.value().find("http://192.168.50.2:10899") != std::string::npos);
-    UT_CHECK(sh.value().find("socks5://192.168.50.2:10899") != std::string::npos);
   }
 }

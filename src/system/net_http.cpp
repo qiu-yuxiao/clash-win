@@ -39,7 +39,7 @@ namespace {
 constexpr uint64_t kDefaultTimeoutS = 20;  // ← PrfOption timeout_seconds 默认
 // 默认订阅 User-Agent 锚定当前内置 Mihomo v1.19.33 同代的上游主流稳定版（clash-verge/v2.5.10），
 // 不绑定客户端 UI 版本号 kAppVersion（0.x 会触发机场“客户端过旧”假节点拦截，高频涨号亦会导致
-// 内核协议代际错判与指纹暴露；详见根目录《有关User-Agent的思考.md》）。
+// 内核协议代际错判与指纹暴露；参见《移植基本准则.md》§5.4）。
 constexpr const char* kDefaultUserAgent = config::consts::kSubscriptionCompatUserAgent;
 
 bool cancel_signaled(HANDLE ev) {

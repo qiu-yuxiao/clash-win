@@ -12,9 +12,8 @@ IProfiles load();
 
 // 全局保护件 uid（config.rs::ensure_default_profile_items）
 inline constexpr const char* kGlobalMergeUid = "Merge";
-inline constexpr const char* kGlobalScriptUid = "Script";
 
-// ← config.rs::ensure_default_profile_items：确保全局 Merge/Script 存在
+// ← config.rs::ensure_default_profile_items：确保全局 Merge 存在
 Result<void> ensure_default_profile_items(IProfiles& p);
 
 // append_item 的独立落点（供 prfitem.cpp ensure_enhance_items 调用，

@@ -12,7 +12,6 @@ inline constexpr const char* kRuntimeConfig = "clash-win.yaml";
 inline constexpr const char* kCheckConfig = "clash-win-check.yaml";
 inline constexpr const char* kWindowState = "window_state.json";
 inline constexpr const char* kProxyHeadState = "proxy_head_state.json";
-inline constexpr const char* kUnlockCache = "unlock_cache.json";
 
 // ---------- 应用版本（2026-11-06 23:20 用户裁定：Clash Win 独立版本线，
 //   从 0.1.0 起步逐版递增，不与 Clash Mini 版本号绑死；当前 v0.3.3 跟进 Clash Mini v3.3.0） ----------
@@ -63,7 +62,7 @@ inline constexpr double kWindowMaxHeight = 860.0;
 inline constexpr uint64_t kProfileTimeoutSeconds = 20;  // PrfOption 默认超时
 inline constexpr uint64_t kAllowAutoUpdateDefault = 1;  // true（prfitem.rs:748）
 inline constexpr size_t kSubscriptionMaxBytes = 50u << 20;
-// 远程订阅默认协议兼容 User-Agent（详见项目根目录《有关User-Agent的思考.md》）：
+// 远程订阅默认协议兼容 User-Agent（参见《移植基本准则.md》§5.4 第四条）：
 // 机场面板依赖 User-Agent 判定输出格式（Clash YAML）并推断内置 Mihomo 内核支持的协议代际（如 AnyTLS/Hysteria2）。
 // 必须与本应用独立 UI 版本号 kAppVersion 彻底解耦：不能报 0.x（会被判为远古客户端拦截下发假节点），
 // 也不随分支高频发版无限上涨（避免超前误发未来未知协议、涨破 10.x 字典序比较 Bug 及唯一隐私指纹）。
@@ -71,7 +70,7 @@ inline constexpr size_t kSubscriptionMaxBytes = 50u << 20;
 inline constexpr const char* kSubscriptionCompatUserAgent = "clash-verge/v2.5.10";
 
 // ----------profiles 文件名规则（← profiles.rs::is_profile_file + prfitem.rs） ----------
-// R/L/m/s/r/p/g + uid + 扩展名；全局保护件 Merge.yaml / Script.js
+// R/L/m/s/r/p/g + uid + 扩展名；全局保护件 Merge.yaml
 
 // ---------- DEFAULT_PAC（← config/mod.rs 逐字抄录） ----------
 inline constexpr const char* kDefaultPac =
@@ -104,14 +103,6 @@ inline constexpr const char* kItemMerge =
 inline constexpr const char* kItemMergeEmpty =
     "# Profile Enhancement Merge Template for Clash Verge\n"
     "\n";
-
-// profile 增强 Script 模板
-inline constexpr const char* kItemScript =
-    "// Define main function (script entry)\n"
-    "\n"
-    "function main(config, profileName) {\n"
-    "  return config;\n"
-    "}\n";
 
 // profile 增强 Rules 模板
 inline constexpr const char* kItemRules =

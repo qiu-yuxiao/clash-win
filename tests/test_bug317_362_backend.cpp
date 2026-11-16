@@ -66,7 +66,7 @@
 #include "mihomo/pipe_ws.h"
 #include "mihomo/ws_manager.h"
 #include "mock_pipe_server.h"
-#include "system/diagnostic_bundle.h"
+#include "clashwin/system/diagnostic_bundle.h"
 #include "system/service_runner.h"
 #include "util/dirs.h"
 #include "yaml-cpp/yaml.h"

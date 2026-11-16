@@ -24,7 +24,7 @@ class DiagnosticBundle {
   // Log tail truncation (caps at max_bytes, trims to newline, prepends notice)
   static std::string tail_truncate_log(const std::string& text, size_t max_bytes);
 
-  // System info collector (version, mode, tun, sniffer, guardian, sysproxy, node count)
+  // System info collector (version, mode, tun, sniffer, sysproxy, node count)
   static std::string collect_system_info();
 
   // A4 WER + 360 read-only crash/whitelist environment report

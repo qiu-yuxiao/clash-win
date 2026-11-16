@@ -199,7 +199,7 @@ struct PrfItem {
   void set_type(PrfType t);
 
   // ---------- 本地构造（T03 范围；from_url 下载留 T06/T15） ----------
-  // ← prfitem.rs::from_local（uid 前缀 L，挂 merge/script/rules/proxies 子项；
+  // ← prfitem.rs::from_local（uid 前缀 L，挂 merge/rules/proxies 子项；
   //   子项创建失败 → Error 传播）
   static Result<PrfItem> from_local(const std::string& name,
                                     const std::string& desc,
@@ -207,7 +207,6 @@ struct PrfItem {
                                     const std::optional<PrfOption>& option);
   // ← prfitem.rs::from_merge（uid 非空用 ITEM_MERGE，否则新 uid + ITEM_MERGE_EMPTY）
   static PrfItem from_merge(std::optional<std::string> uid);
-  static PrfItem from_script(std::optional<std::string> uid);
   static PrfItem from_rules();
   static PrfItem from_proxies();
   // ← prfitem.rs::from_url：订阅下载（T06 实现：fix_dirty_url → SSRF 校验 →

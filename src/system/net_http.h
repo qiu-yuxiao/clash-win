@@ -9,7 +9,7 @@
 //     clash mixed-port 回退链，端口由注入的 resolver 提供）
 //   - 可中断：cancel_event 有信号时在阶段边界中止；各阶段有超时
 //   - User-Agent 可指定（未指定时默认采用 kSubscriptionCompatUserAgent = "clash-verge/v2.5.10"，
-//     对齐当前内置 Mihomo v1.19.x 协议代际并与 UI 版本号解耦；原因详见《有关User-Agent的思考.md》）
+//     对齐当前内置 Mihomo v1.19.x 协议代际并与 UI 版本号解耦；参见《移植基本准则.md》§5.4）
 //   - 响应大小上限 50MB（kSubscriptionMaxBytes），默认总超时 20s
 //     （connect 上限 min(t,10)，← network.rs connect_timeout）
 //   - 响应体必须为合法 UTF-8（← String::from_utf8 严格语义）

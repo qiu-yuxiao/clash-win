@@ -80,7 +80,7 @@ void notify_invalid(const core::validate::ValidationOutcome& o) {
 }
 
 // ← save_profile.rs:88-105 profile_affects_runtime：
-//   current 自身，或 current 的 merge/script/rules/proxies/groups 子项 → 影响运行时
+//   current 自身，或 current 的 merge/rules/proxies/groups 子项 → 影响运行时
 bool profile_affects_runtime(const config::IProfiles& profiles, const std::string& index) {
   const auto& cur = profiles.current;
   if (!cur.has_value()) return false;
@@ -88,7 +88,7 @@ bool profile_affects_runtime(const config::IProfiles& profiles, const std::strin
   const config::PrfItem* item = profiles.get_item(*cur);
   if (!item || !item->option.has_value()) return false;
   const auto& o = *item->option;
-  return (o.merge && *o.merge == index) || (o.script && *o.script == index) ||
+  return (o.merge && *o.merge == index) ||
          (o.rules && *o.rules == index) || (o.proxies && *o.proxies == index) ||
          (o.groups && *o.groups == index);
 }
@@ -544,11 +544,10 @@ void install_cmd_profile(CommandService& svc) {
          const std::string index_str = index->get<std::string>();
          const config::PrfItem* item = latest->get_item(index_str);
          if (!item || !item->file) return CmdResult::err({errs::kBadArgs, "the file field is null"});
-         // ← save_profile.rs:29-31：merge 按 itype，script 按 itype 或 .js 后缀
          const bool is_merge_file = item->itype.has_value() && *item->itype == "merge";
          const bool is_script_file = (item->itype.has_value() && *item->itype == "script") ||
-                                     item->file->size() >= 3 &&
-                                         item->file->compare(item->file->size() - 3, 3, ".js") == 0;
+                                     (item->file->size() >= 3 &&
+                                      item->file->compare(item->file->size() - 3, 3, ".js") == 0);
          std::wstring path = util::dirs::app_profiles_dir() + L"\\" + utf::utf8_to_utf16(*item->file);
          std::string original;
          {
@@ -578,6 +577,10 @@ void install_cmd_profile(CommandService& svc) {
            if (!f.is_open()) return CmdResult::err({errs::kIo, "open for write failed"});
            f << content;
          }
+         // 历史遗留 script 文件：JS 增强引擎已退役，落盘后直接放行无操作
+         if (is_script_file) {
+           return CmdResult::ok(validation_outcome_to_json(core::validate::ValidationOutcome{}));
+         }
          // 独立校验（-t 内核校验）
          auto check = core::validate::make_check_copy(path);
          core::validate::ValidationOutcome outcome;
@@ -601,14 +604,11 @@ void install_cmd_profile(CommandService& svc) {
            // ← 失败回写原文
            std::ofstream f(path, std::ios::binary);
            f << original;
-           // ← save_profile.rs:114-120：按文件种类选通知对象与文案
-           const auto target = is_script_file
-                                   ? core::validate::ValidationNoticeTarget::Script
-                                   : (is_merge_file
-                                          ? core::validate::ValidationNoticeTarget::Merge
-                                          : core::validate::ValidationNoticeTarget::Runtime);
+           const auto target = is_merge_file
+                                   ? core::validate::ValidationNoticeTarget::Merge
+                                   : core::validate::ValidationNoticeTarget::Runtime;
            const char* file_type =
-               is_script_file ? "脚本文件" : (is_merge_file ? "合并配置文件" : "YAML配置文件");
+               is_merge_file ? "合并配置文件" : "YAML配置文件";
            core::validate::handle_validation_notice(outcome, target, file_type);
            return CmdResult::ok(validation_outcome_to_json(outcome));
          }
@@ -756,7 +756,7 @@ void install_cmd_profile(CommandService& svc) {
        },
        consts::kTimeoutHeavy});
 
-  // ---- create_profile（← profile.rs:175-196：新建本地/merge/script 条目）----
+  // ---- create_profile（← profile.rs：新建本地/merge 条目）----
   svc.register_command(
       "create_profile",
       {[](const Json& args) -> CmdResult {
@@ -787,8 +787,6 @@ void install_cmd_profile(CommandService& svc) {
              if (r.is_ok()) item = r.value();
            } else if (itype == "merge") {
              item = config::PrfItem::from_merge(std::nullopt);
-           } else if (itype == "script") {
-             item = config::PrfItem::from_script(std::nullopt);
            }
            if (!item.uid) {
              config::profiles::set_profiles_instance(nullptr);

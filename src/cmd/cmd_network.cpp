@@ -13,7 +13,6 @@
 #include "config/proxy_head_state.h"
 #include "core/monitor.h"
 #include "enhance/enhance.h"
-#include "system/network_info.h"
 #include "system/sysproxy.h"
 #include "util/dirs.h"
 #include "util/utf.h"
@@ -38,54 +37,6 @@ void install_cmd_network(CommandService& svc) {
                                                   s.value().host + L":" +
                                                   std::to_wstring(s.value().port))},
                                    {"bypass", utf::utf16_to_utf8(s.value().bypass)}});
-       },
-       consts::kTimeoutProbe});
-
-  // ---- get_auto_proxy（← network.rs:41-59：AutoConfigURL）----
-  svc.register_command(
-      "get_auto_proxy",
-      {[](const Json&) -> CmdResult {
-         auto a = system::wininet_access()->read_autoproxy();
-         if (a.is_err()) return CmdResult::err(a.error());
-         return CmdResult::ok(Json{{"enable", a.value().enable},
-                                   {"url", utf::utf16_to_utf8(a.value().url)}});
-       },
-       consts::kTimeoutProbe});
-
-  // ---- get_system_hostname（← network.rs:62-74）----
-  auto hostname_handler = [](const Json&) -> CmdResult {
-    auto host = system::get_network_info_provider()->get_hostname();
-    return CmdResult::ok(Json(host));
-  };
-  svc.register_command("get_system_hostname", {hostname_handler, consts::kTimeoutProbe});
-  svc.register_command("hostname", {hostname_handler, consts::kTimeoutProbe});
-
-  // ---- get_network_interfaces（← network.rs:77-80：GetAdaptersAddresses 友好名）----
-  svc.register_command(
-      "get_network_interfaces",
-      {[](const Json&) -> CmdResult {
-         auto list = system::get_network_info_provider()->list_interfaces();
-         Json arr = Json::array();
-         for (const auto& item : list) {
-           arr.push_back(item);
-         }
-         return CmdResult::ok(arr);
-       },
-       consts::kTimeoutProbe});
-
-  // ---- get_network_interfaces_info（← network.rs:83-97：名字+地址集）----
-  svc.register_command(
-      "get_network_interfaces_info",
-      {[](const Json&) -> CmdResult {
-         auto list = system::get_network_info_provider()->list_interfaces_info();
-         Json arr = Json::array();
-         for (const auto& info : list) {
-           Json j{{"name", info.name},
-                  {"mac", info.mac},
-                  {"addresses", info.addresses}};
-           arr.push_back(j);
-         }
-         return CmdResult::ok(arr);
        },
        consts::kTimeoutProbe});
 

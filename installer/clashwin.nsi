@@ -737,6 +737,9 @@ Section "Install"
   Delete "$APPDATA\${BUNDLEID}\window-state.json"
   Delete "$APPDATA\${BUNDLEID}\.window-state.json"
 
+  ; 清理历史看门狗隔离缓存目录（← Mini installer.nsi:961，已于 1.0.0 退役 guardian）
+  RMDir /r "$LOCALAPPDATA\${BUNDLEID}\guard"
+
   ; 清理历史自启动注册表值（← 模板 :912-931，品牌位替换 Clash Mini→Clash Win）
   StrCpy $R1 "Software\Microsoft\Windows\CurrentVersion\Run"
   ReadRegStr $R2 HKCU "$R1" "Clash Win"
@@ -909,6 +912,7 @@ Section "Uninstall"
   SetShellVarContext current
   Delete "$APPDATA\${BUNDLEID}\window-state.json"
   Delete "$APPDATA\${BUNDLEID}\.window-state.json"
+
   ; BUG-363：无条件清理 %LOCALAPPDATA%\io.github.clash-win.clash-win\guard 隔离看门狗缓存目录
   RMDir /r "$LOCALAPPDATA\${BUNDLEID}\guard"
 

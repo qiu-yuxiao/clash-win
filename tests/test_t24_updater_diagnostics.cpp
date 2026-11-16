@@ -11,14 +11,13 @@
 
 #include "cmd/command_service.h"
 #include "core/core_manager.h"
-#include "core/core_updater.h"
+#include "clashwin/core/core_updater.h"
 #include "events/event_bus.h"
 #include "mihomo/mihomo_client.h"
 #include "minisign_vector.h"
 #include "util/ed25519.h"
-#include "system/diagnostic_bundle.h"
-#include "system/guardian.h"
-#include "update/client_updater.h"
+#include "clashwin/system/diagnostic_bundle.h"
+#include "clashwin/update/client_updater.h"
 #include "util/dirs.h"
 #include "util/str_utils.h"
 #include "util/utf.h"
@@ -823,12 +822,4 @@ UT_TEST(t24_diag_bundle_zip_creation_and_contents) {
   UT_CHECK(zip_content.find("verge_secret_val") == std::string::npos);
   UT_CHECK(zip_content.find("prof_secret_val") == std::string::npos);
   UT_CHECK(zip_content.find("***REDACTED***") != std::string::npos);
-}
-
-UT_TEST(t24_v330_system_info_includes_guardian_summary) {
-  const std::string summary = clashwin::system::guardian::get_diagnostic_summary();
-  UT_CHECK(!summary.empty());
-  const std::string sys_info =
-      clashwin::system::DiagnosticBundle::collect_system_info();
-  UT_CHECK(sys_info.find("守护状态") != std::string::npos);
 }

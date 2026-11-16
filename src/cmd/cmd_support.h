@@ -89,7 +89,7 @@ core::RunningMode running_mode();
 // https 的 TLS 握手段以 TCP(+HTTP) 完成时间为口径（schannel 握手留 T16/T25 对齐）
 Result<uint32_t> test_delay_impl(const std::string& url);
 
-// ---------- 剪贴板（← feat/proxy.rs copy_clash_env）----------
+// ---------- 剪贴板 ----------
 bool copy_text_to_clipboard(const std::string& text);
 
 // Result<void> → CmdResult 适配（UI/打开类命令）

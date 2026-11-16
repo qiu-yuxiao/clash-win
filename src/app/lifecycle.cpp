@@ -15,7 +15,6 @@
 #include "events/event_bus.h"
 #include "mihomo/service_ipc.h"
 #include "system/guard_monitor.h"
-#include "system/guardian.h"
 #include "system/sysproxy.h"
 #include "system/tray.h"
 #include "system/service_runner.h"
@@ -163,7 +162,6 @@ bool Lifecycle::entry_lightweight_mode(bool force) {
       if (window_) {
         window_->hide();
       }
-      system::guardian::set_lightweight_mode_signal(true);
       if (tray_) tray_->update_lite_mode_menu(false);
       return true;
     }
@@ -177,7 +175,6 @@ bool Lifecycle::entry_lightweight_mode(bool force) {
   }
 
   CWLOG_INFO("Lifecycle: entering lightweight mode");
-  system::guardian::set_lightweight_mode_signal(true);
 
   if (window_) {
     window_->hide();
@@ -207,7 +204,6 @@ bool Lifecycle::exit_lightweight_mode() {
 
   if (state() == LifecycleState::Normal) {
     CWLOG_INFO("Lifecycle: in Normal state, showing and activating window");
-    system::guardian::set_lightweight_mode_signal(false);
     if (window_) window_->show_and_activate();
     if (tray_) tray_->update_lite_mode_menu(false);
     return true;
@@ -219,7 +215,6 @@ bool Lifecycle::exit_lightweight_mode() {
   }
 
   CWLOG_INFO("Lifecycle: exiting lightweight mode");
-  system::guardian::set_lightweight_mode_signal(false);
 
   events::EventBus::instance().set_lightweight_filter(false);
 
@@ -240,8 +235,6 @@ bool Lifecycle::exit_lightweight_mode() {
 }
 
 void Lifecycle::prepare_exit() {
-  // ★ 双阶段主动退出：prepared（30s TTL）+ 内核事件带回读置位（← shutdown.rs / guardian.rs v3.3.0）
-  system::guardian::notify_intentional_exit_with_reason("lifecycle_prepare_exit");
   state_.store(static_cast<uint8_t>(LifecycleState::PreparingExit), std::memory_order_release);
   CWLOG_INFO("Lifecycle::prepare_exit: Step 1 to Step 4 starting");
 
@@ -422,8 +415,7 @@ bool Lifecycle::quit(int* out_exit_code) {
   CWLOG_INFO(std::format("Lifecycle::quit: cleanup finished, exit code: {}", exit_code));
   if (out_exit_code) *out_exit_code = exit_code;
 
-  // Step 7: Flush logs, upgrade intentional exit proof to confirmed (120s TTL), and terminate
-  system::guardian::confirm_intentional_exit_with_reason("lifecycle_quit");
+  // Step 7: Flush logs and terminate
   if (hooks_.flush_logs) hooks_.flush_logs();
 
   state_.store(static_cast<uint8_t>(LifecycleState::Exited), std::memory_order_release);
@@ -494,8 +486,7 @@ bool Lifecycle::restart_app() {
     }
   }
 
-  // Step 7 flush logs and upgrade intentional exit proof to confirmed
-  system::guardian::confirm_intentional_exit_with_reason("lifecycle_restart");
+  // Step 7 flush logs
   if (hooks_.flush_logs) hooks_.flush_logs();
 
   state_.store(static_cast<uint8_t>(LifecycleState::Exited), std::memory_order_release);
@@ -513,7 +504,6 @@ void Lifecycle::reset() {
   state_.store(static_cast<uint8_t>(LifecycleState::Normal), std::memory_order_release);
   is_cleaning_up_.store(false);
   events::EventBus::instance().set_lightweight_filter(false);
-  system::guardian::set_lightweight_mode_signal(false);
   window_ = nullptr;
   tray_ = nullptr;
   reset_hooks();

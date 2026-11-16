@@ -27,7 +27,7 @@
 #include "events/event_names.h"
 #include "ui/i18n_text.h"  // F-D01：通知文案走 locales，不硬编码中文
 #include "events/notice.h"
-#include "update/client_updater.h"  // install_app_update（B-D44 更新流收口）
+#include "clashwin/update/client_updater.h"  // install_app_update（B-D44 更新流收口）
 #include "theme/theme.h"
 #include "ui/ui_postbox.h"
 #include "mihomo/ws_manager.h"
@@ -35,7 +35,6 @@
 #include "util/log.h"
 #include "util/utf.h"
 #include "system/tray.h"
-#include "system/guardian.h"
 #include "system/signals.h"
 #include "system/service_runner.h"  // TUN 守卫：服务可用性探测
 #include "ui/help_menu.h"
@@ -544,32 +543,6 @@ void MainWindow::build_widget_tree() {
   drawer_mounted_ = true;
   content_->overlay = settings_drawer_;  // 只铺上栏，不遮底部流量条
   content_raw->add_child(std::move(drawer));
-
-  // /unlock 整页（Mini pages/unlock.tsx:1206-1219 为独立路由整页）：
-  //   挂 content 全高，打开时覆盖主场景与底部流量条（入口见 Tray）
-  auto unlock = std::make_unique<scene::UnlockDialog>();
-  unlock_page_ = unlock.get();
-  unlock_page_->set_page_mode(true);
-  unlock_page_->set_visible(false);
-  unlock_page_->on_dismiss = [this]() {
-    if (unlock_page_) unlock_page_->set_visible(false);
-    if (scene_) scene_->set_a11y_hidden(false);
-    if (settings_drawer_) settings_drawer_->set_a11y_hidden(false);
-  };
-  content_raw->add_child(std::move(unlock));
-}
-
-void MainWindow::open_unlock_page() {
-  if (!unlock_page_) return;
-  if (scene_) scene_->set_a11y_hidden(true);
-  if (settings_drawer_) settings_drawer_->set_a11y_hidden(true);
-  unlock_page_->set_visible(true);
-  // 整页首次可见时手动补一次布局（不可见子层不参与 ContentStack::on_arrange）
-  if (content_) {
-    unlock_page_->layout_tree({0, 0, content_->bounds().w, content_->bounds().h});
-  }
-  unlock_page_->open();
-  unlock_page_->invalidate();
 }
 
 void ContentStack::on_arrange(const RectF& area) {
@@ -818,7 +791,6 @@ bool MainWindow::is_any_overlay_open() const {
          (log_viewer_ && log_viewer_->is_open()) ||
          (first_run_ && first_run_->is_open()) ||
          (antivirus_modal_ && antivirus_modal_->is_open()) ||
-         (unlock_page_ && unlock_page_->visible()) ||
          (client_update_ && client_update_->is_open()) ||
          (core_update_ && core_update_->is_open());
 }
@@ -2411,7 +2383,6 @@ void MainWindow::show_and_activate() {
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
   }
   SetForegroundWindow(hwnd_);
-  system::guardian::set_lightweight_mode_signal(false);  // src: src-tauri/src/utils/window_manager.rs:570
   stealth_.feed_activity(now_ms());
 
   // 窗口唤醒防雪崩静默探测（5min 冷却，select=false，刷新前端延迟缓存）
@@ -2432,9 +2403,6 @@ void MainWindow::hide() {
   clear_mouse_hover();
   if (tooltip_host_) tooltip_host_->leave();
   ShowWindow(hwnd_, SW_HIDE);
-  if (!app::Lifecycle::instance().is_exiting()) {
-    system::guardian::set_lightweight_mode_signal(true);  // src: src-tauri/src/utils/window_manager.rs:455
-  }
 }
 
 void MainWindow::release_d2d_resources() {

@@ -1,4 +1,4 @@
-#include "core/core_updater.h"
+#include "clashwin/core/core_updater.h"
 
 #include <windows.h>
 #include <bcrypt.h>

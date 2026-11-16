@@ -1,4 +1,4 @@
-#include "system/diagnostic_bundle.h"
+#include "clashwin/system/diagnostic_bundle.h"
 
 #include <windows.h>
 #include <tlhelp32.h>
@@ -16,7 +16,6 @@
 
 #include "config/config.h"
 #include "clashwin/config/constants.h"
-#include "system/guardian.h"
 #include "util/dirs.h"
 #include "util/log.h"
 #include "util/str_utils.h"
@@ -43,13 +42,12 @@ const char* kBundleReadme =
     "=================\n\n"
     "本包由「设置 → 帮助 → 导出诊断包」生成，用于问题排查。\n\n"
     "内容：\n"
-    "  logs/                         轮转日志（含应用主日志 + guardian.log + 内核日志）\n"
-    "  guard/                        守护心跳与退出凭证/熔断状态 JSON（已脱敏）\n"
+    "  logs/                         轮转日志（含应用主日志 + 内核日志）\n"
     "  wer-crash-report.txt          WER 崩溃事件 / CrashDumps / 360 进程与白名单只读排查摘要\n"
     "  runtime-config.redacted.yaml  内核运行时配置（已脱敏）\n"
     "  verge.yaml.redacted.yaml      应用配置（已脱敏）\n"
     "  profiles.yaml.redacted.yaml   订阅配置（已脱敏）\n"
-    "  system-info.txt               版本与运行摘要（含 TUN 嗅探 / 守护状态）\n\n"
+    "  system-info.txt               版本与运行摘要（含 TUN 嗅探状态）\n\n"
     "脱敏说明：\n"
     "  配置文件已整体脱敏；日志正文已按敏感字段名（password / token / secret /\n"
     "  uuid 等）与 URL 用户信息脱敏。节点密码 / UUID / 密钥 / 订阅链接 / 内核\n"
@@ -338,7 +336,6 @@ std::string DiagnosticBundle::collect_system_info() {
      << "日志级别        : " << (verge->app_log_level.has_value() ? *verge->app_log_level : "") << "\n"
      << "日志轮转        : " << verge->app_log_max_size.value_or(128) << " KB × " << verge->app_log_max_count.value_or(40) << " 个\n"
      << "节点总数        : " << node_count << "\n"
-     << "守护状态        : " << guardian::get_diagnostic_summary() << "\n"
      << "A4 环境排查     : 360进程数=" << av_proc_count
      << ", 360白名单=" << (wl_status == 1 ? "已命中" : (wl_status == 0 ? "未命中" : "未检测到配置"))
      << ", CrashDumps匹配=" << dump_count << " 个（详见 wer-crash-report.txt）\n";
@@ -731,26 +728,6 @@ Result<std::string> DiagnosticBundle::export_diagnostic_bundle() {
       std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
       f.close();
       entries.push_back({out_name, redact_yaml_text(text)});
-    }
-  }
-
-  // 2.5) Guardian state JSONs under guard/ (if present)
-  {
-    const auto guard_dir = guardian::resolve_isolated_guardian_dir();
-    const wchar_t* guard_files[] = {
-        guardian::kMainHeartbeatFilename,
-        guardian::kGuardHeartbeatFilename,
-        guardian::kRespawnStateFilename,
-        guardian::kIntentionalExitFilename,
-    };
-    for (const wchar_t* gf : guard_files) {
-      const auto gp = guard_dir / gf;
-      std::ifstream gfs(gp, std::ios::binary);
-      if (gfs.is_open()) {
-        std::string raw((std::istreambuf_iterator<char>(gfs)),
-                        std::istreambuf_iterator<char>());
-        entries.push_back({"guard/" + utf16_to_utf8(gf), redact_log_text(raw)});
-      }
     }
   }
 

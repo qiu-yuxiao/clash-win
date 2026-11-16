@@ -20,7 +20,7 @@ class Config {
   Draft<IProfiles>& profiles() { return profiles_; }
 
   // ← Config::init_config 的持久化部分：
-  // 1. 确保 profiles.yaml + 全局 Merge/Script 保护件
+  // 1. 确保 profiles.yaml + 全局 Merge 保护件
   // 2. 非 admin 且服务未装 → enable_tun_mode 强制关（BUG-298 教训的配置面）
   // 3. 孤立 profile 文件清理
   // （generate_and_validate 属 T07/T08，此处不实现）

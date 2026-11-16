@@ -28,12 +28,12 @@ const std::vector<std::string>& I18n::supported_languages() {
   return kLangs;
 }
 
-// 10 命名空间（每语言 10 个 JSON + index.ts 聚合；tests 仅测试资源）
+// 9 命名空间（每语言 9 个 JSON + index.ts 聚合）
 namespace {
 const std::vector<std::string>& namespaces() {
   static const std::vector<std::string> kNs = {
       "connections", "home", "layout", "logs", "profiles",
-      "proxies", "rules", "settings", "shared", "tests"};
+      "proxies", "rules", "settings", "shared"};
   return kNs;
 }
 

@@ -8,20 +8,10 @@ items:
   name: null
   file: Merge.yaml
   updated: 1792705001
-- uid: Script
-  type: script
-  name: null
-  file: Script.js
-  updated: 1792705001
 - uid: m2CFYn8m9YMw
   type: merge
   name: null
   file: m2CFYn8m9YMw.yaml
-  updated: 1792705033
-- uid: sOIpbav0QpMd
-  type: script
-  name: null
-  file: sOIpbav0QpMd.js
   updated: 1792705033
 - uid: rwWMH8DGFCbm
   type: rules
@@ -50,7 +40,6 @@ items:
   option:
     allow_auto_update: true
     merge: m2CFYn8m9YMw
-    script: sOIpbav0QpMd
     rules: rwWMH8DGFCbm
     proxies: pGlaepWR90Hn
     groups: null

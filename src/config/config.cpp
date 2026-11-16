@@ -66,13 +66,12 @@ Result<void> Config::init(bool force_save) {
     profiles_.apply();
   }
 
-  // 1. 确保 profiles.yaml + 全局 Merge/Script 保护件（config.rs:134-145）
+  // 1. 确保 profiles.yaml + 全局 Merge 保护件（config.rs:134-145）
   {
     auto& draft = profiles_;
     std::shared_ptr<const IProfiles> latest = draft.latest_arc();
     IProfiles profiles = *latest;
-    bool needs_items = profiles.get_item(profiles::kGlobalMergeUid) == nullptr ||
-                       profiles.get_item(profiles::kGlobalScriptUid) == nullptr;
+    bool needs_items = profiles.get_item(profiles::kGlobalMergeUid) == nullptr;
     if (needs_items) {
       // 注册装配期实例（ensure_enhance_items 的子项追加落点）
       profiles::set_profiles_instance(&profiles);

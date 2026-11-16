@@ -19,7 +19,6 @@
 #include "events/event_names.h"
 #include "i18n/i18n.h"
 #include "system/guard_monitor.h"
-#include "system/guardian.h"
 #include "system/coexist.h"
 #include "system/sysproxy.h"
 #include "system/tray.h"
@@ -73,7 +72,6 @@ system::Sysopt::VergeView make_startup_sysproxy_view(uint16_t pac_port) {
 App::App() = default;
 
 App::~App() {
-  system::guardian::confirm_intentional_exit_with_reason("app_destructor");
   system::SignalHandler::instance().uninstall();
   // T18：退出清理（← census §74 quit：prepare_exit → reset_sysproxy →
   //   停内核 → 停 Timer/monitor；CoreManager 停止沿既有路径）
@@ -92,7 +90,6 @@ App::~App() {
   }
   delete main_window_;  // WM_DESTROY 内完成几何落盘 + PostQuitMessage
   main_window_ = nullptr;
-  system::guardian::destroy_resident_sentinel_window();
   if (wsa_inited_) WSACleanup();
   CWLOG_INFO("App 析构：资源已释放");
   Logger::instance().flush();
@@ -118,11 +115,7 @@ bool App::init() {
     const int killed = system::coexist::kill_other_processes();
     const bool svc_stopped = system::coexist::stop_foreign_service_if_running();
     // ★ 杀对方收尾：清掉对方遗留的 Wintun/Mihomo 孤儿网卡，避免本方开 TUN 时同名冲突断网。
-    //   注意：若本次系 --guardian-respawn 自愈拉起且未发现任何对方进程/服务，
-    //   本方系统服务内核可能正在健康持有活跃 Wintun 网卡，绝不可误拆。
-    if (!system::guardian::is_guardian_respawn() || killed > 0 || svc_stopped) {
-      system::coexist::remove_orphan_wintun_adapters();
-    }
+    system::coexist::remove_orphan_wintun_adapters();
     if (killed > 0 || svc_stopped) {
       CWLOG_INFO(std::format(
           "App::init：互斥共存——终止 Clash Mini 进程 {} 个，服务停止 {}",
@@ -188,11 +181,7 @@ bool App::init() {
     app::Lifecycle::instance().set_hooks(hooks);
   }
 
-  // A5 形态保真：仅当 `--guardian-respawn --silent`（轻量/托盘隐身崩溃）时静默进托盘；
-  // 普通 GUI 态崩溃仅 `--guardian-respawn`，恢复可见主窗口且同样走 Wintun 保护与无感内核重挂。
   bool has_silent_arg = false;
-  const bool is_guardian_silent_respawn =
-      system::guardian::is_guardian_silent_respawn();
   int argc = 0;
   LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
   if (argv) {
@@ -206,7 +195,7 @@ bool App::init() {
   }
   auto verge = config::Config::instance().verge().latest_arc();
   bool is_silent_start = verge ? verge->enable_silent_start.value_or(false) : false;
-  bool should_silent = is_guardian_silent_respawn || (is_silent_start && has_silent_arg);
+  bool should_silent = is_silent_start && has_silent_arg;
 
   // F-D01 ← MF:services/preload.ts:62-97 preloadLanguage / MF:main.tsx:105-110
   //   bootstrap：初始语言优先级「缓存 → verge.language → 浏览器语言 → zh」，
@@ -516,10 +505,6 @@ bool App::init() {
              !IsWindowVisible(main_window_->hwnd());
     };
     mh.now_ms = [] { return static_cast<int64_t>(GetTickCount64()); };
-    mh.on_guardian_tick = [] {
-      system::guardian::ensure_guardian_supervisor();
-      system::guardian::record_main_heartbeat_if_due();
-    };
     monitor.set_hooks(std::move(mh));
 
     // ← clash.rs::start_core（启动收敛）：主动重生成运行时配置并拉起内核。
@@ -537,15 +522,6 @@ bool App::init() {
 
     monitor.start();
   }
-
-  // ★ 双层防误杀与零断流自愈守护（← Mini lib.rs:362-366，v3.2.5 BUG-316）：
-  //   1) 第一层：UI 线程创建零渲染常驻防清理哨兵窗口对（免疫 360 加速球等无窗口清理）；
-  //   2) 第二层：拉起超轻量伴生看门狗进程（0% CPU，仅在后台轻量/托盘隐身态被强杀后自愈）。
-  system::guardian::init_resident_sentinel_window();
-  system::guardian::start_guardian_companion(
-      std::filesystem::path(util::dirs::app_home_dir()) / L"logs",
-      singleton_port_,
-      app::Lifecycle::instance().is_in_lightweight_mode());
 
   CWLOG_INFO("App::init 完成：主窗口就绪");
   return true;

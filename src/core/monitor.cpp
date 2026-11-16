@@ -309,18 +309,11 @@ void CoreMonitor::start() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
               }
               // 若无窗口可见（托盘启动），执行一次初始化自动选点
-              // （← monitor.rs:1236-1247 v3.2.5 BUG-316：若系看门狗无感挂载存活服务内核，
-              //  跳过启动自动重选，避免打断用户正在进行的下载/通话）
               if (hooks_.is_headless && hooks_.is_headless()) {
-                if (CoreManager::instance().take_reattached_existing_core()) {
-                  CWLOG_INFO(
-                      "CoreMonitor: [后台监测] 伴生看门狗已无感挂载运行中内核，延续现有出口节点健康守护");
-                } else {
-                  std::string uid =
-                      hooks_.current_uid ? hooks_.current_uid() : "";
-                  if (!uid.empty() && hooks_.auto_select_trigger) {
-                    hooks_.auto_select_trigger();
-                  }
+                std::string uid =
+                    hooks_.current_uid ? hooks_.current_uid() : "";
+                if (!uid.empty() && hooks_.auto_select_trigger) {
+                  hooks_.auto_select_trigger();
                 }
               }
             }
@@ -343,7 +336,6 @@ void CoreMonitor::start() {
               if (kick_.exchange(false)) break;
             }
             if (!running_.load()) break;
-            if (hooks_.on_guardian_tick) hooks_.on_guardian_tick();
             tick_once();
           }
         });

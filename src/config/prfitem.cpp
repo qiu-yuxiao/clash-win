@@ -94,12 +94,6 @@ Result<PrfOption> ensure_enhance_items(const std::optional<PrfOption>& option) {
     if (!r.is_ok()) return Result<PrfOption>::err(r.error());
     out.merge = item.uid;
   }
-  if (!out.script) {
-    PrfItem item = PrfItem::from_script(std::nullopt);
-    auto r = profiles::append_item_safe(item);
-    if (!r.is_ok()) return Result<PrfOption>::err(r.error());
-    out.script = item.uid;
-  }
   if (!out.rules) {
     PrfItem item = PrfItem::from_rules();
     auto r = profiles::append_item_safe(item);
@@ -183,7 +177,7 @@ Result<PrfItem> PrfItem::from_local(const std::string& name,
   return Result<PrfItem>::ok(std::move(item));
 }
 
-// ---------- from_merge / from_script / from_rules / from_proxies ----------
+// ---------- from_merge / from_rules / from_proxies ----------
 PrfItem PrfItem::from_merge(std::optional<std::string> uid) {
   // ← prfitem.rs:614-630：uid 非空（全局保护件）用 ITEM_MERGE；
   //   新建用新 uid + ITEM_MERGE_EMPTY
@@ -195,17 +189,6 @@ PrfItem PrfItem::from_merge(std::optional<std::string> uid) {
   item.updated = prfitem::now_timestamp();
   item.file_data = uid ? std::string(tmpl::kItemMerge)
                        : std::string(tmpl::kItemMergeEmpty);
-  return item;
-}
-
-PrfItem PrfItem::from_script(std::optional<std::string> uid) {
-  std::string id = uid.value_or(prfitem::gen_uid_prefixed("s"));
-  PrfItem item;
-  item.uid = id;
-  item.set_type(PrfType::Script);
-  item.file = id + ".js";  // js 扩展名
-  item.updated = prfitem::now_timestamp();
-  item.file_data = std::string(tmpl::kItemScript);
   return item;
 }
 

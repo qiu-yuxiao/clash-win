@@ -215,9 +215,9 @@ UT_TEST(t03_first_launch_profiles_and_protection_files) {
     std::printf("  [diag] ensure_default err code=%d msg=%s\n", r.error().code,
                 r.error().message.c_str());
   UT_CHECK(r.is_ok());
-  UT_CHECK(p.items && p.items->size() == 2);
-  UT_CHECK(!p.current.has_value());  // merge/script 不触发自动激活
-  if (!p.items || p.items->size() < 2) return;  // 防崩：前置失败则跳过解引用
+  UT_CHECK(p.items && p.items->size() == 1);
+  UT_CHECK(!p.current.has_value());  // merge 不触发自动激活
+  if (!p.items || p.items->empty()) return;  // 防崩：前置失败则跳过解引用
 
   // items[0] = Merge 保护件（uid 固定 "Merge"、file Merge.yaml）
   const PrfItem& m = (*p.items)[0];
@@ -226,19 +226,12 @@ UT_TEST(t03_first_launch_profiles_and_protection_files) {
   UT_CHECK(!m.name.has_value());  // serde: name: null
   UT_CHECK(m.file && *m.file == "Merge.yaml");
   UT_CHECK(m.updated.has_value());
-  // items[1] = Script 保护件
-  const PrfItem& s = (*p.items)[1];
-  UT_CHECK(s.uid && *s.uid == "Script");
-  UT_CHECK(s.itype && *s.itype == "script");
-  UT_CHECK(s.file && *s.file == "Script.js");
 
   UT_CHECK(p.save_file().is_ok());
 
   // 保护件内容与 tmpl.rs 模板逐字节一致
   UT_CHECK_EQ(read_text(util::dirs::app_profiles_dir() + L"\\Merge.yaml"),
               std::string(tmpl::kItemMerge));
-  UT_CHECK_EQ(read_text(util::dirs::app_profiles_dir() + L"\\Script.js"),
-              std::string(tmpl::kItemScript));
 
   // profiles.yaml 头部形态（config_version/current 固定，items 结构核对）
   std::string actual = read_text(util::dirs::profiles_path());
@@ -261,9 +254,7 @@ UT_TEST(t03_first_launch_profiles_and_protection_files) {
         "  updated: ";
     UT_CHECK(actual.compare(pos, item_head.size(), item_head) == 0);
   }
-  UT_CHECK(actual.find("- uid: Script\n  type: script\n  name: null\n"
-                       "  file: Script.js\n  updated: ") !=
-           std::string::npos);
+  UT_CHECK(actual.find("- uid: Script") == std::string::npos);
 }
 
 UT_TEST(t03_config_init_generates_all_three) {
@@ -279,9 +270,6 @@ UT_TEST(t03_config_init_generates_all_three) {
   UT_CHECK(GetFileAttributesW(
                (util::dirs::app_profiles_dir() + L"\\Merge.yaml").c_str()) !=
            INVALID_FILE_ATTRIBUTES);
-  UT_CHECK(GetFileAttributesW(
-               (util::dirs::app_profiles_dir() + L"\\Script.js").c_str()) !=
-           INVALID_FILE_ATTRIBUTES);
 
   // 装配后的门面数据可用：verge 语言非空、clash 端口 guard 生效
   auto& cfg = Config::instance();
@@ -290,7 +278,7 @@ UT_TEST(t03_config_init_generates_all_three) {
   UT_CHECK_EQ(cfg.clash().latest_arc()->get_client_info().server,
               std::string("127.0.0.1:9098"));
   UT_CHECK(cfg.profiles().latest_arc()->get_item("Merge") != nullptr);
-  UT_CHECK(cfg.profiles().latest_arc()->get_item("Script") != nullptr);
+  UT_CHECK(cfg.profiles().latest_arc()->get_item("Script") == nullptr);
 }
 
 // ← 安装器语言选择（clashwin.nsi .onInit MUI_LANGDLL_DISPLAY）落注册表

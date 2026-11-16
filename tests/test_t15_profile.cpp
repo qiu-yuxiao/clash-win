@@ -62,13 +62,13 @@ UT_TEST(t15_create_and_reorder_commands) {
       {{"item", {{"type", "local"}, {"name", "t15-local"}, {"desc", "d"}}},
        {"file_data", "proxies: []\n"}});
   UT_CHECK_MSG(r1.is_ok(), r1.is_ok() ? "create local ok" : r1.error().message.c_str());
-  // create merge / script
+  // create merge（script 增强引擎已退役，不再支持新建 script 类型）
   UT_CHECK(svc.invoke("create_profile",
                       {{"item", {{"type", "merge"}, {"name", "t15-merge"}}}})
                .is_ok());
-  UT_CHECK(svc.invoke("create_profile",
-                      {{"item", {{"type", "script"}, {"name", "t15-script"}}}})
-               .is_ok());
+  UT_CHECK(!svc.invoke("create_profile",
+                       {{"item", {{"type", "script"}, {"name", "t15-script"}}}})
+                .is_ok());
   // 不支持类型
   UT_CHECK(!svc.invoke("create_profile", {{"item", {{"type", "proxy"}}}}).is_ok());
   // 缺 item

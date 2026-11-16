@@ -187,12 +187,6 @@ UT_TEST(cmd_system_and_app_commands) {
   UT_CHECK(mode.is_ok() && mode.value().is_string());
   auto admin = svc.invoke("app_is_admin");
   UT_CHECK(admin.is_ok() && admin.value().is_boolean());
-  auto uptime = svc.invoke("get_app_uptime");
-  UT_CHECK(uptime.is_ok() && uptime.value().is_number());
-  auto hostname = svc.invoke("get_system_hostname");
-  UT_CHECK(hostname.is_ok() && hostname.value().is_string());
-  auto portable = svc.invoke("get_portable_flag");
-  UT_CHECK(portable.is_ok());
   auto autolaunch = svc.invoke("get_auto_launch_status");
   UT_CHECK(autolaunch.is_ok() && autolaunch.value().is_boolean());
   auto port_in_use = svc.invoke("is_port_in_use", Json{{"port", 33335}});
@@ -203,8 +197,6 @@ UT_TEST(cmd_system_and_app_commands) {
   UT_CHECK(save_head.is_ok());
   auto proxy_addr = svc.invoke("get_proxy_addr", Json{{"name", "no-such"}});
   UT_CHECK(proxy_addr.is_ok() && proxy_addr.value().is_null());
-  auto icon = svc.invoke("download_icon_cache", Json{{"url", "x"}, {"name", "y"}});
-  UT_CHECK(icon.is_ok());  // 目录+桩逻辑
   // frontend_log 转发
   auto flog = svc.invoke("frontend_log", Json{{"level", "info"}, {"message", "t09 smoke"}});
   UT_CHECK(flog.is_ok());

@@ -9,7 +9,7 @@
 #include "config/config.h"
 #include "config/proxy_head_state.h"
 #include "core/service_mode.h"
-#include "core/core_updater.h"
+#include "clashwin/core/core_updater.h"
 #include "events/event_bus.h"
 #include "mihomo/service_ipc.h"
 #include "system/service_runner.h"
@@ -616,48 +616,6 @@ bool CoreManager::core_alive() const {
   if (!d.contains("core_pid")) return false;
   if (d["core_pid"].is_number()) return d["core_pid"].get<long long>() != 0;
   return false;
-}
-
-void CoreManager::mark_reattached_existing_core() {
-  reattached_existing_core_.store(true, std::memory_order_release);
-}
-
-bool CoreManager::take_reattached_existing_core() {
-  return reattached_existing_core_.exchange(false, std::memory_order_acq_rel);
-}
-
-bool CoreManager::try_reattach_running_service_core(
-    const std::function<bool()>& api_alive_fn) {
-  std::lock_guard<std::mutex> lock(lifecycle_);
-  if (mode_.load() != RunningMode::NotRunning) {
-    return false;
-  }
-  auto runner = system::get_service_runner();
-  if (!runner || !runner->is_available()) {
-    return false;
-  }
-  mihomo::ServiceIpc ipc;
-  if (!ipc.connect().is_ok()) {
-    return false;
-  }
-  auto st = ipc.get_status();
-  if (!st.is_ok() || !st.value().is_object()) {
-    return false;
-  }
-  const auto& d = st.value();
-  if (!d.contains("core_pid") || !d["core_pid"].is_number() ||
-      d["core_pid"].get<long long>() == 0) {
-    return false;
-  }
-  if (api_alive_fn && !api_alive_fn()) {
-    return false;
-  }
-  mode_.store(RunningMode::Service);
-  pid_ = 0;
-  mark_reattached_existing_core();
-  CWLOG_INFO(
-      "[Guardian] 检测到系统服务内核仍在健康运行，已无感挂载现有内核（零断流恢复）");
-  return true;
 }
 
 Result<void> CoreManager::start_sidecar(const std::wstring& config_file,

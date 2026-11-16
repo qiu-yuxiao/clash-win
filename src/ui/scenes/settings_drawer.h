@@ -90,8 +90,6 @@ class TakeoverCard : public Widget {
   TakeoverSegmented* seg_ = nullptr;  // wire_callbacks 接线（Drawer 访问）
   Label* title_ = nullptr;
   Label* hint_ = nullptr;             // Mini 无（隐藏）
-  Button* unlock_btn_ = nullptr;      // Mini 无（隐藏）
-  std::function<void()> on_unlock;
 };
 
 // ---------- 代理方式段（标题 + Segmented） ----------
@@ -201,7 +199,6 @@ class SettingsDrawer : public Stack {
   std::function<void()> on_check_app_update;
   std::function<void()> on_check_core_update;
   std::function<void()> on_add_rule;
-  std::function<void()> on_unlock_check;
   std::function<void(bool open)> on_open_changed;
   // BUG-358: 滑条拖动期 200ms 防抖落盘宿主定时器回调（← use-skin-controls.ts:4）
   std::function<void(uint32_t delay_ms)> on_arm_skin_persist_timer;

@@ -25,8 +25,6 @@ const char* to_string(ValidationErrorKind kind) {
     case ValidationErrorKind::FileRead: return "FileRead";
     case ValidationErrorKind::YamlSyntax: return "YamlSyntax";
     case ValidationErrorKind::YamlMapping: return "YamlMapping";
-    case ValidationErrorKind::ScriptSyntax: return "ScriptSyntax";
-    case ValidationErrorKind::ScriptMissingMain: return "ScriptMissingMain";
     case ValidationErrorKind::CoreRejected: return "CoreRejected";
     case ValidationErrorKind::ProcessTerminated: return "ProcessTerminated";
     case ValidationErrorKind::Timeout: return "Timeout";
@@ -60,8 +58,6 @@ ValidationErrorKind kind_from_message(const std::string& message) {
   if (has("failed to read") || has("\xe6\x97\xa0\xe6\xb3\x95\xe8\xaf\xbb\xe5\x8f\x96")) {
     return ValidationErrorKind::FileRead;  // 无法读取
   }
-  if (has("script must contain a main function")) return ValidationErrorKind::ScriptMissingMain;
-  if (has("script syntax error")) return ValidationErrorKind::ScriptSyntax;
   if (has("mapping values are not allowed") || has("failed to transform to yaml mapping") ||
       has("failed to apply merge")) {
     return ValidationErrorKind::YamlMapping;
@@ -348,22 +344,13 @@ const char* notice_status(ValidationErrorKind kind, ValidationNoticeTarget targe
     case ValidationErrorKind::FileMissing:
       return "config_validate::file_not_found";
     case ValidationErrorKind::FileRead:
-      return target == ValidationNoticeTarget::Script ? "config_validate::script_error"
-                                                      : "config_validate::yaml_read_error";
+      return "config_validate::yaml_read_error";
     case ValidationErrorKind::YamlSyntax:
-      switch (target) {
-        case ValidationNoticeTarget::Merge: return "config_validate::merge_syntax_error";
-        case ValidationNoticeTarget::Script: return "config_validate::script_error";
-        default: return "config_validate::yaml_syntax_error";
-      }
+      return target == ValidationNoticeTarget::Merge ? "config_validate::merge_syntax_error"
+                                                     : "config_validate::yaml_syntax_error";
     case ValidationErrorKind::YamlMapping:
-      switch (target) {
-        case ValidationNoticeTarget::Merge: return "config_validate::merge_mapping_error";
-        case ValidationNoticeTarget::Script: return "config_validate::script_error";
-        default: return "config_validate::yaml_mapping_error";
-      }
-    case ValidationErrorKind::ScriptSyntax: return "config_validate::script_syntax_error";
-    case ValidationErrorKind::ScriptMissingMain: return "config_validate::script_missing_main";
+      return target == ValidationNoticeTarget::Merge ? "config_validate::merge_mapping_error"
+                                                     : "config_validate::yaml_mapping_error";
     case ValidationErrorKind::ProcessTerminated: return "config_validate::process_terminated";
     case ValidationErrorKind::CoreRejected:
     case ValidationErrorKind::Timeout:

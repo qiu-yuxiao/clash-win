@@ -25,8 +25,6 @@ UT_TEST(validate_kind_from_message) {
   UT_CHECK(kind_from_message("Failed to read file: xx") == K::FileRead);
   UT_CHECK(kind_from_message("\xe6\x97\xa0\xe6\xb3\x95\xe8\xaf\xbb\xe5\x8f\x96\xe6\x96\x87\xe4\xbb\xb6") ==
            K::FileRead);  // 无法读取文件
-  UT_CHECK(kind_from_message("Script must contain a main function") == K::ScriptMissingMain);
-  UT_CHECK(kind_from_message("Script syntax error: bad js") == K::ScriptSyntax);
   UT_CHECK(kind_from_message("mapping values are not allowed here") == K::YamlMapping);
   UT_CHECK(kind_from_message("failed to transform to yaml mapping") == K::YamlMapping);
   UT_CHECK(kind_from_message("failed to apply merge") == K::YamlMapping);

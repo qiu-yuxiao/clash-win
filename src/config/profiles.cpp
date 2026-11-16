@@ -387,11 +387,6 @@ Result<void> ensure_default_profile_items(IProfiles& p) {
     auto r = p.append_item(merge_item);
     if (!r.is_ok()) return r;
   }
-  if (!p.get_item(kGlobalScriptUid)) {
-    PrfItem script_item = PrfItem::from_script(std::string(kGlobalScriptUid));
-    auto r = p.append_item(script_item);
-    if (!r.is_ok()) return r;
-  }
   return Result<void>::ok();
 }
 
@@ -441,7 +436,7 @@ bool is_profile_file(const std::string& filename) {
 
 bool is_protected_global_file(const std::string& filename) {
   // ← profiles.rs::get_protected_global_files
-  return filename == "Merge.yaml" || filename == "Script.js";
+  return filename == "Merge.yaml";
 }
 
 IProfiles load() { return IProfiles::load(); }

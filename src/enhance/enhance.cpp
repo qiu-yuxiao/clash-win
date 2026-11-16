@@ -39,25 +39,35 @@ bool read_mapping_file(const std::wstring& path, YAML::Node& out) {
   return true;
 }
 
-// ← mod.rs::process_global_items / process_profile_items 的 Script 分支
-void run_script_item(const ChainItem& item, const std::string& script,
-                     YAML::Node& config, std::vector<std::string>& exists_keys,
-                     std::vector<std::pair<std::string, std::vector<ScriptLog>>>& logs,
-                     const std::string& profile_name) {
-  auto res = use_script(script, config, profile_name);
-  if (res.is_ok()) {
-    UseScriptOutcome& outcome = res.value();
-    for (const auto& k : field::use_keys(outcome.config)) {
-      exists_keys.push_back(k);
-    }
-    config = outcome.config;
-    if (!outcome.logs.empty()) logs.push_back({item.uid, std::move(outcome.logs)});
-  } else {
-    logs.push_back({item.uid, {{"exception", res.error().message}}});
-  }
-}
-
 }  // namespace
+
+YAML::Node apply_builtin_guards(YAML::Node config,
+                                const std::string& clash_core,
+                                bool enable_builtin) {
+  if (!enable_builtin ||
+      (!clash_core.empty() && clash_core != "win-mihomo")) {
+    return config;
+  }
+  if (config["mode"] && config["mode"].IsScalar() &&
+      config["mode"].Scalar() == "script") {
+    config["mode"] = "rule";
+  }
+  YAML::Node proxies = config["proxies"];
+  if (proxies && proxies.IsSequence()) {
+    for (std::size_t i = 0; i < proxies.size(); ++i) {
+      YAML::Node p = proxies[i];
+      if (!p || !p.IsMap()) continue;
+      if (p["type"] && p["type"].IsScalar() &&
+          p["type"].Scalar() == "hysteria" && p["alpn"] &&
+          p["alpn"].IsScalar()) {
+        YAML::Node seq(YAML::NodeType::Sequence);
+        seq.push_back(p["alpn"].Scalar());
+        p["alpn"] = seq;
+      }
+    }
+  }
+  return config;
+}
 
 std::string format_updated_suffix(int64_t updated) {
   // ← chrono::Local.timestamp_opt(ts, 0).format("%H%M%S")
@@ -222,9 +232,8 @@ EnhanceOutput enhance_core(const EnhanceInput& input) {
   config["proxies"] = get_merged_proxies(input.merged_proxies_source);
 
   std::vector<std::string> exists_keys;
-  std::vector<std::pair<std::string, std::vector<ScriptLog>>> result_logs;
 
-  // ③ 全局 Merge/Script
+  // ③ 全局 Merge
   for (const auto& k : field::use_keys(config)) exists_keys.push_back(k);
   if (profile.global_merge.kind == ChainItem::Kind::Merge) {
     for (const auto& k : field::use_keys(profile.global_merge.merge)) {
@@ -232,12 +241,8 @@ EnhanceOutput enhance_core(const EnhanceInput& input) {
     }
     config = use_merge(profile.global_merge.merge, config);
   }
-  if (profile.global_script.kind == ChainItem::Kind::Script) {
-    run_script_item(profile.global_script, profile.global_script.script, config,
-                    exists_keys, result_logs, profile.profile_name);
-  }
 
-  // ④ profile 级 Rules/Proxies/Merge/Script
+  // ④ profile 级 Rules/Proxies/Merge
   if (profile.rules_item.kind == ChainItem::Kind::Rules) {
     config = use_seq(profile.rules_item.seq, config, "rules");
   }
@@ -250,27 +255,15 @@ EnhanceOutput enhance_core(const EnhanceInput& input) {
     }
     config = use_merge(profile.merge_item.merge, config);
   }
-  if (profile.script_item.kind == ChainItem::Kind::Script) {
-    run_script_item(profile.script_item, profile.script_item.script, config,
-                    exists_keys, result_logs, profile.profile_name);
-  }
 
   // ⑤ merge_default_config
   config = merge_default_config(config, input.clash_config, verge.socks_enabled,
                                 verge.http_enabled,
                                 verge.enable_external_controller);
 
-  // ⑥ 内置脚本（enable_builtin；core 匹配 win-mihomo；core 空 → 支持）
-  if (verge.enable_builtin) {
-    bool meta_supported = verge.clash_core.empty() ||
-                          verge.clash_core == "win-mihomo";
-    for (const auto& item : builtin_chain_items(meta_supported)) {
-      auto res = use_script(item.script, config, "");
-      if (res.is_ok()) {
-        config = res.value().config;  // 内置脚本失败仅记日志，config 保持
-      }
-    }
-  }
+  // ⑥ 原生 C++ 内建规则卫兵（enable_builtin；core 匹配 win-mihomo；core 空 → 支持）
+  config = apply_builtin_guards(std::move(config), verge.clash_core,
+                                verge.enable_builtin);
 
   // ⑦ enforce_mini_agreements
   MiniAgreementOptions ma;
@@ -289,7 +282,6 @@ EnhanceOutput enhance_core(const EnhanceInput& input) {
   EnhanceOutput out;
   out.config = std::move(config);
   for (auto& k : exists_keys) out.exists_keys.insert(std::move(k));
-  out.script_logs = std::move(result_logs);
   return out;
 }
 
@@ -350,17 +342,11 @@ Result<EnhanceOutput> run_enhance_full_from_config() {
         ChainItem empty;
         empty.uid = uid && !uid->empty() ? "" : fallback;
         empty.kind = fallback_kind;
-        if (fallback_kind == ChainItem::Kind::Script) {
-          empty.script = consts::kItemScript;
-        }
         return empty;
       };
       input.profile.merge_item =
           load_item(cur->option ? cur->option->merge : std::nullopt, "Merge",
                     ChainItem::Kind::Merge);
-      input.profile.script_item =
-          load_item(cur->option ? cur->option->script : std::nullopt, "Script",
-                    ChainItem::Kind::Script);
       input.profile.rules_item =
           load_item(cur->option ? cur->option->rules : std::nullopt, "Rules",
                     ChainItem::Kind::Rules);
@@ -370,9 +356,6 @@ Result<EnhanceOutput> run_enhance_full_from_config() {
       input.profile.global_merge =
           chain_item_load(config::prfitem::profiles_dir(), "Merge", "merge",
                           "Merge.yaml");
-      input.profile.global_script =
-          chain_item_load(config::prfitem::profiles_dir(), "Script", "script",
-                          "Script.js");
     }
   }
 

@@ -9,7 +9,6 @@
 #include "config/config.h"
 #include "core/validate.h"
 #include "enhance/enhance.h"
-#include "system/guardian.h"
 #include "util/dirs.h"
 #include "util/utf.h"
 
@@ -61,70 +60,7 @@ Result<void> reload_or_restart(bool need_restart) {
 }
 }  // namespace
 
-Result<std::string> build_clash_env_text(const config::IVerge& verge) {
-  std::string ip = "127.0.0.1";
-  char* env_ip = nullptr;
-  size_t env_len = 0;
-  if (_dupenv_s(&env_ip, &env_len, "CLASH_VERGE_REV_IP") == 0 && env_ip != nullptr) {
-    if (env_ip[0] != '\0') ip = env_ip;
-    free(env_ip);
-  } else if (verge.proxy_host && !verge.proxy_host->empty()) {
-    ip = *verge.proxy_host;
-  }
-  const uint16_t port =
-      verge.verge_mixed_port.value_or(config::consts::kDefaultMixed);
-  const std::string env_type =
-      (verge.env_type && !verge.env_type->empty()) ? *verge.env_type : "powershell";
-
-  const std::string http_proxy = "http://" + ip + ":" + std::to_string(port);
-  const std::string socks5_proxy = "socks5://" + ip + ":" + std::to_string(port);
-  if (env_type == "sh" || env_type == "bash" || env_type == "zsh") {
-    return Result<std::string>::ok("export https_proxy=" + http_proxy +
-                                   " http_proxy=" + http_proxy +
-                                   " all_proxy=" + socks5_proxy);
-  }
-  if (env_type == "cmd") {
-    return Result<std::string>::ok("set http_proxy=" + http_proxy +
-                                   "\r\nset https_proxy=" + http_proxy);
-  }
-  if (env_type == "ps" || env_type == "powershell") {
-    return Result<std::string>::ok("$env:HTTP_PROXY=\"" + http_proxy +
-                                   "\"; $env:HTTPS_PROXY=\"" + http_proxy + "\"");
-  }
-  if (env_type == "nu" || env_type == "nushell") {
-    return Result<std::string>::ok("load-env { http_proxy: \"" + http_proxy +
-                                   "\", https_proxy: \"" + http_proxy + "\" }");
-  }
-  if (env_type == "fish") {
-    return Result<std::string>::ok("set -x http_proxy " + http_proxy +
-                                   "; set -x https_proxy " + http_proxy);
-  }
-  return Result<std::string>::err(
-      {errs::kBadArgs, "copy_clash_env: Invalid env type! " + env_type});
-}
-
 void install_cmd_clash(CommandService& svc) {
-  // ---- copy_clash_env（← feat/proxy.rs:76-110：按 env_type 生成文本写剪贴板，BUG-333）----
-  svc.register_command(
-      "copy_clash_env",
-      {[](const Json&) -> CmdResult {
-         config::IVerge verge_snapshot;
-         try {
-           const auto latest = config::Config::instance().verge().latest_arc();
-           if (latest) verge_snapshot = *latest;
-         } catch (...) {
-         }
-         auto built = build_clash_env_text(verge_snapshot);
-         if (!built.is_ok()) {
-           return CmdResult::err(built.error());
-         }
-         if (!copy_text_to_clipboard(built.value())) {
-           return CmdResult::err({errs::kIo, "Failed to write to clipboard"});
-         }
-         return CmdResult::ok(Json::object());
-       },
-       consts::kTimeoutProbe});
-
   // ---- get_clash_info（← clash.rs:22-24：ClashInfo serde 布局）----
   svc.register_command(
       "get_clash_info",
@@ -210,15 +146,6 @@ void install_cmd_clash(CommandService& svc) {
   svc.register_command(
       "start_core",
       {[](const Json&) -> CmdResult {
-         // ← lifecycle.rs:149-165（v3.2.5 BUG-316）：
-         //   --guardian-respawn 自愈拉起时，若系统服务内核（clash_verge_service）仍健康存活，
-         //   直接将 running_mode 恢复为 Service 并标记无感挂载，跳过配置重生成与内核重启（零断流）。
-         if (system::guardian::is_guardian_respawn() &&
-             core::CoreManager::instance().try_reattach_running_service_core(
-                 [] { return mihomo_unchecked().get_base_config().is_ok(); })) {
-           events::EventBus::refresh_clash();
-           return CmdResult::ok(Json::object());
-         }
          // 启动前先重生成运行时产物（← start_core_by_sidecar generate_file(Run)）
          auto outcome = run_enhance_pipeline();
          if (!outcome.is_valid()) {

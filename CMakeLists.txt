@@ -11,7 +11,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(compiler)        # MSVC 选项（须在第三方目标之前，令其同样生效）
-include(deps)            # third_party：nlohmann/yaml-cpp/quickjs
+include(deps)            # third_party：nlohmann/yaml-cpp
 include(copy_resources)  # 构建后拷贝 sidecar/ resources/
 
 # util 静态库（T02：全部基础工具 + T01 的 log/utf）
@@ -48,9 +48,7 @@ add_library(clashwin_config STATIC
   src/config/migrate.cpp
   src/config/window_state.cpp
   src/config/proxy_head_state.cpp
-  src/config/unlock_cache.cpp
   src/config/config.cpp
-  src/system/unlock_checker.cpp
 )
 target_include_directories(clashwin_config PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -69,9 +67,6 @@ add_library(clashwin_system STATIC
   src/system/signals.cpp
   src/system/service_runner.cpp
   src/system/coexist.cpp
-  src/system/guardian.cpp
-  src/system/network_info.cpp
-  src/system/icon_cache.cpp
   src/system/resources.cpp
 )
 target_include_directories(clashwin_system PUBLIC
@@ -82,7 +77,7 @@ target_link_libraries(clashwin_system PUBLIC clashwin_util nlohmann_json bcrypt 
 target_compile_options(clashwin_system PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
 # 通用 URI 解析器（T06）+ enhance 配置流水线（T08：enhance/merge/seq/field/
-# chain/tun/mini_agreements/dns_defaults + QuickJS js_engine）
+# chain/tun/mini_agreements/dns_defaults）
 add_library(clashwin_enhance STATIC
   src/enhance/uri_list.cpp
   src/enhance/field.cpp
@@ -93,7 +88,6 @@ add_library(clashwin_enhance STATIC
   src/enhance/mini_agreements.cpp
   src/enhance/dns_defaults.cpp
   src/enhance/nameserver_policy.cpp
-  src/enhance/js_engine.cpp
   src/enhance/enhance.cpp
   src/config/runtime_state.cpp
 )
@@ -101,7 +95,7 @@ target_include_directories(clashwin_enhance PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(clashwin_enhance PUBLIC clashwin_util qjs nlohmann_json)
+target_link_libraries(clashwin_enhance PUBLIC clashwin_util nlohmann_json)
 target_compile_options(clashwin_enhance PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
 # mihomo 管道通信层（T04：HTTP/1.1 over named pipe + WS + clash-verge-service IPC；
@@ -209,7 +203,6 @@ add_library(clashwin_ui STATIC
   src/ui/scenes/connections_panel.cpp
   src/ui/scenes/connection_detail_dialog.cpp
   src/ui/scenes/add_url_dialog.cpp
-  src/ui/scenes/unlock_dialog.cpp
   src/ui/scenes/first_run_guide_dialog.cpp
   src/ui/scenes/utility_modals.cpp
   src/ui/scenes/node_data.cpp
@@ -309,7 +302,6 @@ add_executable(clashwin_test
   tests/test_enhance_seq_merge.cpp
   tests/test_enhance_tun.cpp
   tests/test_enhance_mini_agreements.cpp
-  tests/test_enhance_js_engine.cpp
   tests/test_enhance_golden.cpp
   tests/test_core_commandline.cpp
   tests/test_core_kill.cpp
@@ -363,7 +355,6 @@ add_executable(clashwin_test
   tests/test_t36_m11_challenge.cpp
   tests/test_t37_pixel_and_popup_parity.cpp
   tests/test_t38_notice_parity.cpp
-  tests/test_t39_guardian.cpp
   tests/test_uia_accessibility.cpp
   tests/test_coexist.cpp
   tests/test_bug317_362_backend.cpp

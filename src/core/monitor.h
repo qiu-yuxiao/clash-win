@@ -100,8 +100,6 @@ class CoreMonitor {
     std::function<bool()> is_headless;
     // 时钟（Unix 毫秒；测试注入虚拟时钟）
     std::function<int64_t()> now_ms;
-    // 伴生看门狗巡检与宿主心跳保活（A2/A6，生产装配）
-    std::function<void()> on_guardian_tick;
   };
 
   static CoreMonitor& instance();

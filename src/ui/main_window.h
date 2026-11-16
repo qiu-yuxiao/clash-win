@@ -38,7 +38,6 @@
 #include "scenes/utility_modals.h"
 #include "scenes/add_url_dialog.h"
 #include "scenes/first_run_guide_dialog.h"
-#include "scenes/unlock_dialog.h"
 #include "scenes/node_list.h"
 #include "scenes/quick_bar.h"
 #include "scenes/traffic_pane.h"
@@ -244,7 +243,6 @@ class MainWindow : public app::ILifecycleWindow {
   void reconnect_ws() override;
   void save_geometry(bool immediately) override;
 
-  void open_unlock_page();             // /unlock 整页（内部路由，无可见入口，同 Mini）
   void close_to_lightweight();         // 关闭按钮：隐藏 + entry_lightweight_mode
   void toggle_large();                 // 大尺寸 toggle（640×860 ↔ last-non-large）
   void minimize() { if (hwnd_) ShowWindow(hwnd_, SW_MINIMIZE); }
@@ -330,7 +328,6 @@ class MainWindow : public app::ILifecycleWindow {
   scene::SettingsDrawer* settings_drawer_ = nullptr;
   bool drawer_mounted_ = false;
   scene::LogViewerModal* log_viewer_ = nullptr;  // 主题卡“调试日志”弹窗（Mini 同构）
-  scene::UnlockDialog* unlock_page_ = nullptr;   // /unlock 整页（内部路由，无可见入口，同 Mini）
   scene::AddUrlDialog* add_url_ = nullptr;  // 代理方式第三段“添加网址”（Mini 同构）
   scene::FirstRunGuideDialog* first_run_ = nullptr;  // 首次运行向导（Mini 同构）
   scene::AntivirusWhitelistModal* antivirus_modal_ = nullptr;  // 安全软件白名单说明弹窗（Mini 同构）
