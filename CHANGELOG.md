@@ -2,11 +2,20 @@
 
 All notable changes to **Clash Win** are documented here.
 
-Version format follows the project's **own** line starting at `0.1.0` (constitution §5.3): Clash Win versions increment independently and are **not** bound to Clash Mini's `3.x` numbering (`v3.2.2` was the initial port reference anchor, with subsequent releases continuously synced through `v3.3.0`).
+Version format follows the project's **own** line starting at `0.1.0` (constitution §5.3): Clash Win versions increment independently and are **not** bound to Clash Mini's `3.x` numbering (`v3.2.2` was the initial port reference anchor, now synced 1:1 through **v3.5.0**).
 
 Format reference: `Changelog.md` in the Clash Mini repository (newest first, `## vX.Y.Z` headings with grouped change bullets). Content here is Clash Win's own history, not a copy of Mini's entries.
 
 ---
+
+## v1.0.0 (2026-11-17)
+
+### Upstream v3.5.0 1:1 Full Parity Milestone
+- **Retired Non-Parity Subsystems**: Removed the `--guardian` watchdog process and invisible `1×1` sentinel windows, the `/unlock` feature & locale keys, and embedded `QuickJS` JavaScript profile script execution (`script` profile creation is explicitly rejected while preserving `create_profile`, `reorder_profile`, and `get_next_update_time`).
+- **Node Clone-Topology Deduplication & 24h HTTPS Verification Quarantine**: Synchronized `util/node`, `enhance`, `cmd_proxy`, `monitor`, and `auto_select` to upstream `v3.5.0`, filtering confirmed-fake nodes in `NodeData`, preserving pre-test delay timestamps across `-2` pending states, evicting stale Timeout cache entries when fresher alive history exists (`BUG-387`), preempting auto-select on manual node switch (`AUTO_SELECT_MANUAL_PREEMPTED`), and gating `Offline` self-heal retests (`BUG-388`).
+- **Unified Live + Closed Path Control & Custom Route Backup**: Merged active, synthetic, and recently closed connections into a unified 5-bucket view (`syn_disc` -> `syn_reject` -> `live` -> `syn_idle` -> `closed`), removed legacy Active/Closed tab switching, added YAML custom route **Save** / **Import** (`merge_profile` backup export/import), updated UIA virtual children, and cleaned hidden connection state after 30 seconds.
+- **271px Left-Anchored Narrow Popup & UI Parity**: Standardized all narrow modals (`FirstRunGuideDialog`, `AddUrlDialog`, `EditProfileModal`, `ClientUpdateModal`, `CoreUpdateModal`, `AntivirusWhitelistModal`, `LogViewerModal`, `DeleteProfileConfirmModal`) to `271px` left-anchored layout with `popup_card_paint()` / `popup_tokens()`, added profile deletion confirmation (`BUG-390`), `Monochrome` `28×14` square switch with hover borders (`BUG-384`), Mixed-Port `Esc`/Close blur-save guard (`BUG-385`), `F1`/`F4` global shortcuts active during search focus (`BUG-389`), `320ms` minimum wait-notice dwell, atomic `WM_ENTERSIZEMOVE`/`WM_EXITSIZEMOVE` geometry persistence, and `clash-win://` deep link scheme support.
+- **13-Language Locales & Full Upstream Citation Closure**: Synchronized all 52 locale files across 13 languages and reached `0` unresolved `src:` citations (`ui_src_gate.ps1 -VerifySources`).
 
 ## v0.3.3 (2026-11-14)
 

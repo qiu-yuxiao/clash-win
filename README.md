@@ -6,7 +6,7 @@
 [![Language: C++20](https://img.shields.io/badge/Language-C%2B%2B20-00599C?style=flat-square&logo=c%2B%2B)](https://isocpp.org)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?style=flat-square&logo=windows)](https://github.com/qiu-yuxiao/clash-win)
 
-> **Clash Win** — A pixel-level 1:1 Windows-native clone of **Clash Mini** (synced through **v3.2.6**), engineered 100% by AI with zero lines of manual code.
+> **Clash Win** — A pixel-level 1:1 Windows-native clone of **Clash Mini** (synced through **v3.5.0**), engineered 100% by AI with zero lines of manual code.
 > Built with modern **C++20**, **Win32 API**, and **Direct2D / DirectWrite** — zero WebView2, zero Chromium, zero UI browser engine.
 
 Clash Win preserves everything about Clash Mini — its minimalist zero-threshold workflow, two-step clean-install onboarding wizard, 6 themes & 3D skeuomorphic visuals, smart filtered auto-switching, dual-frequency failover probe, and live path routing — differing only in programming language and name. It can coexist peacefully on disk alongside Clash Mini while enforcing clean runtime mutual exclusion so the two clients never conflict (see [Relationship with Clash Mini](#relationship-with-clash-mini-与-clash-mini-的关系) and [Known Limitations](docs/KNOWN_LIMITATIONS.md)).
@@ -35,10 +35,10 @@ Clash Win preserves everything about Clash Mini — its minimalist zero-threshol
 * **[Zero-Threshold Clean-Install Onboarding]**: Tri-lingual NSIS setup (`简体中文` / `English` / `Русский`, with a reinstall maintenance page and clean-install AppData reset option) seamlessly hands your chosen language to the two-step in-app onboarding wizard — featuring automatic clipboard link sniffing (`Enter` 1-key import), anti-lost Settings Drawer slide-out, automatic System Proxy takeover, and an honest live readiness & latency dashboard.
 * **[Auto Switch & Fast Failover]**: Automatically speed-tests and switches to the fastest node upon importing or switching subscriptions, strictly respecting your active node filter subset to avoid undesired regions. A background 15–25s dual-frequency probe (`TCP:53` direct public IP + DNS fallback) detects congestion or dead nodes in real time and self-heals automatically.
 * **[Rule Updates]**: Integrates popular rule sets and GeoIP / GeoSite databases, kept synced automatically.
-* **[Mini-Monitoring & Zero-Render Standby]**: Shrink the window to its minimum size (`271×126`) to turn Clash Win into a compact desktop traffic monitor, or close to tray for true zero-render lightweight standby protected by offscreen sentinel windows and a `~1 MB` companion watchdog (`--guardian` with zero-drop core re-attach).
+* **[Mini-Monitoring & Zero-Render Standby]**: Shrink the window to its minimum size (`271×126`) to turn Clash Win into a compact desktop traffic monitor, or close to tray for true zero-render lightweight standby.
 * **[6 Skins × Light/Dark & 13 Languages]**: Switch seamlessly among `Trump-3D (Retro-3D)`, `Original`, `Modern`, `Frosted`, `Cyberpunk`, and `Monochrome` skins with per-skin dual-factor sliders, plus **13 built-in UI languages** (`简体中文`, `繁體中文`, `English`, `日本語`, `한국어`, `Русский`, `Deutsch`, `Español`, `Bahasa Indonesia`, `Türkçe`, `فارسی`, `العربية`, `Татарча` — `840+` keys 100% aligned, auto-detected from installer/OS locale, and hot-switchable anytime without restart via the bottom **[Language]** bar when expanded/maximized).
 * **[Native Screen-Reader Accessibility (Win32 UIA)]**: Full zero-WebView Windows UI Automation (`WM_GETOBJECT` / `IRawElementProvider*`) bridge across the custom Direct2D widget tree — supporting **Windows Narrator**, **NVDA**, and **JAWS** voice readout, UIA control patterns (`Invoke` / `Toggle` / `Value` / `RangeValue` / `SelectionItem` / `ExpandCollapse`), live toast announcements, modal focus scoping, and `Tab` / `Shift+Tab` keyboard navigation across all 13 languages.
-* **[Right-Click Routing (Advanced)]**: Expand or maximize the window to open **[Path Control]** alongside settings; right-click any live or historical connection to set highest-priority Direct, Proxy, or Reject rules on the fly.
+* **[Right-Click Routing & Rule Backup (Advanced)]**: Expand or maximize the window to view **[Path Control]** alongside settings — unifying live, managed, and recently closed connections in one prioritized table, setting highest-priority Direct, Proxy, or Reject rules via right-click, and backing up or restoring rules with **Save Routes** / **Import Routes**.
 * **[100% Native Architecture]**: Single native Win32/Direct2D client paired with upstream `mihomo` `v1.19.33` (`win-mihomo.exe`, with automatic missing-core recovery) and Ed25519 Minisign-verified in-app updates.
 
 ---
@@ -65,11 +65,11 @@ Clash Win preserves everything about Clash Mini — its minimalist zero-threshol
 * **[两步式零门槛首启引导]**：NSIS 三语安装向导（支持升级/重装维护与「删除应用程序数据」清洁安装重置）与主程序语言无缝继承；初次或清洁安装启动自动弹出两步式向导，集剪贴板链接智能嗅探（回车一键导入）、防迷路设置抽屉自动展开、系统代理自动接管与真实连通性延迟仪表盘于一体。
 * **[自动切换与秒级自愈]**：导入或切换订阅后自动测速并切至最快节点；测速与自动切换严格遵循当前节点过滤子集，精准规避特定区域。内置 15～25 秒双频（`TCP:53` 直连公网 IP / DNS 兜底）健康度探针，实时避开拥堵或断流节点。
 * **[规则自动同步]**：内置主流分流规则集与 GeoIP / GeoSite 数据库，后台静默同步更新。
-* **[迷你监控与零渲染驻留]**：将窗口缩至最小尺寸（`271×126`）即可化身为桌面微型流量监控器；关闭窗口入托盘即进入真正零 D2D 渲染的极轻驻留态，并由屏幕外 1×1 防清理哨兵窗口与 `~1 MB` 伴生看门狗（`--guardian`，支持零断流无感重挂内核）双重守护。
+* **[迷你监控与零渲染驻留]**：将窗口缩至最小尺寸（`271×126`）即可化身为桌面微型流量监控器；关闭窗口入托盘即进入真正零 D2D 渲染的极轻驻留态。
 * **[六套主题皮肤与 13 国语言]**：内置 `Trump-3D`（复古拟物）、`Original`、`Modern`、`Frosted`、`Cyberpunk`、`Monochrome` 六套主题皮肤，支持亮/暗/跟随系统切换及逐皮肤双因子实时滑块调节；完整内置 **13 种界面语言**（`简体中文`、`繁體中文`、`English`、`日本語`、`한국어`、`Русский`、`Deutsch`、`Español`、`Bahasa Indonesia`、`Türkçe`、`فارسی` 波斯语、`العربية` 阿拉伯语、`Татарча` 鞑靼语 —— `840+` 词条 100% 齐套，首启自动继承安装器或系统区域语言，最大化/拉高窗口后可在设置抽屉底栏点击 **[Language]** 免重启即时热切换）。
 * **[原生无障碍声音读屏（Win32 UIA）]**：在零浏览器引擎的纯 Direct2D 自绘架构上完整实现 Windows UI Automation（`WM_GETOBJECT` / `IRawElementProvider*`）无障碍桥接，全面支持 **Windows 讲述人（Narrator）**、**NVDA**、**JAWS** 等读屏软件对按钮、开关、滑块、节点列表（含协议/延迟/当前节点位置）及顶部实时通知条进行 13 国语言语音朗读、模态焦点隔离与 `Tab` / `Shift+Tab` 全键盘操作。
-* **[右键快捷路由（高级用户）]**：拉宽或最大化窗口后，在右侧 **[路径控制]** 面板右键点击任意实时/历史连接域名，即可一键生成最高优先级的直连、代理或封锁规则。
-* **[100% 纯原生与纯 AI 构建]**：全仓无一行人工手写代码，无 Chromium / WebView2 依赖（内置 QuickJS 仅用于离线执行订阅 `Script.js` 增强脚本）；搭载 `mihomo` `v1.19.33` 内核（`win-mihomo.exe`，缺失可自动下载校验恢复），支持基于 Minisign Ed25519 强验签的应用内自动更新。
+* **[右键快捷路由与规则备份（高级用户）]**：拉宽或最大化窗口后，可在右侧 **[路径控制]** 面板在同一视图管理实时连接、规则托管项与近期已关闭连接，右键一键生成最高优先级的直连、代理或封锁规则，并支持 **保存自定义路由 / 导入自定义路由**（YAML 备份往返）。
+* **[100% 纯原生与纯 AI 构建]**：全仓无一行人工手写代码，无 Chromium / WebView2 依赖；搭载 `mihomo` `v1.19.33` 内核（`win-mihomo.exe`，缺失可自动下载校验恢复），支持基于 Minisign Ed25519 强验签的应用内自动更新。
 
 ---
 
@@ -156,12 +156,12 @@ Get-FileHash .\ClashWin_<version>_x64_portable.zip -Algorithm SHA256
 | **UI & Host Stack** | Tauri 2 + Rust + React / MUI (WebView2) | **Pure C++20 + Win32 + Direct2D / DirectWrite** |
 | **Browser Engine** | Chromium / Edge WebView2 | **None (0 MB Web Engine)** |
 | **Code Authorship** | Reference baseline | **100% AI-generated, 0 lines of manual code** |
-| **Feature & Pixel Parity** | Upstream truth source (synced through **v3.2.6**) | **1:1 behavior, layout, skins, locales & core pipeline** |
+| **Feature & Pixel Parity** | Upstream truth source (synced through **v3.5.0**) | **1:1 behavior, layout, skins, locales & core pipeline** |
 | **Clean-Install Onboarding** | Two-step zero-threshold wizard | **1:1 two-step wizard (installer language inheritance + smart clipboard sniffing + live readiness dashboard)** |
 | **Internationalization (i18n)** | 13 languages (`840+` keys) | **1:1 all 13 languages (`zh` / `zhtw` / `en` / `jp` / `ko` / `ru` / `de` / `es` / `id` / `tr` / `fa` / `ar` / `tt`), live hot-switch** |
 | **Screen Reader (A11y)** | WebView2 DOM `aria-*` exposed to Narrator / NVDA | **1:1 Native Win32 UI Automation (`WM_GETOBJECT` / `IRawElementProvider*`) — Narrator / NVDA / JAWS support across all 13 languages with 0 MB WebView** |
 | **Data Directory** | `%APPDATA%\io.github.clash-mini.clash-mini` | `%APPDATA%\io.github.clash-win.clash-win` |
-| **Version Track** | `3.x` | Independent `0.x` (`v0.1.0` → current `v0.3.0`) |
+| **Version Track** | `3.x` | Independent (`v0.1.0` → current `v1.0.0`) |
 
 ### Peaceful Coexistence & Runtime Mutual Exclusion ("Borrow & Return" / 借用与归还)
 * **Safe Dual Installation**: Clash Win and Clash Mini store configurations, subscriptions, and logs in completely separate `%APPDATA%` directories. Neither installer nor uninstaller ever deletes the other's files, shortcuts, or autostart entries.
@@ -183,9 +183,9 @@ Get-FileHash .\ClashWin_<version>_x64_portable.zip -Algorithm SHA256
 | :--- | :--- | :--- |
 | **Language** | **ISO C++20 (`/MT`)** | Static-runtime native binary, zero external runtime DLL dependencies |
 | **Graphics & UI** | **Direct2D + DirectWrite + WIC** | Hardware-accelerated custom widget tree, 6-skin theme engine, virtualized lists, offscreen pixel-tested rendering |
-| **Windowing & A11y** | **Pure Win32 API + UI Automation** | Frameless DWM window, Per-Monitor v2 DPI, native `WM_GETOBJECT` / `IRawElementProvider*` screen-reader bridge, layered tooltips, 1×1 sentinel windows |
+| **Windowing & A11y** | **Pure Win32 API + UI Automation** | Frameless DWM window, Per-Monitor v2 DPI, native `WM_GETOBJECT` / `IRawElementProvider*` screen-reader bridge, layered tooltips |
 | **Core & IPC** | **Named Pipe + WinHTTP + SCM** | HTTP/1.1 & WebSocket over `\\.\pipe\mini-mihomo-win` (with TCP controller fallback) + `clash_verge_service` privilege separation |
-| **Profile Engine** | **yaml-cpp + nlohmann/json + QuickJS** | Full subscription merge/chain/field enhancement pipeline and sandboxed offline `Script.js` execution |
+| **Profile Engine** | **yaml-cpp + nlohmann/json** | Full subscription merge/chain/field enhancement and custom routing backup pipeline |
 | **Security & Update** | **Ed25519 (Minisign) + BLAKE2b + SHA-256** | Cryptographically verified in-app client updates and core asset integrity checks |
 
 ---
@@ -214,7 +214,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run_tests.ps1
 ```
 
 > [!NOTE]
-> A fresh git clone compiles out of the box, but requires the 5 upstream `sidecar/*.exe` binaries (`win-mihomo.exe`, `clash-verge-service.exe`, install/uninstall helpers, and `sysproxy.exe`) in `sidecar/` before packaging or running locally. See [`docs/05-sidecar-内核资产.md`](docs/05-sidecar-内核资产.md) and [`KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md).
+> A fresh git clone compiles out of the box, but requires the 5 upstream `sidecar/*.exe` binaries (`win-mihomo.exe`, `clash-verge-service.exe`, install/uninstall helpers, and `enableLoopback.exe`) in `sidecar/` before packaging or running locally. See [`docs/05-sidecar-内核资产.md`](docs/05-sidecar-内核资产.md) and [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md).
 
 ---
 
@@ -233,7 +233,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\run_tests.ps1
   * **Clash Mini** — the 1:1 visual, behavioral, and architectural specification reference for this native C++ clone.
   * **[Clash Verge Rev](https://github.com/clash-verge-rev/clash-verge-rev)** — the upstream project from which Clash Mini derived.
   * **[Mihomo (MetaCubeX)](https://github.com/MetaCubeX/mihomo)** — the proxy core shipped as `win-mihomo.exe`.
-  * Vendored open-source libraries under `third_party/` (`yaml-cpp`, `nlohmann/json`, `QuickJS-NG`), each governed by its own permissive license.
+  * Vendored open-source libraries under `third_party/` (`yaml-cpp`, `nlohmann/json`), each governed by its own permissive license.
 * **Copyright & License**: Custom portions Copyright (c) 2026 秋雨潇潇 (<qiuyuxiao@gmail.com>). Distributed under the **GNU General Public License v3.0 only ([GPL-3.0-only](LICENSE))**.
 * **Disclaimer / 免责声明**:
   * Clash Win is a personal recreational AI-engineered native clone project, provided **"AS IS" without warranty of any kind**.
