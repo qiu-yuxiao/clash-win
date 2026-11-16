@@ -108,6 +108,7 @@ Result<DeepLinkInfo> parse_deep_link(std::string_view link) {
   bool valid_scheme = false;
   if (lower_s.starts_with("clash://") || lower_s.starts_with("clash:") ||
       lower_s.starts_with("clash-verge://") || lower_s.starts_with("clash-verge:") ||
+      lower_s.starts_with("clash-win://") || lower_s.starts_with("clash-win:") ||
       lower_s.starts_with("clash-mini://") || lower_s.starts_with("clash-mini:")) {
     valid_scheme = true;
   }

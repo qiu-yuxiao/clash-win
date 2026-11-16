@@ -75,101 +75,70 @@ void EditProfileModal::close() {
 
 void EditProfileModal::on_arrange(const RectF& area) {
   set_bounds(area);
-  // src: layout-dialogs.tsx:124-137 paper p3 / width calc(100%-32px) / maxWidth 450
-  const float cw = std::min(450.0f, std::max(200.0f, area.w - 32.0f));
-  const float ch = std::min(360.0f, std::max(260.0f, area.h - 16.0f));
-  const float cx = std::max(0.0f, (area.w - cw) / 2.0f);
+  // src: popup-styles.ts:120-185 窄窗弹窗锁定左侧 271px
+  const float cw = std::min(theme::kPopupPaneWidth, area.w);
+  const float ch = std::min(372.0f, std::max(270.0f, area.h - 16.0f));
+  const float cx = 0.0f;  // src: popup-styles.ts:123 left: 0
   const float cy = std::max(0.0f, (area.h - ch) / 2.0f);
   card_rect_ = {cx, cy, cw, ch};
 
-  // p24；标题 h6 20 + mb2 16；字段 gap2 16 / label 20 + mb.5 4 / 输入 40
-  // 按钮 h28 px16、右对齐、gap1.5=12，顺序 取消→保存（src: :221-244）
-  const float pad = 24.0f;
-  name_input_rect_ = {cx + pad, cy + 84.0f, cw - pad * 2, 40.0f};
-  url_input_rect_ = {cx + pad, cy + 164.0f, cw - pad * 2, 40.0f};
-  interval_input_rect_ = {cx + pad, cy + 244.0f, cw - pad * 2, 40.0f};
+  const float pad = 14.0f;
+  const float inner_w = std::max(80.0f, cw - pad * 2.0f);
+  name_input_rect_ = {cx + pad, cy + 72.0f, inner_w, 36.0f};
+  url_input_rect_ = {cx + pad, cy + 134.0f, inner_w, 36.0f};
+  interval_input_rect_ = {cx + pad, cy + 196.0f, inner_w, 36.0f};
 
-  const float bw = 56.0f, bh = 28.0f, gap = 12.0f, by = cy + ch - 52.0f;
-  btn_save_rect_ = {cx + cw - pad - bw, by, bw, bh};
-  btn_cancel_rect_ = {cx + cw - pad - bw - gap - bw, by, bw, bh};
+  // src: popup-styles.ts:230-245 全宽纵向堆叠按钮（Cancel 在上 / Save 在下，或 Save 在上 / Cancel 在下）
+  const float bh = 28.0f, gap = 6.0f;
+  btn_cancel_rect_ = {cx + pad, cy + ch - 12.0f - bh, inner_w, bh};
+  btn_save_rect_ = {cx + pad, btn_cancel_rect_.y - gap - bh, inner_w, bh};
 }
 
 void EditProfileModal::on_paint(IRenderTarget& rt) {
-  // src: layout-dialogs.tsx:119-245
-  //   paper p3(24) / width calc(100%-32px) maxWidth 450 / radius 8 /
-  //   border 1px rgba(255,255,255,.12) / theme-panel
-  //   标题 h6(20) bold mb2(16)；字段 label body2(14) bold mb.5(4)、gap2(16)；
-  //   输入 get3DInputStyle outline 2px；mb3(24)；按钮 h28 px16 fs12，
-  //   右对齐 gap1.5(12)，顺序 取消→保存
   if (fade_.advance()) invalidate();  // 自续帧，直到过渡结束
   set_opacity(fade_.value());        // 每帧同步整棵子树的不透明度
   if (fade_.hidden()) return;
 
-  const bool light = ThemeService::instance().is_light();
-  const auto& pal = ThemeService::instance().palette();
-  const auto& vars = ThemeService::instance().vars();
+  const auto& svc = ThemeService::instance();
+  const auto tokens = svc.popup_tokens();
 
-  // 1. MUI 缺省遮罩 rgba(0,0,0,.5)
-  rt.fill_rect({0, 0, bounds().w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
+  // 1. MUI 缺省遮罩 rgba(0,0,0,.5)（锁定 271px 窄窗宽度）
+  // src: src/utils/popup-styles.ts:120
+  const float pane_w = std::min(theme::kPopupPaneWidth, bounds().w);
+  rt.fill_rect({0, 0, pane_w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
 
-  // 2. 卡片底座（theme-panel：6 套皮肤查表）
-  // src: layout-dialogs.tsx:119-137 paper className='theme-panel' + radius 8
-  //   + border 1px rgba(255,255,255,.12)
-  //   → 但 index.scss:108-115 对 .MuiDialog-paper.theme-panel 强制纯色底
-  {
-    const auto pp = ThemeService::instance().panel_paint();
-    if (pp.has_shadow)
-      draw_soft_shadow(rt, card_rect_, pp.radius, pp.shadow_color,
-                       pp.shadow_dy, pp.shadow_blur);
-    if (pp.has_glow)
-      draw_glow(rt, card_rect_, pp.radius, pp.glow_color, pp.glow_blur);
-    if (pp.grad_bg) {
-      rt.fill_round_rect_gradient_angle(card_rect_, pp.radius, pp.grad,
-                                        pp.grad_count, pp.grad_angle);
-    } else if (pp.bg.a > 0.001f) {
-      Brush b{pp.bg};
-      rt.round_rect(card_rect_, pp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &b);
-    }
-    if (pp.border != theme::PanelPaint::BorderKind::None) {
-      Color4f bc = pp.border_color;
-      if (pp.pulse) {
-        const float now_s = static_cast<float>(GetTickCount64()) / 1000.0f;
-        bc = Color4f::lerp(pp.pulse_from, pp.pulse_to,
-                           ThemeService::instance().pulse_phase(now_s));
-      }
-      Pen border{bc, 1.34f};
-      rt.round_rect(card_rect_, pp.radius, border, nullptr);
-      const float inner_r = pp.radius > 3.0f ? pp.radius - 3.0f : 0.0f;
-      rt.round_rect({card_rect_.x + 3, card_rect_.y + 3, card_rect_.w - 6,
-                     card_rect_.h - 6},
-                    inner_r, border, nullptr);
-    }
-  }
+  // 2. 卡片底座（popup_card_paint：6 皮肤查表 + frosted-glass 实底防穿透）
+  ::clashwin::ui::draw_card(rt, card_rect_, svc.popup_card_paint());
 
-  // 3. 标题（h6 20 bold）
+  // 3. 标题 + 分隔线（src: popup-styles.ts:191-212）
+  const float pad = 14.0f;
+  const float inner_w = std::max(80.0f, card_rect_.w - pad * 2.0f);
   TextStyle title_ts;
-  title_ts.size = 20.0f;
+  title_ts.size = 15.0f;
   title_ts.weight = static_cast<int>(Weight::Bold);
-  title_ts.color = pal.primary_text;
+  title_ts.color = tokens.primary_text;
+  title_ts.align_h = AlignH::Center;
   title_ts.align_v = AlignV::Center;
   rt.draw_text(L"⚙️ " + tr("layout.components.dialogs.editProfile.title"),
-               {card_rect_.x + 24.0f, card_rect_.y + 24.0f, card_rect_.w - 48.0f, 20.0f},
+               {card_rect_.x + pad, card_rect_.y + 10.0f, inner_w, 24.0f},
                title_ts);
+  rt.fill_rect({card_rect_.x, card_rect_.y + 44.0f, card_rect_.w, 1.0f},
+               Brush{tokens.divider_color});
 
-  // 4. 字段 label（body2 14 bold mb.5）
+  // 4. 字段 label（body2 12.5 bold）
   TextStyle label_ts;
-  label_ts.size = 14.0f;
+  label_ts.size = 12.5f;
   label_ts.weight = static_cast<int>(Weight::Bold);
-  label_ts.color = pal.primary_text;
+  label_ts.color = tokens.primary_text;
   label_ts.align_v = AlignV::Center;
   rt.draw_text(tr("layout.components.dialogs.editProfile.nameLabel"),
-               {card_rect_.x + 24.0f, card_rect_.y + 60.0f, card_rect_.w - 48.0f, 20.0f},
+               {card_rect_.x + pad, card_rect_.y + 52.0f, inner_w, 18.0f},
                label_ts);
   rt.draw_text(tr("layout.components.dialogs.editProfile.urlLabel"),
-               {card_rect_.x + 24.0f, card_rect_.y + 140.0f, card_rect_.w - 48.0f, 20.0f},
+               {card_rect_.x + pad, card_rect_.y + 114.0f, inner_w, 18.0f},
                label_ts);
   rt.draw_text(tr("layout.components.dialogs.editProfile.intervalLabel"),
-               {card_rect_.x + 24.0f, card_rect_.y + 220.0f, card_rect_.w - 48.0f, 20.0f},
+               {card_rect_.x + pad, card_rect_.y + 176.0f, inner_w, 18.0f},
                label_ts);
 
   // 5. 输入框（get3DInputStyle：6 套皮肤查表）
@@ -432,132 +401,134 @@ void ClientUpdateModal::set_progress(int p, const std::string& msg) {
 
 void ClientUpdateModal::on_arrange(const RectF& area) {
   set_bounds(area);
-  // src: layout-dialogs.tsx:262-265 width 'calc(100% - 32px)' / maxWidth '500px'
-  const float cw = std::min(500.0f, std::max(200.0f, area.w - 32.0f));
-  const float ch = std::min(340.0f, std::max(240.0f, area.h - 16.0f));
-  float cx = std::max(0.0f, (area.w - cw) / 2.0f);
-  float cy = std::max(0.0f, (area.h - ch) / 2.0f);
+  // src: popup-styles.ts:120-185 窄窗弹窗锁定左侧 271px
+  const float cw = std::min(theme::kPopupPaneWidth, area.w);
+  const float ch = std::min(392.0f, std::max(272.0f, area.h - 16.0f));
+  const float cx = 0.0f;
+  const float cy = std::max(0.0f, (area.h - ch) / 2.0f);
   card_rect_ = {cx, cy, cw, ch};
 
-  const float pad = cw < 280.0f ? 16.0f : 24.0f;
+  const float pad = 14.0f;
+  const float inner_w = std::max(80.0f, cw - pad * 2.0f);
   btn_close_x_rect_ = {cx + cw - 32.0f, cy + 6.0f, 26.0f, 24.0f};  // 保留成员（Mini 无 ✕，不绘制）
-  const float chg_h = std::max(60.0f, ch - 220.0f);
-  changelog_box_rect_ = {cx + pad, cy + 124.0f, cw - pad * 2.0f, chg_h};
-  // ← layout-dialogs.tsx:343 bar 高 8px（radius 4）
-  progress_bar_rect_ = {cx + pad, cy + 132.0f + chg_h, cw - pad * 2.0f, 8.0f};
 
-  btn_update_rect_ = {cx + cw - pad - 82.0f, cy + ch - 44.0f, 82.0f, 30.0f};
-  btn_close_rect_ = {btn_update_rect_.x - 8.0f - 76.0f, cy + ch - 44.0f, 76.0f, 30.0f};
+  // src: popup-styles.ts:230-245 全宽纵向堆叠按钮（更新在上，关闭在下）
+  const float close_bh = 28.0f;
+  const float update_bh = 30.0f;
+  const float gap = 6.0f;
+  btn_close_rect_ = {cx + pad, cy + ch - 12.0f - close_bh, inner_w, close_bh};
+  btn_update_rect_ = {cx + pad, btn_close_rect_.y - gap - update_bh, inner_w, update_bh};
+
+  const float acts_top = btn_update_rect_.y - 11.0f;
+  const float chg_h = std::max(56.0f, acts_top - (cy + 114.0f) - 28.0f);
+  changelog_box_rect_ = {cx + pad, cy + 112.0f, inner_w, chg_h};
+  // ← layout-dialogs.tsx:343 bar 高 8px（radius 4）
+  progress_bar_rect_ = {cx + pad, changelog_box_rect_.bottom() + 8.0f, inner_w, 8.0f};
 }
 
 void ClientUpdateModal::on_paint(IRenderTarget& rt) {
-  // 1:1 对齐 layout-dialogs.tsx:247-410 Client Update Dialog：
-  //   MUI Dialog paper（theme-panel 类、radius 8）+ h6 标题 + body2 版本两行 +
-  //   changelog 框（13px pre-wrap）+ 进度条（8px，状态≠idle 时显示）+
-  //   关闭（outlined）/立即更新（contained primary）按钮（downloading 时禁用）。
   if (fade_.advance()) invalidate();  // 自续帧，直到过渡结束
   set_opacity(fade_.value());        // 每帧同步整棵子树的不透明度
   if (fade_.hidden()) return;
 
-  // src: node_modules/@mui/material/Backdrop/Backdrop.js:48
-  //   MUI v5 Dialog Backdrop 缺省 rgba(0,0,0,.5)；Mini 业务源码未覆写 → 取框架缺省
-  rt.fill_rect({0, 0, bounds().w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
+  const auto& svc = ThemeService::instance();
+  const auto tokens = svc.popup_tokens();
 
-  // 豁免: Mini 无对应物 — D2D 无 box-shadow 原语；MUI Dialog paper elevation:24
-  //   （node_modules/@mui/material/Dialog/Dialog.js:343）阴影由 CSS 运行时生成，
-  //   此处以 0.22 alpha 软阴影等效（出处: 无）
-  Brush shadow_b{Color4f(0, 0, 0, 0.22f)};
-  rt.round_rect({card_rect_.x - 2, card_rect_.y - 1, card_rect_.w + 4, card_rect_.h + 5}, 9.0f,
-                {}, &shadow_b);
+  // src: popup-styles.ts:120-168 左侧 271px 窄窗 Backdrop
+  const float pane_w = std::min(theme::kPopupPaneWidth, bounds().w);
+  rt.fill_rect({0, 0, pane_w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
 
-  // theme-panel 卡底（← _theme.tsx paper.background）
-  const auto& vars = ThemeService::instance().vars();
-  Brush card_bg{vars.theme_bg};
-  rt.round_rect(card_rect_, 8.0f, {Color4f(1, 1, 1, 0.12f), 1.0f}, &card_bg);
+  // 统一弹窗卡片（popup_card_paint：6 套皮肤 + frosted-glass 实底防穿透）
+  ::clashwin::ui::draw_card(rt, card_rect_, svc.popup_card_paint());
 
-  const float pad = card_rect_.w < 280.0f ? 16.0f : 24.0f;
-  // 标题（MUI DialogContentText h6 = 1.25rem = 20px bold）
+  const float pad = 14.0f;
+  const float inner_w = std::max(80.0f, card_rect_.w - pad * 2.0f);
+  // 标题 + 分隔线（src: popup-styles.ts:191-212）
   TextStyle title_ts;
-  title_ts.size = 20.0f;
+  title_ts.size = 15.5f;
   title_ts.weight = static_cast<int>(Weight::Bold);
-  title_ts.color = ThemeService::instance().text_primary();
+  title_ts.color = tokens.primary_text;
+  title_ts.align_h = AlignH::Center;
   title_ts.align_v = AlignV::Center;
   title_ts.ellipsis = true;
-  // src: locales/zh/layout.json:58 「"title": "软件本体更新"」（layout-dialogs.tsx:280 🚀）
+  // src: locales/zh/layout.json:76 「"title": "软件本体更新"」（layout-dialogs.tsx:280 🚀）
   rt.draw_text(L"🚀 " + tr("layout.components.dialogs.client.title"),
-               {card_rect_.x + pad, card_rect_.y + 14.0f, card_rect_.w - pad * 2.0f, 28.0f},
+               {card_rect_.x + pad, card_rect_.y + 10.0f, inner_w, 24.0f},
                title_ts);
+  rt.fill_rect({card_rect_.x, card_rect_.y + 42.0f, card_rect_.w, 1.0f},
+               Brush{tokens.divider_color});
 
-  // 版本信息两行（body2 = 14px；最新版本行 bold；v 前缀 ← layout-dialogs.tsx:288-306）
+  // 版本信息两行（body2 = 13px；最新版本行 bold ← layout-dialogs.tsx:288-306）
   const std::wstring unknown = tr("layout.components.dialogs.update.unknown");
   TextStyle ver_ts;
-  ver_ts.size = 14.0f;
-  ver_ts.color = ThemeService::instance().text_primary();
+  ver_ts.size = 13.0f;
+  ver_ts.color = tokens.primary_text;
   ver_ts.align_v = AlignV::Center;
   ver_ts.ellipsis = true;
   rt.draw_text(tr("layout.components.dialogs.update.currentVersion",
                   {{"version", current_version_.empty() ? utf::utf16_to_utf8(unknown)
                                                        : current_version_}}),
-               {card_rect_.x + pad, card_rect_.y + 48.0f, card_rect_.w - pad * 2.0f, 20.0f},
+               {card_rect_.x + pad, card_rect_.y + 46.0f, inner_w, 18.0f},
                ver_ts);
   TextStyle ver_bold = ver_ts;
   ver_bold.weight = static_cast<int>(Weight::Bold);
   rt.draw_text(tr("layout.components.dialogs.update.latestVersion",
                   {{"version", latest_version_.empty() ? utf::utf16_to_utf8(unknown)
                                                        : latest_version_}}),
-               {card_rect_.x + pad, card_rect_.y + 72.0f, card_rect_.w - pad * 2.0f, 20.0f},
+               {card_rect_.x + pad, card_rect_.y + 68.0f, inner_w, 18.0f},
                ver_bold);
 
   TextStyle chg_label = ver_bold;
-  // src: locales/zh/layout.json:59 「"更新日志:"」（layout-dialogs.tsx:318）
+  // src: locales/zh/layout.json:77 「"更新日志:"」（layout-dialogs.tsx:318）
   rt.draw_text(tr("layout.components.dialogs.client.changelog"),
-               {card_rect_.x + pad, card_rect_.y + 100.0f, card_rect_.w - pad * 2.0f, 20.0f},
+               {card_rect_.x + pad, card_rect_.y + 90.0f, inner_w, 18.0f},
                chg_label);
 
   // 更新日志框（13px pre-wrap；← layout-dialogs.tsx:320-336）
-  const bool light = ThemeService::instance().is_light();
-  Brush cl_bg{light ? Color4f::hex(0x000000, 0.04f) : Color4f::hex(0xFFFFFF, 0.06f)};
-  rt.round_rect(changelog_box_rect_, 4.0f, {vars.theme_border, 1.0f}, &cl_bg);
+  Brush cl_bg{tokens.subtle_bg};
+  rt.round_rect(changelog_box_rect_, 4.0f, {tokens.subtle_border, 1.0f}, &cl_bg);
 
   TextStyle cl_ts;
-  cl_ts.size = 13.0f;
-  cl_ts.color = ThemeService::instance().text_primary();
+  cl_ts.size = 12.5f;
+  cl_ts.color = tokens.primary_text;
   cl_ts.wrap = true;
-  // src: locales/zh/layout.json:60 「"暂无详细更新日志"」（layout-dialogs.tsx:335）
+  // src: locales/zh/layout.json:78 「"暂无详细更新日志"」（layout-dialogs.tsx:335）
   std::wstring chg_w = changelog_.empty() ? tr("layout.components.dialogs.client.changelogEmpty") : utf::utf8_to_utf16(changelog_);
   rt.push_clip(changelog_box_rect_);
-  rt.draw_text(chg_w, {changelog_box_rect_.x + 16.0f, changelog_box_rect_.y + 16.0f,
-                       changelog_box_rect_.w - 32.0f, changelog_box_rect_.h - 32.0f}, cl_ts);
+  rt.draw_text(chg_w, {changelog_box_rect_.x + 10.0f, changelog_box_rect_.y + 8.0f,
+                       changelog_box_rect_.w - 20.0f, changelog_box_rect_.h - 16.0f}, cl_ts);
   rt.pop_clip();
 
   // 进度条与状态（仅 status ≠ idle 显示；← layout-dialogs.tsx:338-373）
+  const bool light = svc.is_light();
   if (status_ != "idle") {
-    // bar：8px 高、radius 4、底 10% 黑/白、填充 var(--primary-main)
     Brush bar_bg{light ? Color4f::hex(0x000000, 0.1f) : Color4f::hex(0xFFFFFF, 0.1f)};
     rt.round_rect(progress_bar_rect_, 4.0f, {}, &bar_bg);
     float fill_w = progress_bar_rect_.w * (static_cast<float>(progress_) / 100.0f);
-    Brush fill_b{ThemeService::instance().primary()};
+    Brush fill_b{tokens.accent_primary};
     rt.round_rect({progress_bar_rect_.x, progress_bar_rect_.y, fill_w, progress_bar_rect_.h},
                   4.0f, {}, &fill_b);
 
     TextStyle stat_ts;
     stat_ts.size = 12.0f;
-    stat_ts.color = ThemeService::instance().text_primary();
-    stat_ts.color.a *= 0.8f;  // opacity 0.8
-    // 空消息兜底 = clientDownloading（点击后的初始文案）
+    stat_ts.color = tokens.secondary_text;
     std::wstring stat_str = status_msg_.empty()
                                 ? tr("layout.components.dialogs.progress.clientDownloading")
                                 : utf::utf8_to_utf16(status_msg_);
-    rt.draw_text(stat_str, {progress_bar_rect_.x, progress_bar_rect_.y + 16.0f,
-                            progress_bar_rect_.w, 18.0f}, stat_ts);
+    rt.draw_text(stat_str, {progress_bar_rect_.x, progress_bar_rect_.y + 12.0f,
+                            progress_bar_rect_.w, 16.0f}, stat_ts);
   }
 
-  // 底部按钮（关闭 outlined 禁用于 downloading；更新 contained primary ← layout-dialogs.tsx:377-408）
+  // 动作区分隔线（src: popup-styles.ts:243）
+  rt.fill_rect({card_rect_.x, btn_update_rect_.y - 11.0f, card_rect_.w, 1.0f},
+               Brush{tokens.divider_color});
+
+  // 底部按钮（立即更新 contained primary 上、关闭 outlined 下 ← layout-dialogs.tsx:398-437）
   const bool busy = is_downloading_;
   auto paint_themed_btn = [&](IRenderTarget& rt2, const RectF& r, bool hovered,
                               bool disabled, const char* color_type, bool outlined,
                               const std::wstring& label) {
-    auto p = ThemeService::instance().button_paint(color_type, outlined);
+    auto p = svc.button_paint(color_type, outlined);
     if (!disabled && p.has_shadow)
       draw_soft_shadow(rt2, r, p.radius, p.shadow_color, p.shadow_dy, p.shadow_blur);
     if (!disabled && p.glow.a > 0)
@@ -584,18 +555,14 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
                     Pen{p.bevel_dark, 1.0f});
     }
     TextStyle ts;
-    ts.size = 12.0f;  // MUI Button body2
+    ts.size = 12.5f;  // MUI Button body2
     ts.weight = p.weight;
     ts.color = disabled ? p.text_disabled : p.text;
     ts.align_h = AlignH::Center;
     ts.align_v = AlignV::Center;
     rt2.draw_text(label, r, ts);
   };
-  paint_themed_btn(rt, btn_close_rect_, hover_close_, busy, "default", true,
-                   tr("shared.actions.close"));
 
-  // 标签逻辑（← layout-dialogs.tsx:400-407）：done→准备重启；downloading→更新中...；
-  // 同版本→已是最新；否则→立即更新
   std::wstring upd_label;
   if (status_ == "done")
     upd_label = tr("layout.components.dialogs.client.prepareRestart");
@@ -606,6 +573,8 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
   else
     upd_label = tr("layout.components.dialogs.update.updateNow");
   paint_themed_btn(rt, btn_update_rect_, hover_update_, busy, "primary", false, upd_label);
+  paint_themed_btn(rt, btn_close_rect_, hover_close_, busy, "default", true,
+                   tr("shared.actions.close"));
 }
 
 bool ClientUpdateModal::on_mouse(const MouseEvent& e) {
@@ -732,71 +701,71 @@ void CoreUpdateModal::handle_progress_event(const std::string& status, int progr
 
 void CoreUpdateModal::on_arrange(const RectF& area) {
   set_bounds(area);
-  // src: layout-dialogs.tsx:431-434 width 'calc(100% - 32px)' / maxWidth '450px'
-  const float cw = std::min(450.0f, std::max(200.0f, area.w - 32.0f));
-  const float ch = std::min(280.0f, std::max(190.0f, area.h - 16.0f));
-  float cx = std::max(0.0f, (area.w - cw) / 2.0f);
-  float cy = std::max(0.0f, (area.h - ch) / 2.0f);
+  // src: popup-styles.ts:120-185 窄窗弹窗锁定左侧 271px
+  const float cw = std::min(theme::kPopupPaneWidth, area.w);
+  const float ch = std::min(278.0f, std::max(210.0f, area.h - 16.0f));
+  const float cx = 0.0f;
+  const float cy = std::max(0.0f, (area.h - ch) / 2.0f);
   card_rect_ = {cx, cy, cw, ch};
 
-  const float pad = cw < 280.0f ? 16.0f : 24.0f;
+  const float pad = 14.0f;
+  const float inner_w = std::max(80.0f, cw - pad * 2.0f);
   btn_close_x_rect_ = {cx + cw - 32.0f, cy + 6.0f, 26.0f, 24.0f};  // 保留成员（Mini 无 ✕，不绘制）
-  // ← layout-dialogs.tsx:484 bar 高 8px
-  progress_bar_rect_ = {cx + pad, cy + std::min(148.0f, ch - 92.0f), cw - pad * 2.0f, 8.0f};
 
-  btn_upgrade_rect_ = {cx + cw - pad - 82.0f, cy + ch - 44.0f, 82.0f, 30.0f};
-  btn_close_rect_ = {btn_upgrade_rect_.x - 8.0f - 76.0f, cy + ch - 44.0f, 76.0f, 30.0f};
+  // src: popup-styles.ts:230-245 全宽纵向堆叠按钮（升级在上，关闭在下）
+  const float close_bh = 28.0f;
+  const float upgrade_bh = 30.0f;
+  const float gap = 6.0f;
+  btn_close_rect_ = {cx + pad, cy + ch - 12.0f - close_bh, inner_w, close_bh};
+  btn_upgrade_rect_ = {cx + pad, btn_close_rect_.y - gap - upgrade_bh, inner_w, upgrade_bh};
+
+  // ← layout-dialogs.tsx:484 bar 高 8px
+  progress_bar_rect_ = {cx + pad, cy + 104.0f, inner_w, 8.0f};
 }
 
 void CoreUpdateModal::on_paint(IRenderTarget& rt) {
-  // 1:1 对齐 layout-dialogs.tsx:412-553 Core Update Dialog（「Mini 无对应物」
-  // 的旧注释有误：Mini 具备本对话框）。MUI Dialog paper + h6 标题 + body2
-  // 版本两行 + 进度条（状态≠idle）+ 关闭/升级按钮（busy 时禁用）。
   if (fade_.advance()) invalidate();  // 自续帧，直到过渡结束
   set_opacity(fade_.value());        // 每帧同步整棵子树的不透明度
   if (fade_.hidden()) return;
 
-  const auto& vars = ThemeService::instance().vars();
-  // src: node_modules/@mui/material/Backdrop/Backdrop.js:48
-  //   MUI v5 Dialog Backdrop 缺省 rgba(0,0,0,.5)；Mini 业务源码未覆写 → 取框架缺省
-  rt.fill_rect({0, 0, bounds().w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
+  const auto& svc = ThemeService::instance();
+  const auto tokens = svc.popup_tokens();
 
-  // 豁免: Mini 无对应物 — D2D 无 box-shadow 原语；MUI Dialog paper elevation:24
-  //   （node_modules/@mui/material/Dialog/Dialog.js:343）阴影由 CSS 运行时生成，
-  //   此处以 0.22 alpha 软阴影等效（出处: 无）
-  Brush shadow_b{Color4f(0, 0, 0, 0.22f)};
-  rt.round_rect({card_rect_.x - 2, card_rect_.y - 1, card_rect_.w + 4, card_rect_.h + 5}, 9.0f,
-                {}, &shadow_b);
+  // src: popup-styles.ts:120-168 左侧 271px 窄窗 Backdrop
+  const float pane_w = std::min(theme::kPopupPaneWidth, bounds().w);
+  rt.fill_rect({0, 0, pane_w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
 
-  Brush card_bg{vars.theme_bg};
-  // src: pages/_layout/components/layout-dialogs.tsx:131-132（paper borderRadius 8px
-  //      + border 1px solid rgba(255,255,255,.12)；同名定义见 :264-265 / :433-434）
-  rt.round_rect(card_rect_, 8.0f, {Color4f(1, 1, 1, 0.12f), 1.0f}, &card_bg);
+  // 统一弹窗卡片（popup_card_paint：6 套皮肤 + frosted-glass 实底防穿透）
+  ::clashwin::ui::draw_card(rt, card_rect_, svc.popup_card_paint());
 
-  const float pad = card_rect_.w < 280.0f ? 16.0f : 24.0f;
-  // 标题（h6 = 20px bold）
+  const float pad = 14.0f;
+  const float inner_w = std::max(80.0f, card_rect_.w - pad * 2.0f);
+  // 标题 + 分隔线（src: popup-styles.ts:191-212）
   TextStyle title_ts;
-  title_ts.size = 20.0f;
+  title_ts.size = 15.5f;
   title_ts.weight = static_cast<int>(Weight::Bold);
-  title_ts.color = ThemeService::instance().text_primary();
+  title_ts.color = tokens.primary_text;
+  title_ts.align_h = AlignH::Center;
   title_ts.align_v = AlignV::Center;
   title_ts.ellipsis = true;
-  // src: locales/zh/layout.json:64 「"title": "Mihomo 内核更新"」（layout-dialogs.tsx:449 ⚙️）
+  // src: locales/zh/layout.json:82 「"title": "Mihomo 内核更新"」（layout-dialogs.tsx:469 ⚙️）
   rt.draw_text(L"⚙️ " + tr("layout.components.dialogs.core.title"),
-               {card_rect_.x + pad, card_rect_.y + 14.0f, card_rect_.w - pad * 2.0f, 28.0f},
+               {card_rect_.x + pad, card_rect_.y + 10.0f, inner_w, 24.0f},
                title_ts);
+  rt.fill_rect({card_rect_.x, card_rect_.y + 42.0f, card_rect_.w, 1.0f},
+               Brush{tokens.divider_color});
 
-  // 版本信息两行（body2 = 14px；最新版本行 bold；formatCoreVersion ← style-helpers.tsx:221）
+  // 版本信息两行（body2 = 13px；最新版本行 bold；formatCoreVersion ← style-helpers.tsx:221）
   TextStyle ver_ts;
-  ver_ts.size = 14.0f;
-  ver_ts.color = ThemeService::instance().text_primary();
+  ver_ts.size = 13.0f;
+  ver_ts.color = tokens.primary_text;
   ver_ts.align_v = AlignV::Center;
   ver_ts.ellipsis = true;
   rt.draw_text(tr("layout.components.dialogs.update.currentVersion",
                   {{"version", format_core_version(current_version_)}}),
-               {card_rect_.x + pad, card_rect_.y + 48.0f, card_rect_.w - pad * 2.0f, 20.0f},
+               {card_rect_.x + pad, card_rect_.y + 50.0f, inner_w, 18.0f},
                ver_ts);
-  // src: layout.json:51/65 「最新版本: {{version}} / 获取中...」（layout-dialogs.tsx:471-474）
+  // src: layout.json:69/83 「最新版本: {{version}} / 获取中...」（layout-dialogs.tsx:492-495）
   TextStyle ver_bold = ver_ts;
   ver_bold.weight = static_cast<int>(Weight::Bold);
   rt.draw_text(tr("layout.components.dialogs.update.latestVersion",
@@ -804,36 +773,38 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
                                    ? utf::utf16_to_utf8(
                                          tr("layout.components.dialogs.core.fetching"))
                                    : format_core_version(latest_version_)}}),
-               {card_rect_.x + pad, card_rect_.y + 72.0f, card_rect_.w - pad * 2.0f, 20.0f},
+               {card_rect_.x + pad, card_rect_.y + 72.0f, inner_w, 18.0f},
                ver_bold);
 
-  // 升级进度条（仅 status ≠ idle；8px/radius4/底 10% 黑白/填充 primary ← :479-514）
-  const bool light = ThemeService::instance().is_light();
+  // 升级进度条（仅 status ≠ idle；8px/radius4/底 10% 黑白/填充 primary）
+  const bool light = svc.is_light();
   if (status_ != "idle") {
     Brush bar_bg{light ? Color4f::hex(0x000000, 0.1f) : Color4f::hex(0xFFFFFF, 0.1f)};
     rt.round_rect(progress_bar_rect_, 4.0f, {}, &bar_bg);
     float fill_w = progress_bar_rect_.w * (static_cast<float>(progress_) / 100.0f);
-    Brush fill_b{ThemeService::instance().primary()};
+    Brush fill_b{tokens.accent_primary};
     rt.round_rect({progress_bar_rect_.x, progress_bar_rect_.y, fill_w, progress_bar_rect_.h},
                   4.0f, {}, &fill_b);
 
-    // 状态说明（12px ×0.8；消息直接来自后端 payload，无自造兜底）
     TextStyle msg_ts;
     msg_ts.size = 12.0f;
-    msg_ts.color = ThemeService::instance().text_primary();
-    msg_ts.color.a *= 0.8f;
+    msg_ts.color = tokens.secondary_text;
     std::wstring display_msg = utf::utf8_to_utf16(message_);
-    rt.draw_text(display_msg, {progress_bar_rect_.x, progress_bar_rect_.y + 16.0f,
-                               progress_bar_rect_.w, 20.0f}, msg_ts);
+    rt.draw_text(display_msg, {progress_bar_rect_.x, progress_bar_rect_.y + 12.0f,
+                               progress_bar_rect_.w, 18.0f}, msg_ts);
   }
 
-  // 底部按钮（关闭 outlined 禁用于 busy；升级 contained primary ← layout-dialogs.tsx:518-551）
+  // 动作区分隔线（src: popup-styles.ts:243）
+  rt.fill_rect({card_rect_.x, btn_upgrade_rect_.y - 11.0f, card_rect_.w, 1.0f},
+               Brush{tokens.divider_color});
+
+  // 底部按钮（立即升级 contained primary 上、关闭 outlined 下 ← layout-dialogs.tsx:530-565）
   const bool busy = is_upgrading_ || status_ == "checking" || status_ == "downloading" ||
                     status_ == "extracting";
   auto paint_themed_btn = [&](IRenderTarget& rt2, const RectF& r, bool hovered,
                               bool disabled, const char* color_type, bool outlined,
                               const std::wstring& label) {
-    auto p = ThemeService::instance().button_paint(color_type, outlined);
+    auto p = svc.button_paint(color_type, outlined);
     if (!disabled && p.has_shadow)
       draw_soft_shadow(rt2, r, p.radius, p.shadow_color, p.shadow_dy, p.shadow_blur);
     if (!disabled && p.glow.a > 0)
@@ -860,18 +831,14 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
                     Pen{p.bevel_dark, 1.0f});
     }
     TextStyle ts;
-    ts.size = 12.0f;  // MUI Button body2
+    ts.size = 12.5f;  // MUI Button body2
     ts.weight = p.weight;
     ts.color = disabled ? p.text_disabled : p.text;
     ts.align_h = AlignH::Center;
     ts.align_v = AlignV::Center;
     rt2.draw_text(label, r, ts);
   };
-  paint_themed_btn(rt, btn_close_rect_, hover_close_, busy, "default", true,
-                   tr("shared.actions.close"));
 
-  // 标签逻辑（← layout-dialogs.tsx:544-550）：done→更新完成；busy→更新中...；
-  // 否则→立即更新（isSameVersion 分支在 dialog 打开前提下不可达）
   std::wstring upd_label;
   if (status_ == "done")
     upd_label = tr("layout.components.dialogs.core.updateDone");
@@ -880,6 +847,8 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
   else
     upd_label = tr("layout.components.dialogs.update.updateNow");
   paint_themed_btn(rt, btn_upgrade_rect_, hover_upgrade_, busy, "primary", false, upd_label);
+  paint_themed_btn(rt, btn_close_rect_, hover_close_, busy, "default", true,
+                   tr("shared.actions.close"));
 }
 
 bool CoreUpdateModal::on_mouse(const MouseEvent& e) {
@@ -1169,10 +1138,10 @@ bool LogViewerModal::matches_filter(const LogEntry& entry) const {
 
 void LogViewerModal::on_arrange(const RectF& area) {
   set_bounds(area);
-  // 对齐 Mini：窄窗口下宽度与最小窗口宽度一致（271px）
-  const float cw = std::min(area.w, 271.0f);
+  // 对齐 Mini（popup-styles.ts:43-50）：贴左弹出、宽度收敛至主窗窄面板 271px
+  const float cw = std::min(area.w, theme::kPopupPaneWidth);
   const float ch = std::min(480.0f, area.h - 16.0f);
-  float cx = std::max(0.0f, (area.w - cw) / 2.0f);
+  float cx = 0.0f;
   float cy = std::max(0.0f, (area.h - ch) / 2.0f);
   card_rect_ = {cx, cy, cw, ch};
 
@@ -1212,37 +1181,22 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
 
   // 豁免: Mini 无对应物 — 本查看器为 ClashWin 自加的终端风日志查看器，
   //   Mini 日志页无终端配色字面量（出处: layout-dialogs.tsx:565-594 无终端配色）。
-  rt.fill_rect({0, 0, bounds().w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
+  const float pane_w = std::min(theme::kPopupPaneWidth, bounds().w);
+  rt.fill_rect({0, 0, pane_w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
 
-  Brush shadow_b{Color4f(0, 0, 0, 0.22f)};
-  rt.round_rect({card_rect_.x - 2, card_rect_.y - 1, card_rect_.w + 4, card_rect_.h + 5}, 9.0f,
-                {}, &shadow_b);
-
-  // ★ 卡片底座走主题（theme-panel 查表，与 EditProfileModal 同构）：
-  //   src: layout-dialogs.tsx:556-594 Dialog paper className='theme-panel'
-  //   + index.scss:108-115（theme-panel 被强制为纯色面板基色）
-  //   此前写死 #FFFFFF 白底 + #1A1A1A 深字 → 暗色模式下是刺眼的白卡。
+  // ★ 卡片底座走 popup_card_paint（6 皮肤半透磨砂/全不透高对比适配）：
+  //   src: layout-dialogs.tsx:556-594 Dialog paper + popup-styles.ts
   {
     const auto& svc = ThemeService::instance();
     const auto& pal = svc.palette();
     const auto& vars = svc.vars();
-    const auto pp = svc.panel_paint();
-    if (pp.has_shadow)
-      draw_soft_shadow(rt, card_rect_, pp.radius, pp.shadow_color, pp.shadow_dy,
-                       pp.shadow_blur);
-    if (pp.has_glow)
-      draw_glow(rt, card_rect_, pp.radius, pp.glow_color, pp.glow_blur);
-    if (pp.grad_bg) {
-      rt.fill_round_rect_gradient_angle(card_rect_, pp.radius, pp.grad,
-                                        pp.grad_count, pp.grad_angle);
-    } else if (pp.bg.a > 0.001f) {
-      Brush b{pp.bg};
-      rt.round_rect(card_rect_, pp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &b);
+    const auto pp = svc.popup_card_paint();
+    if (!pp.has_shadow && !pp.has_glow) {
+      Brush shadow_b{Color4f(0, 0, 0, 0.22f)};
+      rt.round_rect({card_rect_.x - 2, card_rect_.y - 1, card_rect_.w + 4, card_rect_.h + 5},
+                    pp.radius, {}, &shadow_b);
     }
-    if (pp.border != theme::PanelPaint::BorderKind::None) {
-      Pen border{pp.border_color, 1.34f};
-      rt.round_rect(card_rect_, pp.radius, border, nullptr);
-    }
+    ::clashwin::ui::draw_card(rt, card_rect_, pp);
 
   // 标题
   TextStyle title_ts;
@@ -1811,7 +1765,7 @@ bool LogViewerModal::a11y_set_virtual_child_value(size_t idx, const std::wstring
 // ==========================================
 AntivirusWhitelistModal::AntivirusWhitelistModal(Widget* parent)
     : Widget(parent) {
-  set_z_order(1020);  // src: src/pages/_layout.tsx:2051（置于 FirstRunGuideDialog(980) 之上）
+  set_z_order(1020);  // src: src/pages/_layout.tsx:1990（置于 FirstRunGuideDialog(980) 之上）
 }
 
 void AntivirusWhitelistModal::open() {
@@ -1836,7 +1790,7 @@ void AntivirusWhitelistModal::close() {
 
 void AntivirusWhitelistModal::rebuild_sections() const {
   sections_.clear();
-  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:46-67
+  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:46-68
   struct KeyPair {
     const char* title_key;
     const char* body_key;
@@ -1860,22 +1814,22 @@ void AntivirusWhitelistModal::on_arrange(const RectF& area) {
   set_bounds(area);
   rebuild_sections();
 
-  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:78-85
-  const float cw = std::min(520.0f, std::max(200.0f, area.w - 32.0f));
-  const float px = 14.0f;     // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:92 px: 1.75
-  const float py_tb = 12.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:93 py: 1.5
-  const float py_c = 14.0f;   // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:118 py: 1.75
-  const float sec_gap = 12.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:122 mb: 1.5
-  const float title_mb = 4.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:129 mb: 0.5
-  const float btn_h = 30.0f;    // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:163-164 py 0.7 + 12.5px
+  // src: popup-styles.ts:120-185 窄窗弹窗锁定左侧 271px
+  const float cw = std::min(theme::kPopupPaneWidth, area.w);
+  const float px = 14.0f;       // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:92 px: 1.75
+  const float py_tb = 12.0f;    // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:93 py: 1.5
+  const float py_c = 14.0f;     // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:118 py: 1.75
+  const float sec_gap = 12.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:100 mb: 1.5
+  const float title_mb = 4.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:107 mb: 0.5
+  const float btn_h = 30.0f;    // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:130-137 py 0.7 + 12.5px
 
   const float inner_w = std::max(80.0f, cw - px * 2.0f);
   ITextEngine* te = text_engine();
 
-  title_h_ = 21.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:109-110
+  title_h_ = 21.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:87-88
   if (te) {
     TextStyle tts;
-    tts.size = 15.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:109
+    tts.size = 15.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:87
     tts.weight = static_cast<int>(Weight::Bold);
     tts.wrap = true;
     const SizeF sz =
@@ -1887,18 +1841,18 @@ void AntivirusWhitelistModal::on_arrange(const RectF& area) {
   for (size_t i = 0; i < sections_.size(); ++i) {
     auto& sec = sections_[i];
     sec.y_rel = y_rel;
-    sec.title_h = 19.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:130-131
-    sec.body_h = 20.0f;   // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:140-141
+    sec.title_h = 19.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:108-109
+    sec.body_h = 20.0f;   // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:118-119
     if (te) {
       TextStyle sts;
-      sts.size = 13.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:130
+      sts.size = 13.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:108
       sts.weight = static_cast<int>(Weight::Bold);
       sts.wrap = true;
       const SizeF st_sz = te->measure_text(sec.title, sts, inner_w);
       if (st_sz.h > 0.0f) sec.title_h = std::max(19.0f, st_sz.h + 2.0f);
 
       TextStyle bts;
-      bts.size = 12.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:141
+      bts.size = 12.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:119
       bts.weight = static_cast<int>(Weight::Normal);
       bts.wrap = true;
       const SizeF sb_sz = te->measure_text(sec.body, bts, inner_w);
@@ -1912,16 +1866,16 @@ void AntivirusWhitelistModal::on_arrange(const RectF& area) {
   const float title_block_h = py_tb * 2.0f + title_h_ + 1.0f;
   const float actions_block_h = 1.0f + py_tb * 2.0f + btn_h;
   const float natural_h = title_block_h + py_c * 2.0f + total_sections_h_ + actions_block_h;
-  // 豁免: Mini 无对应物 — 矮视口下夹紧弹窗高度为 area.h - 16，并允许正文区垂直滚动（出处: antivirus-whitelist-dialog.tsx:118）
+  // 豁免: Mini 无对应物 — 矮视口下夹紧弹窗高度为 area.h - 16，并允许正文区垂直滚动（出处: antivirus-whitelist-dialog.tsx:96）
   const float ch = std::min(natural_h, std::max(160.0f, area.h - 16.0f));
-  const float cx = std::max(0.0f, (area.w - cw) / 2.0f);
+  const float cx = 0.0f;  // src: popup-styles.ts:123 left: 0
   const float cy = std::max(0.0f, (area.h - ch) / 2.0f);
   card_rect_ = {cx, cy, cw, ch};
   title_rect_ = {cx, cy, cw, title_block_h};
   actions_rect_ = {cx, cy + ch - actions_block_h, cw, actions_block_h};
   content_rect_ = {cx, title_rect_.bottom(), cw,
                    std::max(0.0f, actions_rect_.y - title_rect_.bottom())};
-  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:154-169 fullWidth 按钮
+  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:130-142 fullWidth 按钮
   btn_close_rect_ = {cx + px, actions_rect_.y + 1.0f + py_tb, inner_w, btn_h};
 
   const float ms = max_scroll();
@@ -1930,7 +1884,7 @@ void AntivirusWhitelistModal::on_arrange(const RectF& area) {
 }
 
 float AntivirusWhitelistModal::max_scroll() const {
-  const float py_c = 14.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:118
+  const float py_c = 14.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:96
   return std::max(0.0f, (py_c * 2.0f + total_sections_h_) - content_rect_.h);
 }
 
@@ -1951,31 +1905,27 @@ void AntivirusWhitelistModal::on_paint(IRenderTarget& rt) {
     on_arrange(bounds());
   }
 
-  const bool light = ThemeService::instance().is_light();
-  const bool retro = ThemeService::instance().skin() == theme::SkinId::Retro3d;
-  const auto& pal = ThemeService::instance().palette();
+  const auto& svc = ThemeService::instance();
+  const auto tokens = svc.popup_tokens();
 
-  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:70 MUI Dialog backdrop rgba(0,0,0,.5)
-  rt.fill_rect({0.0f, 0.0f, bounds().w, bounds().h},
+  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:76 窄窗 271px Backdrop rgba(0,0,0,.5)
+  const float pane_w = std::min(theme::kPopupPaneWidth, bounds().w);
+  rt.fill_rect({0.0f, 0.0f, pane_w, bounds().h},
                Brush{Color4f(0.0f, 0.0f, 0.0f, 0.5f)});
 
-  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:78-85 get3DCardStyle(theme, 'default') + radius 8
-  ::clashwin::ui::draw_card(rt, card_rect_,
-                            ThemeService::instance().card_paint("default"));
+  // src: popup-styles.ts:90-117 统一弹窗表面
+  ::clashwin::ui::draw_card(rt, card_rect_, svc.popup_card_paint());
 
-  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:99 borderBottom palette.divider
-  const Color4f div_c =
-      light ? Color4f::hex(0x000000, 0.12f) : Color4f::hex(0xFFFFFF, 0.12f);
-  const float px = 14.0f;     // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:92
-  const float py_tb = 12.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:93
-  const float py_c = 14.0f;   // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:118
-  const float title_mb = 4.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:129
+  const float px = 14.0f;       // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:92
+  const float py_tb = 12.0f;    // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:93
+  const float py_c = 14.0f;     // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:96
+  const float title_mb = 4.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:107
 
-  // Title block（src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:89-116）
+  // Title block（src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:79-94）
   TextStyle title_ts;
-  title_ts.size = 15.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:109
+  title_ts.size = 15.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:87
   title_ts.weight = static_cast<int>(Weight::Bold);
-  title_ts.color = ThemeService::instance().card_paint("default").text_color;
+  title_ts.color = tokens.primary_text;
   title_ts.align_h = AlignH::Center;
   title_ts.align_v = AlignV::Center;
   title_ts.wrap = true;
@@ -1984,11 +1934,9 @@ void AntivirusWhitelistModal::on_paint(IRenderTarget& rt) {
                 std::max(0.0f, title_rect_.w - px * 2.0f), title_h_},
                title_ts);
   rt.fill_rect({card_rect_.x, title_rect_.bottom() - 1.0f, card_rect_.w, 1.0f},
-               Brush{div_c});
+               Brush{tokens.divider_color});
 
-  // Content block（5 sections，src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:118-149）
-  const Color4f sec_body_c =
-      retro ? Color4f::hex(0x2C1F03, 0.78f) : pal.secondary_text;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:44
+  // Content block（5 sections，src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:96-128）
   const float inner_w = std::max(0.0f, content_rect_.w - px * 2.0f);
   rt.push_clip(content_rect_);
   for (const auto& sec : sections_) {
@@ -1997,18 +1945,18 @@ void AntivirusWhitelistModal::on_paint(IRenderTarget& rt) {
     if (sy + sh_total < content_rect_.y || sy > content_rect_.bottom()) continue;
 
     TextStyle st_ts;
-    st_ts.size = 13.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:130
-    st_ts.weight = 700;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:127
-    st_ts.color = pal.primary_text;
+    st_ts.size = 13.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:108
+    st_ts.weight = 700;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:105
+    st_ts.color = tokens.primary_text;
     st_ts.align_h = AlignH::Left;
     st_ts.align_v = AlignV::Top;
     st_ts.wrap = true;
     rt.draw_text(sec.title, {content_rect_.x + px, sy, inner_w, sec.title_h}, st_ts);
 
     TextStyle sb_ts;
-    sb_ts.size = 12.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:141
+    sb_ts.size = 12.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:119
     sb_ts.weight = static_cast<int>(Weight::Normal);
-    sb_ts.color = sec_body_c;
+    sb_ts.color = tokens.secondary_text;
     sb_ts.align_h = AlignH::Left;
     sb_ts.align_v = AlignV::Top;
     sb_ts.wrap = true;
@@ -2018,9 +1966,11 @@ void AntivirusWhitelistModal::on_paint(IRenderTarget& rt) {
   }
   rt.pop_clip();
 
-  // Actions block（src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:151-170）
-  rt.fill_rect({card_rect_.x, actions_rect_.y, card_rect_.w, 1.0f}, Brush{div_c});
-  const auto bp = ThemeService::instance().button_paint("default", true);  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:162
+  // Actions block（src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:130-142）
+  rt.fill_rect({card_rect_.x, actions_rect_.y, card_rect_.w, 1.0f},
+               Brush{tokens.divider_color});
+  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:134
+  const auto bp = svc.button_paint("default", true);
   RectF br = btn_close_rect_;
   if (pressed_close_) br.y += 1.0f;
   if (bp.has_shadow) {
@@ -2037,7 +1987,7 @@ void AntivirusWhitelistModal::on_paint(IRenderTarget& rt) {
     rt.round_rect(br, bp.radius, Pen{bp.border, bp.border_w}, nullptr);
   }
   TextStyle bts;
-  bts.size = 12.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:164
+  bts.size = 12.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:136
   bts.weight = bp.weight;
   bts.color = bp.text;
   bts.align_h = AlignH::Center;
@@ -2069,7 +2019,7 @@ bool AntivirusWhitelistModal::on_mouse(const MouseEvent& e) {
 
   if (e.type == MouseEventType::Wheel) {
     if (content_rect_.contains(pt.x, pt.y) || card_rect_.contains(pt.x, pt.y)) {
-      const float delta = static_cast<float>(e.wheel_delta) / 120.0f * 36.0f;  // 豁免: Mini 无对应物 — 桌面滚轮步长 36px（出处: antivirus-whitelist-dialog.tsx:118）
+      const float delta = static_cast<float>(e.wheel_delta) / 120.0f * 36.0f;  // 豁免: Mini 无对应物 — 桌面滚轮步长 36px（出处: antivirus-whitelist-dialog.tsx:96）
       set_scroll_y(scroll_y_ - delta);
     }
     return true;
@@ -2157,6 +2107,283 @@ bool AntivirusWhitelistModal::a11y_invoke_virtual_child(size_t idx) {
   if (!open_ || !enabled()) return false;
   if (idx == 5u) {
     close();
+    return true;
+  }
+  return false;
+}
+
+// ==========================================
+// 7. DeleteProfileConfirmModal (BUG-390)
+//   src: src/pages/_layout/components/layout-dialogs.tsx:643-698
+// ==========================================
+DeleteProfileConfirmModal::DeleteProfileConfirmModal(Widget* parent)
+    : Widget(parent) {
+  set_z_order(980);
+}
+
+void DeleteProfileConfirmModal::open(const std::string& uid,
+                                     const std::string& profile_name) {
+  uid_ = uid;
+  profile_name_ = profile_name;
+  open_ = true;
+  fade_.show();
+  hover_cancel_ = false;
+  hover_delete_ = false;
+  pressed_cancel_ = false;
+  pressed_delete_ = false;
+  if (bounds().w > 0.0f && bounds().h > 0.0f) {
+    on_arrange(bounds());
+  }
+  invalidate();
+}
+
+void DeleteProfileConfirmModal::close() {
+  if (!open_) return;
+  open_ = false;
+  fade_.hide();
+  invalidate();
+  if (on_dismiss) on_dismiss();
+}
+
+void DeleteProfileConfirmModal::on_arrange(const RectF& area) {
+  set_bounds(area);
+  // src: layout-dialogs.tsx:647-650 + popup-styles.ts:120-185 窄窗 271px 左锚定
+  const float cw = std::min(theme::kPopupPaneWidth, area.w);
+  const float pad = 14.0f;
+  const float inner_w = std::max(80.0f, cw - pad * 2.0f);
+  const float title_h = 44.0f;
+  float name_h = 0.0f;
+  float msg_h = 22.0f;
+  if (ITextEngine* te = text_engine()) {
+    if (!profile_name_.empty()) {
+      TextStyle nts;
+      nts.size = 13.0f;
+      nts.weight = static_cast<int>(Weight::Bold);
+      nts.wrap = true;
+      name_h = std::max(20.0f,
+                        te->measure_text(utf::utf8_to_utf16(profile_name_), nts, inner_w).h + 4.0f);
+    }
+    TextStyle mts;
+    mts.size = 13.0f;
+    mts.wrap = true;
+    msg_h = std::max(20.0f,
+                     te->measure_text(tr("profiles.modals.confirmDelete.message"), mts, inner_w).h + 4.0f);
+  } else if (!profile_name_.empty()) {
+    name_h = 22.0f;
+  }
+  const float content_h = 12.0f + name_h + (name_h > 0.0f ? 8.0f : 0.0f) + msg_h + 12.0f;
+  const float acts_h = 11.0f + 28.0f + 8.0f + 28.0f + 11.0f;
+  const float ch = std::min(title_h + content_h + acts_h, std::max(140.0f, area.h - 16.0f));
+  const float cx = 0.0f;
+  const float cy = std::max(0.0f, (area.h - ch) / 2.0f);
+  card_rect_ = {cx, cy, cw, ch};
+
+  const float acts_top = cy + ch - acts_h;
+  btn_cancel_rect_ = {cx + pad, acts_top + 11.0f, inner_w, 28.0f};
+  btn_delete_rect_ = {cx + pad, btn_cancel_rect_.bottom() + 8.0f, inner_w, 28.0f};
+}
+
+void DeleteProfileConfirmModal::on_paint(IRenderTarget& rt) {
+  if (fade_.advance()) invalidate();
+  set_opacity(fade_.value());
+  if (fade_.hidden()) return;
+
+  if (card_rect_.w <= 0.0f && bounds().w > 0.0f && bounds().h > 0.0f) {
+    on_arrange(bounds());
+  }
+
+  const auto& svc = ThemeService::instance();
+  const auto tokens = svc.popup_tokens();
+
+  const float pane_w = std::min(theme::kPopupPaneWidth, bounds().w);
+  rt.fill_rect({0.0f, 0.0f, pane_w, bounds().h},
+               Brush{Color4f(0.0f, 0.0f, 0.0f, 0.5f)});
+  ::clashwin::ui::draw_card(rt, card_rect_, svc.popup_card_paint());
+
+  const float pad = 14.0f;
+  const float inner_w = std::max(80.0f, card_rect_.w - pad * 2.0f);
+  TextStyle title_ts;
+  title_ts.size = 15.0f;
+  title_ts.weight = static_cast<int>(Weight::Bold);
+  title_ts.color = tokens.primary_text;
+  title_ts.align_h = AlignH::Center;
+  title_ts.align_v = AlignV::Center;
+  rt.draw_text(tr("profiles.modals.confirmDelete.title"),
+               {card_rect_.x + pad, card_rect_.y + 10.0f, inner_w, 24.0f},
+               title_ts);
+  rt.fill_rect({card_rect_.x, card_rect_.y + 43.0f, card_rect_.w, 1.0f},
+               Brush{tokens.divider_color});
+
+  float text_y = card_rect_.y + 56.0f;
+  if (!profile_name_.empty()) {
+    TextStyle nts;
+    nts.size = 13.0f;
+    nts.weight = static_cast<int>(Weight::Bold);
+    nts.color = tokens.primary_text;
+    nts.wrap = true;
+    const float max_h = std::max(20.0f, btn_cancel_rect_.y - 11.0f - text_y - 24.0f);
+    rt.draw_text(utf::utf8_to_utf16(profile_name_),
+                 {card_rect_.x + pad, text_y, inner_w, max_h}, nts);
+    if (ITextEngine* te = text_engine()) {
+      text_y += std::max(20.0f,
+                         te->measure_text(utf::utf8_to_utf16(profile_name_), nts, inner_w).h + 4.0f) + 8.0f;
+    } else {
+      text_y += 30.0f;
+    }
+  }
+  TextStyle mts;
+  mts.size = 13.0f;
+  mts.color = tokens.secondary_text;
+  mts.wrap = true;
+  rt.draw_text(tr("profiles.modals.confirmDelete.message"),
+               {card_rect_.x + pad, text_y, inner_w,
+                std::max(18.0f, btn_cancel_rect_.y - 16.0f - text_y)},
+               mts);
+
+  rt.fill_rect({card_rect_.x, btn_cancel_rect_.y - 11.0f, card_rect_.w, 1.0f},
+               Brush{tokens.divider_color});
+
+  auto paint_btn = [&](const RectF& orig_r, const char* ctype, bool outlined,
+                       bool hover, bool pressed, const std::wstring& label) {
+    const auto bp = svc.button_paint(ctype, outlined);
+    RectF r = orig_r;
+    if (pressed) r.y += 1.0f;
+    if (bp.has_shadow && !pressed) {
+      draw_soft_shadow(rt, r, bp.radius, bp.shadow_color, bp.shadow_dy, bp.shadow_blur);
+    }
+    if (bp.glow.a > 0 && !pressed) {
+      draw_glow(rt, r, bp.radius, bp.glow, bp.glow_blur);
+    }
+    if (bp.use_grad) {
+      const GradientStop* gs = hover ? bp.grad_hover : bp.grad;
+      rt.fill_round_rect_gradient_angle(r, bp.radius, gs, bp.grad_count, bp.grad_angle);
+    } else {
+      Color4f fill = pressed ? bp.fill_pressed : (hover ? bp.fill_hover : bp.fill);
+      Brush fb{fill};
+      rt.round_rect(r, bp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &fb);
+    }
+    if (bp.border_w > 0.01f) {
+      rt.round_rect(r, bp.radius, Pen{bp.border, bp.border_w}, nullptr);
+    }
+    TextStyle bts;
+    bts.size = 12.5f;
+    bts.weight = bp.weight;
+    bts.color = bp.text;
+    bts.align_h = AlignH::Center;
+    bts.align_v = AlignV::Center;
+    rt.draw_text(label, r, bts);
+  };
+  paint_btn(btn_cancel_rect_, "default", true, hover_cancel_, pressed_cancel_,
+            tr("shared.actions.cancel"));
+  paint_btn(btn_delete_rect_, "error", false, hover_delete_, pressed_delete_,
+            tr("shared.actions.delete"));
+}
+
+bool DeleteProfileConfirmModal::on_mouse(const MouseEvent& e) {
+  if (!open_) return false;
+  const PointF pt = e.pos;
+
+  if (e.type == MouseEventType::Leave) {
+    hover_cancel_ = hover_delete_ = false;
+    pressed_cancel_ = pressed_delete_ = false;
+    invalidate();
+    return true;
+  }
+  if (e.type == MouseEventType::Move) {
+    const bool hc = btn_cancel_rect_.contains(pt.x, pt.y);
+    const bool hd = btn_delete_rect_.contains(pt.x, pt.y);
+    if (hc != hover_cancel_ || hd != hover_delete_) {
+      hover_cancel_ = hc;
+      hover_delete_ = hd;
+      invalidate();
+    }
+    return true;
+  }
+  if (e.type == MouseEventType::Down) {
+    pressed_cancel_ = btn_cancel_rect_.contains(pt.x, pt.y);
+    pressed_delete_ = btn_delete_rect_.contains(pt.x, pt.y);
+    invalidate();
+    return true;
+  }
+  if (e.type == MouseEventType::Up) {
+    const bool was_c = pressed_cancel_;
+    const bool was_d = pressed_delete_;
+    pressed_cancel_ = pressed_delete_ = false;
+    invalidate();
+    if (was_c && btn_cancel_rect_.contains(pt.x, pt.y)) {
+      close();
+      return true;
+    }
+    if (was_d && btn_delete_rect_.contains(pt.x, pt.y)) {
+      const std::string target_uid = uid_;
+      close();
+      if (on_confirm && !target_uid.empty()) on_confirm(target_uid);
+      return true;
+    }
+    if (!card_rect_.contains(pt.x, pt.y)) {
+      close();
+      return true;
+    }
+    return true;
+  }
+  return true;
+}
+
+bool DeleteProfileConfirmModal::on_key(const KeyEvent& e) {
+  if (!open_) return false;
+  if (e.type == KeyEventType::Down) {
+    if (e.key == VK_ESCAPE || e.key == 27) {
+      close();
+      return true;
+    }
+    if (e.key == VK_RETURN || e.key == 13) {
+      const std::string target_uid = uid_;
+      close();
+      if (on_confirm && !target_uid.empty()) on_confirm(target_uid);
+      return true;
+    }
+  }
+  return false;
+}
+
+std::wstring DeleteProfileConfirmModal::a11y_default_name() const {
+  return tr("profiles.modals.confirmDelete.title");
+}
+
+A11ySubItem DeleteProfileConfirmModal::a11y_virtual_child(size_t idx) const {
+  A11ySubItem sub;
+  if (idx == 0) {
+    sub.role = A11yRole::Text;
+    std::wstring msg = tr("profiles.modals.confirmDelete.message");
+    if (!profile_name_.empty()) {
+      msg = utf::utf8_to_utf16(profile_name_) + L": " + msg;
+    }
+    sub.name = msg;
+    sub.local_bounds = card_rect_;
+    return sub;
+  }
+  sub.role = A11yRole::Button;
+  sub.can_invoke = enabled();
+  if (idx == 1) {
+    sub.name = tr("shared.actions.cancel");
+    sub.local_bounds = btn_cancel_rect_;
+  } else {
+    sub.name = tr("shared.actions.delete");
+    sub.local_bounds = btn_delete_rect_;
+  }
+  return sub;
+}
+
+bool DeleteProfileConfirmModal::a11y_invoke_virtual_child(size_t idx) {
+  if (!open_ || !enabled()) return false;
+  if (idx == 1) {
+    close();
+    return true;
+  }
+  if (idx == 2) {
+    const std::string target_uid = uid_;
+    close();
+    if (on_confirm && !target_uid.empty()) on_confirm(target_uid);
     return true;
   }
   return false;

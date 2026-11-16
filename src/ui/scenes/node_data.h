@@ -11,6 +11,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -73,6 +74,7 @@ struct DataHooks {
   //   返回择优选中的节点名（空表示未选中/繁忙）
   std::function<std::string(const std::vector<std::string>& nodes)> test_and_select;
   std::function<BatchTestSummary()> last_batch_summary;
+  std::function<std::unordered_set<std::string>()> fetch_confirmed_fake;
   std::function<int64_t()> now_ms;  // 时钟注入（TTL/测试确定性）
 };
 
@@ -82,6 +84,9 @@ class NodeData {
     int delay = -1;
     int64_t updated_at_ms = 0;
     int64_t ttl_ms = kDelayCacheTtlMs;
+    int64_t pre_test_updated_at_ms = 0;
+    int64_t pre_test_ttl_ms = kDelayCacheTtlMs;
+    int64_t updated_at_epoch_ms = 0;
   };
   using DelaySnapshotMap = std::map<std::string, std::optional<DelayCacheEntry>>;
 
@@ -200,7 +205,7 @@ class NodeData {
   std::string now_;
   std::string group_ = "PROXY";
   // 延迟缓存：name → (delay, updated_at_ms, ttl_ms)
-  std::map<std::string, DelayCacheEntry> delay_cache_;
+  mutable std::map<std::string, DelayCacheEntry> delay_cache_;
   // src: services/delay.ts:268-298 getDelayFix：缓存过期后回落内核 history
   struct ProxyHistory {
     bool alive = true;    // ★ 内核 alive 真源（← delay.ts:279-281）；false → 一律 Timeout(0)

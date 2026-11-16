@@ -35,8 +35,7 @@
         "tunUnavailable": "Для TUN требуется режим службы или права администратора"
       },
       "actions": {
-        "installService": "Установить службу",
-        "uninstallService": "Удалить службу"
+        "installService": "Установить службу"
       },
       "fields": {
         "systemProxy": "Системный прокси",
@@ -188,8 +187,6 @@
           "backupSetting": "Настройки резервного копирования",
           "runtimeConfig": "Используемая конфигурация",
           "openConfDir": "Открыть папку приложения",
-          "openCoreDir": "Открыть папку ядра",
-          "openLogsDir": "Открыть папку логов",
           "checkUpdates": "Проверить обновления",
           "openDevTools": "Открыть инструменты разработчика",
           "liteModeSettings": "Настройки режима LightWeight",
@@ -281,8 +278,7 @@
     },
     "clashCore": {
       "variants": {
-        "release": "Официальная версия",
-        "alpha": "Альфа-версия"
+        "release": "Официальная версия"
       }
     },
     "liteMode": {
@@ -546,6 +542,14 @@
     "takeoverTooltipTun": "Режим виртуального адаптера TUN",
     "debugLogs": "Журналы отладки системы",
     "pathControl": "Управление путями (ПКМ)",
+    "saveCustomRoutes": "Сохранить маршруты",
+    "importCustomRoutes": "Импорт маршрутов",
+    "saveCustomRoutesTooltip": "Сохранить все пользовательские правила маршрутизации в файл (можно импортировать после переустановки)",
+    "importCustomRoutesTooltip": "Импортировать пользовательские правила маршрутизации из сохранённого файла",
+    "routesExportSuccess": "Сохранено пользовательских правил маршрутизации: {{count}}",
+    "routesExportEmpty": "Нет пользовательских правил маршрутизации для сохранения",
+    "routesImportSuccess": "Импортировано пользовательских правил маршрутизации: {{count}}",
+    "routesImportEmpty": "В выбранном файле не найдено действительных правил маршрутизации",
     "statusTesting": "Тестирование",
     "statusUntested": "Не проверено",
     "statusError": "Ошибка",
@@ -555,10 +559,7 @@
     "statusDelayGood": "Хороший пинг",
     "statusDelayExcellent": "Отличный пинг",
     "activeNodeLabel": "Активный узел: ",
-    "connectionsActive": "Активно",
-    "connectionsHistory": "История",
     "connectionsDisconnectAll": "Отключить все",
-    "connectionsClearHistory": "Очистить историю",
     "total": "Всего",
     "proxyMethod": "Режим прокси",
     "globalProxy": "Глобальный прокси",
@@ -575,7 +576,6 @@
     "testingInProgress": "Идёт проверка задержки, попробуйте позже",
     "testNotExecuted": "Проверка не выполнена: ядро не готово или нет доступных узлов",
     "testFailed": "Ошибка проверки задержки: {{message}}",
-    "updated": "Обновлено",
     "portSaved": "Порт прокси сохранён и перезагружен",
     "testSingleNodeTooltip": "Нажмите для проверки только этого узла (без переключения)",
     "networkOffline": "Нет сети",
@@ -588,6 +588,11 @@
     "tunSnifferAuto": "Авто",
     "tunSnifferOn": "Вкл",
     "tunSnifferOff": "Выкл",
-    "tunSnifferNeedTunTooltip": "Действует только в режиме TUN (включите режим TUN)"
+    "tunSnifferNeedTunTooltip": "Действует только в режиме TUN (включите режим TUN)",
+    "settingEnabled": "Включено",
+    "settingDisabled": "Отключено",
+    "tunSnifferUpdated": "Настройка сниффера доменов TUN обновлена",
+    "autoLaunchVerifyFailed": "Не удалось подтвердить статус автозапуска; возможно, блокировка антивирусом",
+    "invalidPort": "Введите корректный номер порта (1–65535)"
   }
 }

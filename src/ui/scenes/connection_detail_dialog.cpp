@@ -3,6 +3,8 @@
 #include <windows.h>
 #include <algorithm>
 
+#include "ui/card_draw.h"
+#include "ui/soft_shadow.h"
 #include "ui/theme/theme.h"
 #include "util/parse_traffic.h"
 #include "util/utf.h"
@@ -167,28 +169,30 @@ void ConnectionDetailDialog::on_paint(IRenderTarget& rt) {
   // 点外部关闭行为保留（本文件 :214）。
 
   const auto& theme = theme::ThemeService::instance();
-  const auto& pal = theme.palette();
-  const auto& vars = theme.vars();
+  const auto tokens = theme.popup_tokens();
+  const auto card_paint = theme.popup_card_paint();
 
-  // 2. 卡片底（阴影 + 纸底 + 圆角 8；位置由 place_card 按触发行锚定）
-  Brush shadow_b{Color4f(0, 0, 0, 0.25f)};  // 豁免: Mini 无对应物 — D2D 无 box-shadow，投影用偏移层模拟（出处: connection-detail.tsx:59-61 无阴影色值）
-  rt.round_rect({card_rect_.x - 2, card_rect_.y - 1, card_rect_.w + 4, card_rect_.h + 5}, 9.0f,
-                {}, &shadow_b);
-
-  Brush card_bg{vars.theme_panel_bg};
-  rt.round_rect(card_rect_, 8.0f, {vars.divider_color, 1.0f}, &card_bg);
+  // 2. 卡片底（统一走 popup_card_paint()，支持 6 皮肤及 frosted-glass 实底防穿透；位置由 place_card 按触发行锚定）
+  if (!card_paint.has_shadow && !card_paint.has_glow) {
+    Brush shadow_b{Color4f(0, 0, 0, 0.25f)};  // 豁免: Mini 无对应物 — retro 之外无阴影时保留 Popover 浅投影（出处: 无）
+    rt.round_rect({card_rect_.x - 2, card_rect_.y - 1, card_rect_.w + 4, card_rect_.h + 5},
+                  card_paint.radius + 1.0f, {}, &shadow_b);
+  }
+  ::clashwin::ui::draw_card(rt, card_rect_, card_paint);
 
   // 3. 标题
   TextStyle title_ts;
   title_ts.size = 12.5f;
   title_ts.weight = static_cast<int>(Weight::Bold);
-  title_ts.color = pal.primary_text;
+  title_ts.color = tokens.primary_text;
   title_ts.align_v = AlignV::Center;
-  rt.draw_text(L"连接详情", {card_rect_.x + 14, card_rect_.y + 8, card_rect_.w - 28, 20},
+  rt.draw_text(tr("connections.components.contextMenu.viewDetail"),
+               {card_rect_.x + 14, card_rect_.y + 8, card_rect_.w - 28, 20},
                title_ts);
 
   // 分隔线
-  rt.fill_rect({card_rect_.x + 10, card_rect_.y + 32, card_rect_.w - 20, 1}, Brush{vars.divider_color});
+  rt.fill_rect({card_rect_.x + 10, card_rect_.y + 32, card_rect_.w - 20, 1},
+               Brush{tokens.divider_color});
 
   // 4. 13 项元数据逐行绘制
   auto f_list = fields();
@@ -197,12 +201,12 @@ void ConnectionDetailDialog::on_paint(IRenderTarget& rt) {
   TextStyle label_ts;
   label_ts.size = 12.0f;  // src: :160 fontSize 12
   label_ts.weight = static_cast<int>(Weight::Bold);  // src: :168 <b>
-  label_ts.color = pal.secondary_text;  // src: :159
+  label_ts.color = tokens.secondary_text;  // src: :159
   label_ts.align_v = AlignV::Center;
 
   TextStyle val_ts;
   val_ts.size = 12.0f;  // src: :160
-  val_ts.color = pal.primary_text;  // src: :174
+  val_ts.color = tokens.primary_text;  // src: :174
   val_ts.align_v = AlignV::Center;
   val_ts.ellipsis = true;
 
@@ -233,13 +237,12 @@ void ConnectionDetailDialog::on_paint(IRenderTarget& rt) {
   }
 
   // 关闭按钮
-  Color4f dis_bg = hover_dismiss_ ? Color4f::hex(0x000000, 0.12f)  // 豁免: 关闭钮悬停 12% 黑
-                                   : Color4f::hex(0x000000, 0.06f);  // 豁免: 关闭钮常态 6% 黑
+  Color4f dis_bg = hover_dismiss_ ? tokens.subtle_border : tokens.subtle_bg;
   Brush d_bg{dis_bg};
-  rt.round_rect(btn_dismiss_rect_, 4.0f, {vars.divider_color, 1.0f}, &d_bg);
+  rt.round_rect(btn_dismiss_rect_, 4.0f, {tokens.subtle_border, 1.0f}, &d_bg);
   TextStyle dis_ts;
   dis_ts.size = 11.0f;
-  dis_ts.color = pal.primary_text;
+  dis_ts.color = tokens.primary_text;
   dis_ts.align_h = AlignH::Center;
   dis_ts.align_v = AlignV::Center;
   rt.draw_text(tr("shared.actions.close"), btn_dismiss_rect_, dis_ts);

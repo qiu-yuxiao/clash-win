@@ -76,7 +76,7 @@ class TitleBarButton : public Widget {
     RectF r{0, 0, bounds().w, bounds().h};
     const auto& svc = theme::ThemeService::instance();
     if (hover_) {
-      // ← window-controller.tsx:31-49 IconButton 未指定 color ⇒ MUI action.hover
+      // ← window-controller.tsx:31-49 IconButton 未指定 color ⇒ MUI action hover
       //   （light rgba(0,0,0,.04) / dark rgba(255,255,255,.08)）；关闭键 :hover 红
       Brush bg = close_red_ ? Brush{Color4f::hex(0xFF0000)}
                             : Brush{svc.is_light() ? Color4f(0, 0, 0, 0.04f)

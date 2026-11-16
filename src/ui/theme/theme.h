@@ -369,6 +369,10 @@ struct SwitchPaint {
   bool thumb_hover_inset_dark = false;  // 覆盖常态 inset 底暗线
   Color4f thumb_hover_inset_dark_color = Color4f{0, 0, 0, 0};
   float thumb_hover_inset_dark_dy = 0;
+
+  // ★ 轨道悬停描边态（← BUG-384 monochrome '&:hover .MuiSwitch-track': borderColor）
+  bool track_hover = false;
+  Color4f track_hover_border = Color4f{0, 0, 0, 0};
 };
 
 // ---------- 逐皮肤的滑块规格 ----------
@@ -416,6 +420,24 @@ struct SkinFactorView {
   float val1 = 1.0f;      // --control-skin-val1（几何类：圆角/半径/不透明度…）
   float depth = 1.0f;     // --depth-factor（深度类：阴影位移/浮雕/辉光…）
   float vibrancy = 1.0f;  // --vibrancy-factor ≡ --control-skin-val2
+};
+
+inline constexpr float kPopupPaneWidth = 271.0f;  // src: constants.ts MIN_WINDOW_WIDTH
+
+// ---------- 统一弹窗语义色（← utils/popup-styles.ts getPopupSkinTokens） ----------
+struct PopupSkinTokens {
+  bool is_retro3d = false;
+  Color4f primary_text;
+  Color4f secondary_text;
+  Color4f disabled_text;
+  Color4f divider_color;
+  Color4f ready_color;
+  Color4f warning_color;
+  Color4f error_color;
+  Color4f info_color;
+  Color4f accent_primary;
+  Color4f subtle_bg;
+  Color4f subtle_border;
 };
 
 class ThemeService {
@@ -481,6 +503,9 @@ class ThemeService {
   PanelPaint panel_paint() const;
   // card_type ∈ {"default","primary","upload","download"}（← get3DCardStyle）
   CardPaint card_paint(const char* card_type = "default") const;
+  // 统一弹窗表面与语义色（← utils/popup-styles.ts getPopupSkinTokens / getPopupCardStyle）
+  PopupSkinTokens popup_tokens() const;
+  CardPaint popup_card_paint() const;
   // 滑块族查表（6 套皮肤 × depth/vibrancy ← get3DSliderStyle）
   SliderPaint slider_paint() const;
   // 开关族查表（6 套皮肤 ← base-switch.tsx styled()）

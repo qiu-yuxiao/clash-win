@@ -54,6 +54,14 @@
 namespace clashwin::ui::scene {
 
 class EditProfileModal;
+class DeleteProfileConfirmModal;
+
+// src: src/pages/_layout/utils/settings-guards.ts:7-21 BUG-385
+inline bool should_skip_mixed_port_blur_save(bool is_open,
+                                             bool skip_requested,
+                                             bool focus_on_close_btn) {
+  return !is_open || skip_requested || focus_on_close_btn;
+}
 
 // 皮肤/因子持久化（clashwin-skin.json）
 // 因子按皮肤分别存储（← use-skin-controls.ts:13-24 readFactor：
@@ -250,6 +258,10 @@ class SettingsDrawer : public Stack {
   //   help-menu-button.tsx:192,200 disabled={clientCheckLoading/coreCheckLoading}）
   void set_app_update_checking(bool checking);
   void set_core_update_checking(bool checking);
+  DeleteProfileConfirmModal* delete_confirm_modal() const {
+    return delete_confirm_modal_;
+  }
+  void request_delete_profile(const std::string& uid);
   std::vector<Button*> skin_row_;     // Trump-3D/Original/Modern/Frosted/Cyberpunk/Monochrome
   bool bottom_row_visible() const { return bottom_row_visible_; }
   // 启动期用 verge 实际值回填抽屉控件（不触发 patch，避免启动回写）
@@ -284,7 +296,10 @@ class SettingsDrawer : public Stack {
   ContextMenu* profile_menu_ = nullptr;      // 订阅行右键菜单（_layout.tsx:1806-1856）
   ContextMenu* url_menu_ = nullptr;          // URL 输入右键菜单（_layout.tsx:1859-1932）
   EditProfileModal* edit_profile_modal_ = nullptr;  // 编辑订阅（layout-dialogs.tsx:119-245）
+  DeleteProfileConfirmModal* delete_confirm_modal_ = nullptr;  // BUG-390 删除二次确认
   bool open_ = false;
+  bool skip_port_blur_save_ = false;
+  bool close_btn_pressed_ = false;
   bool skin_prefs_dirty_ = false;
   std::string pending_skin_name_;
   float pending_depth_ = 0.3f;     // src: src/pages/_layout/hooks/use-skin-controls.ts:45

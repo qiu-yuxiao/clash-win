@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <ctime>
 #include <iomanip>
 #include <memory>
@@ -23,6 +24,15 @@ namespace clashwin::ui::scene {
 
 namespace utf = clashwin::utf;
 
+namespace {
+int64_t current_epoch_ms(int64_t hook_now_ms) {
+  if (hook_now_ms >= 1'000'000'000'000LL) return hook_now_ms;
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::system_clock::now().time_since_epoch())
+      .count();
+}
+}  // namespace
+
 std::wstring format_delay(int delay) {
   // ← src/services/delay.ts:454-460 formatDelay（-1='-'；-2='testing'；0/≥timeout 且 ≤1e5 = Timeout；>1e5 = Error）
   if (delay == -1) return L"-";  // src: src/services/delay.ts:455
@@ -39,13 +49,18 @@ bool NodeData::load() {
     CWLOG_WARN("NodeData: fetch_group 失败（内核未就绪？）");
     return false;
   }
+  const std::unordered_set<std::string> confirmed_fake =
+      hooks_.fetch_confirmed_fake ? hooks_.fetch_confirmed_fake()
+                                  : std::unordered_set<std::string>{};
   // ← MF:services/cmds.ts:344-349 calcuProxies：
   //   all.filter((item) => item?.name && !isDummyNode(item.name))
-  //   无订阅（裸配置 PROXY 组 all=[DIRECT]）时列表应为空态，不得展示 DIRECT。
+  //   无订阅（裸配置 PROXY 组 all=[DIRECT]）时列表应为空态，不得展示 DIRECT；
+  //   HTTPS 验真连续失败确认伪节点一并隐藏。
   std::vector<std::string> all;
   all.reserve(raw.size());
   for (const auto& name : raw) {
-    if (!name.empty() && !clashwin::util::is_dummy_node(name))
+    if (!name.empty() && !clashwin::util::is_dummy_node(name) &&
+        !confirmed_fake.contains(name))
       all.push_back(name);
   }
   std::map<std::string, mihomo::ProxyItem> items;
@@ -85,21 +100,40 @@ bool NodeData::apply_delay_results(
     const std::vector<std::pair<std::string, int>>& items, bool from_probe) {
   if (items.empty()) return false;
   const int64_t now = hooks_.now_ms ? hooks_.now_ms() : 0;
+  const int64_t now_epoch = current_epoch_ms(now);
   bool any_visible_changed = false;
   for (const auto& [name, delay] : items) {
     if (name.empty()) continue;
     const int before_vis = row_delay(name);
     int64_t ttl = kDelayCacheTtlMs;
     if (!from_probe) {
-      // src: src/services/delay.ts:408-413 复用缓存指标保鲜上限钳制在 30s，不给即将过期的旧记录续命
+      // src: src/services/delay.ts:471-486 复用缓存指标保鲜上限钳制在 30s，
+      //   若原记录正在测速中(-2)则承接其 pre_test_updated_at_ms，避免给即将过期的旧记录续命
       ttl = kReusedMetricsMaxTtlMs;
       auto it = delay_cache_.find(name);
-      if (it != delay_cache_.end() && it->second.delay != -2) {
-        const int64_t rem = it->second.ttl_ms - (now - it->second.updated_at_ms);
-        if (rem > 0 && rem < ttl) ttl = rem;
+      if (it != delay_cache_.end()) {
+        int64_t base_ts = 0;
+        int64_t base_ttl = 0;
+        if (it->second.delay > 0 && it->second.delay < kNodeDelayMaxMs) {
+          base_ts = it->second.updated_at_ms;
+          base_ttl = it->second.ttl_ms;
+        } else if (it->second.delay == -2 &&
+                   it->second.pre_test_updated_at_ms > 0) {
+          base_ts = it->second.pre_test_updated_at_ms;
+          base_ttl = it->second.pre_test_ttl_ms;
+        }
+        if (base_ts > 0) {
+          const int64_t rem = base_ttl - (now - base_ts);
+          if (rem > 0 && rem < ttl) ttl = rem;
+        }
       }
     }
-    delay_cache_[name] = DelayCacheEntry{delay, now, ttl};
+    DelayCacheEntry next;
+    next.delay = delay;
+    next.updated_at_ms = now;
+    next.ttl_ms = ttl;
+    next.updated_at_epoch_ms = now_epoch;
+    delay_cache_[name] = next;
     if (row_delay(name) != before_vis) any_visible_changed = true;
   }
   // BUG-339: 仅当至少一个节点的可见延迟发生变化时才广播 UI 重绘通知
@@ -127,11 +161,30 @@ bool NodeData::apply_delay_results(const nlohmann::json& payload, bool from_prob
 void NodeData::set_delays_batch(const std::vector<std::string>& names, int delay) {
   if (names.empty()) return;
   const int64_t now = hooks_.now_ms ? hooks_.now_ms() : 0;
+  const int64_t now_epoch = current_epoch_ms(now);
   bool any_visible_changed = false;
   for (const auto& name : names) {
     if (name.empty()) continue;
     const int before_vis = row_delay(name);
-    delay_cache_[name] = DelayCacheEntry{delay, now, kDelayCacheTtlMs};
+    DelayCacheEntry next;
+    next.delay = delay;
+    next.updated_at_ms = now;
+    next.ttl_ms = kDelayCacheTtlMs;
+    next.updated_at_epoch_ms = now_epoch;
+    if (delay == -2) {
+      auto it = delay_cache_.find(name);
+      if (it != delay_cache_.end()) {
+        if (it->second.delay > 0 && it->second.delay < kNodeDelayMaxMs) {
+          next.pre_test_updated_at_ms = it->second.updated_at_ms;
+          next.pre_test_ttl_ms = it->second.ttl_ms;
+        } else if (it->second.delay == -2 &&
+                   it->second.pre_test_updated_at_ms > 0) {
+          next.pre_test_updated_at_ms = it->second.pre_test_updated_at_ms;
+          next.pre_test_ttl_ms = it->second.pre_test_ttl_ms;
+        }
+      }
+    }
+    delay_cache_[name] = next;
     if (row_delay(name) != before_vis) any_visible_changed = true;
   }
   if (any_visible_changed) notify();
@@ -140,8 +193,27 @@ void NodeData::set_delays_batch(const std::vector<std::string>& names, int delay
 void NodeData::set_delay(const std::string& name, int delay) {
   if (name.empty()) return;
   const int64_t now = hooks_.now_ms ? hooks_.now_ms() : 0;
+  const int64_t now_epoch = current_epoch_ms(now);
   const int before_vis = row_delay(name);
-  delay_cache_[name] = DelayCacheEntry{delay, now, kDelayCacheTtlMs};
+  DelayCacheEntry next;
+  next.delay = delay;
+  next.updated_at_ms = now;
+  next.ttl_ms = kDelayCacheTtlMs;
+  next.updated_at_epoch_ms = now_epoch;
+  if (delay == -2) {
+    auto it = delay_cache_.find(name);
+    if (it != delay_cache_.end()) {
+      if (it->second.delay > 0 && it->second.delay < kNodeDelayMaxMs) {
+        next.pre_test_updated_at_ms = it->second.updated_at_ms;
+        next.pre_test_ttl_ms = it->second.ttl_ms;
+      } else if (it->second.delay == -2 &&
+                 it->second.pre_test_updated_at_ms > 0) {
+        next.pre_test_updated_at_ms = it->second.pre_test_updated_at_ms;
+        next.pre_test_ttl_ms = it->second.pre_test_ttl_ms;
+      }
+    }
+  }
+  delay_cache_[name] = next;
   if (row_delay(name) != before_vis) notify();
 }
 
@@ -207,15 +279,32 @@ bool NodeData::test_group() {
 //   ← Mini proxy-groups.tsx:230-275 handleCheckAll
 //   视觉占位：先置 -2（testing）触发流光动画，再委托后端统一引擎
 bool NodeData::test_and_select(const std::vector<std::string>& nodes) {
-  std::vector<std::string> target_names = nodes;
-  if (target_names.empty()) {
+  const std::unordered_set<std::string> confirmed_fake =
+      hooks_.fetch_confirmed_fake ? hooks_.fetch_confirmed_fake()
+                                  : std::unordered_set<std::string>{};
+  std::vector<std::string> target_names;
+  if (nodes.empty()) {
     target_names.reserve(rows_.size());
     for (const auto& r : rows_) {
-      if (!r.name.empty() && !clashwin::util::is_dummy_node(r.name)) {
+      if (!r.name.empty() && !clashwin::util::is_dummy_node(r.name) &&
+          !confirmed_fake.contains(r.name)) {
         target_names.push_back(r.name);
       }
     }
+  } else {
+    target_names.reserve(nodes.size());
+    for (const auto& n : nodes) {
+      if (!n.empty() && !confirmed_fake.contains(n)) {
+        target_names.push_back(n);
+      }
+    }
+    if (target_names.empty()) {
+      last_batch_summary_ = BatchTestSummary{};
+      return false;
+    }
   }
+  const std::vector<std::string> call_nodes =
+      nodes.empty() ? std::vector<std::string>{} : target_names;
   // BUG-321: 仅为当前尚未处于 -2 的节点建立快照（若 UI 线程已提前拍摄快照并置 -2，外层也会兜底恢复）
   std::vector<std::string> non_pending;
   non_pending.reserve(target_names.size());
@@ -232,7 +321,7 @@ bool NodeData::test_and_select(const std::vector<std::string>& nodes) {
     restore_delays_for_still_pending(internal_snaps);
     return false;
   }
-  std::string fastest = hooks_.test_and_select(nodes);
+  std::string fastest = hooks_.test_and_select(call_nodes);
   bool ok = !fastest.empty();
   if (hooks_.last_batch_summary) {
     last_batch_summary_ = hooks_.last_batch_summary();
@@ -300,6 +389,20 @@ int NodeData::row_delay(const std::string& name) const {
   if (it != delay_cache_.end()) {
     // -2（测速中）永不按 TTL 惰性过期；完成或失败时由 apply_delay_results / restore_delays_for_still_pending 收敛
     if (it->second.delay == -2) return -2;  // src: src/services/delay.ts:456
+    // BUG-387：若缓存停留在 Timeout（0 或 >=5000），但内核快照已证实 alive 且末条有效 history 严格晚于缓存写入时刻，立即淘汰假超时缓存
+    if (it->second.delay == 0 || it->second.delay >= kNodeDelayMaxMs) {
+      auto h = proxy_history_.find(name);
+      if (h != proxy_history_.end() && h->second.alive &&
+          h->second.delay > 0 && h->second.delay < kNodeDelayMaxMs) {
+        int64_t rec = 0;
+        if (parse_iso_time_ms(h->second.time, &rec) &&
+            rec > it->second.updated_at_epoch_ms &&
+            current_epoch_ms(now) - rec <= kHistoryFallbackMaxAgeMs) {
+          delay_cache_.erase(it);
+          return h->second.delay;
+        }
+      }
+    }
     if (now - it->second.updated_at_ms <= it->second.ttl_ms)
       return it->second.delay;
   }
@@ -392,6 +495,13 @@ DataHooks NodeData::production_hooks(const std::string& group) {
     return true;
   };
   h.now_ms = [] { return static_cast<int64_t>(GetTickCount64()); };
+  h.fetch_confirmed_fake = [] {
+    std::unordered_set<std::string> out;
+    for (const auto& name : clashwin::util::confirmed_fake_node_names()) {
+      out.insert(name);
+    }
+    return out;
+  };
   // ★ §5.2/§5.6「所见即所选」：可见子集 → 测速 + 择优切换
   //   ← Mini proxy-groups.tsx:230-275 handleCheckAll
   //     triggerAutoSelect(currentUid, visibleNames, 0, true)

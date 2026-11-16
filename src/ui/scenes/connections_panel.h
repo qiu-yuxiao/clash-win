@@ -1,8 +1,8 @@
 #pragma once
-// 连接面板（T20）：完整实现 v3.2.1 路径控制/活跃历史分段/Chains 64px 循环排序/虚拟列表/右键菜单/详情弹窗。
+// 连接面板（T20）：完整实现 v3.5.0 统一实时/近期已关闭连接列表、路径控制、保存/导入路由、Chains 74px 循环排序/虚拟列表/右键菜单/详情弹窗。
 // 逐行对照：
-// - connections-panel.tsx（副标题 11px 加粗、3D 活跃/历史分段 140×18、断开全部、清空历史）
-// - connection-table.tsx（Host 列 flex:1、Chains 列固定 64px 居中、▲/▼ 循环排序、右键 6 项菜单、行点击详情）
+// - connections-panel.tsx（副标题 11px 加粗、保存路由 / 导入路由、断开全部）
+// - connection-table.tsx（Host 列 flex:1、Chains 列固定 74px 居中、▲/▼ 循环排序、右键 6/7 项菜单、行点击详情）
 // - ScrollList 虚拟滚动，hidden scrollbar（show_scrollbar = false），支持平滑滚轮
 // - 严格遵守 Direct2D 局部坐标规则（以 {0, y} 相对本控件绘制，禁止 double offset）
 #include <atomic>
@@ -131,9 +131,17 @@ class ConnectionsPanel : public Widget {
 
   A11yRole a11y_default_role() const override { return A11yRole::Group; }
   std::wstring a11y_default_name() const override;
-  size_t a11y_virtual_child_count() const override { return 4; }
+  size_t a11y_virtual_child_count() const override { return 2; }
   A11ySubItem a11y_virtual_child(size_t idx) const override;
   bool a11y_invoke_virtual_child(size_t idx) override;
+
+  // v3.5.0 自定义路径控制规则保存 / 导入（← connections-panel.tsx:90-108 + quick-routing.ts:593-674）
+  std::string export_routes_to_string() const;
+  int import_routes_from_string(const std::string& content, bool run_enhance = true);
+  void handle_save_custom_routes();
+  void handle_import_custom_routes();
+  Button* save_routes_btn() const { return btn_save_routes_; }
+  Button* import_routes_btn() const { return btn_import_routes_; }
 
   void refresh_visible();
   void reload_managed_rules();
@@ -149,6 +157,7 @@ class ConnectionsPanel : public Widget {
 
  private:
   void show_context_menu(const ConnItem& item, PointF anchor, RectF row_global);
+  void set_routes_io_busy(bool busy);
 
   ConnectionData* data_ = nullptr;
   uint64_t data_sub_ = 0;
@@ -157,6 +166,7 @@ class ConnectionsPanel : public Widget {
   std::shared_ptr<std::atomic<bool>> alive_ = std::make_shared<std::atomic<bool>>(true);
 
   Tab tab_ = Tab::Active;
+  bool route_io_busy_ = false;
   std::string filter_;
   SortCol sort_col_ = SortCol::None;
   SortDir sort_dir_ = SortDir::None;
@@ -168,16 +178,15 @@ class ConnectionsPanel : public Widget {
 
   // 子控件
   TextField* search_ = nullptr;
+  Button* btn_save_routes_ = nullptr;
+  Button* btn_import_routes_ = nullptr;
   Button* btn_disconnect_all_ = nullptr;
-  Button* btn_clear_history_ = nullptr;
   ScrollList* list_ = nullptr;
   ConnTableOverlay* table_overlay_ = nullptr;
   ContextMenu* context_menu_ = nullptr;
   ConnectionDetailDialog* detail_dialog_ = nullptr;
 
   // 点击热区
-  RectF tab_active_rect_;
-  RectF tab_closed_rect_;
   RectF header_host_rect_;
   RectF header_chains_rect_;
 };

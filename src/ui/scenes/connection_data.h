@@ -63,6 +63,7 @@ struct ConnItem {
   // v3.3.0 路径控制扩展字段
   PathControlStatus control_status = PathControlStatus::Proxy;
   bool is_synthetic = false;
+  bool is_closed = false;
   std::optional<core::quick_routing::ManagedMergeRule> managed_rule;
   std::optional<core::quick_routing::RuleType> target_type;
   std::string target_value;
@@ -103,6 +104,20 @@ class ConnectionData {
   void sort_by_traffic();
   // 清空 closed 历史（← clearClosedConnections）
   void clear_closed() { closed_.clear(); }
+  // 隐藏窗口 30s 后回收全部连接列表与速率状态
+  void clear_all() {
+    if (active_.empty() && closed_.empty() && upload_total_ == 0.0 &&
+        download_total_ == 0.0) {
+      return;
+    }
+    active_.clear();
+    closed_.clear();
+    upload_total_ = 0.0;
+    download_total_ = 0.0;
+    epoch_id_.clear();
+    last_seq_ = -1;
+    notify_now();
+  }
 
   // UI 通知（节流合并：窗口内多次变化只触发一次；now_ms 注入时钟）
   uint64_t subscribe(std::function<void()> cb);

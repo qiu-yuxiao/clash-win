@@ -73,11 +73,12 @@ std::string path_control_status_key(PathControlStatus status);
 bool reconcile_disconnected_records(PathControlState& state,
                                     const std::vector<ConnItem>& active);
 
-// 合成活跃连接列表（活跃行 + 已断开目标 synthetic 行 + 托管 Merge 规则 synthetic 行）
+// 合成活跃连接列表（活跃行 + 已断开目标 synthetic 行 + 托管 Merge 规则 synthetic 行 + 去重近期已关闭行）
 std::vector<ConnItem> compose_active_path_control_connections(
     const std::vector<ConnItem>& raw_active,
     const std::vector<core::quick_routing::ManagedMergeRule>& managed_rules,
-    const PathControlState& state);
+    const PathControlState& state,
+    const std::vector<ConnItem>& raw_closed = {});
 
 // 为历史连接补充 4 态控制信息（不注入 synthetic 行）
 std::vector<ConnItem> enrich_closed_path_control_connections(

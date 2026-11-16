@@ -77,7 +77,8 @@ void Modal::close() {
   // open_ 立刻置 false：命中、回调、on_mask_click 语义与旧实现一致；
   // 画面另行淡出 195ms（MUI leave），由 on_paint 自续帧推进。
   open_ = false;
-  fade_.hide();  // ← MUI duration.leavingScreen 195ms
+  // ← MUI duration leavingScreen 195ms
+  fade_.hide();
   invalidate();
   if (on_close) on_close();
 }

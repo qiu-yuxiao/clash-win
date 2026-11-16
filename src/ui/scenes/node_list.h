@@ -133,7 +133,7 @@ class NodeGridRowWidget : public Widget {
   std::vector<NodeRowWidget*> cards_;
 };
 
-// 滚动置顶按钮 ← src/components/layout/scroll-top-button.tsx:10-40
+// 滚动置顶按钮 ← src/components/layout/scroll-top-button.tsx:10-36
 //   · position absolute / bottom 20 / right 20（相对整个节点列容器外框）
 //   · MUI IconButton 默认尺寸：padding 8 + 图标 24 → 40×40 圆形（borderRadius 50%）
 //   · 底色 light rgba(0,0,0,.1) / dark rgba(255,255,255,.1)，hover 各 .2

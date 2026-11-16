@@ -107,7 +107,7 @@ bool Slider::on_mouse(const MouseEvent& e) {
   }
 }
 
-// ★ 键盘调节（← MUI useSlider.js:326-370 `createHandleHiddenInputKeyDown`）
+// ★ 键盘调节（src: theme-settings-card.tsx:365-373；MUI useSlider createHandleHiddenInputKeyDown）
 //   ArrowUp/ArrowRight   +step（Shift 时 +shiftStep=10）
 //   ArrowDown/ArrowLeft   -step（Shift 时 -shiftStep=10）
 //   PageUp/PageDown       ±shiftStep(=10)
@@ -119,7 +119,7 @@ bool Slider::on_key(const KeyEvent& e) {
   if (e.type != KeyEventType::Down) return false;
   if (!enabled()) return false;
   const float step = step_ > 0 ? step_ : 0.1f;
-  const float shift_step = 10.0f;   // ← MUI shiftStep 缺省 10（useSlider.js:182）
+  const float shift_step = 10.0f;   // ← MUI shiftStep 缺省 10
   const float size = e.shift ? shift_step : step;
   float target = value_;
   switch (e.key) {

@@ -14,6 +14,7 @@
 #include "ui/soft_shadow.h"
 #include "ui/theme/theme.h"
 #include "util/dirs.h"
+#include "util/node.h"
 #include "util/str_utils.h"
 #include "util/utf.h"
 #include "ui/i18n_text.h"  // F-D01
@@ -106,26 +107,18 @@ constexpr float kStarBtnW = 130.0f;      // 豁免: Mini 无对应物 — 按钮
 bool is_retro();
 bool is_light();
 
-// 语义色（src: :479-487）
+// 语义色（src: popup-styles.ts:50-84 getPopupSkinTokens）
 Color4f secondary_text() {
-  // src: :479 retro-3d 换 deep brown rgba(44,31,3,.78)，其余 text.secondary
-  return is_retro() ? Color4f::hex(0x2C1F03, 0.78f)
-                    : ThemeService::instance().palette().secondary_text;
+  return ThemeService::instance().popup_tokens().secondary_text;
 }
 Color4f disabled_text() {
-  // src: :480 retro-3d rgba(44,31,3,.55)，其余 text.disabled
-  return is_retro() ? Color4f::hex(0x2C1F03, 0.55f)
-                    : ThemeService::instance().palette().secondary_text;
+  return ThemeService::instance().popup_tokens().disabled_text;
 }
 Color4f ready_color() {
-  // src: :481 retro-3d #1B5E20，其余 success.main
-  return is_retro() ? Color4f::hex(0x1B5E20)
-                    : ThemeService::instance().palette().success_color;
+  return ThemeService::instance().popup_tokens().ready_color;
 }
 Color4f warning_color() {
-  // src: :482 retro-3d #8C4A03，其余 warning.main
-  return is_retro() ? Color4f::hex(0x8C4A03)
-                    : ThemeService::instance().palette().warning_color;
+  return ThemeService::instance().popup_tokens().warning_color;
 }
 Color4f star_accent_color() {
   // src: :483-487 retro-3d #7A3E00；其余 dark #FFD54F / light #B26A00
@@ -133,8 +126,7 @@ Color4f star_accent_color() {
   return is_light() ? Color4f::hex(0xB26A00) : Color4f::hex(0xFFD54F);
 }
 Color4f card_text_color() {
-  // src: utils/button-styles.ts:535/576 get3DCardStyle('default').color（6 套皮肤）
-  return ThemeService::instance().card_paint("default").text_color;
+  return ThemeService::instance().popup_tokens().primary_text;
 }
 
 bool is_retro() {
@@ -144,9 +136,8 @@ bool is_light() {
   return ThemeService::instance().is_light();
 }
 
-// src: MUI 默认 palette.divider light rgba(0,0,0,.12) / dark rgba(255,255,255,.12)
 Color4f divider_color() {
-  return is_light() ? Color4f::hex(0x000000, 0.12f) : Color4f::hex(0xFFFFFF, 0.12f);
+  return ThemeService::instance().popup_tokens().divider_color;
 }
 
 void draw_text(IRenderTarget& rt, const std::wstring& text, const RectF& r,
@@ -164,11 +155,11 @@ void draw_text(IRenderTarget& rt, const std::wstring& text, const RectF& r,
   rt.draw_text(text, r, ts);
 }
 
-// 3D 卡：6 套皮肤走 ThemeService::card_paint("default") 查表
-//   （src: utils/button-styles.ts:492-731 get3DCardStyle）
+// 3D 卡：6 套皮肤走 ThemeService::popup_card_paint() 查表
+//   （src: utils/popup-styles.ts:90-117 getPopupCardStyle）
 void paint_card(IRenderTarget& rt, const RectF& r) {
   ::clashwin::ui::draw_card(rt, r,
-                            ThemeService::instance().card_paint("default"));
+                            ThemeService::instance().popup_card_paint());
 }
 
 enum class BtnStyle { Primary, OutlinedDefault, OutlinedPrimary };
@@ -292,21 +283,9 @@ std::string read_clipboard_url() {
   CloseClipboard();
 
   std::string trimmed = util::trim(res);
-  if (!trimmed.empty()) {
-    std::string lower = util::to_lower(trimmed);
-    if (lower.rfind("http://", 0) == 0 || lower.rfind("https://", 0) == 0 ||
-        lower.rfind("clash://", 0) == 0 || lower.rfind("ss://", 0) == 0 ||
-        lower.rfind("ssr://", 0) == 0 || lower.rfind("vmess://", 0) == 0 ||
-        lower.rfind("vless://", 0) == 0 || lower.rfind("trojan://", 0) == 0 ||
-        lower.rfind("hysteria://", 0) == 0 || lower.rfind("hysteria2://", 0) == 0 ||
-        lower.rfind("hy2://", 0) == 0 || lower.rfind("wireguard://", 0) == 0 ||
-        lower.rfind("wg://", 0) == 0 || lower.rfind("tuic://", 0) == 0 ||
-        lower.rfind("socks5://", 0) == 0 || lower.rfind("socks://", 0) == 0) {
-      return trimmed;
-    }
-    if (lower.find("proxies:") != std::string::npos) {
-      return trimmed;
-    }
+  if (!trimmed.empty() &&
+      clashwin::util::is_supported_subscription_or_node_input(trimmed)) {
+    return trimmed;
   }
   return "";
 }
@@ -391,6 +370,7 @@ FirstRunGuideDialog::FirstRunGuideDialog(Widget* parent) : Widget(parent) {
 
 void FirstRunGuideDialog::open() {
   open_ = true;
+  opened_after_completion_ = is_first_run_completed();
   fade_.show();  // ← MUI Dialog 缺省 Fade（enter 225ms）
   // src: :286-298 resetForm：重新打开从导入步开始
   step_ = FirstRunStep::Input;
@@ -528,9 +508,14 @@ void FirstRunGuideDialog::submit_import() {
     }
   }
 
-  // 仅要求非空：口径与设置页订阅导入框完全一致，同时支持 http(s) 订阅链接与直连节点（ss/vmess/vless/trojan/hy2/wg等十数种协议）
+  // 校验非空与链接/节点格式（src: first-run-guide-dialog.tsx:373-381）
   if (target_url.empty()) {
-    error_message_ = "请输入或粘贴订阅链接或节点配置";
+    error_message_ = tr8("layout.components.firstRun.errEmpty");
+    invalidate();
+    return;
+  }
+  if (!clashwin::util::is_supported_subscription_or_node_input(target_url)) {
+    error_message_ = tr8("layout.components.firstRun.errScheme");
     invalidate();
     return;
   }
@@ -544,7 +529,7 @@ void FirstRunGuideDialog::submit_import() {
 
   auto finish_import = [this](bool success, const std::string& err_msg) {
     if (success) {
-      // src: :398 verge 已加载且 enable_system_proxy/enable_tun_mode 均未开启 → 自动接管
+      // src: :398 仅首次引导（非用户重开）且未开启接管时自动开启系统代理
       bool checked = false;
       bool takeover_on = false;
       try {
@@ -554,7 +539,7 @@ void FirstRunGuideDialog::submit_import() {
         checked = true;
       } catch (...) {
       }
-      if (checked && !takeover_on) {
+      if (!opened_after_completion_ && checked && !takeover_on) {
         if (on_patch_system_proxy) {
           on_patch_system_proxy(true);
         } else {
@@ -672,9 +657,9 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
   set_bounds(area);
   if (url_menu_) url_menu_->set_bounds({0, 0, area.w, area.h});
   set_bounds(area);
-  // 对齐 Mini（first-run-guide-dialog.tsx:545-557）：窄窗口下 m:0 铺满视口宽度（271px），
-  // 宽窗口下 maxWidth 520 并保留左右 32px 呼吸留白
-  const float cw = area.w <= 285.0f ? area.w : std::min(kCardMaxW, area.w - 32.0f);
+  // 对齐 Mini（first-run-guide-dialog.tsx:545-557 + popup-styles.ts:43-50）：
+  // 窄窗口及宽窗口均贴左停靠在 271px 主面板宽度内
+  const float cw = std::min(theme::kPopupPaneWidth, area.w);
   const bool has_banner =
       step_ == FirstRunStep::Input && detected_clipboard_url_.empty() == false &&
       url_.empty();
@@ -748,9 +733,10 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
       TextStyle bts;
       bts.size = kStarBodyFont;
       bts.wrap = true;
+      // src: :1052 lineHeight 1.55
       const SizeF bs_sz = te->measure_text(
           tr("layout.components.firstRun.wikiHint"), bts, card_text_w);
-      if (bs_sz.h > 0) star_body_h_ = std::max(kStarBodyH, bs_sz.h + 4.0f);  // src: :1052 lineHeight 1.55
+      if (bs_sz.h > 0) star_body_h_ = std::max(kStarBodyH, bs_sz.h + 4.0f);
     }
     star_h = kCardPad + star_title_h_ + kImportedMb + star_body_h_ + kStarBtnMt +
              kStarBtnH + kCardPad;
@@ -799,7 +785,7 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
                  : kTitleBlockH + kContentPad + ready_cards_h + kContentPad + kActionsH;
   ch = std::min(ch, area.h - 8.0f);  // 豁免: Mini 无对应物 — 窄高视口防溢出安全留边 4px×2
 
-  const float cx = std::max(0.0f, (area.w - cw) / 2.0f);
+  const float cx = 0.0f;  // src: popup-styles.ts:43-50 贴左停靠
   const float cy = std::max(0.0f, (area.h - ch) / 2.0f);
   card_rect_ = {cx, cy, cw, ch};
 
@@ -939,8 +925,9 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
   set_opacity(fade_.value());        // 每帧同步整棵子树的不透明度
   if (fade_.hidden()) return;
 
-  // src: MUI Dialog backdrop 默认 rgba(0,0,0,0.5)
-  rt.fill_rect({0, 0, bounds().w, bounds().h},
+  // src: MUI Dialog backdrop 默认 rgba(0,0,0,0.5)，限宽 271px 窄面板区域
+  const float pane_w = std::min(theme::kPopupPaneWidth, bounds().w);
+  rt.fill_rect({0, 0, pane_w, bounds().h},
                Brush{Color4f(0, 0, 0, 0.5f)});
 
   paint_card(rt, card_rect_);

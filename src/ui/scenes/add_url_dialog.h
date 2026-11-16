@@ -14,6 +14,7 @@
 #include <string>
 
 #include "core/quick_routing.h"
+#include "ui/context_menu.h"
 #include "ui/overlay_fade.h"
 #include "ui/widget.h"
 
@@ -30,6 +31,9 @@ class AddUrlDialog : public Widget {
 
   const std::string& payload() const { return payload_; }
   void set_payload(const std::string& p);
+
+  void set_context_menu(ContextMenu* menu) { context_menu_ = menu; }
+  void open_context_menu(PointF anchor);
 
   // 策略偏好（源码 addQuickRoutingRules 的默认行为；保留内部状态兼容旧调用）
   core::quick_routing::RuleTarget target() const { return target_; }
@@ -70,6 +74,7 @@ class AddUrlDialog : public Widget {
 
  private:
   void do_submit();
+  void copy_payload_to_clipboard();
 
   bool open_ = false;
   // ← MUI Dialog 缺省 Fade 过渡（enter 225ms / leave 195ms）
@@ -77,6 +82,8 @@ class AddUrlDialog : public Widget {
   std::string payload_;
   core::quick_routing::RuleTarget target_ = core::quick_routing::RuleTarget::Proxy;
   std::string error_message_;
+  ContextMenu* context_menu_ = nullptr;
+  bool all_selected_ = false;
 
   RectF card_rect_;
   RectF title_rect_;

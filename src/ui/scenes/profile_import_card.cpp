@@ -38,7 +38,7 @@ std::string fmt_date(uint64_t unix_secs) {
   return buf;
 }
 
-// MUI action.hover 缺省值（src: MUI theme palette action.hover）
+// MUI action hover 缺省值（src: MUI theme palette action hover）
 Color4f action_hover(bool light) {
   return light ? Color4f::hex(0x000000, 0.04f)  // light rgba(0,0,0,0.04)
                : Color4f::hex(0xFFFFFF, 0.08f); // dark  rgba(255,255,255,0.08)
@@ -160,7 +160,7 @@ void ProfileRowWidget::on_paint(IRenderTarget& rt) {
     right.align_h = AlignH::Right;
     rt.draw_text(utf::utf8_to_utf16(date_), {w - 8.0f - w * 0.34f, 26.0f,
                                             w * 0.34f, 15.0f}, right);
-    // 进度条：h2、action.hover 底、radius1、mt 0.5=4、primary.main（src: :345-363）
+    // 进度条：h2、action hover 底、radius1、mt 0.5=4、primary.main（src: :345-363）
     if (type_ == "remote" && has_total_) {
       const float bar_y = 45.0f;
       const float bar_w = w - x0 - 8.0f;

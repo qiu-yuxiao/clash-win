@@ -36,7 +36,8 @@ void ConnRowWidget::on_paint(IRenderTarget& rt) {
   const auto& svc = ThemeService::instance();
   // 【PAINTFIX】局部坐标 {0,0,w,h}（同 title_bar：bounds() 会二次叠加原点）
   RectF r{0, 0, bounds().w, bounds().h};
-  if (hover_) rt.fill_rect(r, Brush{Color4f::hex(0x000000, 0.04f)});  // src: MUI action.hover rgba(0,0,0,.04)
+  // src: MUI action hover alpha 0.04
+  if (hover_) rt.fill_rect(r, Brush{Color4f::hex(0x000000, 0.04f)});
 
   // 协议色点（chains 分类；8px 圆点 x=4）
   Brush dot{chains_color(row_.chains_cat)};

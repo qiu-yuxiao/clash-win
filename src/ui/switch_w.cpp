@@ -91,7 +91,7 @@ bool SwitchW::on_mouse(const MouseEvent& e) {
 }
 
 void SwitchW::on_paint(IRenderTarget& rt) {
-  // T12：6 套皮肤统一走 ThemeService::switch_paint()（← base-switch.tsx:15-556）。
+  // T12：6 套皮肤统一走 ThemeService::switch_paint()（← base-switch.tsx:15-507）。
   //
   // ★ 轨道（滑槽）可见性（用户反馈 2026-11-07）：retro-3d 槽底是
   //   rgba(212,175,55,.15)*.85 的半透明金，叠在同色卡片底上几乎无对比。
@@ -104,7 +104,7 @@ void SwitchW::on_paint(IRenderTarget& rt) {
   const float h = bounds().h > 0 ? bounds().h : sp.track_h;
   const RectF track{0, 0, w, h};
   // 依据皮肤自身 track_h 等比缩放旋钮直径、圆角和 bevel 阴影
-  // src: basic-settings-card.tsx:148 transform: 'scale(0.85)' / base-switch.tsx:25-545
+  // src: basic-settings-card.tsx:148 transform: 'scale(0.85)' / base-switch.tsx:25-496
   const float scale = sp.track_h > 0.0f ? (h / sp.track_h) : 1.0f;
   const float track_radius = std::min(h * 0.5f, sp.track_radius * scale);
   const float thumb_d = sp.thumb_d * scale;
@@ -126,7 +126,8 @@ void SwitchW::on_paint(IRenderTarget& rt) {
   rt.round_rect(track, track_radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &off_b);
   const float off_bw = sp.off_bw * scale;
   if (off_bw > 0.01f && a < 0.999f) {
-    Color4f off_edge = sp.off_border;
+    Color4f off_edge =
+        (thumb_hovered_ && sp.track_hover) ? sp.track_hover_border : sp.off_border;
     off_edge.a *= (1.0f - a) * dis;
     rt.round_rect(inset_rect(track, off_bw * 0.5f),
                   std::max(0.0f, track_radius - off_bw * 0.5f),
@@ -169,7 +170,8 @@ void SwitchW::on_paint(IRenderTarget& rt) {
     }
     const float on_bw = sp.on_bw * scale;
     if (on_bw > 0.01f) {
-      Color4f oe = sp.on_border;
+      Color4f oe =
+          (thumb_hovered_ && sp.track_hover) ? sp.track_hover_border : sp.on_border;
       oe.a *= a * dis;
       rt.round_rect(inset_rect(track, on_bw * 0.5f),
                     std::max(0.0f, track_radius - on_bw * 0.5f),

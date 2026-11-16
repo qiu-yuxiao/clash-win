@@ -1277,4 +1277,73 @@ void set_verify_record_for_test(const std::string& fp,
   }
 }
 
+bool is_supported_subscription_or_node_input(std::string_view raw) {
+  auto trim_sv = [](std::string_view s) {
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) {
+      s.remove_prefix(1);
+    }
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) {
+      s.remove_suffix(1);
+    }
+    return s;
+  };
+  std::vector<std::string_view> lines;
+  size_t pos = 0;
+  while (pos <= raw.size()) {
+    size_t nl = raw.find('\n', pos);
+    std::string_view seg =
+        (nl == std::string_view::npos) ? raw.substr(pos) : raw.substr(pos, nl - pos);
+    seg = trim_sv(seg);
+    if (!seg.empty()) lines.push_back(seg);
+    if (nl == std::string_view::npos) break;
+    pos = nl + 1;
+  }
+  if (lines.empty()) return false;
+
+  auto starts_with_ci = [](std::string_view s, std::string_view pfx) {
+    if (s.size() < pfx.size()) return false;
+    for (size_t i = 0; i < pfx.size(); ++i) {
+      if (std::tolower(static_cast<unsigned char>(s[i])) !=
+          std::tolower(static_cast<unsigned char>(pfx[i]))) {
+        return false;
+      }
+    }
+    return true;
+  };
+  auto has_ws = [](std::string_view s) {
+    for (char ch : s) {
+      if (std::isspace(static_cast<unsigned char>(ch))) return true;
+    }
+    return false;
+  };
+
+  bool has_http = false;
+  for (auto line : lines) {
+    if (starts_with_ci(line, "http://") || starts_with_ci(line, "https://")) {
+      has_http = true;
+      break;
+    }
+  }
+  if (has_http) {
+    return lines.size() == 1 && !has_ws(lines[0]);
+  }
+
+  static constexpr std::string_view kSchemes[] = {
+      "vmess://", "ss://",     "trojan://",    "vless://",
+      "hysteria2://", "hysteria://", "anytls://", "tuic://",
+      "wireguard://", "socks5://", "socks://",
+  };
+  for (auto line : lines) {
+    bool ok = false;
+    for (auto sch : kSchemes) {
+      if (starts_with_ci(line, sch)) {
+        ok = true;
+        break;
+      }
+    }
+    if (!ok) return false;
+  }
+  return true;
+}
+
 }  // namespace clashwin::util

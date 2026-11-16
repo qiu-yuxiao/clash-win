@@ -441,7 +441,8 @@ bool reconcile_disconnected_records(PathControlState& state,
 std::vector<ConnItem> compose_active_path_control_connections(
     const std::vector<ConnItem>& raw_active,
     const std::vector<qr::ManagedMergeRule>& managed_rules,
-    const PathControlState& state) {
+    const PathControlState& state,
+    const std::vector<ConnItem>& raw_closed) {
   std::unordered_set<std::string> disc_id_set(state.disconnected_ids.begin(),
                                               state.disconnected_ids.end());
 
@@ -449,9 +450,11 @@ std::vector<ConnItem> compose_active_path_control_connections(
   std::unordered_set<std::string> live_matched_rule_raws;
 
   std::vector<ConnItem> out;
-  out.reserve(raw_active.size() + state.records.size() + managed_rules.size());
+  out.reserve(raw_active.size() + state.records.size() + managed_rules.size() +
+              raw_closed.size());
   for (const auto& raw : raw_active) {
     ConnItem item = raw;
+    item.is_closed = false;
     auto target = extract_connection_target(item);
     if (target.has_value()) {
       item.target_type = target->type;
@@ -492,6 +495,35 @@ std::vector<ConnItem> compose_active_path_control_connections(
     out.push_back(make_synthetic_managed_rule_row(rule));
   }
 
+  // src: path-control.ts:564-593 并入按目标去重的近期已关闭连接（逆序最新在前）
+  for (size_t i = raw_closed.size(); i-- > 0;) {
+    const auto& raw = raw_closed[i];
+    auto target = extract_connection_target(raw);
+    if (!target.has_value() || covered_keys.count(target->key)) {
+      continue;
+    }
+    auto matched_rule = find_matching_managed_rule(raw, managed_rules);
+    if (matched_rule.has_value() && covered_rule_raws.count(matched_rule->raw)) {
+      continue;
+    }
+    covered_keys.insert(target->key);
+    if (matched_rule.has_value()) {
+      covered_rule_raws.insert(matched_rule->raw);
+    }
+    ConnItem item = raw;
+    item.cur_upload = 0.0;
+    item.cur_download = 0.0;
+    item.is_closed = true;
+    item.target_type = target->type;
+    item.target_value = target->value;
+    item.target_key = target->key;
+    item.managed_rule = matched_rule;
+    bool is_disc = disc_id_set.count(item.id) > 0;
+    item.control_status =
+        resolve_connection_control_status(item, item.managed_rule, is_disc);
+    out.push_back(std::move(item));
+  }
+
   prioritize_path_control_connections(out);
   return out;
 }
@@ -507,6 +539,9 @@ std::vector<ConnItem> enrich_closed_path_control_connections(
   out.reserve(raw_closed.size());
   for (const auto& raw : raw_closed) {
     ConnItem item = raw;
+    item.cur_upload = 0.0;
+    item.cur_download = 0.0;
+    item.is_closed = true;
     if (auto target = extract_connection_target(item)) {
       item.target_type = target->type;
       item.target_value = target->value;
@@ -542,9 +577,13 @@ void prioritize_path_control_connections(std::vector<ConnItem>& items) {
   std::vector<ConnItem> syn_reject;
   std::vector<ConnItem> live_rows;
   std::vector<ConnItem> syn_idle;
+  std::vector<ConnItem> closed_rows;
 
+  // src: path-control.ts:650-685 五桶重排：disconnected -> reject -> live -> idle -> closed
   for (auto& row : items) {
-    if (!row.is_synthetic) {
+    if (!row.is_synthetic && row.is_closed) {
+      closed_rows.push_back(std::move(row));
+    } else if (!row.is_synthetic) {
       live_rows.push_back(std::move(row));
     } else if (row.control_status == PathControlStatus::Disconnected) {
       syn_disc.push_back(std::move(row));
@@ -556,11 +595,13 @@ void prioritize_path_control_connections(std::vector<ConnItem>& items) {
   }
 
   items.clear();
-  items.reserve(syn_disc.size() + syn_reject.size() + live_rows.size() + syn_idle.size());
+  items.reserve(syn_disc.size() + syn_reject.size() + live_rows.size() +
+                syn_idle.size() + closed_rows.size());
   for (auto& r : syn_disc) items.push_back(std::move(r));
   for (auto& r : syn_reject) items.push_back(std::move(r));
   for (auto& r : live_rows) items.push_back(std::move(r));
   for (auto& r : syn_idle) items.push_back(std::move(r));
+  for (auto& r : closed_rows) items.push_back(std::move(r));
 }
 
 void PathControlStore::load_default() {

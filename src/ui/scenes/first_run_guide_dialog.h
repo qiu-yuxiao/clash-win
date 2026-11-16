@@ -75,6 +75,7 @@ class FirstRunGuideDialog : public Widget {
   bool ready_timed_out() const { return gave_up_; }  // src: :230 setGaveUp(true)
   bool takeover_active() const { return takeover_active_; }
   void set_takeover_active(bool active) { takeover_active_ = active; }
+  bool is_reopened_after_completion() const { return opened_after_completion_; }
   bool retesting() const { return retesting_; }
 
   // 就绪计时/轮询驱动（窗口 WM_TIMER 每 250ms 调；src: :228-245）
@@ -152,6 +153,7 @@ class FirstRunGuideDialog : public Widget {
 
  private:
   bool open_ = false;
+  bool opened_after_completion_ = false;
   OverlayFade fade_;  // ← MUI Dialog 缺省 Fade（enter 225 / leave 195）
   FirstRunStep step_ = FirstRunStep::Input;
   std::string url_;

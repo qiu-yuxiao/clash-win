@@ -48,7 +48,7 @@ class MenuList : public Widget {
   // 绘制参数
   Color4f bg_ = Color4f::hex(0xFFFFFF);  // src: MUI background.paper #fff
   Color4f border_ = Color4f::hex(0x000000, 0.12f);  // src: MUI palette.divider
-  Color4f hover_bg_ = Color4f::hex(0x000000, 0.06f);  // src: MUI action.hover rgba(0,0,0,0.06)
+  Color4f hover_bg_ = Color4f::hex(0x000000, 0.06f);  // src: MUI action hover rgba(0,0,0,0.06)
   Color4f text_ = Color4f::hex(0x000000, 0.87f);  // src: MUI text.primary
   Color4f disabled_text_ = Color4f::hex(0x000000, 0.38f);  // src: MUI text.disabled
   Color4f shortcut_text_ = Color4f::hex(0x000000, 0.45f);  // src: MUI text.secondary

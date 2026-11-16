@@ -35,8 +35,7 @@
         "tunUnavailable": "虛擬網路介面卡模式需要安裝服務模式或以系統管理員身分執行"
       },
       "actions": {
-        "installService": "安裝服務",
-        "uninstallService": "解除安裝服務"
+        "installService": "安裝服務"
       },
       "fields": {
         "systemProxy": "系統代理",
@@ -188,8 +187,6 @@
           "backupSetting": "備份設定",
           "runtimeConfig": "執行期設定",
           "openConfDir": "配置目錄",
-          "openCoreDir": "內核目錄",
-          "openLogsDir": "日誌目錄",
           "checkUpdates": "檢查更新",
           "openDevTools": "開發人員工具",
           "liteModeSettings": "輕量模式設定",
@@ -281,8 +278,7 @@
     },
     "clashCore": {
       "variants": {
-        "release": "正式版",
-        "alpha": "預覽版"
+        "release": "正式版"
       }
     },
     "liteMode": {
@@ -546,6 +542,14 @@
     "takeoverTooltipTun": "開啟虛擬網卡接管全機流量",
     "debugLogs": "系統調試運行日誌",
     "pathControl": "路徑控制（右鍵點擊鏈接）",
+    "saveCustomRoutes": "儲存路由",
+    "importCustomRoutes": "匯入路由",
+    "saveCustomRoutesTooltip": "將所有自訂路徑控制路由規則儲存至指定檔案（重裝後可匯入還原）",
+    "importCustomRoutesTooltip": "從已儲存的檔案匯入自訂路徑控制路由規則",
+    "routesExportSuccess": "已儲存 {{count}} 條自訂路由規則",
+    "routesExportEmpty": "目前沒有可儲存的自訂路由規則",
+    "routesImportSuccess": "已匯入 {{count}} 條自訂路由規則",
+    "routesImportEmpty": "所選檔案中沒有有效的自訂路由規則",
     "statusTesting": "測試中",
     "statusUntested": "未測試",
     "statusError": "錯誤",
@@ -555,10 +559,7 @@
     "statusDelayGood": "延遲良好",
     "statusDelayExcellent": "延遲極佳",
     "activeNodeLabel": "活躍節點：",
-    "connectionsActive": "活躍",
-    "connectionsHistory": "歷史",
     "connectionsDisconnectAll": "斷開全部",
-    "connectionsClearHistory": "清空歷史",
     "total": "總量",
     "proxyMethod": "代理方式",
     "globalProxy": "全域代理",
@@ -575,7 +576,6 @@
     "testingInProgress": "正在測速中，請稍候再試",
     "testNotExecuted": "測速未執行：核心未就緒或暫無可測節點",
     "testFailed": "測速失敗：{{message}}",
-    "updated": "已更新",
     "portSaved": "代理連接埠已儲存並重新載入",
     "testSingleNodeTooltip": "點擊單獨測速此節點（不切換連線）",
     "networkOffline": "網路斷開",
@@ -588,6 +588,11 @@
     "tunSnifferAuto": "自動",
     "tunSnifferOn": "開啟",
     "tunSnifferOff": "關閉",
-    "tunSnifferNeedTunTooltip": "僅在 TUN 模式下生效（目前未開啟 TUN，切換後生效）"
+    "tunSnifferNeedTunTooltip": "僅在 TUN 模式下生效（目前未開啟 TUN，切換後生效）",
+    "settingEnabled": "已開啟",
+    "settingDisabled": "已關閉",
+    "tunSnifferUpdated": "TUN 網域嗅探設定已更新",
+    "autoLaunchVerifyFailed": "開機自啟狀態校驗未生效，可能被安全軟體攔截",
+    "invalidPort": "請輸入有效的連接埠號（1–65535）"
   }
 }

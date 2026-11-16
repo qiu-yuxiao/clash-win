@@ -35,8 +35,7 @@
         "tunUnavailable": "TUN به حالت سرویس یا حالت ادمین نیاز دارد"
       },
       "actions": {
-        "installService": "نصب سرویس",
-        "uninstallService": "حذف سرویس"
+        "installService": "نصب سرویس"
       },
       "fields": {
         "systemProxy": "پراکسی سیستم",
@@ -188,8 +187,6 @@
           "backupSetting": "تنظیمات پشتیبان گیری",
           "runtimeConfig": "پیکربندی زمان اجرا",
           "openConfDir": "باز کردن پوشه برنامه",
-          "openCoreDir": "باز کردن پوشه هسته",
-          "openLogsDir": "باز کردن پوشه لاگ‌ها",
           "checkUpdates": "بررسی برای به‌روزرسانی‌ها",
           "openDevTools": "باز کردن ابزارهای توسعه‌دهنده",
           "liteModeSettings": "LightWeight Mode Settings",
@@ -281,8 +278,7 @@
     },
     "clashCore": {
       "variants": {
-        "release": "نسخه نهایی",
-        "alpha": "نسخه آلفا"
+        "release": "نسخه نهایی"
       }
     },
     "liteMode": {
@@ -546,6 +542,14 @@
     "takeoverTooltipTun": "حالت آداپتور مجازی TUN",
     "debugLogs": "لاگ‌های عیب‌یابی سیستم",
     "pathControl": "کنترل مسیر (کلیک راست)",
+    "saveCustomRoutes": "ذخیره مسیرها",
+    "importCustomRoutes": "وارد کردن مسیرها",
+    "saveCustomRoutesTooltip": "ذخیره همه قوانین مسیریابی سفارشی در یک فایل (قابل بازیابی پس از نصب مجدد)",
+    "importCustomRoutesTooltip": "وارد کردن قوانین مسیریابی سفارشی از فایل ذخیره‌شده",
+    "routesExportSuccess": "{{count}} قانون مسیریابی سفارشی ذخیره شد",
+    "routesExportEmpty": "قانون مسیریابی سفارشی برای ذخیره وجود ندارد",
+    "routesImportSuccess": "{{count}} قانون مسیریابی سفارشی وارد شد",
+    "routesImportEmpty": "قانون مسیریابی سفارشی معتبری در فایل انتخاب‌شده یافت نشد",
     "statusTesting": "در حال تست",
     "statusUntested": "تست نشده",
     "statusError": "خطا",
@@ -555,10 +559,7 @@
     "statusDelayGood": "تاخیر خوب",
     "statusDelayExcellent": "تاخیر عالی",
     "activeNodeLabel": "گره فعال: ",
-    "connectionsActive": "فعال",
-    "connectionsHistory": "تاریخچه",
     "connectionsDisconnectAll": "قطع همه اتصالات",
-    "connectionsClearHistory": "پاک کردن تاریخچه",
     "total": "مجموع",
     "proxyMethod": "حالت پروکسی",
     "globalProxy": "پروکسی همگانی",
@@ -575,7 +576,6 @@
     "testingInProgress": "آزمایش سرعت در جریان است، بعداً دوباره تلاش کنید",
     "testNotExecuted": "آزمایش اجرا نشد: هسته آماده نیست یا گره قابل آزمایشی وجود ندارد",
     "testFailed": "آزمایش سرعت ناموفق بود: {{message}}",
-    "updated": "به‌روزرسانی شد",
     "portSaved": "درگاه پروکسی ذخیره و بارگذاری مجدد شد",
     "testSingleNodeTooltip": "برای تست فقط همین گره کلیک کنید (بدون تغییر اتصال)",
     "networkOffline": "آفلاین",
@@ -588,6 +588,11 @@
     "tunSnifferAuto": "خودکار",
     "tunSnifferOn": "روشن",
     "tunSnifferOff": "خاموش",
-    "tunSnifferNeedTunTooltip": "فقط در حالت TUN فعال است (حالت TUN را روشن کنید)"
+    "tunSnifferNeedTunTooltip": "فقط در حالت TUN فعال است (حالت TUN را روشن کنید)",
+    "settingEnabled": "فعال شد",
+    "settingDisabled": "غیرفعال شد",
+    "tunSnifferUpdated": "تنظیم اسنیفر دامنه TUN به‌روزرسانی شد",
+    "autoLaunchVerifyFailed": "تأیید وضعیت اجرای خودکار ناموفق بود؛ ممکن است مسدود شده باشد",
+    "invalidPort": "لطفاً یک شماره درگاه معتبر وارد کنید (۱ تا ۶۵۵۳۵)"
   }
 }

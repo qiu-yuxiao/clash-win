@@ -6,6 +6,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -27,6 +28,9 @@ bool is_valid_node_server(const std::string& server);
 
 // ← node.rs::match_node_filter：多关键词过滤（AND/OR `|`/`｜`/排除 `-`/`!`/`！`，大小写不敏感）。
 bool match_node_filter(const std::string& name, const std::string& filter_text);
+
+// ← utils/node.ts:587-604 isSupportedSubscriptionOrNodeInput：判断是否为单条 HTTP(S) 订阅 URL 或单/多行受支持节点 URI。
+bool is_supported_subscription_or_node_input(std::string_view raw);
 
 // ---- 指纹 & 订阅拓扑连坐去重 ----
 struct RawProxyEntry {

@@ -223,7 +223,7 @@ target_include_directories(clashwin_ui PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 target_link_libraries(clashwin_ui PUBLIC clashwin_util clashwin_cmd clashwin_i18n clashwin_system
-  d2d1 dwrite windowscodecs user32 uiautomationcore oleaut32 ole32)
+  d2d1 dwrite windowscodecs user32 comdlg32 uiautomationcore oleaut32 ole32)
 target_compile_options(clashwin_ui PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 
 # app 应用聚合与生命周期/单实例/深链（T19）
@@ -360,6 +360,7 @@ add_executable(clashwin_test
   tests/test_bug317_362_backend.cpp
   tests/test_bug317_362_ui.cpp
   tests/test_v350_backend_parity.cpp
+  tests/test_v350_ui_parity.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_app clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32 bcrypt)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)

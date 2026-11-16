@@ -35,8 +35,7 @@
         "tunUnavailable": "TUNモードはサービスモードまたは管理者モードが必要です"
       },
       "actions": {
-        "installService": "サービスをインストール",
-        "uninstallService": "サービスのアンインストール"
+        "installService": "サービスをインストール"
       },
       "fields": {
         "systemProxy": "システムプロキシ",
@@ -188,8 +187,6 @@
           "backupSetting": "バックアップ設定",
           "runtimeConfig": "現在の設定",
           "openConfDir": "設定ディレクトリを開く",
-          "openCoreDir": "コアディレクトリを開く",
-          "openLogsDir": "ログディレクトリを開く",
           "checkUpdates": "更新を確認",
           "openDevTools": "開発者ツールを開く",
           "liteModeSettings": "軽量モード設定",
@@ -281,8 +278,7 @@
     },
     "clashCore": {
       "variants": {
-        "release": "正式版",
-        "alpha": "アルファ版"
+        "release": "正式版"
       }
     },
     "liteMode": {
@@ -546,6 +542,14 @@
     "takeoverTooltipTun": "仮想ネットワークアダプターで全トラフィックをキャプチャします",
     "debugLogs": "システムログ",
     "pathControl": "パス制御（右クリックで接続）",
+    "saveCustomRoutes": "ルート保存",
+    "importCustomRoutes": "ルート読込",
+    "saveCustomRoutesTooltip": "すべてのカスタムパス制御ルーティングルールを指定ファイルに保存（再インストール後に復元可能）",
+    "importCustomRoutesTooltip": "保存されたファイルからカスタムパス制御ルーティングルールをインポート",
+    "routesExportSuccess": "{{count}} 件のカスタムルーティングルールを保存しました",
+    "routesExportEmpty": "保存できるカスタムルーティングルールがありません",
+    "routesImportSuccess": "{{count}} 件のカスタムルーティングルールをインポートしました",
+    "routesImportEmpty": "選択したファイルに有効なカスタムルーティングルールが見つかりません",
     "statusTesting": "テスト中",
     "statusUntested": "未テスト",
     "statusError": "エラー",
@@ -555,10 +559,7 @@
     "statusDelayGood": "遅延良好",
     "statusDelayExcellent": "遅延極小",
     "activeNodeLabel": "アクティブノード：",
-    "connectionsActive": "アクティブ",
-    "connectionsHistory": "履歴",
     "connectionsDisconnectAll": "すべて切断",
-    "connectionsClearHistory": "履歴をクリア",
     "total": "合計",
     "proxyMethod": "プロキシ方式",
     "globalProxy": "全局プロキシ",
@@ -575,7 +576,6 @@
     "testingInProgress": "スピードテスト中です。しばらくしてから再試行してください",
     "testNotExecuted": "テスト未実行：コアが準備できていないか、テスト可能なノードがありません",
     "testFailed": "スピードテストに失敗しました：{{message}}",
-    "updated": "更新しました",
     "portSaved": "プロキシポートを保存し再読み込みしました",
     "testSingleNodeTooltip": "クリックしてこのノードのみ速度テスト（接続は切り替えません）",
     "networkOffline": "オフライン",
@@ -588,6 +588,11 @@
     "tunSnifferAuto": "自動",
     "tunSnifferOn": "オン",
     "tunSnifferOff": "オフ",
-    "tunSnifferNeedTunTooltip": "TUN モード時のみ有効（TUN モードに切り替えてください）"
+    "tunSnifferNeedTunTooltip": "TUN モード時のみ有効（TUN モードに切り替えてください）",
+    "settingEnabled": "有効にしました",
+    "settingDisabled": "無効にしました",
+    "tunSnifferUpdated": "TUN ドメインスニファー設定を更新しました",
+    "autoLaunchVerifyFailed": "自動起動の状態確認に失敗しました。セキュリティソフトにブロックされた可能性があります",
+    "invalidPort": "有効なポート番号（1〜65535）を入力してください"
   }
 }

@@ -264,15 +264,17 @@ void NodeRowWidget::on_paint(IRenderTarget& rt) {
       ds.align_h = AlignH::Center;
       ds.align_v = AlignV::Center;
       const std::wstring dtxt = format_delay(delay_);
+      // src: src/components/proxy/proxy-item.tsx:256
       rt.draw_text(dtxt,
-                   {delay_r.x + 3, delay_r.y, delay_r.w - 6, r.h - kNodeBorderW}, ds);  // src: src/components/proxy/proxy-item.tsx:256
+                   {delay_r.x + 3, delay_r.y, delay_r.w - 6, r.h - kNodeBorderW}, ds);
       if (hover_ && in_delay_zone(hover_x_)) {
         float tw = 12.0f;  // src: src/components/proxy/proxy-item.tsx:244
         if (ITextEngine* eng = text_engine()) {
           tw = std::min(delay_r.w - 6.0f, eng->measure_text(dtxt, ds, 0).w);  // src: src/components/proxy/proxy-item.tsx:244
         }
         const float ux = delay_r.x + (delay_r.w - tw) * 0.5f;
-        const float uy = delay_r.y + (r.h - kNodeBorderW) * 0.5f + 6.5f;  // src: src/components/proxy/proxy-item.tsx:244
+        // src: src/components/proxy/proxy-item.tsx:244
+        const float uy = delay_r.y + (r.h - kNodeBorderW) * 0.5f + 6.5f;
         rt.fill_rect({ux, uy, std::max(0.0f, tw), 1.0f}, Brush{ds.color});  // src: src/components/proxy/proxy-item.tsx:244
       }
     }
@@ -458,7 +460,7 @@ void NodeGridRowWidget::on_paint(IRenderTarget& rt) {
 }
 
 // ---------- ScrollTopButton ----------
-// ← src/components/layout/scroll-top-button.tsx:10-40 + proxy-groups.tsx:171-176,212-220
+// ← src/components/layout/scroll-top-button.tsx:10-36 + proxy-groups.tsx:171-176,212-220
 ScrollTopButton::ScrollTopButton(Widget* parent) : Widget(parent) {
   auto ic = std::make_unique<IconW>();
   icon_ = ic.get();

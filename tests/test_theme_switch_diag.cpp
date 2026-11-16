@@ -92,14 +92,14 @@ UT_TEST(t12_diag_switch_track_visible_per_skin) {
 //      modern-flat   #374151                              (:266)
 //      frosted-glass rgba(255,255,255,.08)                 (:355)
 //      cyberpunk     #05070c                              (:437)
-//      monochrome    #374151                              (:538)
+//      monochrome    #0a0a0a                              (:488 BUG-384)
 //    亮色权威值：
 //      retro-3d      rgba(212,175,55,.25) * opacity .85
 //      original      #e2e8f0
 //      modern-flat   #e5e7eb
 //      frosted-glass rgba(0,0,0,.06)
 //      cyberpunk     #f1f5f9
-//      monochrome    #e5e7eb
+//      monochrome    #f4f4f5                              (:488 BUG-384)
 //
 //    注：D2D 回读为**预乘 alpha**，故半透明色的 RGB 已被 alpha 缩放。
 UT_TEST(t12_diag_switch_track_color_differs_per_skin) {
@@ -116,7 +116,7 @@ UT_TEST(t12_diag_switch_track_color_differs_per_skin) {
       {55, 65, 81, 255}, // modern-flat #374151
       {20, 20, 20, 20},  // frosted   255 @ .08 → 预乘 20,20,20
       {5, 7, 12, 255},   // cyberpunk #05070c
-      {55, 65, 81, 255}, // monochrome #374151（与 modern-flat 同色，Mini 事实）
+      {10, 10, 10, 255}, // monochrome #0a0a0a（BUG-384）
   };
   const Exp kLight[6] = {
       {45, 37, 12, 54},  // retro-3d  212/175/55 @ .25*.85=.2125 → a=54
@@ -124,7 +124,7 @@ UT_TEST(t12_diag_switch_track_color_differs_per_skin) {
       {229, 231, 235, 255}, // modern-flat #e5e7eb
       {0, 0, 0, 15},     // frosted   black @ .06 → 预乘 0,0,0
       {241, 245, 249, 255}, // cyberpunk #f1f5f9
-      {229, 231, 235, 255}, // monochrome #e5e7eb（与 modern-flat 同色）
+      {244, 244, 245, 255}, // monochrome #f4f4f5（BUG-384）
   };
 
   for (int pass = 0; pass < 2; ++pass) {

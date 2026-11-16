@@ -1071,31 +1071,30 @@ SwitchPaint ThemeService::switch_paint() const {
       p.thumb_hover_glow_blur = 10.0f;
       break;
     case SkinId::Monochrome:
-      // :454-545：28×14、track r14、off #e5e7eb/#374151 无边、
-      //   thumb 12 + margin 1 r6 #000/#fff + 0 1 2 .15；
-      //   on track #000/#fff、on thumb #fff/#000
+      // :478-496（BUG-384）：buildSquareSwitchStyle 28×14、track r0、
+      //   off bg #f4f4f5/#0a0a0a + 1px #737373、thumb 12×12 margin 1 r0 #737373；
+      //   on bg #d4d4d4/#262626 + 1px #000/#fff、on thumb #000/#fff；
+      //   &:hover .MuiSwitch-track borderColor #000/#fff（无 thumb hover 缩放）
       p.track_w = 28.0f;
       p.track_h = 14.0f;
-      p.track_radius = 14.0f;
-      p.off_bg = light ? Color4f::hex(0xE5E7EB) : Color4f::hex(0x374151);
-      p.off_bw = 0.0f;
-      p.on_bg = light ? Color4f::hex(0x000000) : Color4f::hex(0xFFFFFF);
-      p.on_bw = 0.0f;
+      p.track_radius = 0.0f;
+      p.off_bg = light ? Color4f::hex(0xF4F4F5) : Color4f::hex(0x0A0A0A);
+      p.off_border = Color4f::hex(0x737373);
+      p.off_bw = 1.0f;
+      p.on_bg = light ? Color4f::hex(0xD4D4D4) : Color4f::hex(0x262626);
+      p.on_border = light ? Color4f::hex(0x000000) : Color4f::hex(0xFFFFFF);
+      p.on_bw = 1.0f;
       p.thumb_d = 12.0f;
       p.thumb_margin = 1.0f;
-      p.thumb_radius = 6.0f;
-      p.off_thumb = light ? Color4f::hex(0x000000) : Color4f::hex(0xFFFFFF);
+      p.thumb_radius = 0.0f;
+      p.off_thumb = Color4f::hex(0x737373);
       p.off_thumb_bw = 0.0f;
-      p.on_thumb = light ? Color4f::hex(0xFFFFFF) : Color4f::hex(0x000000);
+      p.on_thumb = light ? Color4f::hex(0x000000) : Color4f::hex(0xFFFFFF);
       p.on_thumb_bw = 0.0f;
-      p.thumb_shadow = true;
-      p.thumb_shadow_color = Color4f::hex(0x000000, 0.15f);
-      p.thumb_shadow_dy = 1.0f;
-      p.thumb_shadow_blur = 2.0f;
-      // ★ 旋钮悬停态（← base-switch.tsx:543-545 `&:hover .MuiSwitch-thumb`）
-      //   transform: scale(1.05) —— 仅缩放，不改阴影。
-      p.thumb_hover = true;
-      p.thumb_hover_scale = 1.05f;
+      p.thumb_shadow = false;
+      p.thumb_hover = false;
+      p.track_hover = true;
+      p.track_hover_border = light ? Color4f::hex(0x000000) : Color4f::hex(0xFFFFFF);
       break;
   }
   return p;
@@ -1260,7 +1259,7 @@ SliderPaint ThemeService::slider_paint() const {
         p.thumb_shadow_dy = 1.0f;
         p.thumb_shadow_blur = 3.0f;
       }
-      // ★ thumb 悬停态（← style-helpers.tsx:395-404 `&:hover, &.Mui-focusVisible`）
+      // ★ thumb 悬停态（← style-helpers.tsx:306-313 `&:hover, &.Mui-focusVisible`）
       //   transform scale(1.15)
       //   bgcolor rgba(255,255,255,1.0)      （常态 rgba(255,255,255,.9|.8)）
       //   boxShadow 亮态 '0 2px 5px rgba(0,0,0,0.18)'
@@ -1282,7 +1281,7 @@ SliderPaint ThemeService::slider_paint() const {
       break;
 
     case SkinId::Cyberpunk:
-      // :452-480：rail h2 白/#05070c + 1px #ff0055、track h2 #4caf50/#39ff14、
+      // :317-344：rail h2 白/#05070c + 1px #ff0055、track h2 #4caf50/#39ff14、
       //   thumb 8×12 方角同色 + 0 0 5px 同色 glow
       p.thickness = 2.0f;
       p.thumb_w = 8.0f;
@@ -1298,7 +1297,7 @@ SliderPaint ThemeService::slider_paint() const {
       p.thumb_glow = true;
       p.thumb_glow_color = with_alpha(p.track, 0.75f);
       p.thumb_glow_blur = 5.0f * d;  // src: theme-settings-card.tsx:303
-      // ★ thumb 悬停态（← style-helpers.tsx:427-430 `&:hover, &.Mui-focusVisible`）
+      // ★ thumb 悬停态（← style-helpers.tsx:338-341 `&:hover, &.Mui-focusVisible`）
       //   transform scale(1.15) + boxShadow '0 0 8px <主色>'（常态 0 0 5px）
       p.thumb_hover = true;
       p.thumb_hover_scale = 1.15f;
@@ -1507,6 +1506,53 @@ CardPaint ThemeService::card_paint(const char* card_type) const {
       p.text_color = light ? Color4f::hex(0x000000) : Color4f::hex(0xFFFFFF);
       p.has_shadow = false;
       break;
+  }
+  return p;
+}
+
+PopupSkinTokens ThemeService::popup_tokens() const {
+  const bool light = is_light();
+  const bool retro = (skin_ == SkinId::Retro3d);
+  PopupSkinTokens t{};
+  t.is_retro3d = retro;
+  // src: src/utils/popup-styles.ts:59-69
+  t.primary_text = retro ? (light ? Color4f::hex(0x3C2F0F) : Color4f::hex(0x2C1F03))
+                         : palette_.primary_text;
+  t.secondary_text = retro ? Color4f::hex(0x2C1F03, 0.78f) : palette_.secondary_text;
+  t.disabled_text = retro ? Color4f::hex(0x2C1F03, 0.50f)
+                          : (light ? Color4f::hex(0x000000, 0.38f)
+                                   : Color4f::hex(0xFFFFFF, 0.50f));
+  t.divider_color = retro ? Color4f::hex(0x2C1F03, 0.20f) : vars_.divider_color;
+  // src: src/utils/popup-styles.ts:70-82
+  t.ready_color = retro ? Color4f::hex(0x1B5E20) : palette_.success_color;
+  t.warning_color = retro ? Color4f::hex(0x8C4A03) : palette_.warning_color;
+  t.error_color = retro ? Color4f::hex(0x991B1B) : palette_.error_color;
+  t.info_color = retro ? Color4f::hex(0x01579B) : palette_.info_color;
+  t.accent_primary = retro ? Color4f::hex(0x0D47A1) : palette_.primary_color;
+  // src: src/utils/popup-styles.ts:75-82
+  t.subtle_bg = retro ? Color4f::hex(0xFFFFFF, 0.22f)
+                      : (light ? Color4f::hex(0x000000, 0.04f)
+                               : Color4f::hex(0xFFFFFF, 0.06f));
+  t.subtle_border = retro ? Color4f::hex(0x7A3E00, 0.32f) : vars_.divider_color;
+  return t;
+}
+
+CardPaint ThemeService::popup_card_paint() const {
+  CardPaint p = card_paint("default");
+  if (skin_ == SkinId::FrostedGlass) {
+    const bool light = is_light();
+    // src: src/utils/popup-styles.ts:95-109
+    p.grad_bg = false;
+    p.bg = light ? Color4f::hex(0xF8FAFC, 0.97f) : Color4f::hex(0x1A1C26, 0.97f);
+    p.border_w = 1.0f;
+    p.border = light ? Color4f::hex(0x0F172A, 0.12f)
+                     : Color4f::hex(0xFFFFFF, 0.14f);
+    // src: src/utils/popup-styles.ts:106-108
+    p.has_shadow = true;
+    p.shadow_color = light ? Color4f::hex(0x0F172A, 0.16f)
+                           : Color4f::hex(0x000000, 0.45f);
+    p.shadow_dy = 8.0f;
+    p.shadow_blur = 28.0f;
   }
   return p;
 }

@@ -35,8 +35,7 @@
         "tunUnavailable": "El modo TUN requiere el modo de servicio o el modo de administrador"
       },
       "actions": {
-        "installService": "Instalar servicio",
-        "uninstallService": "Desinstalar servicio"
+        "installService": "Instalar servicio"
       },
       "fields": {
         "systemProxy": "Proxy del sistema",
@@ -188,8 +187,6 @@
           "backupSetting": "Configuración de copia de seguridad",
           "runtimeConfig": "Configuración actual",
           "openConfDir": "Directorio de configuración",
-          "openCoreDir": "Directorio del núcleo",
-          "openLogsDir": "Directorio de registros",
           "checkUpdates": "Comprobar actualizaciones",
           "openDevTools": "Abrir herramientas de desarrollo",
           "liteModeSettings": "Configuración del modo ligero",
@@ -281,8 +278,7 @@
     },
     "clashCore": {
       "variants": {
-        "release": "Versión estable",
-        "alpha": "Versión alfa"
+        "release": "Versión estable"
       }
     },
     "liteMode": {
@@ -546,6 +542,14 @@
     "takeoverTooltipTun": "Modo Adaptador Virtual TUN",
     "debugLogs": "Registros de Depuración del Sistema",
     "pathControl": "Control de Ruta (clic derecho)",
+    "saveCustomRoutes": "Guardar rutas",
+    "importCustomRoutes": "Importar rutas",
+    "saveCustomRoutesTooltip": "Guardar todas las reglas de enrutamiento personalizadas en un archivo (importable tras reinstalar)",
+    "importCustomRoutesTooltip": "Importar reglas de enrutamiento personalizadas desde un archivo guardado",
+    "routesExportSuccess": "Se guardaron {{count}} regla(s) de enrutamiento personalizada(s)",
+    "routesExportEmpty": "No hay reglas de enrutamiento personalizadas para guardar",
+    "routesImportSuccess": "Se importaron {{count}} regla(s) de enrutamiento personalizada(s)",
+    "routesImportEmpty": "No se encontraron reglas de enrutamiento personalizadas válidas en el archivo seleccionado",
     "statusTesting": "Probando",
     "statusUntested": "Sin probar",
     "statusError": "Error",
@@ -555,10 +559,7 @@
     "statusDelayGood": "Latencia Buena",
     "statusDelayExcellent": "Latencia Excelente",
     "activeNodeLabel": "Nodo activo: ",
-    "connectionsActive": "Activo",
-    "connectionsHistory": "Historial",
     "connectionsDisconnectAll": "Desconectar todo",
-    "connectionsClearHistory": "Limpiar historial",
     "total": "Total",
     "proxyMethod": "Modo de proxy",
     "globalProxy": "Proxy global",
@@ -575,7 +576,6 @@
     "testingInProgress": "Prueba de velocidad en curso, inténtelo más tarde",
     "testNotExecuted": "Prueba no ejecutada: el núcleo no está listo o no hay nodos disponibles",
     "testFailed": "Error en la prueba de velocidad: {{message}}",
-    "updated": "Actualizado",
     "portSaved": "Puerto proxy guardado y recargado",
     "testSingleNodeTooltip": "Clic para probar solo este nodo (sin cambiar conexión)",
     "networkOffline": "Sin red",
@@ -588,6 +588,11 @@
     "tunSnifferAuto": "Auto",
     "tunSnifferOn": "Sí",
     "tunSnifferOff": "No",
-    "tunSnifferNeedTunTooltip": "Solo efectivo en modo TUN (active el modo TUN)"
+    "tunSnifferNeedTunTooltip": "Solo efectivo en modo TUN (active el modo TUN)",
+    "settingEnabled": "Activado",
+    "settingDisabled": "Desactivado",
+    "tunSnifferUpdated": "Sniffer de dominios TUN actualizado",
+    "autoLaunchVerifyFailed": "Error al verificar el inicio automático; puede estar bloqueado por seguridad",
+    "invalidPort": "Introduzca un número de puerto válido (1-65535)"
   }
 }

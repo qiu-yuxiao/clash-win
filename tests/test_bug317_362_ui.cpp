@@ -469,11 +469,18 @@ UT_TEST(bug355_global_shortcuts_ctrl_f_f4_f1_and_guards) {
                                     false, false) ==
            GlobalShortcutAction::None);
 
-  // 抽屉/弹窗打开、输入控件聚焦、IME 组词中、长按 repeat 均完全屏蔽业务热键
+  // 抽屉/弹窗打开、IME 组词中、长按 repeat 均完全屏蔽业务热键；
+  // BUG-389：F1/F4 在焦点位于搜索/编辑框时依然生效，Ctrl+F 在可编辑焦点下退回输入框语义
   UT_CHECK(classify_global_shortcut('F', true, false, false, false, false, true,
                                     false) == GlobalShortcutAction::None);
+  UT_CHECK(classify_global_shortcut('F', true, false, false, false, false, false,
+                                    true) == GlobalShortcutAction::None);
   UT_CHECK(classify_global_shortcut(VK_F4, false, false, false, false, false,
-                                    false, true) == GlobalShortcutAction::None);
+                                    false, true) ==
+           GlobalShortcutAction::TestVisibleSubset);
+  UT_CHECK(classify_global_shortcut(VK_F1, false, false, false, false, false,
+                                    false, true) ==
+           GlobalShortcutAction::TestFullGroup);
   UT_CHECK(classify_global_shortcut(VK_F1, false, false, false, true, false,
                                     false, false) ==
            GlobalShortcutAction::None);

@@ -92,11 +92,11 @@ UT_TEST(t21_first_run_guide_trigger_500ms_delay) {
   UT_CHECK(dialog.step() == FirstRunStep::Input);
 
   // 3. 布局后检查卡片尺寸
-  // src: first-run-guide-dialog.tsx:545-828 maxWidth 520；标题 68.5 + 内容 + 动作 96.4
-  // = 357（无剪贴板横幅分支）+ 32px 视口留白
+  // src: popup-styles.ts:120-185 锁定左侧 271px；胶囊在窄宽折行，高度 >= 357
   dialog.on_arrange({0, 0, 800, 600});
-  UT_CHECK(dialog.card_rect().w > 300.0f);
-  UT_CHECK_EQ(dialog.card_rect().h, 357.0f);
+  UT_CHECK_EQ(dialog.card_rect().x, 0.0f);
+  UT_CHECK_EQ(dialog.card_rect().w, 271.0f);
+  UT_CHECK(dialog.card_rect().h >= 357.0f);
 
   dialog.close();
   UT_CHECK(!dialog.is_open());
@@ -251,10 +251,11 @@ UT_TEST(t21_addurl_modal_layout_and_fields) {
   // 排版到 800x600 视图中
   dialog.on_arrange({0, 0, 800, 600});
 
-  // 对照源码 add-url-dialog.tsx:200-202：paper 最大宽 380（calc(100%-32px)），
-  // 高度 = 标题 44 + 内容 104 + 动作 60.5 = 208.5
-  UT_CHECK_EQ(dialog.card_rect().w, 380.0f);
-  UT_CHECK_EQ(dialog.card_rect().h, 208.5f);
+  // 对照源码 popup-styles.ts:120-245：窄窗锁定左侧 271px，全宽纵向堆叠动作区
+  // 高度 = 标题 42 + 内容 112 + 动作 94 = 248
+  UT_CHECK_EQ(dialog.card_rect().x, 0.0f);
+  UT_CHECK_EQ(dialog.card_rect().w, 271.0f);
+  UT_CHECK_EQ(dialog.card_rect().h, 248.0f);
 
   // 默认策略偏好为 PROXY
   UT_CHECK(dialog.target() == core::quick_routing::RuleTarget::Proxy);

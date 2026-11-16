@@ -81,10 +81,14 @@ UT_TEST(t31_switch_hover_scale_per_skin) {
   UT_CHECK(p.thumb_hover);
   UT_CHECK(almost_eq(p.thumb_hover_scale, 1.10f));
 
+  // BUG-384：monochrome 改为 28×14 方角开关 + &:hover .MuiSwitch-track 边框高亮（无 thumb scale）
   svc.init(SkinId::Monochrome, ThemeMode::Light);
   p = svc.switch_paint();
-  UT_CHECK(p.thumb_hover);
-  UT_CHECK(almost_eq(p.thumb_hover_scale, 1.05f));
+  UT_CHECK(!p.thumb_hover);
+  UT_CHECK(p.track_hover);
+  UT_CHECK(almost_eq(p.track_radius, 0.0f));
+  UT_CHECK(almost_eq(p.thumb_radius, 0.0f));
+  UT_CHECK(almost_eq(p.track_hover_border.r, 0.0f));
 
   // original / frosted-glass 无 hover 规则
   svc.init(SkinId::Original, ThemeMode::Light);

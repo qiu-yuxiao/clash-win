@@ -1,16 +1,22 @@
 #include "connections_panel.h"
 
 #include <windows.h>
+#include <commdlg.h>
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <ctime>
+#include <fstream>
+#include <sstream>
 #include <thread>
 
+#include "cmd/command_service.h"
 #include "cmd/cmd_support.h"
 #include "core/quick_routing.h"
 #include "events/event_bus.h"
 #include "events/event_names.h"
 #include "events/notice.h"
+#include "i18n/i18n.h"
 #include "mihomo/mihomo_client.h"
 #include "ui/icon_w.h"
 #include "ui/theme/theme.h"
@@ -226,34 +232,41 @@ ConnectionsPanel::ConnectionsPanel(Widget* parent) : Widget(parent) {
   };
   add_child(std::move(search));
 
-  // 2. 断开全部按钮（src: connections-panel.tsx:193 get3DButtonStyle contained primary）
+  // 2. 保存路由 & 导入路由按钮（src: connections-panel.tsx:154-195）
+  auto btn_save = std::make_unique<Button>();
+  btn_save->set_i18n_text("settings.mini.saveCustomRoutes");
+  btn_save->set_i18n_tooltip("settings.mini.saveCustomRoutesTooltip");
+  btn_save_routes_ = btn_save.get();
+  btn_save_routes_->themed_ = true;
+  btn_save_routes_->theme_color_type_ = "primary";
+  btn_save_routes_->text_style.size = 11.0f;  // src: connections-panel.tsx:163
+  btn_save_routes_->text_style.weight = 700;
+  btn_save_routes_->on_click = [this] { handle_save_custom_routes(); };
+  add_child(std::move(btn_save));
+
+  auto btn_imp = std::make_unique<Button>();
+  btn_imp->set_i18n_text("settings.mini.importCustomRoutes");
+  btn_imp->set_i18n_tooltip("settings.mini.importCustomRoutesTooltip");
+  btn_import_routes_ = btn_imp.get();
+  btn_import_routes_->themed_ = true;
+  btn_import_routes_->theme_color_type_ = "primary";
+  btn_import_routes_->text_style.size = 11.0f;  // src: connections-panel.tsx:183
+  btn_import_routes_->text_style.weight = 700;
+  btn_import_routes_->on_click = [this] { handle_import_custom_routes(); };
+  add_child(std::move(btn_imp));
+
+  // 3. 断开全部按钮（src: connections-panel.tsx:210-219 get3DButtonStyle contained primary）
   auto btn_disc = std::make_unique<Button>();
   btn_disc->set_i18n_text("settings.mini.connectionsDisconnectAll");
   btn_disconnect_all_ = btn_disc.get();
   btn_disconnect_all_->themed_ = true;
   btn_disconnect_all_->theme_color_type_ = "primary";
-  btn_disconnect_all_->text_style.size = 11.0f;  // src: connections-panel.tsx:189 fontSize '11px'
-  btn_disconnect_all_->text_style.weight = 700;  // src: connections-panel.tsx:190 fontWeight 700
+  btn_disconnect_all_->text_style.size = 11.0f;  // src: connections-panel.tsx:214
+  btn_disconnect_all_->text_style.weight = 700;
   btn_disconnect_all_->on_click = [this] {
     if (on_close_all) on_close_all();
   };
   add_child(std::move(btn_disc));
-
-  // 3. 清空历史按钮（src: connections-panel.tsx:210 get3DButtonStyle contained primary）
-  auto btn_clr = std::make_unique<Button>();
-  btn_clr->set_i18n_text("settings.mini.connectionsClearHistory");
-  btn_clear_history_ = btn_clr.get();
-  btn_clear_history_->themed_ = true;
-  btn_clear_history_->theme_color_type_ = "primary";
-  btn_clear_history_->text_style.size = 11.0f;  // src: connections-panel.tsx:206 fontSize '11px'
-  btn_clear_history_->text_style.weight = 700;  // src: connections-panel.tsx:207 fontWeight 700
-  btn_clear_history_->on_click = [this] {
-    path_store_.clear_all();
-    if (on_clear_history) on_clear_history();
-    refresh_visible();
-  };
-  btn_clear_history_->set_visible(false);
-  add_child(std::move(btn_clr));
 
   // 4. 虚拟滚动列表 (ScrollList: show_scrollbar = false, row_height = 20)
   auto list = std::make_unique<ScrollList>();
@@ -340,11 +353,153 @@ void ConnectionsPanel::bind(ConnectionData* data) {
 }
 
 void ConnectionsPanel::set_tab(Tab tab) {
-  if (tab_ == tab) return;
   tab_ = tab;
-  btn_clear_history_->set_visible(tab_ == Tab::Closed);
   refresh_visible();
   invalidate();
+}
+
+void ConnectionsPanel::set_routes_io_busy(bool busy) {
+  route_io_busy_ = busy;
+  if (btn_save_routes_) btn_save_routes_->set_disabled(busy);
+  if (btn_import_routes_) btn_import_routes_->set_disabled(busy);
+}
+
+std::string ConnectionsPanel::export_routes_to_string() const {
+  auto rules = core::quick_routing::read_managed_merge_rules();
+  if (rules.empty()) return "";
+  std::vector<std::string> raw_rules;
+  raw_rules.reserve(rules.size());
+  for (const auto& r : rules) raw_rules.push_back(r.raw);
+  return core::quick_routing::serialize_custom_routing_backup(raw_rules);
+}
+
+int ConnectionsPanel::import_routes_from_string(const std::string& content,
+                                                bool run_enhance) {
+  const int added = core::quick_routing::import_custom_routing_rules_from_content(content);
+  if (added <= 0) return 0;
+  if (run_enhance) {
+    cmd::CommandService::instance().invoke("enhance_profiles", nlohmann::json::object());
+  }
+  reload_managed_rules();
+  refresh_visible();
+  events::EventBus::refresh_clash();
+  return added;
+}
+
+void ConnectionsPanel::handle_save_custom_routes() {
+  if (route_io_busy_) return;
+  set_routes_io_busy(true);
+  auto finish = [this] { set_routes_io_busy(false); };
+
+  auto rules = core::quick_routing::read_managed_merge_rules();
+  if (rules.empty()) {
+    events::NoticeService::instance().push(
+        "info", i18n::I18n::instance().t("settings.mini.routesExportEmpty"), 2000);
+    finish();
+    return;
+  }
+
+  std::time_t now = std::time(nullptr);
+  std::tm tm_now{};
+  localtime_s(&tm_now, &now);
+  wchar_t default_name[128] = {};
+  wcsftime(default_name, 128, L"clash-win-routes-%Y-%m-%d.yaml", &tm_now);
+
+  wchar_t path_buf[MAX_PATH] = {};
+  wcscpy_s(path_buf, default_name);
+  OPENFILENAMEW ofn{};
+  ofn.lStructSize = sizeof(ofn);
+  ofn.hwndOwner = ::GetActiveWindow();
+  ofn.lpstrFilter = L"YAML (*.yaml;*.yml)\0*.yaml;*.yml\0All Files (*.*)\0*.*\0";
+  ofn.lpstrFile = path_buf;
+  ofn.nMaxFile = MAX_PATH;
+  ofn.lpstrDefExt = L"yaml";
+  ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+  if (!::GetSaveFileNameW(&ofn)) {
+    finish();
+    return;
+  }
+
+  std::vector<std::string> raw_rules;
+  raw_rules.reserve(rules.size());
+  for (const auto& r : rules) raw_rules.push_back(r.raw);
+  const std::string content =
+      core::quick_routing::serialize_custom_routing_backup(raw_rules);
+
+  std::ofstream ofs(path_buf, std::ios::binary | std::ios::trunc);
+  if (!ofs.is_open()) {
+    events::NoticeService::instance().push("error", "Failed to open export file");
+    finish();
+    return;
+  }
+  ofs.write(content.data(), static_cast<std::streamsize>(content.size()));
+  ofs.close();
+
+  events::NoticeService::instance().push(
+      "success",
+      i18n::I18n::instance().t("settings.mini.routesExportSuccess",
+                               {{"count", std::to_string(rules.size())}}),
+      2500);
+  finish();
+}
+
+void ConnectionsPanel::handle_import_custom_routes() {
+  if (route_io_busy_) return;
+  wchar_t path_buf[MAX_PATH] = {};
+  OPENFILENAMEW ofn{};
+  ofn.lStructSize = sizeof(ofn);
+  ofn.hwndOwner = ::GetActiveWindow();
+  ofn.lpstrFilter = L"YAML (*.yaml;*.yml)\0*.yaml;*.yml\0All Files (*.*)\0*.*\0";
+  ofn.lpstrFile = path_buf;
+  ofn.nMaxFile = MAX_PATH;
+  ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+  if (!::GetOpenFileNameW(&ofn)) {
+    return;
+  }
+
+  std::ifstream ifs(path_buf, std::ios::binary);
+  if (!ifs.is_open()) {
+    events::NoticeService::instance().push("error", "Failed to read backup file");
+    return;
+  }
+  std::ostringstream oss;
+  oss << ifs.rdbuf();
+  std::string content = oss.str();
+
+  if (core::quick_routing::parse_custom_routing_backup(content).empty()) {
+    events::NoticeService::instance().push(
+        "info", i18n::I18n::instance().t("settings.mini.routesImportEmpty"), 2000);
+    return;
+  }
+
+  set_routes_io_busy(true);
+  auto alive = alive_;
+  std::thread([this, alive, content = std::move(content)]() mutable {
+    const int added =
+        core::quick_routing::import_custom_routing_rules_from_content(content);
+    if (added > 0) {
+      (void)cmd::CommandService::instance().invoke(
+          "enhance_profiles", nlohmann::json::object());
+    }
+    UiPostbox::instance().post([this, alive, added] {
+      if (!alive->load(std::memory_order_acquire)) return;
+      set_routes_io_busy(false);
+      if (added <= 0) {
+        events::NoticeService::instance().push(
+            "info", i18n::I18n::instance().t("settings.mini.routesImportEmpty"),
+            2000);
+        return;
+      }
+      reload_managed_rules();
+      refresh_visible();
+      events::EventBus::refresh_clash();
+      events::NoticeService::instance().push(
+          "success",
+          i18n::I18n::instance().t("settings.mini.routesImportSuccess",
+                                   {{"count", std::to_string(added)}}),
+          2500);
+    });
+  }).detach();
 }
 
 void ConnectionsPanel::set_filter(const std::string& text) {
@@ -402,20 +557,13 @@ void ConnectionsPanel::refresh_visible() {
     return;
   }
 
-  // 1. 对账已断连目标 & 合成 4 态活跃 / 历史连接列表（← use-path-control.ts:102-143）
+  // 1. 对账已断连目标 & 合成 4 态统一活跃/托管规则/近期已关闭列表（← path-control.ts:515-596）
   const auto& raw_active = data_->active();
+  std::vector<ConnItem> raw_closed(data_->closed().begin(), data_->closed().end());
   path_store_.reconcile(raw_active);
-  auto composed_active = compose_active_path_control_connections(
-      raw_active, managed_rules_, path_store_.state());
-  active_composed_count_ = composed_active.size();
-
-  if (tab_ == Tab::Active) {
-    visible_items_ = std::move(composed_active);
-  } else {
-    std::vector<ConnItem> raw_closed(data_->closed().begin(), data_->closed().end());
-    visible_items_ = enrich_closed_path_control_connections(
-        raw_closed, managed_rules_, path_store_.state());
-  }
+  visible_items_ = compose_active_path_control_connections(
+      raw_active, managed_rules_, path_store_.state(), raw_closed);
+  active_composed_count_ = visible_items_.size();
 
   // 2. 过滤
   if (!filter_.empty()) {
@@ -464,18 +612,18 @@ void ConnectionsPanel::refresh_visible() {
                      [this](int idx) -> std::unique_ptr<Widget> {
                        if (idx < 0 || idx >= static_cast<int>(visible_items_.size()))
                          return std::unique_ptr<Widget>();
+                       const ConnItem& it = visible_items_[static_cast<size_t>(idx)];
                        auto row = std::make_unique<ConnPanelRowWidget>();
-                       row->bind(visible_items_[static_cast<size_t>(idx)], tab_ == Tab::Closed,
-                                 static_cast<size_t>(idx));
-                       row->on_click = [this](const ConnItem& it, RectF row_global) {
-                         detail_dialog_->open(it, tab_ == Tab::Closed, row_global);
+                       row->bind(it, it.is_closed, static_cast<size_t>(idx));
+                       row->on_click = [this](const ConnItem& cur, RectF row_global) {
+                         detail_dialog_->open(cur, cur.is_closed || cur.is_synthetic, row_global);
                        };
-                       row->on_close = [this](const ConnItem& it) {
-                         apply_disconnect_item(it);
+                       row->on_close = [this](const ConnItem& cur) {
+                         apply_disconnect_item(cur);
                        };
-                       row->on_context_menu = [this](const ConnItem& it, PointF pt,
+                       row->on_context_menu = [this](const ConnItem& cur, PointF pt,
                                                      RectF row_global) {
-                         show_context_menu(it, pt, row_global);
+                         show_context_menu(cur, pt, row_global);
                        };
                        return row;
                      });
@@ -485,11 +633,11 @@ void ConnectionsPanel::refresh_visible() {
 
 void ConnectionsPanel::show_context_menu(const ConnItem& item, PointF anchor, RectF row_global) {
   std::vector<MenuItem> items;
-  // src: locales/zh/connections.json:42-49 六/七项文案（connection-table.tsx:566-623）
+  // src: locales/zh/connections.json:42-49 六/七项文案（connection-table.tsx:566-614）
   items.push_back({tr("connections.components.contextMenu.setDirect"), false, false, L""});
   items.push_back({tr("connections.components.contextMenu.setProxy"), false, false, L""});
   items.push_back({tr("connections.components.contextMenu.setReject"), false, false, L""});
-  const bool disc_disabled = (tab_ == Tab::Closed || item.is_synthetic);
+  const bool disc_disabled = (item.is_closed || item.is_synthetic);
   items.push_back({tr("connections.components.contextMenu.disconnect"), disc_disabled, false, L""});
   const bool has_restore =
       item.managed_rule.has_value() || item.control_status == PathControlStatus::Disconnected;
@@ -519,14 +667,14 @@ void ConnectionsPanel::show_context_menu(const ConnItem& item, PointF anchor, Re
         if (addr == "--") addr.clear();
         if (!addr.empty()) copy_address_to_clipboard(addr);
       } else if (idx == detail_idx) {
-        detail_dialog_->open(item, tab_ == Tab::Closed, row_global);
+        detail_dialog_->open(item, item.is_closed || item.is_synthetic, row_global);
       }
     }
   };
 }
 
 void ConnectionsPanel::apply_disconnect_item(const ConnItem& item) {
-  if (item.is_synthetic) return;
+  if (item.is_synthetic || item.is_closed) return;
   auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::system_clock::now().time_since_epoch())
                     .count();
@@ -619,7 +767,7 @@ void ConnTableOverlay::on_paint(IRenderTarget& rt) {
   stroke(0.75f);
   stroke(3.25f);
   if (!empty) return;
-  // src: base-empty.tsx:19-45 居中「空空如也」（shared.json:52）：
+  // src: base-empty.tsx:19-40 居中「空空如也」（shared.json:52）：
   //   :35 <InboxRounded fontSize='4em' />（4em × 16px = 64px）
   //   :36 <Typography fontSize='1.25em' />（1.25em × 16px = 20px）
   //   :32 color: alpha(palette.text.secondary, 0.75)
@@ -642,41 +790,47 @@ void ConnTableOverlay::on_paint(IRenderTarget& rt) {
 void ConnectionsPanel::on_arrange(const RectF& area) {
   set_bounds(area);
 
-  // 1. 顶部 Header 行 (高 22px): Subtitle + 3D Toggle
-  // src: connections-panel.tsx:65-73 justifyContent: 'flex-start', gap: 1 (8px)
+  // 1. 顶部 Header 行 (高 22px): Subtitle + 保存路由 + 导入路由
+  // src: connections-panel.tsx:130-195
   TextStyle title_ts;
   title_ts.size = 11.0f;
   title_ts.weight = static_cast<int>(Weight::Bold);
-  float title_w = 145.0f;
+  float title_w = 136.0f;
   if (auto* te = text_engine()) {
     title_ts.wrap = false;
     title_w = te->measure_text(tr("settings.mini.pathControl"), title_ts, 0).w + 4.0f;  // 豁免: Mini 无对应物 — 防止 DWrite 字距微偏截断末尾字（出处: 无）
   }
-  float seg_w = 140.0f;
-  float seg_h = 18.0f;
-  float seg_x = 4.0f + title_w + 8.0f;
-  tab_active_rect_ = {seg_x, 2.0f, seg_w / 2.0f, seg_h};
-  tab_closed_rect_ = {seg_x + seg_w / 2.0f, 2.0f, seg_w / 2.0f, seg_h};
+  TextStyle btn_ts;
+  btn_ts.size = 11.0f;
+  btn_ts.weight = 700;
+  btn_ts.wrap = false;
+  float save_w = 58.0f;
+  float import_w = 58.0f;
+  if (auto* te = text_engine()) {
+    save_w = std::max(48.0f, te->measure_text(tr("settings.mini.saveCustomRoutes"), btn_ts, 0).w + 14.0f);
+    import_w = std::max(48.0f, te->measure_text(tr("settings.mini.importCustomRoutes"), btn_ts, 0).w + 14.0f);
+  }
+  const float btns_x = std::min(4.0f + title_w + 6.0f, std::max(4.0f, area.w - 4.0f - save_w - import_w - 6.0f));
+  if (btn_save_routes_) {
+    btn_save_routes_->layout_tree({btns_x, 2.0f, save_w, 18.0f});
+    btn_save_routes_->set_visible(true);
+  }
+  if (btn_import_routes_) {
+    const float imp_x = btns_x + save_w + 6.0f;
+    const float imp_fit = std::max(36.0f, std::min(import_w, area.w - 4.0f - imp_x));
+    btn_import_routes_->layout_tree({imp_x, 2.0f, imp_fit, 18.0f});
+    btn_import_routes_->set_visible(true);
+  }
 
-  // 2. 工具栏行 (高 24px, y = 24px): 搜索框 + 断开全部 [+ 清空历史]
+  // 2. 工具栏行 (高 24px, y = 24px): 搜索框 + 断开全部
+  // src: connections-panel.tsx:198-220
   float tool_y = 24.0f;
   float btn_w = 64.0f;
   float btn_h = 20.0f;
-
-  if (tab_ == Tab::Closed) {
-    float sw = area.w - btn_w * 2 - 16.0f;
-    if (sw < 60.0f) sw = 60.0f;
-    search_->layout_tree({4.0f, tool_y, sw, btn_h});
-    btn_disconnect_all_->layout_tree({4.0f + sw + 4.0f, tool_y, btn_w, btn_h});
-    btn_clear_history_->layout_tree({4.0f + sw + 4.0f + btn_w + 4.0f, tool_y, btn_w, btn_h});
-    btn_clear_history_->set_visible(true);
-  } else {
-    float sw = area.w - btn_w - 12.0f;
-    if (sw < 60.0f) sw = 60.0f;
-    search_->layout_tree({4.0f, tool_y, sw, btn_h});
-    btn_disconnect_all_->layout_tree({4.0f + sw + 4.0f, tool_y, btn_w, btn_h});
-    btn_clear_history_->set_visible(false);
-  }
+  float sw = area.w - btn_w - 12.0f;
+  if (sw < 60.0f) sw = 60.0f;
+  search_->layout_tree({4.0f, tool_y, sw, btn_h});
+  btn_disconnect_all_->layout_tree({4.0f + sw + 4.0f, tool_y, btn_w, btn_h});
 
   // 3. 表头行 (高 20px, y = 48px): Host (flex 1) + Chains (74px, src: connection-table.tsx:192-194)
   header_host_rect_ = {0, 48.0f, area.w - 74.0f, 20.0f};
@@ -703,90 +857,16 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   title_ts.weight = static_cast<int>(Weight::Bold);
   title_ts.color = pal.primary_text;
   title_ts.align_v = AlignV::Center;
-  float title_w = tab_active_rect_.x - 4.0f - 8.0f;
-  if (title_w <= 0.0f) title_w = 145.0f;
+  float title_w = btn_save_routes_ ? std::max(40.0f, btn_save_routes_->bounds().x - 10.0f) : 145.0f;
   title_ts.wrap = false;
-  rt.draw_text(tr("settings.mini.pathControl"), {4.0f, 2.0f, title_w + 4.0f, 18.0f}, title_ts);  // src: connections-panel.tsx:69-73
+  title_ts.ellipsis = true;
+  rt.draw_text(tr("settings.mini.pathControl"), {4.0f, 2.0f, title_w, 18.0f}, title_ts);  // src: connections-panel.tsx:141-153
 
-  // 3D Toggle (140×18px)
-  // src: connections-panel.tsx:75-100 get3DSegmentedContainerStyle(theme) + get3DSegmentedActiveStyle(theme)
-  float seg_x = tab_active_rect_.x;
-  float seg_w = 140.0f;
-  float seg_h = 18.0f;
-  const auto sp = theme.segmented_paint();
-  const float cont_radius = sp.container_radius > 0.01f ? sp.container_radius : 4.0f;
   if (search_) {
     search_->apply_theme();
     search_->style_.size = 12;
     search_->caret_color_ = search_->style_.color;
   }
-  RectF cont_r{seg_x, 2.0f, seg_w, seg_h};
-  Brush cont_bg{sp.container_bg};
-  rt.round_rect(cont_r, cont_radius, Pen{sp.container_border, 1.0f}, &cont_bg);
-  if (sp.container_inset) {
-    draw_top_inset_shadow(rt, cont_r, cont_radius, sp.container_inset_color,
-                          sp.container_inset_dy, sp.container_inset_blur);
-  }
-  if (sp.container_top_hi.a > 0.004f) {
-    rt.draw_line({cont_r.x + cont_radius, cont_r.bottom() + 0.5f},
-                 {cont_r.right() - cont_radius, cont_r.bottom() + 0.5f},
-                 Pen{sp.container_top_hi, 1.0f});
-  }
-
-  // 滑块指示背景
-  RectF active_seg = (tab_ == Tab::Active) ? tab_active_rect_ : tab_closed_rect_;
-  RectF pill{active_seg.x + 1.0f, active_seg.y + 1.0f, active_seg.w - 2.0f, active_seg.h - 2.0f};
-  const bool has_border = sp.active_border.a > 0.001f;
-  if (sp.active_grad_count > 0) {
-    rt.fill_round_rect_gradient_angle(pill, sp.active_radius,
-                                      sp.active_grad, sp.active_grad_count,
-                                      sp.active_grad_angle);
-    if (has_border) {
-      rt.round_rect(pill, sp.active_radius, Pen{sp.active_border, 1.0f}, nullptr);
-    }
-  } else {
-    Brush sel_bg{sp.active_bg};
-    rt.round_rect(pill, sp.active_radius,
-                  Pen{sp.active_border, has_border ? 1.0f : 0.0f}, &sel_bg);
-  }
-  if (sp.active_has_bevel && sp.active_bevel_dark.a > 0.004f) {
-    const float by = sp.active_bevel_dy;
-    rt.draw_line({pill.x + sp.active_radius, pill.bottom() + 0.5f},
-                 {pill.right() - sp.active_radius, pill.bottom() + 0.5f},
-                 Pen{sp.active_bevel_dark, 1.0f});
-    if (by > 0.5f) {
-      rt.draw_line({pill.x + sp.active_radius, pill.bottom() + by + 0.5f},
-                   {pill.right() - sp.active_radius, pill.bottom() + by + 0.5f},
-                   Pen{sp.active_bevel_dark, 1.0f});
-    }
-  }
-  if (sp.active_has_glow && sp.active_glow_color.a > 0.004f) {
-    draw_glow(rt, pill, sp.active_radius, sp.active_glow_color, sp.active_glow_blur);
-  }
-
-  size_t act_num = data_ ? active_composed_count_ : 0;
-  size_t cls_num = data_ ? data_->closed().size() : 0;
-
-  std::wstring act_text = tr("settings.mini.connectionsActive") + L" (" +
-                          std::to_wstring(act_num) + L")";
-  std::wstring cls_text = tr("settings.mini.connectionsHistory") + L" (" +
-                          std::to_wstring(cls_num) + L")";
-
-  TextStyle tab_act_ts;
-  tab_act_ts.size = 10.5f;
-  tab_act_ts.weight = static_cast<int>(Weight::Bold);
-  tab_act_ts.color = (tab_ == Tab::Active) ? sp.active_text : pal.secondary_text;
-  tab_act_ts.align_h = AlignH::Center;
-  tab_act_ts.align_v = AlignV::Center;
-  rt.draw_text(act_text, tab_active_rect_, tab_act_ts);
-
-  TextStyle tab_cls_ts;
-  tab_cls_ts.size = 10.5f;
-  tab_cls_ts.weight = static_cast<int>(Weight::Bold);
-  tab_cls_ts.color = (tab_ == Tab::Closed) ? sp.active_text : pal.secondary_text;
-  tab_cls_ts.align_h = AlignH::Center;
-  tab_cls_ts.align_v = AlignV::Center;
-  rt.draw_text(cls_text, tab_closed_rect_, tab_cls_ts);
 
   // 2. 表头背景 (y = 48px, 高 20px)
   Brush th_bg{vars.theme_panel_bg};
@@ -794,7 +874,7 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   rt.fill_rect({0, 67.0f, bounds().w, 1.0f}, Brush{vars.divider_color});
 
   // Host 表头
-  // src: locales/zh/connections.json:35 miniTable.hostColumn "链接目标"
+  // src: locales/zh/connections.json:35 链接目标列名
   std::wstring host_title = tr("connections.components.miniTable.hostColumn");
   if (sort_col_ == SortCol::Host) {
     if (sort_dir_ == SortDir::Asc) host_title += L" ▲";
@@ -825,38 +905,11 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   th_chains_ts.align_v = AlignV::Center;
   // src: connection-table.tsx:192-194
   rt.draw_text(chains_title, {bounds().w - 74.0f, 48.0f, 74.0f, 20.0f}, th_chains_ts);
-
-  // 空态：src: locales/zh/shared.json:52 「"empty": "空空如也"」（base-empty.tsx:16 textKey）
-  if (false && visible_items_.empty()) {
-    const RectF lr = list_->bounds();
-    Color4f ec(pal.secondary_text.r, pal.secondary_text.g, pal.secondary_text.b,
-               0.75f);  // src: base-empty.tsx:32 alpha(text.secondary, .75)
-    const float icon_sz = 64.0f;  // src: base-empty.tsx:35 '4em'
-    const float cx = lr.x + lr.w / 2.0f;
-    const float cy = lr.y + lr.h / 2.0f;
-    IconW::paint_at(rt, "inbox",
-                    {cx - icon_sz / 2.0f, cy - icon_sz + 4.0f, icon_sz, icon_sz}, ec);
-    TextStyle empty_ts;
-    empty_ts.size = 20.0f;  // src: base-empty.tsx:36 '1.25em'
-    empty_ts.color = ec;
-    empty_ts.align_h = AlignH::Center;
-    empty_ts.align_v = AlignV::Center;
-    rt.draw_text(tr("shared.statuses.empty"),
-                 {lr.x, cy + 8.0f, lr.w, 24.0f}, empty_ts);
-  }
 }
 
 bool ConnectionsPanel::on_mouse(const MouseEvent& e) {
   if (e.type == MouseEventType::Up) {
     PointF pt = e.pos;
-    if (tab_active_rect_.contains(pt.x, pt.y)) {
-      set_tab(Tab::Active);
-      return true;
-    }
-    if (tab_closed_rect_.contains(pt.x, pt.y)) {
-      set_tab(Tab::Closed);
-      return true;
-    }
     if (header_host_rect_.contains(pt.x, pt.y)) {
       cycle_sort_host();
       return true;
@@ -886,30 +939,11 @@ std::wstring ConnectionsPanel::a11y_default_name() const {
 A11ySubItem ConnectionsPanel::a11y_virtual_child(size_t idx) const {
   A11ySubItem sub;
   sub.can_invoke = enabled();
-  size_t act_num = data_ ? active_composed_count_ : 0;
-  size_t cls_num = data_ ? data_->closed().size() : 0;
+  sub.role = A11yRole::Button;
   if (idx == 0) {
-    sub.role = A11yRole::TabItem;
-    sub.name = tr("settings.mini.connectionsActive") + L" (" +
-               std::to_wstring(act_num) + L")";
-    sub.local_bounds = tab_active_rect_;
-    sub.selected = (tab_ == Tab::Active);
-    sub.pos_in_set = 1;
-    sub.size_of_set = 2;
-  } else if (idx == 1) {
-    sub.role = A11yRole::TabItem;
-    sub.name = tr("settings.mini.connectionsHistory") + L" (" +
-               std::to_wstring(cls_num) + L")";
-    sub.local_bounds = tab_closed_rect_;
-    sub.selected = (tab_ == Tab::Closed);
-    sub.pos_in_set = 2;
-    sub.size_of_set = 2;
-  } else if (idx == 2) {
-    sub.role = A11yRole::Button;
     sub.name = tr("connections.components.miniTable.hostColumn");
     sub.local_bounds = header_host_rect_;
   } else {
-    sub.role = A11yRole::Button;
     sub.name = tr("connections.components.miniTable.chainsColumn");
     sub.local_bounds = header_chains_rect_;
   }
@@ -919,10 +953,8 @@ A11ySubItem ConnectionsPanel::a11y_virtual_child(size_t idx) const {
 bool ConnectionsPanel::a11y_invoke_virtual_child(size_t idx) {
   if (!enabled()) return false;
   switch (idx) {
-    case 0: set_tab(Tab::Active); return true;
-    case 1: set_tab(Tab::Closed); return true;
-    case 2: cycle_sort_host(); return true;
-    case 3: cycle_sort_chains(); return true;
+    case 0: cycle_sort_host(); return true;
+    case 1: cycle_sort_chains(); return true;
     default: return false;
   }
 }

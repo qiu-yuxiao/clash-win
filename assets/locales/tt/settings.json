@@ -35,8 +35,7 @@
         "tunUnavailable": "TUN requires Service Mode or Admin Mode"
       },
       "actions": {
-        "installService": "Хезмәтне урнаштыру",
-        "uninstallService": "Uninstall Service"
+        "installService": "Хезмәтне урнаштыру"
       },
       "fields": {
         "systemProxy": "Системалы прокси",
@@ -188,8 +187,6 @@
           "backupSetting": "Резерв копия көйләүләре",
           "runtimeConfig": "Агымдагы конфигурация",
           "openConfDir": "Кушымта папкасын ачу",
-          "openCoreDir": "Ядро сакланган папканы ачу",
-          "openLogsDir": "Логлар папкасын ачу",
           "checkUpdates": "Яңартуларны тикшерү",
           "openDevTools": "Разработчик коралларын ачу",
           "liteModeSettings": "LightWeight Mode Settings",
@@ -281,8 +278,7 @@
     },
     "clashCore": {
       "variants": {
-        "release": "Рәсми версия",
-        "alpha": "Альфа-версия"
+        "release": "Рәсми версия"
       }
     },
     "liteMode": {
@@ -546,6 +542,14 @@
     "takeoverTooltipTun": "TUN Virtual Adapter Mode",
     "debugLogs": "System Debug Logs",
     "pathControl": "Path Control (Right-click link)",
+    "saveCustomRoutes": "Маршрутларны саклау",
+    "importCustomRoutes": "Маршрутларны импортлау",
+    "saveCustomRoutesTooltip": "Барлык махсус маршрут кагыйдәләрен файлга саклау (яңадан урнаштыргач импортлап була)",
+    "importCustomRoutesTooltip": "Сакланган файлдан махсус маршрут кагыйдәләрен импортлау",
+    "routesExportSuccess": "{{count}} махсус маршрут кагыйдәсе сакланды",
+    "routesExportEmpty": "Саклау өчен махсус маршрут кагыйдәләре юк",
+    "routesImportSuccess": "{{count}} махсус маршрут кагыйдәсе импортланды",
+    "routesImportEmpty": "Сайланган файлда яраклы махсус маршрут кагыйдәләре табылмады",
     "statusTesting": "Testing",
     "statusUntested": "Untested",
     "statusError": "Error",
@@ -555,10 +559,7 @@
     "statusDelayGood": "Good Latency",
     "statusDelayExcellent": "Excellent Latency",
     "activeNodeLabel": "Active Node: ",
-    "connectionsActive": "Active",
-    "connectionsHistory": "History",
     "connectionsDisconnectAll": "Disconnect All",
-    "connectionsClearHistory": "Clear History",
     "total": "Total",
     "proxyMethod": "Прокси режимы",
     "globalProxy": "Гомуми прокси",
@@ -575,7 +576,6 @@
     "testingInProgress": "Тизлек тикшерүе бара, соңрак кабат карагыз",
     "testNotExecuted": "Тикшерү үтәлмәде: төп программа әзер түгел яки тикшерергә мөмкин төен юк",
     "testFailed": "Тизлек тикшерүе уңышсыз: {{message}}",
-    "updated": "Яңартылды",
     "portSaved": "Прокси порты сакланды һәм яңадан йөкләнде",
     "testSingleNodeTooltip": "Бу төенне генә тикшерү өчен басыгыз (күчермичә)",
     "networkOffline": "Челтәр юк",
@@ -588,6 +588,11 @@
     "tunSnifferAuto": "Auto",
     "tunSnifferOn": "On",
     "tunSnifferOff": "Off",
-    "tunSnifferNeedTunTooltip": "Effective only in TUN mode (enable TUN mode to activate)"
+    "tunSnifferNeedTunTooltip": "Effective only in TUN mode (enable TUN mode to activate)",
+    "settingEnabled": "Кабызылды",
+    "settingDisabled": "Сүндерелде",
+    "tunSnifferUpdated": "TUN домен снифферы көйләүләре яңартылды",
+    "autoLaunchVerifyFailed": "Автоматик җибәрү халәтен тикшерү уңышсыз; куркынычсызлык программасы чикләгән булырга мөмкин",
+    "invalidPort": "Зинһар, дөрес порт номерын кертегез (1–65535)"
   }
 }

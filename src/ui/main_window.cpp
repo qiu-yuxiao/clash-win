@@ -51,7 +51,7 @@ using config::window_state::SavedWindowState;
 
 namespace {
 const wchar_t kWndClass[] = L"ClashWinMainWindow";
-// 单实例唤醒消息（← T01 app.h consts::kAppWakeup；常量收编到本文件）
+// 单实例唤醒消息（T01 kAppWakeup 常量收编到本文件）
 constexpr UINT kAppWakeup = WM_APP + 1;
 // 定时器 id（WM_TIMER）
 constexpr UINT_PTR kTimerFrame = 1;   // 33ms 帧泵（§5.4 30fps 合帧）
@@ -152,6 +152,9 @@ std::optional<std::pair<double, double>> LargeModeController::load(
 MainWindow::MainWindow() = default;
 
 MainWindow::~MainWindow() {
+  if (alive_) {
+    alive_->store(false, std::memory_order_release);
+  }
   if (uia_) {
     uia_->shutdown();
   }
@@ -192,6 +195,40 @@ MainWindow::~MainWindow() {
   }
 }
 
+uint64_t MainWindow::push_tracked_wait_notice(const std::string& msg) {
+  const uint64_t wait_id = events::NoticeService::instance().push("info", msg, 0);
+  if (wait_id != 0) {
+    wait_notice_started_ms_[wait_id] = GetTickCount64();
+  }
+  return wait_id;
+}
+
+void MainWindow::hide_tracked_wait_notice(uint64_t wait_id) {
+  if (wait_id == 0) return;
+  uint64_t started_ms = 0;
+  if (auto it = wait_notice_started_ms_.find(wait_id);
+      it != wait_notice_started_ms_.end()) {
+    started_ms = it->second;
+    wait_notice_started_ms_.erase(it);
+  }
+  constexpr uint64_t kMinWaitDwellMs = 320;
+  const uint64_t now = GetTickCount64();
+  if (started_ms == 0 || now >= started_ms + kMinWaitDwellMs) {
+    events::NoticeService::instance().hide(wait_id);
+    return;
+  }
+  const uint64_t rem = (started_ms + kMinWaitDwellMs) - now;
+  auto alive = alive_;
+  std::thread([alive, wait_id, rem] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(rem));
+    if (!alive || !alive->load(std::memory_order_acquire)) return;
+    UiPostbox::instance().post([alive, wait_id] {
+      if (!alive->load(std::memory_order_acquire)) return;
+      events::NoticeService::instance().hide(wait_id);
+    });
+  }).detach();
+}
+
 bool MainWindow::create(bool show_immediately, bool defer_render) {
   // UI 线程标记：通知可能由后台线程 push，SnackbarW 据此决定是否转投 UI 线程
   UiPostbox::instance().mark_ui_thread();
@@ -229,7 +266,7 @@ bool MainWindow::create(bool show_immediately, bool defer_render) {
                        static_cast<float>(client_h_)});
   });
 
-  // 几何恢复（window_state.json：钳制 + 脱屏居中守卫，← restore_window_state）
+  // 几何恢复（钳制 + 脱屏居中守卫，对接 restore_window_state）
   apply_geometry_restore();
 
   // 断点 → 标题栏图标/场景挂卸
@@ -357,10 +394,9 @@ bool MainWindow::create_hwnd() {
   int h = static_cast<int>(kDefaultWindowH * s + 0.5f);
   int x = (GetSystemMetrics(SM_CXSCREEN) - w) / 2;
   int y = (GetSystemMetrics(SM_CYSCREEN) - h) / 2;
-  // ← window.rs：加载完成才 show → 创建时不带 WS_VISIBLE，show_and_activate 再显
-  // F-D07：窗口标题对齐 Mini（window.rs:176 → "Clash Mini Ver.{appVersion}"）；
-  // 品牌名按豁免替换为 Clash Win，版本号取自单一事实源 kAppVersion
-  // （与标题栏 TitleBar::set_version 同一出处）。
+  // ← window.rs:176 加载完成才 show → 创建时不带 WS_VISIBLE，show_and_activate 再显
+  // F-D07：窗口标题对齐 Mini（src: src-tauri/src/utils/resolve/window.rs:176 "Clash Mini Ver.{appVersion}"）
+  // 豁免: Mini 无对应物 — 按品牌规范替换为 Clash Win，版本号取 kAppVersion（出处: src-tauri/src/utils/resolve/window.rs:176）
   std::wstring win_title =
       L"Clash Win Ver." +
       utf::utf8_to_utf16(clashwin::config::consts::kAppVersion);
@@ -751,7 +787,8 @@ void MainWindow::test_single_node_async(const std::string& node) {
               quick_bar_->set_badge(node_data_->row_delay(node), true);
             }
             // src: src/pages/_layout/components/active-node-card.tsx:192
-            if (err.find("AUTO_SELECT_BUSY") != std::string::npos) {
+            if (err.find("AUTO_SELECT_BUSY") != std::string::npos ||
+                err.find("AUTO_SELECT_MANUAL_PREEMPTED") != std::string::npos) {
               events::NoticeService::instance().push(
                   "info", tr8("settings.mini.testingInProgress"));
             } else if (err.find("AUTO_SELECT_NO_RESULT") != std::string::npos) {
@@ -891,7 +928,9 @@ void MainWindow::trigger_auto_select_and_refresh(const std::string& uid,
     scene::BatchTestSummary sum;
     if (user_initiated) {
       if (!r.is_ok()) {
-        if (r.error().message.find("AUTO_SELECT_BUSY") != std::string::npos) {
+        if (r.error().message.find("AUTO_SELECT_BUSY") != std::string::npos ||
+            r.error().message.find("AUTO_SELECT_MANUAL_PREEMPTED") !=
+                std::string::npos) {
           sum.busy = true;
         }
       } else if (r.value().is_array() && !r.value().empty()) {
@@ -1122,12 +1161,14 @@ void MainWindow::build_scene() {
     }
     auto snap = node_data_->snapshot_delays(names);
     if (!names.empty()) node_data_->set_delays_batch(names, -2);  // src: src/services/delay.ts:452
-    std::thread([this, uid, snap = std::move(snap)]() mutable {
+    const bool select_node =
+        (latest_network_health() != scene::NetworkHealthIssue::Offline);
+    std::thread([this, uid, select_node, snap = std::move(snap)]() mutable {
       // src: src/pages/_layout/components/active-node-card.tsx:121
       auto r = cmd::CommandService::instance().invoke(
           "trigger_auto_select",
           nlohmann::json::object(
-              {{"profile_uid", uid}, {"sort_type", 0}, {"select", true}}));
+              {{"profile_uid", uid}, {"sort_type", 0}, {"select", select_node}}));
       bool has_healthy = false;
       bool empty_result = false;
       std::string err;
@@ -1156,7 +1197,9 @@ void MainWindow::build_scene() {
             if (node_data_) node_data_->restore_delays_for_still_pending(snap);
             if (!err.empty()) {
               // src: src/pages/_layout/components/active-node-card.tsx:137
-              if (err.find("AUTO_SELECT_BUSY") != std::string::npos) {
+              if (err.find("AUTO_SELECT_BUSY") != std::string::npos ||
+                  err.find("AUTO_SELECT_MANUAL_PREEMPTED") !=
+                      std::string::npos) {
                 events::NoticeService::instance().push(
                     "info", tr8("settings.mini.testingInProgress"));
               } else if (err.find("AUTO_SELECT_NO_RESULT") != std::string::npos) {
@@ -1360,9 +1403,7 @@ void MainWindow::build_scene() {
             args = nlohmann::json::object({{k, v}});
           }
           const uint64_t wait_id =
-              info_key ? events::NoticeService::instance().push(
-                             "info", tr8(info_key), 0)
-                       : 0;
+              info_key ? push_tracked_wait_notice(tr8(info_key)) : 0;
 
           // ---- 后台线程：只做阻塞式 svc.invoke（UI 线程不再被 wait_for 拖住）----
           std::thread([this, k, cmd, args, wait_id, success_msg, is_clash, is_rule] {
@@ -1382,7 +1423,7 @@ void MainWindow::build_scene() {
             UiPostbox::instance().post(
                 [this, wait_id, success_msg, ok, err] {
                   auto& notices = events::NoticeService::instance();
-                  if (wait_id) notices.hide(wait_id);  // finally hideNotice
+                  if (wait_id) hide_tracked_wait_notice(wait_id);  // finally hideNotice
                   if (!settings_drawer_) return;       // 同 on_takeover_change 生命周期守卫
                   if (ok) {
                     if (!success_msg.empty()) {
@@ -1409,9 +1450,8 @@ void MainWindow::build_scene() {
             else if (v.enable_system_proxy.value_or(false)) prev_mode = "SYS";
           } catch (...) {}
 
-          auto& notices = events::NoticeService::instance();
           const uint64_t wait_id =
-              notices.push("info", tr8("layout.notices.adjusting"), 0);
+              push_tracked_wait_notice(tr8("layout.notices.adjusting"));
 
           std::thread([this, mode, prev_mode, wait_id] {
             cmd::LongOperationGuard long_guard;
@@ -1429,7 +1469,7 @@ void MainWindow::build_scene() {
               const std::string err = ok ? std::string() : r.error().message;
               UiPostbox::instance().post([this, wait_id, ok, err, prev_mode] {
                 auto& nots = events::NoticeService::instance();
-                nots.hide(wait_id);
+                hide_tracked_wait_notice(wait_id);
                 if (ok) {
                   nots.push("success", tr8("layout.notices.switchedToManualMode"));
                   if (settings_drawer_) settings_drawer_->sync_takeover(false, false);
@@ -1454,7 +1494,7 @@ void MainWindow::build_scene() {
               const std::string err = ok ? std::string() : r.error().message;
               UiPostbox::instance().post([this, wait_id, ok, err, prev_mode] {
                 auto& nots = events::NoticeService::instance();
-                nots.hide(wait_id);
+                hide_tracked_wait_notice(wait_id);
                 if (ok) {
                   nots.push("success", tr8("layout.notices.systemProxyEnabled"));
                   if (settings_drawer_) settings_drawer_->sync_takeover(true, false);
@@ -1480,7 +1520,7 @@ void MainWindow::build_scene() {
               if (!inst.is_ok()) {
                 UiPostbox::instance().post([this, wait_id, prev_mode] {
                   auto& nots = events::NoticeService::instance();
-                  nots.hide(wait_id);
+                  hide_tracked_wait_notice(wait_id);
                   nots.push("error", tr8("layout.notices.tunServiceConfigFailed"));
                   if (settings_drawer_)
                     settings_drawer_->sync_takeover(prev_mode == "SYS", prev_mode == "TUN");
@@ -1496,7 +1536,7 @@ void MainWindow::build_scene() {
             const std::string err = ok ? std::string() : r.error().message;
             UiPostbox::instance().post([this, wait_id, ok, err, prev_mode] {
               auto& nots = events::NoticeService::instance();
-              nots.hide(wait_id);
+              hide_tracked_wait_notice(wait_id);
               if (ok) {
                 nots.push("success", tr8("layout.notices.tunModeEnabled"));
                 if (settings_drawer_) settings_drawer_->sync_takeover(false, true);
@@ -1525,8 +1565,8 @@ void MainWindow::build_scene() {
       const int core_port =
           static_cast<int>(cfg.clash().latest_arc()->get_mixed_port());
       if (port == verge_port && port == core_port) return true;  // 无变更，静默
-      const uint64_t wait_id = events::NoticeService::instance().push(
-          "info", tr8("layout.notices.adjusting"), 0);
+      const uint64_t wait_id =
+          push_tracked_wait_notice(tr8("layout.notices.adjusting"));
       std::thread([this, port, wait_id] {
         cmd::LongOperationGuard long_guard;
         auto& svc = cmd::CommandService::instance();
@@ -1535,7 +1575,7 @@ void MainWindow::build_scene() {
         if (inuse.is_ok() && inuse.value().is_boolean() && inuse.value().get<bool>()) {
           UiPostbox::instance().post([this, port, wait_id] {
             auto& notices = events::NoticeService::instance();
-            notices.hide(wait_id);
+            hide_tracked_wait_notice(wait_id);
             notices.push(
                 "error", tr8("settings.modals.clashPort.messages.portInUse",
                              {{"port", std::to_string(port)}}));
@@ -1557,7 +1597,7 @@ void MainWindow::build_scene() {
             ok ? std::string() : (a.is_ok() ? b.error().message : a.error().message);
         UiPostbox::instance().post([this, port, wait_id, ok, err] {
           auto& notices = events::NoticeService::instance();
-          notices.hide(wait_id);
+          hide_tracked_wait_notice(wait_id);
           if (ok) {
             if (settings_drawer_ && settings_drawer_->basic_card()) {
               settings_drawer_->basic_card()->port_current_ = port;
@@ -1666,8 +1706,8 @@ void MainWindow::build_scene() {
     };
     settings_drawer_->on_update_profile = [this](const std::string& uid) {
       // ← _layout.tsx:938-952：常驻 info「正在更新订阅」→ 后台更新 → 收尾隐藏并通知
-      const uint64_t wait_id = events::NoticeService::instance().push(
-          "info", tr8("layout.notices.updatingSubscription"), 0);
+      const uint64_t wait_id =
+          push_tracked_wait_notice(tr8("layout.notices.updatingSubscription"));
       std::thread([this, uid, wait_id] {
         cmd::LongOperationGuard long_guard;
         auto r = cmd::CommandService::instance().invoke(
@@ -1675,7 +1715,7 @@ void MainWindow::build_scene() {
         const bool ok = r.is_ok();
         const std::string err = ok ? std::string() : r.error().message;
         UiPostbox::instance().post([this, uid, wait_id, ok, err] {
-          events::NoticeService::instance().hide(wait_id);
+          hide_tracked_wait_notice(wait_id);
           if (ok) {
             events::EventBus::notice_message("update_subscription::ok", "");
             if (settings_drawer_ && settings_drawer_->profile_card()) {
@@ -1776,7 +1816,7 @@ void MainWindow::build_scene() {
         std::wstring p2 = clashwin::util::dirs::app_logs_dir() + L"\\clashwin.log";
         std::wstring path = fs::exists(p2) ? p2 : p1;
         std::ifstream in(fs::path(path), std::ios::in | std::ios::binary);
-        // 豁免: 无 — 使用 fs::path 打开宽字符日志路径（出处: 无）
+        // 豁免: Mini 无对应物 — 使用 fs::path 打开宽字符日志路径（出处: 无）
         if (in) {
           std::deque<std::string> tail;
           std::string line;
@@ -1787,7 +1827,7 @@ void MainWindow::build_scene() {
           }
           for (const auto& l : tail) log_viewer_->push_log_line(l);
         }
-        // 拉取 Mihomo 内核运行日志（src: cmd_clash.cpp:285 get_clash_logs）
+        // 拉取 Mihomo 内核运行日志（调用 get_clash_logs 命令）
         auto kr = cmd::CommandService::instance().invoke("get_clash_logs", {});
         if (kr.is_ok() && kr.value().is_array()) {
           for (const auto& item : kr.value()) {
@@ -1802,7 +1842,7 @@ void MainWindow::build_scene() {
           log_viewer_->push_log("info", "Clash Win runtime logger active: " + utf::utf16_to_utf8(path));
         }
       }
-      // 订阅实时内核日志流（src: use-log-data.ts:25-45 / ws_manager.h:44）
+      // 订阅实时内核日志流（src: use-log-data.ts:25-45）
       if (ws_sub_logs_ == 0 && ws_) {
         ws_sub_logs_ = ws_->subscribe_logs(
             mihomo::LogLevel::Info, [this](const std::string& payload) {
@@ -1841,7 +1881,11 @@ void MainWindow::build_scene() {
       auto au = std::make_unique<scene::AddUrlDialog>();
       add_url_ = au.get();
       au->set_z_order(960);  // ctor 已设；显式声明与 root_ 其它弹窗层序
+      auto au_menu = std::make_unique<ContextMenu>();
+      au_menu->set_z_order(965);
+      add_url_->set_context_menu(au_menu.get());
       root_.add_child(std::move(au));
+      root_.add_child(std::move(au_menu));
     }
     // 客户端/内核更新弹窗（Mini：_layout.tsx:1948/1956，帮助菜单点击才弹）
     {
@@ -2054,13 +2098,13 @@ void MainWindow::build_scene() {
       fr->on_dismiss_later = [this] {
         if (settings_drawer_) settings_drawer_->set_open(true);
       };
-      // src: src/pages/_layout.tsx:2049 Ready 步 Card 3 打开安全软件白名单弹窗
+      // src: src/pages/_layout.tsx:1979 Ready 步 Card 3 打开安全软件白名单弹窗
       fr->on_open_whitelist_guide = [this] {
         if (antivirus_modal_) antivirus_modal_->open();
       };
       root_.add_child(std::move(fr));
     }
-    // 安全软件白名单说明弹窗（src: src/pages/_layout.tsx:2051-2054）
+    // 安全软件白名单说明弹窗（src: src/pages/_layout.tsx:1981-1984）
     {
       auto av = std::make_unique<scene::AntivirusWhitelistModal>();
       antivirus_modal_ = av.get();
@@ -2259,10 +2303,16 @@ void MainWindow::build_ws_pipes() {
 }
 
 void MainWindow::update_conn_ws_state() {
-  // Mini 同构：/connections 流仅抽屉打开且宽>285 时订阅（连接面板只在抽屉右列）
-  bool needed = settings_drawer_ && settings_drawer_->is_open() &&
-                !bp_.is_narrow() && !bp_.is_mini() &&
-                bp_.logical_h() > win::kMiniHeightThreshold;
+  // Mini 同构：/connections 流仅抽屉打开且宽>285 且未最小化时订阅（连接面板只在抽屉右列）
+  const bool needed = settings_drawer_ && settings_drawer_->is_open() &&
+                      !bp_.is_narrow() && !bp_.is_mini() &&
+                      bp_.logical_h() > win::kMiniHeightThreshold &&
+                      (!hwnd_ || !IsIconic(hwnd_));
+  if (needed) {
+    conn_gc_deadline_ms_ = 0;
+  } else if (conn_gc_deadline_ms_ == 0) {
+    conn_gc_deadline_ms_ = now_ms() + 30000;
+  }
   if (needed && ws_sub_conn_ == 0 && ws_) {
     ws_sub_conn_ = ws_->subscribe_connections(
         [this](const std::string& payload) {
@@ -2537,6 +2587,10 @@ void MainWindow::on_client_resized(int cw, int ch, bool persist) {
 
 void MainWindow::persist_geometry(bool immediately) {
   if (!restore_done_) return;  // 【DPIFIX】恢复完成前不落盘（防 dpi 未换挡污染）
+  if (!immediately && in_sizemove_) {
+    pending_persist_geometry_ = true;
+    return;
+  }
   if (!store_) {
     store_ = std::make_unique<WindowStateStore>(
         clashwin::util::dirs::window_state_path());
@@ -2672,7 +2726,7 @@ int MainWindow::hit_test_nc(POINT screen_pt) {
   GetClientRect(hwnd_, &rc);
   // 【DPIARCH】pt/rc 为物理像素，热区常量是 DIP → 边界处 ×s 换算一次
   const float s = dpi_scale();
-  // src: resize-handles.tsx:500「if (isLargeMode) return null」→ 大尺寸态无侧边热区
+  // src: resize-handles.tsx:329「if (isLargeMode) return null」→ 大尺寸态无侧边热区
   if (!bp_.is_large()) {
   const auto rb = static_cast<LONG>(kResizeBorder * s);
   const auto cs = static_cast<LONG>(kCornerSize * s);
@@ -2777,6 +2831,19 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       return 0;
     }
 
+    case WM_ENTERSIZEMOVE:
+      in_sizemove_ = true;
+      pending_persist_geometry_ = false;
+      break;
+
+    case WM_EXITSIZEMOVE:
+      in_sizemove_ = false;
+      if (pending_persist_geometry_) {
+        pending_persist_geometry_ = false;
+        persist_geometry(false);
+      }
+      break;
+
     case WM_SIZING: {
       // src: src-tauri/src/utils/resolve/window.rs:351 上缘缩放最小高度防下移（top=bottom-minH）
       auto* rc = reinterpret_cast<RECT*>(lp);
@@ -2793,6 +2860,7 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
         if (tooltip_host_) tooltip_host_->leave();
         clear_mouse_hover();
         if (traffic_pane_) traffic_pane_->set_enabled(false);
+        update_conn_ws_state();
         break;
       }
       if (traffic_pane_) traffic_pane_->set_enabled(true);
@@ -2828,7 +2896,12 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
         pump_frame();
         if (tooltip_host_) tooltip_host_->tick_now(now_ms());
       } else if (wp == kTimerIdle) {
-        stealth_.tick(now_ms());  // 到点隐藏（自续期 = 下一秒再 tick）
+        const int64_t now = now_ms();
+        stealth_.tick(now);  // 到点隐藏（自续期 = 下一秒再 tick）
+        if (conn_gc_deadline_ms_ != 0 && now >= conn_gc_deadline_ms_) {
+          conn_gc_deadline_ms_ = 0;
+          if (conn_data_) conn_data_->clear_all();
+        }
       } else if (wp == kTimerNodeRetry) {
         KillTimer(hwnd_, kTimerNodeRetry);
         reload_nodes();

@@ -293,7 +293,8 @@ bool QuickBar::a11y_invoke_virtual_child(size_t index) {
 
 SizeF QuickBar::on_measure(float max_w, float max_h) {
   SizeF s = Row::on_measure(max_w, max_h);
-  s.h = 30;  // src: _layout.tsx:1318 快捷条容器 height 30px（内含卡高 28，见 active-node-card.tsx:241）
+  // src: _layout.tsx:1318 快捷条容器 height 30px（内含卡高 28，见 active-node-card.tsx:241）
+  s.h = 30;
   return s;
 }
 
@@ -981,7 +982,7 @@ void TakeoverSegmented::on_paint(IRenderTarget& rt) {
     }
     TextStyle ts;
     ts.size = 13;  // src: takeover-mode-card.tsx:116-117 zh 13px（非 zh 11px）
-    // src: button-styles.ts:1105-1123 选中文字 get3DSegmentedActiveTextColor；
+    // src: button-styles.ts:1105-1122 选中文字 get3DSegmentedActiveTextColor；
     //   未选中 takeover-mode-card.tsx:110-115
     //     isRetro3DDark ? 'rgba(44,31,3,.75)' : 'text.secondary'
     //   hover :122-129 dark '#2C1F03'；active :130-137 dark rgba(44,31,3,.5)

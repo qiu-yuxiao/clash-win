@@ -14,8 +14,10 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "app/lifecycle.h"
@@ -85,11 +87,8 @@ inline GlobalShortcutAction classify_global_shortcut(
     uint32_t vk, bool ctrl, bool alt, bool shift,
     bool ime_composing, bool is_repeat,
     bool overlay_open, bool editable_focused) {
-  if (ime_composing || is_repeat || overlay_open || editable_focused) {
+  if (ime_composing || is_repeat || overlay_open) {
     return GlobalShortcutAction::None;
-  }
-  if (ctrl && !alt && !shift && vk == 'F') {
-    return GlobalShortcutAction::FocusFilter;  // src: src/utils/disable-webview-shortcuts.ts:45
   }
   if (!ctrl && !alt && !shift) {
     if (vk == VK_F4) {
@@ -98,6 +97,9 @@ inline GlobalShortcutAction classify_global_shortcut(
     if (vk == VK_F1) {
       return GlobalShortcutAction::TestFullGroup;  // src: src/utils/disable-webview-shortcuts.ts:68
     }
+  }
+  if (!editable_focused && ctrl && !alt && !shift && vk == 'F') {
+    return GlobalShortcutAction::FocusFilter;  // src: src/utils/disable-webview-shortcuts.ts:45
   }
   return GlobalShortcutAction::None;
 }
@@ -291,6 +293,8 @@ class MainWindow : public app::ILifecycleWindow {
   //   真实 WM_SIZE/WM_DPICHANGED 及运行时重排默认 true（← Mini 窗口构建前一次注入几何）。
   void on_client_resized(int cw, int ch, bool persist = true);  // WM_SIZE
   void persist_geometry(bool immediately = false); // WM_SIZE/WM_MOVE
+  uint64_t push_tracked_wait_notice(const std::string& msg);
+  void hide_tracked_wait_notice(uint64_t wait_id);
   void pump_frame();                               // 33ms 帧泵
   void draw();
   int hit_test_nc(POINT screen_pt);                // WM_NCHITTEST
@@ -389,6 +393,11 @@ class MainWindow : public app::ILifecycleWindow {
   int64_t tun_guard_cool_until_ = 0;      // 1s 冷却（:123-127）
   std::atomic<bool> tun_guard_busy_{false};
   void tun_guard_tick();
+  std::shared_ptr<std::atomic<bool>> alive_ = std::make_shared<std::atomic<bool>>(true);
+  int64_t conn_gc_deadline_ms_ = 0;
+  bool in_sizemove_ = false;
+  bool pending_persist_geometry_ = false;
+  std::unordered_map<uint64_t, uint64_t> wait_notice_started_ms_;
   std::unique_ptr<UiaWindowBridge> uia_;  // 原生 Win32 UI Automation 读屏桥接
 };
 

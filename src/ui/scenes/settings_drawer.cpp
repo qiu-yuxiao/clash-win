@@ -69,7 +69,7 @@ constexpr float kComboRoutingH = 52;    // 20.4+6+25.2
 // src: src/pages/_layout/components/basic-settings-card.tsx:300-398 无固定高，内容驱动：
 //   p16 + 标题 20.4 + mb4 + 2×24 + mt2 + 24(tunSniffer) + mt2 + 24(mixedPort) + p16 = 156.4
 constexpr float kBasicH = 156.4f;
-// src: theme-settings-card.tsx:148-494 无固定高（flexShrink 0）：
+// src: theme-settings-card.tsx:148-476 无固定高（flexShrink 0）：
 //   p8 + 标题 20.4 + mb4 + 2×23.2 + mt8 + 按钮24 + 页脚(pt8+18.3+16.6) + p8 = 161.7
 constexpr float kThemeH = 161.7f;
 
@@ -89,6 +89,14 @@ Color4f mix_hover(const Color4f& a, const Color4f& b, float k) {
 class CloseButton : public IconW {
  public:
   CloseButton() = default;
+  std::function<void(bool down)> on_press_state;
+  bool on_mouse(const MouseEvent& e) override {
+    if (e.type == MouseEventType::Down && on_press_state) on_press_state(true);
+    if ((e.type == MouseEventType::Up || e.type == MouseEventType::Leave) &&
+        on_press_state)
+      on_press_state(false);
+    return IconW::on_mouse(e);
+  }
   void on_paint(IRenderTarget& rt) override {
     RectF r{0, 0, bounds().w, bounds().h};
     // src: _layout.tsx:1294 get3DButtonStyle(theme,'contained','primary')
@@ -287,14 +295,14 @@ void style_gold_segmented(Segmented* s) {
   s->style_.weight = static_cast<int>(Weight::Bold);
 }
 
-// 主题卡三段为 10px（theme-settings-card.tsx:211），单独一套
+// 主题卡三段为 11px（theme-settings-card.tsx:259），单独一套
 void style_gold_segmented_small(Segmented* s) {
   style_gold_segmented(s);
-  s->style_.size = 10;  // src: theme-settings-card.tsx:211 fontSize '10px'
+  s->style_.size = 11;  // src: theme-settings-card.tsx:259 fontSize '11px'
 }
 
 void style_slider(Slider* s) {
-  // src: pages/_layout/utils/style-helpers.tsx:241-467 get3DSliderStyle
+  // src: pages/_layout/utils/style-helpers.tsx:241-375 get3DSliderStyle
   // 6 套皮肤全部走单次查表（此前只有 retro 金渐变与 MUI 缺省两枝）
   s->apply_theme();
 }
@@ -695,7 +703,7 @@ void BasicCard::on_arrange(const RectF& area) {
 }
 
 // ---------- ThemeCard ----------
-// src: theme-settings-card.tsx:136-495
+// src: theme-settings-card.tsx:136-476
 ThemeCard::ThemeCard() : Widget(nullptr) {
   // src: theme-settings-card.tsx:156-167 标题 13px bold、mb 0.5=4
   auto t = std::make_unique<Label>();
@@ -811,14 +819,14 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   vv->style.color = slider_value_color();
   vv->set_text(SettingsDrawer::fmt_factor(0.0f));
   add_child(std::move(vv));
-  // 页脚 src: theme-settings-card.tsx:468-494 11px text.secondary + 10px primary
+  // 页脚 src: theme-settings-card.tsx:450-476 11px text.secondary + 10px primary
   auto cp = std::make_unique<Label>();
   copyright_ = cp.get();
   copyright_->style.size = 11;
   copyright_->style.align_h = AlignH::Center;
   copyright_->style.align_v = AlignV::Center;
   copyright_->style.color =
-      // src: :471 text.secondary + 页脚整体 opacity .75（:459）→ 复合 alpha .45
+      // src: :455 text.secondary + 页脚整体 opacity .75 → 复合 alpha .45
       (theme::ThemeService::instance().skin() == theme::SkinId::Retro3d && !is_light())
           ? Color4f::hex(0x2C1F03, 0.75f)
           : (is_light() ? Color4f::hex(0x3C3C43, 0.45f) : Color4f::hex(0xEBEBF5, 0.45f));
@@ -827,10 +835,10 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   add_child(std::move(cp));
   auto em = std::make_unique<Label>();
   email_ = em.get();
-  email_->style.size = 10;  // src: theme-settings-card.tsx:486 fontSize 10
+  email_->style.size = 10;  // src: theme-settings-card.tsx:468 fontSize 10
   email_->style.align_h = AlignH::Center;
   email_->style.align_v = AlignV::Center;
-  // src: :486 color 'primary.main' + 页脚 opacity .75（:459）
+  // src: :468 color 'primary.main' + 页脚 opacity .75
   Color4f pc = theme::ThemeService::instance().primary();
   pc.a = 0.75f;
   email_->style.color = pc;
@@ -841,11 +849,12 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
 void ThemeCard::on_arrange(const RectF& area) {
   set_bounds(area);
   const float pad = kCardPad;
-  // 头行 src: theme-settings-card.tsx:148-180（标题左、三段右 100×18、mb 4）
-  const float seg_w = 100.0f, seg_h = 18.0f;
-  mode_seg_->layout_tree({area.w - pad - seg_w, pad, seg_w, seg_h});
+  // 头行 src: theme-settings-card.tsx:182-196（标题左、三段右 118×20、右边距 4px 对齐 BasicCard、mb 4）
+  const float seg_w = 118.0f, seg_h = 20.0f;
   const float title_lh = 20.4f;  // src: theme-settings-card.tsx:156 subtitle2 13px×1.57
-  title_->layout_tree({pad, pad, area.w - pad * 2 - seg_w - 8, title_lh});
+  mode_seg_->layout_tree({area.w - pad - 4.0f - seg_w, pad + (title_lh - seg_h) * 0.5f,
+                          seg_w, seg_h});
+  title_->layout_tree({pad, pad, std::max(40.0f, area.w - pad * 2 - seg_w - 12.0f), title_lh});
   // src: theme-settings-card.tsx:326-333 ListItem dense + py 0.1=0.8 + px 0.5=4；
   //   行高 = caption 13px×1.66=21.6 + 1.6 ≈ 23.2
   const float row1_y = pad + title_lh + 4.0f;  // 头行 mb 0.5=4（:153）
@@ -992,6 +1001,12 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
   edit_profile_modal_ = em.get();
   add_child(std::move(em));
 
+  // 删除订阅二次确认弹窗（BUG-390，layout-dialogs.tsx:643-698）
+  auto dm = std::make_unique<DeleteProfileConfirmModal>();
+  delete_confirm_modal_ = dm.get();
+  dm->set_z_order(995);
+  add_child(std::move(dm));
+
   static const wchar_t* kSkinNames[6] = {L"Trump-3D", L"Original", L"Modern",
                                          L"Frosted", L"Cyberpunk", L"Monochrome"};
   // src: _layout.tsx:1663-1688 每皮肤独立 fontFamily
@@ -1027,7 +1042,8 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
   style_cell(bottom_help_, 16.0f);  // src: src/pages/_layout/components/help-menu-button.tsx:91
   bottom_help_->text_style.weight = static_cast<int>(Weight::Bold);
   bottom_help_->on_click = [this]() { open_help_menu(); };
-  bottom_help_->set_tooltip_text(tr("layout.components.helpMenu.buttonAriaLabel"));  // src: locales/zh/layout.json:40 buttonAriaLabel
+  // src: locales/zh/layout.json:40 buttonAriaLabel
+  bottom_help_->set_tooltip_text(tr("layout.components.helpMenu.buttonAriaLabel"));
   bottom_help_->set_i18n_a11y_name("layout.components.helpMenu.buttonAriaLabel");
   bottom_help_->set_a11y_expanded_getter(
       [this]() { return help_menu_ && help_menu_->is_open(); });
@@ -1041,6 +1057,7 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
   close_btn_ = close.get();
   close_btn_->set_icon("close");
   close_btn_->size_ = 20;
+  close->on_press_state = [this](bool down) { close_btn_pressed_ = down; };
   // 图标色由 CloseButton::on_paint 按 button_paint("primary").text 实时取
   // （src: button-styles.ts:35 primary contained textColor，逐皮肤）
   close_btn_->on_click = [this]() { set_open(false); };
@@ -1095,8 +1112,27 @@ void SettingsDrawer::set_open(bool open) {
     flush_pending_skin_prefs();
     if (help_menu_ && help_menu_->is_open()) help_menu_->close();
     if (lang_menu_ && lang_menu_->is_open()) lang_menu_->close();
+    if (delete_confirm_modal_ && delete_confirm_modal_->is_open()) {
+      delete_confirm_modal_->close();
+    }
   }
   open_ = open;
+  if (!open) {
+    if (basic_card_ && basic_card_->port_field_ &&
+        basic_card_->port_field_->focused()) {
+      skip_port_blur_save_ = true;
+      basic_card_->port_field_->blur();
+    }
+    if (basic_card_ && basic_card_->port_field_ &&
+        basic_card_->port_current_ > 0) {
+      basic_card_->port_field_->set_text(
+          std::to_wstring(basic_card_->port_current_));
+    }
+    close_btn_pressed_ = false;
+  } else {
+    close_btn_pressed_ = false;
+    skip_port_blur_save_ = false;
+  }
   mask_->set_visible(false);  // 源码无遮罩
   panel_->set_visible(open);
   if (close_btn_) close_btn_->set_visible(open);
@@ -1277,7 +1313,7 @@ void SettingsDrawer::restyle_cards() {
                             : Color4f::hex(0xEBEBF5, 0.45f));
     }
     if (theme_card_->email_) {
-      // src: theme-settings-card.tsx:486 color 'primary.main' + 页脚 opacity .75（retro 暗态 #2C1F03）
+      // src: theme-settings-card.tsx:468 color 'primary.main' + 页脚 opacity .75（retro 暗态 #2C1F03）
       Color4f ec = (theme::ThemeService::instance().skin() == theme::SkinId::Retro3d && !is_light())
                        ? Color4f::hex(0x2C1F03, 0.75f)
                        : theme::ThemeService::instance().primary();
@@ -1354,6 +1390,9 @@ void SettingsDrawer::on_arrange(const RectF& area) {
                            kCloseSize, kCloseSize});
   // 编辑订阅弹窗：全窗遮罩 + 居中卡片（layout-dialogs.tsx:119-137）
   if (edit_profile_modal_) edit_profile_modal_->layout_tree({0, 0, area.w, area.h});
+  if (delete_confirm_modal_) {
+    delete_confirm_modal_->layout_tree({0, 0, area.w, area.h});
+  }
 
   // 左列 src: _layout.tsx:1428-1437（x=padding、y=padding、宽 240、gap 5）
   //   @media not all and (max-height:830px) → pb:30px（给底部行让位，_layout.tsx:1429-1432）
@@ -1626,7 +1665,7 @@ void SettingsDrawer::open_profile_menu(const std::string& uid, PointF anchor) {
     } else if (idx == 4) {
       if (on_update_profile) on_update_profile(uid);
     } else if (idx == 6) {
-      if (on_delete_profile) on_delete_profile(uid);
+      request_delete_profile(uid);
     }
   };
   // ContextMenu 是 panel_ 子件：锚点需转 panel_ 局部（与 open_url_menu 对齐）
@@ -1683,6 +1722,21 @@ void SettingsDrawer::open_url_menu(PointF anchor) {
   url_menu_->open(its, panel_->to_local(anchor));
 }
 
+void SettingsDrawer::request_delete_profile(const std::string& uid) {
+  if (!delete_confirm_modal_) {
+    if (on_delete_profile) on_delete_profile(uid);
+    return;
+  }
+  std::string pname = uid;
+  if (profile_card_) {
+    if (const config::PrfItem* item = profile_card_->find_item(uid)) {
+      if (item->name && !item->name->empty()) pname = *item->name;
+    }
+  }
+  delete_confirm_modal_->open(uid, pname);
+  invalidate();
+}
+
 void SettingsDrawer::open_edit_profile(const std::string& uid) {
   if (!edit_profile_modal_ || !profile_card_) return;
   const config::PrfItem* item = profile_card_->find_item(uid);
@@ -1725,7 +1779,7 @@ void SettingsDrawer::wire_callbacks() {
     if (on_update_profile) on_update_profile(uid);
   };
   profile_card_->on_delete_profile = [this](const std::string& uid) {
-    if (on_delete_profile) on_delete_profile(uid);
+    request_delete_profile(uid);
   };
   // 订阅行右键 → Mini 菜单（_layout.tsx:1806-1856）
   profile_card_->on_context_menu = [this](const std::string& uid, PointF anchor) {
@@ -1745,6 +1799,15 @@ void SettingsDrawer::wire_callbacks() {
       invalidate();
     };
     edit_profile_modal_->on_dismiss = [this] { invalidate(); };
+  }
+  if (delete_confirm_modal_) {
+    delete_confirm_modal_->on_confirm = [this](const std::string& uid) {
+      if (on_delete_profile) on_delete_profile(uid);
+      if (profile_card_) profile_card_->reload_profiles();
+      if (bounds().w > 0) layout_tree(bounds());
+      invalidate();
+    };
+    delete_confirm_modal_->on_dismiss = [this] { invalidate(); };
   }
   // 接管三段 → 宿主 handleTakeoverModeChange（← _layout.tsx:1042-1114）
   //   宿主负责 isTunModeAvailable(is_admin||service_ok) 判定、service 缺失时试装、
@@ -1818,7 +1881,7 @@ void SettingsDrawer::wire_callbacks() {
       }
     };
   }
-  // Mixed Port：Enter / 失焦提交（Mini 无保存钮；src: basic-settings-card.tsx:232）
+  // Mixed Port：Enter / 失焦提交（Mini 无保存钮；src: basic-settings-card.tsx:492-516）
   auto commit_port = [this] {
     std::wstring t = basic_card_->port_field_->text();
     if (t.empty()) return;
@@ -1833,8 +1896,31 @@ void SettingsDrawer::wire_callbacks() {
           std::to_wstring(basic_card_->port_current_));
     }
   };
+  basic_card_->port_field_->on_key_intercept = [this](const KeyEvent& e) {
+    if (e.type == KeyEventType::Down && e.key == VK_ESCAPE) {
+      skip_port_blur_save_ = true;
+      if (basic_card_->port_current_ > 0) {
+        basic_card_->port_field_->set_text(
+            std::to_wstring(basic_card_->port_current_));
+      }
+      basic_card_->port_field_->blur();
+      return true;
+    }
+    return false;
+  };
   basic_card_->port_field_->on_submit = commit_port;
-  basic_card_->port_field_->on_focus_lost = commit_port;
+  basic_card_->port_field_->on_focus_lost = [this, commit_port]() {
+    if (should_skip_mixed_port_blur_save(open_, skip_port_blur_save_,
+                                         close_btn_pressed_)) {
+      skip_port_blur_save_ = false;
+      if (open_ && basic_card_->port_current_ > 0) {
+        basic_card_->port_field_->set_text(
+            std::to_wstring(basic_card_->port_current_));
+      }
+      return;
+    }
+    commit_port();
+  };
   basic_card_->save_btn_->on_click = commit_port;  // 隐藏件兼容测试
   // 皮肤条（隐藏件；保留接线）
   static const char* skin_names[] = {"retro-3d", "original", "modern-flat",
@@ -1943,9 +2029,9 @@ void SettingsDrawer::on_paint(IRenderTarget& rt) {
   rt.push_clip(area);
   // theme-panel 底 + 4px double 金边
   draw_panel_bg(rt, area);
-  // 左列 borderRight 1px divider（_layout.tsx:1436）
+  // 左列 borderRight 1px divider（src: _layout.tsx:1436）
   const float div_x = kPad + kLeftW;
-  rt.fill_rect({div_x, kPad, 1.0f, area.h - kPad * 2}, Brush{divider_color()});  // src: _layout.tsx:1436
+  rt.fill_rect({div_x, kPad, 1.0f, area.h - kPad * 2}, Brush{divider_color()});
   // 四张渐变卡（顺序与 _layout.tsx:1440-1516 一致）；
   // 订阅卡自绘底（ProfileImportCard::on_paint，避免重复画 bevel）
   if (combo_rect_.y < area.h) draw_card_bg(rt, combo_rect_);

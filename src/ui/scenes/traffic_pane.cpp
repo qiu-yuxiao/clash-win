@@ -353,7 +353,7 @@ void TrafficPane::on_paint(IRenderTarget& rt) {
                              : Color4f(1, 1, 1, 0.12f)});
   }
   if (!narrow_) {
-    // src: :77-80 bgcolor action.hover + borderRadius 1(=8px)
+    // src: :77-80 bgcolor action hover + borderRadius 1(=8px)
     Pen none{Color4f(0, 0, 0, 0), 0};
     Brush bg{light ? Color4f(0, 0, 0, 0.04f) : Color4f(1, 1, 1, 0.08f)};
     rt.round_rect(graph_rect_, kCardR + 2, none, &bg);

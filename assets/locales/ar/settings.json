@@ -35,8 +35,7 @@
         "tunUnavailable": "TUN requires Service Mode or Admin Mode"
       },
       "actions": {
-        "installService": "تثبيت الخدمة ",
-        "uninstallService": "Uninstall Service"
+        "installService": "تثبيت الخدمة "
       },
       "fields": {
         "systemProxy": "وكيل النظام",
@@ -188,8 +187,6 @@
           "backupSetting": "إعداد النسخ الاحتياطي",
           "runtimeConfig": "تكوين وقت التشغيل",
           "openConfDir": "فتح مجلد التكوين",
-          "openCoreDir": "فتح مجلد النواة",
-          "openLogsDir": "فتح مجلد السجلات",
           "checkUpdates": "التحقق من وجود تحديثات",
           "openDevTools": "أدوات المطور",
           "liteModeSettings": "LightWeight Mode Settings",
@@ -281,8 +278,7 @@
     },
     "clashCore": {
       "variants": {
-        "release": "الإصدار المستقر",
-        "alpha": "الإصدار التجريبي"
+        "release": "الإصدار المستقر"
       }
     },
     "liteMode": {
@@ -546,6 +542,14 @@
     "takeoverTooltipTun": "وضع محول TUN الافتراضي",
     "debugLogs": "سجلات تصحيح أخطاء النظام",
     "pathControl": "التحكم في المسار (انقر بزر الماوس الأيمن)",
+    "saveCustomRoutes": "حفظ المسارات",
+    "importCustomRoutes": "استيراد المسارات",
+    "saveCustomRoutesTooltip": "حفظ جميع قواعد التوجيه المخصصة في ملف (يمكن استيرادها بعد إعادة التثبيت)",
+    "importCustomRoutesTooltip": "استيراد قواعد التوجيه المخصصة من ملف محفوظ",
+    "routesExportSuccess": "تم حفظ {{count}} من قواعد التوجيه المخصصة",
+    "routesExportEmpty": "لا توجد قواعد توجيه مخصصة لحفظها",
+    "routesImportSuccess": "تم استيراد {{count}} من قواعد التوجيه المخصصة",
+    "routesImportEmpty": "لم يتم العثور على قواعد توجيه مخصصة صالحة في الملف المحدد",
     "statusTesting": "جاري الاختبار",
     "statusUntested": "لم يختبر",
     "statusError": "خطأ",
@@ -555,10 +559,7 @@
     "statusDelayGood": "زمن وصول جيد",
     "statusDelayExcellent": "زمن وصول ممتاز",
     "activeNodeLabel": "العقدة النشطة: ",
-    "connectionsActive": "نشط",
-    "connectionsHistory": "السجل",
     "connectionsDisconnectAll": "قطع اتصال الكل",
-    "connectionsClearHistory": "مسح السجل",
     "total": "الإجمالي",
     "proxyMethod": "وضع البروكسي",
     "globalProxy": "بروكسي شامل",
@@ -575,7 +576,6 @@
     "testingInProgress": "اختبار السرعة جارٍ، يرجى المحاولة لاحقًا",
     "testNotExecuted": "لم يُنفَّذ الاختبار: النواة غير جاهزة أو لا توجد عقد قابلة للاختبار",
     "testFailed": "فشل اختبار السرعة: {{message}}",
-    "updated": "تم التحديث",
     "portSaved": "تم حفظ منفذ البروكسي وإعادة تحميله",
     "testSingleNodeTooltip": "انقر لاختبار هذه العقدة فقط (دون التبديل)",
     "networkOffline": "غير متصل",
@@ -588,6 +588,11 @@
     "tunSnifferAuto": "تلقائي",
     "tunSnifferOn": "تشغيل",
     "tunSnifferOff": "إيقاف",
-    "tunSnifferNeedTunTooltip": "يعمل في وضع TUN فقط (فعّل وضع TUN لتشغيله)"
+    "tunSnifferNeedTunTooltip": "يعمل في وضع TUN فقط (فعّل وضع TUN لتشغيله)",
+    "settingEnabled": "تم التفعيل",
+    "settingDisabled": "تم التعطيل",
+    "tunSnifferUpdated": "تم تحديث إعدادات فاحص نطاقات TUN",
+    "autoLaunchVerifyFailed": "فشل التحقق من التشغيل التلقائي؛ قد يكون محظوراً بواسطة برنامج الأمان",
+    "invalidPort": "يرجى إدخال رقم منفذ صالح (1-65535)"
   }
 }
