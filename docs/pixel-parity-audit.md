@@ -18,7 +18,7 @@
 | P3 | 基础卡 TUN 嗅探行标签宽 | `basic-settings-card.tsx:361-378` 行内 px 4 + 标签 + gap 4 + 段 122 + px 4 | 标签宽按 −126 预留（少算 4px gap） | −134 |
 | P4 | 分段控件（4 处）盒模型 | `theme-settings-card.tsx:186-193`(118×20)、`basic-settings-card.tsx:385-390`(118×20)、`takeover-mode-card.tsx:73`/`routing-preference-card.tsx:66`(height 22)，均 `p:'1px'` + 容器 `border:1px` | 段外框按 118×20 / 高 25.2 布局；描边压在框线上；滑块内缩 1 | 段外框 122×24 / 高 26；描边画在框内；段盒 = padding box 三等分；滑块在段盒内再内缩 1（=外框内缩 2），与 `get3DSegmentedActiveStyle` 的 `left/top:1px` 一致 |
 | P5 | 主题卡头行高 | 头行 = max(标题 20.41, 段外框 24) = 24（`theme-settings-card.tsx:152-160`） | 20.4（按标题算，段溢出） | 24 |
-| P6 | 卡片固定高常量 | 内容驱动：基础卡 139.9 / 主题卡 165.2 / 组合卡 128.8 | 基础 156.4（注释把 `p:1` 当 16 **两侧各算一次**，多算 16）、主题 161.7、组合 128 | 139.9 / 165.2 / 128.8（组合内 60.4 + 52.4） |
+| P6 | 卡片固定高常量 | 内容驱动：基础卡 141.9 / 主题卡 165.3 / 组合卡 128.8 | 基础 156.4（注释把 `p:1` 当 16 **两侧各算一次**，多算 16）、主题 161.7、组合 128 | 141.9 / 165.3 / 128.8（组合内 60.4 + 52.4） |
 | P7 | 主题卡标题 i18n | `theme-settings-card.tsx:164` `settings.components.verge.theme.title`（且同键作 `title=` 提示） | 复用 `...basic.fields.themeSetting`（文案同、键不同，未来漂移会错位） | 改用 `theme.title` + 同键 tooltip |
 | P8 | 标题栏下边线颜色 | `_layout.tsx:1195` inline `borderBottom: 1px solid var(--divider-color)`；`use-custom-theme.ts:366-369` 注入 `rgba(0,0,0,.06)` / `rgba(255,255,255,.06)`，**与皮肤无关** | `--theme-border`（retro 浅色 #e2e8f0 / 深色 #333333，且逐皮肤不同） | 恒定 6% 黑 / 6% 白 |
 | P9 | 连接面板纵向节奏 | `connections-panel.tsx:110-220`：列 gap 4；第 2/3 项各带 `mt:0.5`=4；搜索框为 MUI `size="small"` TextField（`OutlinedInput.js:113,162` 内距 8.5 → 高 40） | 表头 48、列表 68（搜索框按 20 高、无 mt） | 搜索行 y=28 高 40；表格 y=76；表头带 81..101；数据行 106 起 |

@@ -69,16 +69,16 @@ constexpr float kComboH = 128.8f;         // 8 + 60.4 + 52.4 + 8
 constexpr float kComboTakeoverH = 60.4f;  // 20.41+6+26+8
 constexpr float kComboRoutingH = 52.4f;   // 20.41+6+26
 // src: src/pages/_layout/components/basic-settings-card.tsx:300-398 无固定高，内容驱动：
-//   p8 + 标题 20.41 + mb4 + 2×23.98 + 2.4(段行高 26.4-23.98?) ... 见下逐行累加
+//   p8 + 标题 20.41 + mb4 + 行1 23.98 + 行2 23.98 + 嗅探行 26.4 + mt2 + 端口行 25.1 + p8
 //   行高：caption 13px×1.66=21.58 + py 0.15×2=2.4 = 23.98（前两行）
 //   嗅探行：段外框 24 撑高 → 24+2.4 = 26.4
 //   端口行：输入框 22.7 撑高 → 22.7+2.4 = 25.1，另有 mt 0.25=2
-//   = 8 + 20.41 + 4 + 23.98×2 + 26.4 + 2 + 25.1 + 8 = 139.87
-constexpr float kBasicH = 139.9f;
+//   = 8 + 20.41 + 4 + 23.98 + 23.98 + 26.4 + 2 + 25.1 + 8 = 141.87
+constexpr float kBasicH = 141.9f;
 // src: theme-settings-card.tsx:148-476 无固定高（flexShrink 0）：
 //   p8 + 头行 24（标题 20.41 与 118×20→外框 122×24 的段取高者）
-//   + mb4 + 2×23.2 + mt8 + 按钮24 + 页脚(pt8+18.26+16.6) + p8 = 165.22
-constexpr float kThemeH = 165.2f;
+//   + mb4 + 2×23.2 + mt8 + 按钮24 + 页脚(pt8+18.3+16.6) + p8 = 165.3
+constexpr float kThemeH = 165.3f;
 
 bool is_light() { return ThemeService::instance().is_light(); }
 RectF inset_rect(const RectF& r, float d);
