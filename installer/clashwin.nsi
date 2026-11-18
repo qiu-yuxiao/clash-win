@@ -48,7 +48,7 @@ ${UnStrStr}
 
 ; ---------- 可覆盖定义（构建脚本传入绝对路径） ----------
 !ifndef VERSION
-  !define VERSION "1.0.2"
+  !define VERSION "1.0.3"
 !endif
 !ifndef STAGEDIR
   !define STAGEDIR "stage"

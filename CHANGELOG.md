@@ -8,7 +8,7 @@ Format reference: `Changelog.md` in the Clash Mini repository (newest first, `##
 
 ---
 
-## 未发布 / Unreleased
+## v1.0.3 (2026-11-19)
 
 ### Button Three-State Visuals (V8 closed)
 - **Buttons now carry the whole `get3DButtonStyle` state model**: `ButtonPaint` gained three-state shadows (`ShadowLayer shadow[2]` / `shadow_hover` / `shadow_active`, with layer counts that differ per state), three-state glow (`glow_hover` / `glow_active`, distinguishable from "no glow in this state") and `border_disabled`. Hover now deepens the shadow and widens the glow the way the source does — retro-3d adds a *second* layer `0 4d 4d` and takes its glow from `8v/0.2` to `12v/0.4` (`0.15 -> 0.35` for error), original `1/3 .15 -> 2/6 .2`, modern-flat `2v/4v -> 3v/6v`, frosted `4/12 -> 6/16`, cyberpunk `5d -> 10d` — and press pulls it back (`0 d 2px`, `2v`, `2d`, glow gone in retro-3d). Disabled buttons keep each skin's own border colour instead of being drawn borderless.
