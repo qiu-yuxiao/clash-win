@@ -30,9 +30,9 @@ inline constexpr float kImportCardW = 240;  // ← 抽屉左列 240px（_layout.
 inline constexpr float kProfileRowH = 61;
 inline constexpr float kProfileRowVisualH = 53;
 inline constexpr float kProfileListMaxH = 110;  // src: :196 maxHeight 110
-// 卡固定部分 = p8 + 标题行20.4 + mb6 + 输入 46 + gap4 + 按钮24 + mb8 + p8 = 124.4
-// src: profile-import-card.tsx:145-165 multiline 2 行高（py4 + 2×13px*1.4375 + py4 ≈ 46）
-inline constexpr float kProfileCardChromeH = 124.4f;
+// 卡固定部分 = p8 + 标题行20.4 + mb6 + 输入 48 + gap4 + 按钮24 + mb8 + p8 = 126.4
+// src: profile-import-card.tsx:138-167（输入框 48 = 根 p8.5×2 + 文本域 31）
+inline constexpr float kProfileCardChromeH = 126.4f;
 
 // 单条订阅行（src: profile-import-card.tsx:217-366）
 class ProfileRowWidget : public Widget {

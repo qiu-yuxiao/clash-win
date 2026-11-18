@@ -127,9 +127,9 @@ UT_TEST(t36_b3_theme_card_copyright_vertical_stability) {
     UT_CHECK(tc != nullptr);
     if (!tc) continue;
 
-    // 主题卡自然内容包裹高 165.3f（p8 + 头行 24 + mb4 + 2×23.2 + mt8 + 按钮 24
-    //   + 页脚 pt8+18.26+16.6 + p8），段外框 122×24 撑高头行
-    UT_CHECK(near_f(tc->bounds().h, 165.3f, 0.5f));
+    // 主题卡自然内容包裹高 166.3f（p8 + 头行 24 + mb4 + 2×23.2 + mt8 + 按钮 24
+    //   + 页脚 borderTop 1px dashed + pt8 + 18.26 + 16.6 + p8），段外框 122×24 撑高头行
+    UT_CHECK(near_f(tc->bounds().h, 166.3f, 0.5f));
 
     UT_CHECK(tc->logs_btn_ != nullptr);
     UT_CHECK(tc->copyright_ != nullptr);
@@ -138,10 +138,10 @@ UT_TEST(t36_b3_theme_card_copyright_vertical_stability) {
 
     const float btn_bottom = tc->logs_btn_->bounds().bottom();
     const float foot_y = tc->copyright_->bounds().y;
-    // 锚定于 logs_btn_ 下方正好 8 DIP
-    UT_CHECK(near_f(foot_y, btn_bottom + 8.0f));
-    // 邮箱紧随著作权下方 18.3 DIP
-    UT_CHECK(near_f(tc->email_->bounds().y, foot_y + 18.3f));
+    // 页脚盒顶边框 1px dashed + pt 8 → 版权行顶 = 按钮底 + 9
+    UT_CHECK(near_f(foot_y, btn_bottom + 9.0f));
+    // 邮箱紧随著作权下方 18.26 DIP（11px/10px caption ×1.66 行高）
+    UT_CHECK(near_f(tc->email_->bounds().y, foot_y + 18.26f, 0.05f));
 
     if (i == 0) {
       expected_rel_y = foot_y;
@@ -207,20 +207,22 @@ UT_TEST(t36_b6_profile_import_card_url_multiline_height) {
   UT_CHECK(card.url_field() != nullptr);
   if (!card.url_field()) return;
 
-  // 4a) 输入框高度严格为 46.0 DIP（容纳 2 行文字）
-  UT_CHECK(near_f(card.url_field()->bounds().h, 46.0f));
+  // 4a) 输入框外框高度 48.0 DIP（MUI multiline small 根内距 8.5×2 + 文本域 31）
+  // ★ MUI 盒模型：文本域高不随 inline fontSize 缩放（继承根 lineHeight 23px 绝对值）
+  //   根 p8.5×2 + 文本域 31 = 48
+  UT_CHECK(near_f(card.url_field()->bounds().h, 48.0f));
   UT_CHECK(near_f(card.url_field()->bounds().y, 34.4f));
 
-  // 4b) 卡片固定头部镀铬高度为 124.4 DIP
-  UT_CHECK(near_f(kProfileCardChromeH, 124.4f));
+  // 4b) 卡片固定头部镀铬高度为 126.4 DIP
+  UT_CHECK(near_f(kProfileCardChromeH, 126.4f));
 
-  // 4c) preferred_height 包含 124.4 DIP 基础高
-  UT_CHECK(card.preferred_height() >= 124.4f);
+  // 4c) preferred_height 包含 126.4 DIP 基础高
+  UT_CHECK(card.preferred_height() >= 126.4f);
 
-  // 4d) 列表起始 y 严格等于 116.4 DIP (34.4 + 46 + gap4 + btn24 + mb8)
+  // 4d) 列表起始 y 严格等于 118.4 DIP (34.4 + 48 + gap4 + btn24 + mb8)
   UT_CHECK(card.list() != nullptr);
   if (card.list()) {
-    UT_CHECK(near_f(card.list()->bounds().y, 116.4f));
+    UT_CHECK(near_f(card.list()->bounds().y, 118.4f));
   }
 }
 

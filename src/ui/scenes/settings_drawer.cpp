@@ -68,17 +68,19 @@ constexpr float kCloseSize = 28.0f, kCloseTop = 3.0f, kCloseRight = 8.0f;
 constexpr float kComboH = 128.8f;         // 8 + 60.4 + 52.4 + 8
 constexpr float kComboTakeoverH = 60.4f;  // 20.41+6+26+8
 constexpr float kComboRoutingH = 52.4f;   // 20.41+6+26
-// src: src/pages/_layout/components/basic-settings-card.tsx:300-398 无固定高，内容驱动：
-//   p8 + 标题 20.41 + mb4 + 行1 23.98 + 行2 23.98 + 嗅探行 26.4 + mt2 + 端口行 25.1 + p8
+// src: src/pages/_layout/components/basic-settings-card.tsx:154-530 无固定高，内容驱动：
+//   p8 + 标题 20.41 + mb4 + 行1 23.98 + 行2 23.98 + 嗅探行 26.4 + 端口行(mt2 + 29.4) + p8
 //   行高：caption 13px×1.66=21.58 + py 0.15×2=2.4 = 23.98（前两行）
 //   嗅探行：段外框 24 撑高 → 24+2.4 = 26.4
-//   端口行：输入框 22.7 撑高 → 22.7+2.4 = 25.1，另有 mt 0.25=2
-//   = 8 + 20.41 + 4 + 23.98 + 23.98 + 26.4 + 2 + 25.1 + 8 = 141.87
-constexpr float kBasicH = 141.9f;
+//   端口行：输入框外框 27（=InputBase 根 lineHeight 1.4375em→23px 绝对值 + inline py2×2）
+//           + py 2.4 = 29.4，另有 mt 0.25=2
+//   = 8 + 20.41 + 4 + 23.98 + 23.98 + 26.4 + 2 + 29.4 + 8 = 146.17
+constexpr float kBasicH = 146.2f;
 // src: theme-settings-card.tsx:148-476 无固定高（flexShrink 0）：
 //   p8 + 头行 24（标题 20.41 与 118×20→外框 122×24 的段取高者）
-//   + mb4 + 2×23.2 + mt8 + 按钮24 + 页脚(pt8+18.3+16.6) + p8 = 165.3
-constexpr float kThemeH = 165.3f;
+//   + mb4 + 2×23.2 + mt8 + 按钮24
+//   + 页脚(borderTop 1px dashed + pt8 + 18.26 + 16.6) + p8 = 166.3
+constexpr float kThemeH = 166.3f;
 
 bool is_light() { return ThemeService::instance().is_light(); }
 RectF inset_rect(const RectF& r, float d);
@@ -698,16 +700,22 @@ void BasicCard::on_arrange(const RectF& area) {
          seg_w, seg_h});
   }
   // Mixed Port 行：grid 第 4 行跨两列，mt 0.25=2（src: src/pages/_layout/components/basic-settings-card.tsx:398）
-  const float mixed_h = 25.1f;  // 输入框 22.7 撑高 + py 2.4
+  //   输入框外框高（★ box 模型）：InputBase 根 `lineHeight:'1.4375em'`（InputBase.js:78）
+  //   在根 16px 字号下计算为 **23px 绝对值**，输入框 `font:inherit` 继承该绝对值
+  //   （不随 inline `fontSize:13px` 缩回 18.7）；再叠加 inline `py:2px`
+  //   → 27 = 23 + 2 + 2（对齐 MUI 缺省 small 高度 40 = 23 + 8.5×2）
+  const float port_fh = 27.0f;
+  const float port_fw = 88.0f;  // inline width 80 是 content-box，+ pl4/pr4 = 88
+  const float mixed_h = port_fh + 2.4f;  // 输入框撑高 + py 0.15×2
   const float mixed_y = sniffer_y + sniffer_row_h + 2.0f;
-  // 标签宽 auto：整行余下空间（src: :218-220 label 为 flex 1，space-between）
-  //   行内：px 0.5(左4) + 标签 + gap 0.5(4) + 输入框 80 + px 0.5(右4)
-  //   → 标签宽 = area.w - 2*pad - 8 - 80 - 4
+  // 标签宽 auto：整行余下空间（src: :486-489 label 与右侧 Box 由 space-between 分开）
+  //   行内：px 0.5(左4) + 标签 + gap 0.5(4) + 输入框 88 + px 0.5(右4) → 标签宽 = 内容宽 - 100
   port_label_->layout_tree({pad + 4.0f, mixed_y,
-                            std::max(0.0f, area.w - pad * 2.0f - 88.0f), mixed_h});
-  // 输入框 src: basic-settings-card.tsx:238-251 width 80px，py 2 + 13*1.4375 ≈ 22.7
-  port_field_->layout_tree({area.w - pad - 80.0f, mixed_y + (mixed_h - 22.7f) / 2.0f,
-                           80.0f, 22.7f});
+                            std::max(0.0f, area.w - pad * 2.0f - port_fw - 12.0f),
+                            mixed_h});
+  // 输入框 src: basic-settings-card.tsx:508-522（htmlInput width 80 / pt2 pb2 pl4 pr4 / fs13）
+  port_field_->layout_tree({area.w - pad - 4.0f - port_fw,
+                            mixed_y + (mixed_h - port_fh) / 2.0f, port_fw, port_fh});
 }
 
 // ---------- ThemeCard ----------
@@ -887,20 +895,23 @@ void ThemeCard::on_arrange(const RectF& area) {
   const float logs_w = lb_sz.w + 8.0f;
   logs_btn_->layout_tree({(area.w - logs_w) / 2.0f, row1_y + row_h * 2 + 8,
                           logs_w, 24.0f});
-  // 页脚：src: theme-settings-card.tsx:452-466 mt:auto pt:1=8 紧随调试日志按钮下方 8 DIP，消除窗口高度依赖
-  const float foot_y = logs_btn_->bounds().bottom() + 8.0f;
-  copyright_->layout_tree({pad, foot_y, area.w - pad * 2, 18.3f});
-  email_->layout_tree({pad, foot_y + 18.3f, area.w - pad * 2, 16.6f});
+  // 页脚：src: theme-settings-card.tsx:431-466
+  //   页脚 Box 紧接调试日志按钮（mt:auto 在内容撑满时为 0）：
+  //   borderTop 1px dashed（占 1px 布局高）+ pt:1=8 + 版权行 18.26 + 邮箱行 16.6
+  const float foot_top = logs_btn_->bounds().bottom();
+  const float foot_y = foot_top + 1.0f + 8.0f;
+  copyright_->layout_tree({pad, foot_y, area.w - pad * 2, 18.26f});
+  email_->layout_tree({pad, foot_y + 18.26f, area.w - pad * 2, 16.6f});
 }
 
 void ThemeCard::on_paint(IRenderTarget& rt) {
   Widget::on_paint(rt);
   if (!copyright_) return;
   // src: theme-settings-card.tsx:460 borderTop 1px dashed divider + :457 pt:1=8
-  //   → 虚线在页脚内容盒（copyright 行盒）上方 8px，且只跨卡片内容宽
-  //   （页脚 Box 是 p:1 卡片的内容子盒：左右各让 8px，不是满卡宽）
+  //   → 虚线＝页脚盒的顶边框：位于 copyright 行盒上方 9px（1 边框 + 8 内距），
+  //   且只跨卡片内容宽（页脚 Box 是 p:1 卡片的内容子盒，左右各让 8px）
   //   divider light rgba(0,0,0,.12) / dark rgba(255,255,255,.12)（_theme.tsx:47）
-  const float y = copyright_->bounds().y - 8.0f;
+  const float y = copyright_->bounds().y - 9.0f;
   const float x0 = kCardPad, x1 = bounds().w - kCardPad;
   if (y <= 0 || x1 <= x0) return;
   Brush dash{(theme::ThemeService::instance().skin() == theme::SkinId::Retro3d &&

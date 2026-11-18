@@ -142,7 +142,12 @@ UT_TEST(tfix_drawer_covers_content_not_titlebar) {
   Px content_panel = pixel(135, 40);
   // original：白底（近白、无金色偏蓝）
   UT_CHECK(content_panel.r > 240 && content_panel.b > 240);
-  Px panel = pixel(135, 297);  // 左列卡片间隙（profile/combo 之间 5px gap）
+  // 左列卡片间隙（profile/combo 之间 5px gap）：按实际几何取中点，
+  //   不再硬编码 y（卡片高随源码推导变动，硬编码会失效）
+  const float gap_y = t.drawer->global_bounds().y +
+                      (t.drawer->profile_card()->bounds().bottom() +
+                       t.drawer->takeover_card()->bounds().y) * 0.5f;
+  Px panel = pixel(135, static_cast<int>(gap_y));
   UT_CHECK(panel.r > 240);     // theme-panel 底
   // 关闭恢复
   t.drawer->set_open(false);
