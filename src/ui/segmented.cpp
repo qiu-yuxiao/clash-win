@@ -55,8 +55,9 @@ std::optional<RectF> Segmented::tooltip_anchor_rect() const {
     return std::nullopt;
   }
   const RectF g = global_bounds();
-  const float seg_w = g.w / static_cast<float>(options_.size());
-  return RectF{g.x + static_cast<float>(hover_) * seg_w, g.y, seg_w, g.h};
+  const float seg_w = (g.w - 2.0f) / static_cast<float>(options_.size());
+  return RectF{g.x + 1.0f + static_cast<float>(hover_) * seg_w, g.y + 1.0f,
+               seg_w, std::max(0.0f, g.h - 2.0f)};
 }
 
 void Segmented::set_selected(int i) {
@@ -92,8 +93,10 @@ SizeF Segmented::on_measure(float max_w, float max_h) {
 
 int Segmented::hit_segment(const PointF& local) const {
   if (options_.empty() || bounds().w <= 0) return -1;
-  float seg_w = bounds().w / static_cast<float>(options_.size());
-  int idx = static_cast<int>(local.x / seg_w);
+  // 命中区 = 各段标签盒（CSS 上位于容器 padding box 内：外框 1px border 之内）
+  const float seg_w = (bounds().w - 2.0f) / static_cast<float>(options_.size());
+  if (seg_w <= 0.0f) return -1;
+  int idx = static_cast<int>((local.x - 1.0f) / seg_w);
   if (idx < 0 || idx >= static_cast<int>(options_.size())) return -1;
   return idx;
 }
@@ -171,8 +174,9 @@ A11ySubItem Segmented::a11y_virtual_child(size_t index) const {
   }
   const float seg_w = options_.empty()
                           ? 0.0f
-                          : bounds().w / static_cast<float>(options_.size());
-  sub.local_bounds = {seg_w * static_cast<float>(index), 0.0f, seg_w, bounds().h};
+                          : (bounds().w - 2.0f) / static_cast<float>(options_.size());
+  sub.local_bounds = {1.0f + seg_w * static_cast<float>(index), 1.0f, seg_w,
+                      std::max(0.0f, bounds().h - 2.0f)};
   sub.enabled = enabled();
   sub.focusable = enabled();
   sub.can_invoke = enabled();
@@ -240,6 +244,18 @@ void Segmented::on_paint(IRenderTarget& rt) {
     act_grad_angle = p.active_grad_angle;
     if (p.container_radius > 0.01f) cont_radius = p.container_radius;
   }
+  // ★ 盒模型：bounds = CSS **border box**（Mini 侧 `Box` 无全局 border-box 重置，
+  //   `height:22 + p:'1px' + border 1px` 的 content-box 外框 = 26）。
+  //   容器 1px 描边画在框内 [0,1]（stroke 居中线 = 0.5）；段内盒 = border 内缩 1px
+  //   的 padding box；选中块 = 段盒再内缩 1px（get3DSegmentedActiveStyle left/top 1px）。
+  const float kBorderInset = 0.5f;  // 描边中心线：使 1px 描边恰好落在框内
+  const float kBorder = 1.0f;
+  RectF cbox{r.x + kBorderInset, r.y + kBorderInset,
+             std::max(0.0f, r.w - kBorderInset * 2.0f),
+             std::max(0.0f, r.h - kBorderInset * 2.0f)};
+  RectF padbox{r.x + kBorder, r.y + kBorder,
+               std::max(0.0f, r.w - kBorder * 2.0f),
+               std::max(0.0f, r.h - kBorder * 2.0f)};
   Brush bg{bg_c};
   // src: button-styles.ts:939-945 容器 1px rgba(212,175,55,.35/.22)（gold_3d_）
   Color4f border_c = themed_ ? cont_border : act_border;
@@ -248,17 +264,19 @@ void Segmented::on_paint(IRenderTarget& rt) {
                                           ? 0.35f
                                           : 0.22f);
   // 容器 inset 内凹阴影（← :934-938 retro-3d）
-  rt.round_rect(r, cont_radius, {Color4f(0, 0, 0, 0), 0.0f}, &bg);
+  rt.round_rect(cbox, std::max(0.0f, cont_radius - kBorderInset),
+                {Color4f(0, 0, 0, 0), 0.0f}, &bg);
   if (cont_inset) {
-    draw_top_inset_shadow(rt, r, cont_radius, cont_inset_color, cont_inset_dy,
-                          cont_inset_blur);
+    draw_top_inset_shadow(rt, cbox, std::max(0.0f, cont_radius - kBorderInset),
+                          cont_inset_color, cont_inset_dy, cont_inset_blur);
     // src: button-styles.ts:934-938 inset 0 3d 5d 轨道四周内凹阴影（含左/右内边界阴影）
-    draw_inner_glow(rt, r, cont_radius,
+    draw_inner_glow(rt, cbox, std::max(0.0f, cont_radius - kBorderInset),
                     Color4f{cont_inset_color.r, cont_inset_color.g,
                             cont_inset_color.b, cont_inset_color.a * 0.65f},
                     cont_inset_blur * 0.75f, 4);
   }
-  rt.round_rect(r, cont_radius, {border_c, cont_bw}, nullptr);
+  rt.round_rect(cbox, std::max(0.0f, cont_radius - kBorderInset),
+                {border_c, cont_bw}, nullptr);
   // 容器顶部高光线（← 0 1px 0 rgba(255,255,255,.8|.08)）
   if (cont_top_hi.a > 0.004f)
     rt.draw_line({r.x + cont_radius, r.bottom() + 0.5f},
@@ -269,13 +287,13 @@ void Segmented::on_paint(IRenderTarget& rt) {
                  {r.right() - cont_radius, r.y + 0.5f},
                  Pen{cont_top_hi, 1.0f});
   if (options_.empty()) return;
-  float seg_w = r.w / static_cast<float>(options_.size());
+  float seg_w = padbox.w / static_cast<float>(options_.size());
   for (int i = 0; i < static_cast<int>(options_.size()); ++i) {
-    RectF seg{r.x + seg_w * i, r.y, seg_w, r.h};
+    RectF seg{padbox.x + seg_w * i, padbox.y, seg_w, padbox.h};
     bool sel = i == selected_;
     if (sel) {
-      // src: button-styles.ts:1005 滑块 radius 3；容器 p 1px → 内缩 1
-      const float inset = gold_3d_ ? 1.0f : 2.0f;
+      // src: button-styles.ts:1000-1001 选中块 absolute inset 1px（相对 padding box）
+      const float inset = 1.0f;
       RectF sr{seg.x + inset, seg.y + inset, seg.w - 2 * inset, seg.h - 2 * inset};
       if (gold_3d_) {
         // src: button-styles.ts:1006-1007 135° 六停金渐变（retro-3d）

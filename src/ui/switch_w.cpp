@@ -22,8 +22,9 @@ bool SwitchW::set_checked(bool v, bool fire) {
 
 SizeF SwitchW::on_measure(float max_w, float max_h) {
   (void)max_w; (void)max_h;
-  // 尺寸随皮肤：retro/original/modern 28×14、frosted 28×14、cyberpunk 18×10、
-  //   monochrome 28×14（← base-switch.tsx sizeSmall 强制尺寸）
+  // 尺寸随皮肤（Mini 唯一的开关用法是基础设置 4 个 size="small"）：
+  //   retro/original/modern 28×14、frosted 28×14、cyberpunk 18×10、monochrome 18×10
+  //   （← base-switch.tsx:26-51 `.MuiSwitch-sizeSmall` 强制尺寸）
   const auto sp = theme::ThemeService::instance().switch_paint();
   width_ = sp.track_w;
   height_ = sp.track_h;

@@ -112,33 +112,20 @@ UT_TEST(t37_basic_card_switches_and_labels_bottom_aligned_pixels) {
       for (int i = 0; i < 4; ++i) {
         UT_CHECK(sws[i] != nullptr);
         if (!sws[i] || !basic->labels_[i]) continue;
-        // 尺寸按皮肤自身尺寸 × 0.85（cyberpunk 18×10 → 15.3×8.5；其余 28×14 → 23.8×11.9）
+        // 尺寸按皮肤自身尺寸 × 0.85（cyberpunk/monochrome 18×10 → 15.3×8.5；其余 28×14 → 23.8×11.9）
         UT_CHECK(near_f(sws[i]->bounds().w, sp.track_w * 0.85f, 0.25f));
         UT_CHECK(near_f(sws[i]->bounds().h, sp.track_h * 0.85f, 0.25f));
 
-        // 离屏逐像素扫描该标签的真实字面墨迹底沿（剔除 y/g/p/q/j 下伸尾以测主基线，并单独验证原串）
-        Label lb_probe;
-        lb_probe.style = basic->labels_[i]->style;
-        lb_probe.style.color = Color4f::hex(0x111111);
-        std::wstring base_txt = basic->labels_[i]->text;
-        for (wchar_t& ch : base_txt) {
-          if (ch == L'g' || ch == L'j' || ch == L'p' || ch == L'q' || ch == L'y') {
-            ch = L'a';
-          }
-        }
-        lb_probe.set_text(base_txt);
-        const RectF lb_box{0.0f, 0.0f, basic->labels_[i]->bounds().w,
-                           basic->labels_[i]->bounds().h};
-        const float lb_base_bot =
-            scan_ink_bottom_dip(lb_probe, lb_box, Color4f::hex(0xFFFFFF), 144.0f);
-
-        const float sw_body_bot =
-            (sws[i]->bounds().y - basic->labels_[i]->bounds().y) +
-            std::max(sws[i]->bounds().h,
-                     0.5f * (sws[i]->bounds().h + sp.thumb_d * 0.85f));
-        UT_CHECK(lb_base_bot > 10.0f);
-        // 跨 OS 字体 / 144 DPI 灰度抗锯齿边缘（1~2 物理像素 ≈ 0.67~1.33 DIP）下，主基线与开关底沿误差 <= 1.5 DIP
-        UT_CHECK(std::fabs(lb_base_bot - sw_body_bot) <= 1.5f);
+        // ★ 垂直定位对齐 Mini 的 flex 模型（basic-settings-card.tsx:45-53 gridItemSx
+        //   `alignItems:'center'` + `transform-origin:'right center'` 的 scale(.85)）：
+        //   行内标签盒与开关视觉盒共用同一垂直中心线 —— 不再按"标签墨迹底沿"对齐。
+        //   断言：开关视觉盒中心 == 标签盒中心（误差 <= 0.3 DIP）。
+        const float sw_cy = sws[i]->bounds().y + sws[i]->bounds().h * 0.5f;
+        const float lb_cy =
+            basic->labels_[i]->bounds().y + basic->labels_[i]->bounds().h * 0.5f;
+        UT_CHECK(near_f(sw_cy, lb_cy, 0.3f));
+        // 右缘 = 列右缘 - px 0.5(4) - mr 1px；左缘随皮肤宽度走
+        UT_CHECK(sws[i]->bounds().right() <= basic->labels_[i]->bounds().right() + 40.0f);
       }
     }
   }

@@ -1179,8 +1179,8 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
   set_opacity(fade_.value());        // 每帧同步整棵子树的不透明度
   if (fade_.hidden()) return;
 
-  // 豁免: Mini 无对应物 — 本查看器为 ClashWin 自加的终端风日志查看器，
-  //   Mini 日志页无终端配色字面量（出处: layout-dialogs.tsx:565-594 无终端配色）。
+  // src: src/pages/logs.tsx + src/pages/_layout/components/layout-dialogs.tsx:595-641
+  // 已按 Mini 主题色实现，无终端风配色字面量（过时豁免注释已删）。
   const float pane_w = std::min(theme::kPopupPaneWidth, bounds().w);
   rt.fill_rect({0, 0, pane_w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
 
@@ -1788,26 +1788,35 @@ void AntivirusWhitelistModal::close() {
   if (on_dismiss) on_dismiss();
 }
 
+// BUG-395：360 底层硬白名单文件与追加内容（品牌替换为 Clash Win，对齐 Mini v3.5.2）
+// src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:24-27
+static const wchar_t* const kWhiteInternalIniPath =
+    L"C:\\Program Files (x86)\\360\\360Safe\\netmon\\whiteinternal.ini";
+static const wchar_t* const kWhiteInternalIniSnippet =
+    L"path1=Clash Win\\clashwin.exe\r\npath2=Clash Win\\win-mihomo.exe";
+
 void AntivirusWhitelistModal::rebuild_sections() const {
   sections_.clear();
-  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:46-68
-  struct KeyPair {
-    const char* title_key;
-    const char* body_key;
-  };
-  static const KeyPair kKeys[5] = {
-      {"layout.components.antivirus.whyTitle", "layout.components.antivirus.why"},
-      {"layout.components.antivirus.benefitTitle", "layout.components.antivirus.benefit"},
-      {"layout.components.antivirus.optionalTitle", "layout.components.antivirus.optional"},
-      {"layout.components.antivirus.consequenceTitle", "layout.components.antivirus.consequence"},
-      {"layout.components.antivirus.howTitle", "layout.components.antivirus.how"},
-  };
-  for (const auto& kp : kKeys) {
-    SectionLayout sl;
-    sl.title = tr(kp.title_key);
-    sl.body = tr(kp.body_key);
-    sections_.push_back(std::move(sl));
-  }
+  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:133-276
+  // 原因说明（无卡片）→ 方案一卡片 → 方案二卡片
+  BlockLayout why;
+  why.kind = 0;
+  why.title = tr("layout.components.antivirus.whyTitle");
+  why.body = tr("layout.components.antivirus.why");
+  sections_.push_back(std::move(why));
+
+  BlockLayout easy;
+  easy.kind = 1;
+  easy.title = tr("layout.components.antivirus.easyTitle");
+  easy.body = tr("layout.components.antivirus.easyBody");
+  sections_.push_back(std::move(easy));
+
+  BlockLayout root;
+  root.kind = 2;
+  root.title = tr("layout.components.antivirus.rootTitle");
+  root.body = tr("layout.components.antivirus.rootIntro") + L"\n" +
+              tr("layout.components.antivirus.rootSteps");
+  sections_.push_back(std::move(root));
 }
 
 void AntivirusWhitelistModal::on_arrange(const RectF& area) {
@@ -1837,28 +1846,56 @@ void AntivirusWhitelistModal::on_arrange(const RectF& area) {
     if (sz.h > 0.0f) title_h_ = std::max(21.0f, sz.h + 2.0f);
   }
 
+  // BUG-395 卡片内边距（src: antivirus-whitelist-dialog.tsx cardSx p:1.35 → 10.8px ≈ 11）
+  const float card_pad = 11.0f;
+  const float inner_btn_h = 28.0f;   // 方案一/二按钮 size=small py≈0.6 + 12.5px
+  const float code_box_h = 34.0f;    // 代码框两行 11px/1.45 + padding
+
   float y_rel = 0.0f;
   for (size_t i = 0; i < sections_.size(); ++i) {
     auto& sec = sections_[i];
     sec.y_rel = y_rel;
-    sec.title_h = 19.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:108-109
-    sec.body_h = 20.0f;   // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:118-119
+    sec.title_h = 19.0f;  // src: antivirus-whitelist-dialog.tsx:108-109 fontSize 13
+    sec.body_h = 20.0f;   // src: antivirus-whitelist-dialog.tsx:119 fontSize 12.5
     if (te) {
       TextStyle sts;
-      sts.size = 13.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:108
+      sts.size = 13.0f;
       sts.weight = static_cast<int>(Weight::Bold);
       sts.wrap = true;
       const SizeF st_sz = te->measure_text(sec.title, sts, inner_w);
       if (st_sz.h > 0.0f) sec.title_h = std::max(19.0f, st_sz.h + 2.0f);
 
       TextStyle bts;
-      bts.size = 12.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:119
+      bts.size = 12.5f;
       bts.weight = static_cast<int>(Weight::Normal);
       bts.wrap = true;
       const SizeF sb_sz = te->measure_text(sec.body, bts, inner_w);
       if (sb_sz.h > 0.0f) sec.body_h = std::max(20.0f, sb_sz.h + 4.0f);
     }
-    y_rel += sec.title_h + title_mb + sec.body_h;
+
+    float block_h = sec.title_h + title_mb + sec.body_h;
+    if (sec.kind == 1) {
+      // 方案一：warning 框 + 一键静默按钮（卡片内）
+      if (te) {
+        TextStyle wt;
+        wt.size = 12.0f;
+        wt.wrap = true;
+        const SizeF ws =
+            te->measure_text(tr("layout.components.antivirus.easyWarning"), wt,
+                             inner_w - card_pad * 2.0f);
+        sec.body_h += (ws.h > 0.0f ? ws.h : 34.0f) + 10.0f;  // 警告框高+上间距
+        block_h = sec.title_h + title_mb + sec.body_h;
+      }
+      block_h += card_pad * 2.0f + inner_btn_h + 8.0f;
+    } else if (sec.kind == 2) {
+      // 方案二：两个代码框 + 两个复制按钮（卡片内）
+      block_h += card_pad * 2.0f + code_box_h * 2.0f + 6.0f +
+                 inner_btn_h + 8.0f;
+    } else {
+      block_h += 0.0f;  // 原因说明无卡片内边距
+    }
+    sec.block_h = block_h;
+    y_rel += block_h;
     if (i + 1 < sections_.size()) y_rel += sec_gap;
   }
   total_sections_h_ = y_rel;
@@ -1877,6 +1914,29 @@ void AntivirusWhitelistModal::on_arrange(const RectF& area) {
                    std::max(0.0f, actions_rect_.y - title_rect_.bottom())};
   // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:130-142 fullWidth 按钮
   btn_close_rect_ = {cx + px, actions_rect_.y + 1.0f + py_tb, inner_w, btn_h};
+
+  // BUG-395：三个新增按钮的相对 y（相对 content 顶部，未含 scroll；y 存相对偏移）
+  // 遍历块累加到方案一/方案二内部的按钮位置
+  {
+    float off = py_c;
+    for (const auto& sec : sections_) {
+      if (sec.kind == 1) {
+        // body 内已含 warning 框高；按钮在 body 之后、卡片底内边距之前
+        const float btn_y = off + sec.title_h + title_mb + sec.body_h + card_pad;
+        btn_enable_silent_rect_ = {cx + px + card_pad, btn_y,
+                                   inner_w - card_pad * 2.0f, inner_btn_h};
+      } else if (sec.kind == 2) {
+        // 两个代码框 + 复制按钮，紧跟 body
+        const float after_body = off + sec.title_h + title_mb + sec.body_h + card_pad;
+        const float copy_y = after_body + code_box_h * 2.0f + 6.0f;
+        const float half_w = (inner_w - card_pad * 2.0f - 6.0f) / 2.0f;
+        btn_copy_path_rect_ = {cx + px + card_pad, copy_y, half_w, inner_btn_h};
+        btn_copy_snippet_rect_ = {cx + px + card_pad + half_w + 6.0f, copy_y,
+                                  half_w, inner_btn_h};
+      }
+      off += sec.block_h + sec_gap;
+    }
+  }
 
   const float ms = max_scroll();
   if (scroll_y_ > ms) scroll_y_ = ms;
@@ -1936,33 +1996,126 @@ void AntivirusWhitelistModal::on_paint(IRenderTarget& rt) {
   rt.fill_rect({card_rect_.x, title_rect_.bottom() - 1.0f, card_rect_.w, 1.0f},
                Brush{tokens.divider_color});
 
-  // Content block（5 sections，src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:96-128）
+  // Content block（BUG-395：原因说明 + 方案一卡片 + 方案二卡片）
   const float inner_w = std::max(0.0f, content_rect_.w - px * 2.0f);
+  const float card_pad = 11.0f;
+  const float code_box_h = 34.0f;
+  const bool silent_on = is_silent_start_enabled ? is_silent_start_enabled() : false;
+
+  // 通用按钮绘制 lambda（对齐 svc.button_paint 皮肤语义）
+  auto draw_btn = [&](const RectF& r, const std::wstring& label, bool hover,
+                      bool pressed, const char* color, const char* variant) {
+    const auto p = svc.button_paint(color, true);
+    RectF br = r;
+    if (pressed) br.y += 1.0f;
+    if (p.has_shadow) {
+      draw_soft_shadow(rt, br, p.radius, p.shadow_color, p.shadow_dy, p.shadow_blur);
+    }
+    if (p.use_grad) {
+      const GradientStop* gs = hover ? p.grad_hover : p.grad;
+      rt.fill_round_rect_gradient_angle(br, p.radius, gs, p.grad_count, p.grad_angle);
+    } else {
+      Brush b{hover ? p.fill_hover : p.fill};
+      rt.round_rect(br, p.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &b);
+    }
+    if (p.border_w > 0.01f) {
+      rt.round_rect(br, p.radius, Pen{p.border, p.border_w}, nullptr);
+    }
+    TextStyle ts;
+    ts.size = 12.0f;
+    ts.weight = p.weight;
+    ts.color = p.text;
+    ts.align_h = AlignH::Center;
+    ts.align_v = AlignV::Center;
+    rt.draw_text(label, br, ts);
+    (void)variant;
+  };
+
   rt.push_clip(content_rect_);
   for (const auto& sec : sections_) {
     const float sy = content_rect_.y + py_c + sec.y_rel - scroll_y_;
-    const float sh_total = sec.title_h + title_mb + sec.body_h;
+    const float sh_total = sec.block_h;
     if (sy + sh_total < content_rect_.y || sy > content_rect_.bottom()) continue;
 
+    // 方案一/二用卡片底色+边框（对齐 Mini cardSx）
+    if (sec.kind != 0) {
+      Brush card_bg{tokens.subtle_bg};
+      rt.round_rect({content_rect_.x + px, sy, inner_w, sec.block_h}, 8.0f,
+                    Pen{tokens.subtle_border, 1.0f}, &card_bg);
+    }
+
     TextStyle st_ts;
-    st_ts.size = 13.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:108
-    st_ts.weight = 700;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:105
+    st_ts.size = 13.0f;
+    st_ts.weight = 700;
     st_ts.color = tokens.primary_text;
     st_ts.align_h = AlignH::Left;
     st_ts.align_v = AlignV::Top;
     st_ts.wrap = true;
-    rt.draw_text(sec.title, {content_rect_.x + px, sy, inner_w, sec.title_h}, st_ts);
+    const float tx = content_rect_.x + px + (sec.kind ? card_pad : 0.0f);
+    const float tw = inner_w - (sec.kind ? card_pad * 2.0f : 0.0f);
+    rt.draw_text(sec.title, {tx, sy + (sec.kind ? card_pad : 0.0f), tw, sec.title_h}, st_ts);
 
     TextStyle sb_ts;
-    sb_ts.size = 12.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:119
+    sb_ts.size = 12.5f;
     sb_ts.weight = static_cast<int>(Weight::Normal);
     sb_ts.color = tokens.secondary_text;
     sb_ts.align_h = AlignH::Left;
     sb_ts.align_v = AlignV::Top;
     sb_ts.wrap = true;
-    rt.draw_text(sec.body,
-                 {content_rect_.x + px, sy + sec.title_h + title_mb, inner_w, sec.body_h},
-                 sb_ts);
+    const float body_y = sy + (sec.kind ? card_pad : 0.0f) + sec.title_h + title_mb;
+    const float body_h = sec.body_h - (sec.kind == 1 ? 44.0f : 0.0f);
+    rt.draw_text(sec.body, {tx, body_y, tw, std::max(16.0f, body_h)}, sb_ts);
+
+    if (sec.kind == 1) {
+      // 方案一：警告框 + 一键静默按钮
+      const float warn_h = sec.body_h - 44.0f - 10.0f;
+      const float warn_y = body_y + sec.body_h - 44.0f - warn_h - 4.0f;
+      Brush warn_bg{tokens.subtle_bg};
+      rt.round_rect({tx, warn_y, tw, std::max(18.0f, warn_h)}, 6.0f,
+                    Pen{tokens.warning_color, 0.6f}, &warn_bg);
+      TextStyle wt;
+      wt.size = 12.0f;
+      wt.wrap = true;
+      wt.color = tokens.warning_color;
+      wt.align_v = AlignV::Top;
+      rt.draw_text(tr("layout.components.antivirus.easyWarning"),
+                   {tx + 6.0f, warn_y + 3.0f, tw - 12.0f, std::max(16.0f, warn_h - 4.0f)}, wt);
+      const RectF sr = {btn_enable_silent_rect_.x,
+                        btn_enable_silent_rect_.y + content_rect_.y - scroll_y_,
+                        btn_enable_silent_rect_.w, btn_enable_silent_rect_.h};
+      draw_btn(sr,
+               silent_on ? L"✅ " + tr("layout.components.antivirus.silentEnabledBtn")
+                         : L"⚡ " + tr("layout.components.antivirus.enableSilentBtn"),
+               hover_enable_silent_, pressed_enable_silent_,
+               silent_on ? "default" : "primary", silent_on ? "outlined" : "contained");
+    } else if (sec.kind == 2) {
+      // 方案二：两个代码框 + 两个复制按钮
+      const float bx = tx;
+      const float by = body_y + sec.body_h + card_pad;
+      const float bw = tw;
+      const Brush code_bg{tokens.subtle_bg};
+      rt.round_rect({bx, by, bw, code_box_h}, 6.0f, Pen{tokens.subtle_border, 1.0f}, &code_bg);
+      rt.round_rect({bx, by + code_box_h + 6.0f, bw, code_box_h}, 6.0f,
+                    Pen{tokens.subtle_border, 1.0f}, &code_bg);
+      TextStyle ct;
+      ct.size = 11.0f;
+      ct.wrap = true;
+      ct.color = tokens.primary_text;
+      ct.align_v = AlignV::Center;
+      rt.draw_text(std::wstring(kWhiteInternalIniPath), {bx + 7.0f, by, bw - 14.0f, code_box_h}, ct);
+      rt.draw_text(std::wstring(kWhiteInternalIniSnippet),
+                   {bx + 7.0f, by + code_box_h + 6.0f, bw - 14.0f, code_box_h}, ct);
+      const RectF pr = {btn_copy_path_rect_.x,
+                        btn_copy_path_rect_.y + content_rect_.y - scroll_y_,
+                        btn_copy_path_rect_.w, btn_copy_path_rect_.h};
+      const RectF nr = {btn_copy_snippet_rect_.x,
+                        btn_copy_snippet_rect_.y + content_rect_.y - scroll_y_,
+                        btn_copy_snippet_rect_.w, btn_copy_snippet_rect_.h};
+      draw_btn(pr, L"📋 " + tr("layout.components.antivirus.copyPath"),
+               hover_copy_path_, pressed_copy_path_, "default", "outlined");
+      draw_btn(nr, L"📋 " + tr("layout.components.antivirus.copySnippet"),
+               hover_copy_snippet_, pressed_copy_snippet_, "default", "outlined");
+    }
   }
   rt.pop_clip();
 
@@ -1999,10 +2152,26 @@ bool AntivirusWhitelistModal::on_mouse(const MouseEvent& e) {
   if (!open_) return false;
   const PointF pt = e.pos;
 
+  // 相对 y 偏移 → 屏幕矩形（三个新按钮）
+  const float oy = content_rect_.y - scroll_y_;
+  auto scr = [oy](const RectF& r) {
+    return RectF{r.x, r.y + oy, r.w, r.h};
+  };
+  const bool silent_on = is_silent_start_enabled ? is_silent_start_enabled() : false;
+  const RectF rs = scr(btn_enable_silent_rect_);
+  const RectF rp = scr(btn_copy_path_rect_);
+  const RectF rn = scr(btn_copy_snippet_rect_);
+  // 已开启静默时按钮禁用，不参与命中
+  const bool silent_hit = !silent_on && rs.contains(pt.x, pt.y);
+
   if (e.type == MouseEventType::Leave) {
-    if (hover_close_ || pressed_close_) {
-      hover_close_ = false;
-      pressed_close_ = false;
+    if (hover_close_ || pressed_close_ || hover_enable_silent_ ||
+        pressed_enable_silent_ || hover_copy_path_ || pressed_copy_path_ ||
+        hover_copy_snippet_ || pressed_copy_snippet_) {
+      hover_close_ = pressed_close_ = false;
+      hover_enable_silent_ = pressed_enable_silent_ = false;
+      hover_copy_path_ = pressed_copy_path_ = false;
+      hover_copy_snippet_ = pressed_copy_snippet_ = false;
       invalidate();
     }
     return true;
@@ -2010,8 +2179,15 @@ bool AntivirusWhitelistModal::on_mouse(const MouseEvent& e) {
 
   if (e.type == MouseEventType::Move) {
     const bool hc = btn_close_rect_.contains(pt.x, pt.y);
-    if (hc != hover_close_) {
+    const bool he = silent_hit;
+    const bool hpa = rp.contains(pt.x, pt.y);
+    const bool hsn = rn.contains(pt.x, pt.y);
+    if (hc != hover_close_ || he != hover_enable_silent_ ||
+        hpa != hover_copy_path_ || hsn != hover_copy_snippet_) {
       hover_close_ = hc;
+      hover_enable_silent_ = he;
+      hover_copy_path_ = hpa;
+      hover_copy_snippet_ = hsn;
       invalidate();
     }
     return true;
@@ -2026,19 +2202,39 @@ bool AntivirusWhitelistModal::on_mouse(const MouseEvent& e) {
   }
 
   if (e.type == MouseEventType::Down) {
-    if (btn_close_rect_.contains(pt.x, pt.y)) {
-      pressed_close_ = true;
+    pressed_close_ = btn_close_rect_.contains(pt.x, pt.y);
+    pressed_enable_silent_ = silent_hit;
+    pressed_copy_path_ = rp.contains(pt.x, pt.y);
+    pressed_copy_snippet_ = rn.contains(pt.x, pt.y);
+    if (pressed_close_ || pressed_enable_silent_ || pressed_copy_path_ ||
+        pressed_copy_snippet_) {
       invalidate();
     }
     return true;
   }
 
   if (e.type == MouseEventType::Up) {
-    const bool was_pressed = pressed_close_;
-    pressed_close_ = false;
+    const bool pc = pressed_close_, pe = pressed_enable_silent_;
+    const bool pp = pressed_copy_path_, pn = pressed_copy_snippet_;
+    pressed_close_ = pressed_enable_silent_ = false;
+    pressed_copy_path_ = pressed_copy_snippet_ = false;
     invalidate();
-    if (was_pressed && btn_close_rect_.contains(pt.x, pt.y)) {
+    if (pc && btn_close_rect_.contains(pt.x, pt.y)) {
       close();
+      return true;
+    }
+    if (pe && silent_hit) {
+      if (on_enable_silent_start) on_enable_silent_start();
+      return true;
+    }
+    if (pp && rp.contains(pt.x, pt.y)) {
+      if (on_copy_text) on_copy_text(std::wstring(kWhiteInternalIniPath));
+      if (on_copied_notice) on_copied_notice();
+      return true;
+    }
+    if (pn && rn.contains(pt.x, pt.y)) {
+      if (on_copy_text) on_copy_text(std::wstring(kWhiteInternalIniSnippet));
+      if (on_copied_notice) on_copied_notice();
       return true;
     }
     if (!card_rect_.contains(pt.x, pt.y)) {
@@ -2085,7 +2281,10 @@ std::wstring AntivirusWhitelistModal::a11y_default_name() const {
 A11ySubItem AntivirusWhitelistModal::a11y_virtual_child(size_t idx) const {
   if (sections_.empty()) rebuild_sections();
   A11ySubItem sub;
-  if (idx < 5u && idx < sections_.size()) {
+  const float oy = content_rect_.y - scroll_y_;
+  const bool silent_on = is_silent_start_enabled ? is_silent_start_enabled() : false;
+  if (idx < 3u && idx < sections_.size()) {
+    // 0=原因 1=方案一 2=方案二
     const auto& sec = sections_[idx];
     sub.role = A11yRole::Text;
     sub.name = sec.title + L"\n" + sec.body;
@@ -2093,6 +2292,30 @@ A11ySubItem AntivirusWhitelistModal::a11y_virtual_child(size_t idx) const {
     const float sh = sec.title_h + 4.0f + sec.body_h;
     sub.local_bounds = {content_rect_.x + 14.0f, sy,
                         std::max(0.0f, content_rect_.w - 28.0f), sh};
+  } else if (idx == 3u) {
+    sub.role = A11yRole::Button;
+    sub.name = silent_on
+                   ? tr("layout.components.antivirus.silentEnabledBtn")
+                   : tr("layout.components.antivirus.enableSilentBtn");
+    sub.local_bounds = {btn_enable_silent_rect_.x,
+                        btn_enable_silent_rect_.y + oy, btn_enable_silent_rect_.w,
+                        btn_enable_silent_rect_.h};
+    sub.can_invoke = !silent_on;
+    sub.focusable = !silent_on;
+  } else if (idx == 4u) {
+    sub.role = A11yRole::Button;
+    sub.name = tr("layout.components.antivirus.copyPath");
+    sub.local_bounds = {btn_copy_path_rect_.x, btn_copy_path_rect_.y + oy,
+                        btn_copy_path_rect_.w, btn_copy_path_rect_.h};
+    sub.can_invoke = true;
+    sub.focusable = true;
+  } else if (idx == 5u) {
+    sub.role = A11yRole::Button;
+    sub.name = tr("layout.components.antivirus.copySnippet");
+    sub.local_bounds = {btn_copy_snippet_rect_.x, btn_copy_snippet_rect_.y + oy,
+                        btn_copy_snippet_rect_.w, btn_copy_snippet_rect_.h};
+    sub.can_invoke = true;
+    sub.focusable = true;
   } else {
     sub.role = A11yRole::Button;
     sub.name = tr("layout.components.antivirus.close");
@@ -2105,7 +2328,22 @@ A11ySubItem AntivirusWhitelistModal::a11y_virtual_child(size_t idx) const {
 
 bool AntivirusWhitelistModal::a11y_invoke_virtual_child(size_t idx) {
   if (!open_ || !enabled()) return false;
+  if (idx == 3u) {
+    const bool silent_on = is_silent_start_enabled ? is_silent_start_enabled() : false;
+    if (!silent_on && on_enable_silent_start) on_enable_silent_start();
+    return !silent_on;
+  }
+  if (idx == 4u) {
+    if (on_copy_text) on_copy_text(std::wstring(kWhiteInternalIniPath));
+    if (on_copied_notice) on_copied_notice();
+    return true;
+  }
   if (idx == 5u) {
+    if (on_copy_text) on_copy_text(std::wstring(kWhiteInternalIniSnippet));
+    if (on_copied_notice) on_copied_notice();
+    return true;
+  }
+  if (idx == 6u) {
     close();
     return true;
   }

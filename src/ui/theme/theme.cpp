@@ -1037,8 +1037,8 @@ SwitchPaint ThemeService::switch_paint() const {
       break;
 
     case SkinId::Cyberpunk:
-      // :374-452：18×10、track r0、off #f1f5f9/#05070c + 1px #ff0055、
-      //   thumb 12 + margin 1 方角 #ff0055 + 0 0 4 #ff0055；
+      // :374-452：buildSquareSwitchStyle ← sizeSmall 强制 18×10、track r0、
+      //   off #f1f5f9/#05070c + 1px #ff0055、thumb 8 + margin 1 方角 #ff0055 + 0 0 4 #ff0055；
       //   on track #e0f7fa/#0a0e17 + 1px #00b0ff/#00f0ff、on thumb 同色 + 0 0 6
       p.track_w = 18.0f;
       p.track_h = 10.0f;
@@ -1049,8 +1049,9 @@ SwitchPaint ThemeService::switch_paint() const {
       p.on_bg = light ? Color4f::hex(0xE0F7FA) : Color4f::hex(0x0A0E17);
       p.on_border = light ? Color4f::hex(0x00B0FF) : Color4f::hex(0x00F0FF);
       p.on_bw = 1.0f;
-      // :427-434 thumb 12×12 margin 1 方角（sizeSmall 强制 12/1）
-      p.thumb_d = 12.0f;
+      // base-switch.tsx:37-51 `.MuiSwitch-sizeSmall` 强制 thumb 8×8 margin 1 方角
+      //   （基础设置 4 个开关全部 size="small"，Mini 无大号开关用法）
+      p.thumb_d = 8.0f;
       p.thumb_margin = 1.0f;
       p.thumb_radius = 0.0f;
       p.off_thumb = Color4f::hex(0xFF0055);
@@ -1071,12 +1072,14 @@ SwitchPaint ThemeService::switch_paint() const {
       p.thumb_hover_glow_blur = 10.0f;
       break;
     case SkinId::Monochrome:
-      // :478-496（BUG-384）：buildSquareSwitchStyle 28×14、track r0、
-      //   off bg #f4f4f5/#0a0a0a + 1px #737373、thumb 12×12 margin 1 r0 #737373；
+      // :478-496（BUG-384）：buildSquareSwitchStyle —— 与 cyberpunk 同一构造器。
+      //   基础设置 4 个开关全部 size="small" → `.MuiSwitch-sizeSmall`（:26-51）
+      //   强制轨道 18×10、thumb 8×8 margin 1、两者 borderRadius 0（方角）。
+      //   off bg #f4f4f5/#0a0a0a + 1px #737373、thumb #737373；
       //   on bg #d4d4d4/#262626 + 1px #000/#fff、on thumb #000/#fff；
       //   &:hover .MuiSwitch-track borderColor #000/#fff（无 thumb hover 缩放）
-      p.track_w = 28.0f;
-      p.track_h = 14.0f;
+      p.track_w = 18.0f;
+      p.track_h = 10.0f;
       p.track_radius = 0.0f;
       p.off_bg = light ? Color4f::hex(0xF4F4F5) : Color4f::hex(0x0A0A0A);
       p.off_border = Color4f::hex(0x737373);
@@ -1084,7 +1087,7 @@ SwitchPaint ThemeService::switch_paint() const {
       p.on_bg = light ? Color4f::hex(0xD4D4D4) : Color4f::hex(0x262626);
       p.on_border = light ? Color4f::hex(0x000000) : Color4f::hex(0xFFFFFF);
       p.on_bw = 1.0f;
-      p.thumb_d = 12.0f;
+      p.thumb_d = 8.0f;
       p.thumb_margin = 1.0f;
       p.thumb_radius = 0.0f;
       p.off_thumb = Color4f::hex(0x737373);

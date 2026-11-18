@@ -32,11 +32,11 @@ inline constexpr float kFilterBarH = 35;     // src: proxy-head.tsx:70-79 py4+26
 inline constexpr float kListTopGap = 4;      // src: proxy-head.tsx:77 mb 0.5=4
 inline constexpr float kNodeTypeColW = 55;   // src: proxy-item.tsx:106 width 55
 inline constexpr float kNodeDelayColW = 65;  // src: proxy-item.tsx:200 width 65
-inline constexpr float kListInset = 8;       // src: proxy-groups.tsx:327 mx: 1 → 8
+inline constexpr float kListInset = 8;       // src: proxy-groups.tsx:519 mx: 1 → 8
 // theme-panel 的「border: 4px double」（src: index.scss:75/125）在 border-box 下向内占 4px：
 // 过滤栏与列表都是它的子节点，必须整体内缩，否则边框圈不到过滤栏（见 on_arrange）。
 inline constexpr float kPanelBorder = 4;
-inline constexpr float kListBottomGap = 8;   // src: proxy-groups.tsx:327 mb: 1 → 8
+inline constexpr float kListBottomGap = 8;   // src: proxy-groups.tsx:519 mb: 1 → 8
 inline constexpr float kNodeBorderW = 2;     // src: proxy-item.tsx:75 borderBottom 2px
 inline constexpr float kNodeSelectBorderW = 3;  // src: proxy-item.tsx 选中 borderLeft 3px
 // ★ ❌1 宽窗三列判定阈值（← use-render-list.ts:88 isMinimalWidth → col 1/3；
@@ -274,6 +274,12 @@ class NodeList : public Widget {
   std::atomic<uint64_t> filter_change_seq_{0};
   bool pending_auto_test_ = false;
   bool is_testing_ = false;
+  // BUG-392（proxy-groups.tsx:93-95 activeTestFilterRef/pendingRecheckGroupsRef/busyRetryCountRef）：
+  // 在途测速期间过滤词变更登记尾部重测；AUTO_SELECT_BUSY 最多续试 2 次。
+  std::string active_test_filter_;
+  bool pending_recheck_ = false;
+  int busy_retry_count_ = 0;
+  bool recheck_timer_armed_ = false;
   int sort_type_ = 1;  // src: use-head-state.ts:21 sortType 初值 1（按延迟）
   // ★ ❌1 网格列数（宽窗 3 / 窄窗 1，由内容宽决定）与最近一次内容宽（用于判定切换）
   int cols_ = 1;

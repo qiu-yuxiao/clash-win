@@ -741,30 +741,8 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     star_h = kCardPad + star_title_h_ + kImportedMb + star_body_h_ + kStarBtnMt +
              kStarBtnH + kCardPad;
   }
-  const bool has_av = static_cast<bool>(on_open_whitelist_guide);
-  float av_h = 0.0f;
-  if (step_ == FirstRunStep::Ready && has_av) {
-    av_title_h_ = 19.0f;  // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1115
-    av_body_h_ = 58.0f;   // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1125
-    if (ITextEngine* te = text_engine()) {
-      TextStyle ats;
-      ats.size = 13.0f;  // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1114
-      ats.weight = 700;
-      ats.wrap = true;
-      const SizeF at_sz = te->measure_text(
-          L"🛡️ " + tr("layout.components.antivirus.briefTitle"), ats, card_text_w);
-      if (at_sz.h > 0) av_title_h_ = std::max(19.0f, at_sz.h + 2.0f);
-
-      TextStyle bts;
-      bts.size = kStarBodyFont;  // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1126
-      bts.wrap = true;
-      const SizeF ab_sz = te->measure_text(
-          tr("layout.components.antivirus.brief"), bts, card_text_w);
-      if (ab_sz.h > 0) av_body_h_ = std::max(38.0f, ab_sz.h + 4.0f);
-    }
-    av_h = kCardPad + av_title_h_ + kImportedMb + av_body_h_ + kStarBtnMt +
-           kStarBtnH + kCardPad;  // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1093-1155
-  }
+  // BUG-395（Mini v3.5.2 commit 28b77761）：首启 Step 2 的防误杀引导卡片已删除，
+  // 防误杀说明改由帮助菜单「轻量模式防误杀指南」弹窗承载。
   if (step_ == FirstRunStep::Ready) {
     const bool show_node = !active_node_name_.empty() && (proxy_ready() || unconfirmed());
     const bool show_retest = !proxy_ready() && (unconfirmed() || retesting_);
@@ -777,8 +755,7 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     if (show_warn) ny += kWarnMt + kWarnH;
     node_h = ny + kCardPad;  // 底部留白
   }
-  const float ready_cards_h =
-      node_h + kReadyGap + star_h + (has_av ? (kReadyGap + av_h) : 0.0f);
+  const float ready_cards_h = node_h + kReadyGap + star_h;
   float ch = step_ == FirstRunStep::Input
                  ? kInputStepH + (intro_h_ - kIntroH) + pills_extra +
                        (has_banner ? banner_h_ + kBannerMb : 0.0f)
@@ -796,8 +773,6 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
   if (step_ == FirstRunStep::Input) {
     max_ready_scroll_ = 0.0f;
     ready_scroll_y_ = 0.0f;
-    card_av_rect_ = {};
-    btn_av_open_rect_ = {};
     // ---- 三大特性胶囊：flex 1 1 auto + flexWrap:wrap + gap 6 ----
     // （src: :607-644）窄窗 + 长译文放不下一行时必须折行，
     //   行内按 flex-grow 均摊剩余宽度；早期实现平均三等分 → 文字互相压盖
@@ -830,13 +805,8 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     }
     const float pre_actions = cy + ch - kActionsH;
     const float viewport_h = std::max(40.0f, (pre_actions - content_y) - kContentPad);
-    if (has_av) {
-      max_ready_scroll_ = std::max(0.0f, ready_cards_h - viewport_h);
-      ready_scroll_y_ = std::clamp(ready_scroll_y_, 0.0f, max_ready_scroll_);
-    } else {
-      max_ready_scroll_ = 0.0f;
-      ready_scroll_y_ = 0.0f;
-    }
+    max_ready_scroll_ = std::max(0.0f, ready_cards_h - viewport_h);
+    ready_scroll_y_ = std::clamp(ready_scroll_y_, 0.0f, max_ready_scroll_);
     const float scroll_off = ready_scroll_y_;
 
     // src: :863-1083 绿色仪表卡 → Star 卡（卡间 mb 12）；绿卡高度流式自增
@@ -859,7 +829,7 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     warn_y_ = show_warn ? (ny + kWarnMt) : ny;
 
     float star_y = node_y + node_h + kReadyGap;
-    if (!has_av && star_y + star_h > pre_actions - 4.0f) {
+    if (star_y + star_h > pre_actions - 4.0f) {
       const float avail = pre_actions - 4.0f - star_y;
       if (avail < 70.0f) {
         star_y = std::max(content_y + node_h + 2.0f, pre_actions - 4.0f - star_h);  // 豁免: 极矮视口下防底栏重叠
@@ -882,28 +852,7 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     btn_wiki_rect_ = {card_star_rect_.right() - kCardPad - wiki_w, wiki_y,
                       wiki_w, kStarBtnH};
 
-    if (has_av) {
-      // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1090-1157
-      const float av_y = card_star_rect_.bottom() + kReadyGap;
-      card_av_rect_ = {inner_x, av_y, inner_w, av_h};
-      float av_btn_w = kStarBtnW;
-      if (ITextEngine* te = text_engine()) {
-        TextStyle ats;
-        ats.size = kHintFont;  // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1144
-        ats.weight = 600;
-        const SizeF aws = te->measure_text(
-            L"📄 " + tr("layout.components.antivirus.briefOpen"), ats, 0);
-        av_btn_w = std::min(inner_w - kCardPad * 2.0f,
-                            std::max(90.0f, aws.w + 12.0f));  // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1149
-      }
-      const float av_btn_y = card_av_rect_.bottom() - kCardPad - kStarBtnH;
-      btn_av_open_rect_ = {card_av_rect_.right() - kCardPad - av_btn_w, av_btn_y,
-                           av_btn_w, kStarBtnH};
-    } else {
-      card_av_rect_ = {};
-      btn_av_open_rect_ = {};
-    }
-
+    // BUG-395：Step 2 防误杀卡片已删除（Mini v3.5.2）
     const float actions_top = cy + ch - kActionsH;
     btn_finish_star_rect_ = {inner_x, actions_top + kActionPadY, inner_w, kPrimaryBtnH};
     btn_finish_rect_ = {inner_x, btn_finish_star_rect_.bottom() + kActionGap, inner_w,
@@ -1183,40 +1132,7 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
               hover_wiki_ ? warning_color() : ThemeService::instance().primary(),
               AlignH::Right);
 
-    // ---- 卡片 3：安全软件白名单简要说明（src: :1090-1157）----
-    if (on_open_whitelist_guide && card_av_rect_.w > 0.0f) {
-      const RectF& ac = card_av_rect_;
-      // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1096-1105
-      const Color4f av_bg = is_retro()
-                                ? Color4f::hex(0xFFFFFF, 0.22f)
-                                : (is_light() ? Color4f::hex(0x000000, 0.04f)
-                                              : Color4f::hex(0x808080, 0.09f));
-      const Color4f av_bd = is_retro() ? Color4f::hex(0x7A3E00, 0.35f)
-                                       : divider_color();
-      Brush ab{av_bg};
-      rt.round_rect(ac, 8.0f, Pen{av_bd, 1.0f}, &ab);  // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1094
-
-      // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1108-1119
-      draw_text(rt, L"🛡️ " + tr("layout.components.antivirus.briefTitle"),
-                {ac.x + kCardPad, ac.y + kCardPad, ac.w - kCardPad * 2.0f, av_title_h_},
-                13.0f, 700, ThemeService::instance().palette().primary_text,
-                AlignH::Left, AlignV::Top, true);
-      // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1121-1130
-      const float av_body_y = ac.y + kCardPad + av_title_h_ + kImportedMb;
-      const float av_body_max_h = std::max(12.0f, btn_av_open_rect_.y - 2.0f - av_body_y);
-      draw_text(rt, tr("layout.components.antivirus.brief"),
-                {ac.x + kCardPad, av_body_y, ac.w - kCardPad * 2.0f, av_body_max_h},
-                kStarBodyFont, static_cast<int>(Weight::Normal), secondary_text(),
-                AlignH::Left, AlignV::Top, true, true);
-      // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1139-1154
-      draw_text(rt, L"📄 " + tr("layout.components.antivirus.briefOpen"),
-                {btn_av_open_rect_.x,
-                 btn_av_open_rect_.y + (pressed_av_open_ ? 1.0f : 0.0f),
-                 btn_av_open_rect_.w, btn_av_open_rect_.h},
-                kHintFont, 600,
-                hover_av_open_ ? warning_color() : ThemeService::instance().primary(),
-                AlignH::Right);
-    }
+    // BUG-395：Step 2 防误杀卡片已删除，无卡片 3
     rt.pop_clip();
 
     // ---- 动作区（src: :1086-1119）----
@@ -1241,9 +1157,9 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
 
   if (e.type == MouseEventType::Leave) {
     hover_banner_ = hover_paste_ = hover_submit_ = hover_later_ = hover_enter_ = false;
-    hover_retest_ = hover_wiki_ = hover_av_open_ = hover_finish_star_ = hover_finish_ = false;
+    hover_retest_ = hover_wiki_ = hover_finish_star_ = hover_finish_ = false;
     pressed_banner_ = pressed_paste_ = pressed_enter_ = pressed_submit_ = pressed_later_ = false;
-    pressed_retest_ = pressed_wiki_ = pressed_av_open_ = pressed_finish_star_ = pressed_finish_ = false;
+    pressed_retest_ = pressed_wiki_ = pressed_finish_star_ = pressed_finish_ = false;
     invalidate();
     return true;
   }
@@ -1265,9 +1181,6 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
           pressed_retest_ = true;
         }
         if (btn_wiki_rect_.contains(pt.x, pt.y)) pressed_wiki_ = true;
-        if (on_open_whitelist_guide && btn_av_open_rect_.contains(pt.x, pt.y)) {
-          pressed_av_open_ = true;
-        }
       }
       if (btn_finish_star_rect_.contains(pt.x, pt.y)) pressed_finish_star_ = true;
       if (btn_finish_rect_.contains(pt.x, pt.y)) pressed_finish_ = true;
@@ -1298,15 +1211,12 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
       const bool hr = in_vp && btn_retest_rect_.contains(pt.x, pt.y) &&
                       !proxy_ready() && (unconfirmed() || retesting_);
       const bool hw = in_vp && btn_wiki_rect_.contains(pt.x, pt.y);
-      const bool hav = in_vp && on_open_whitelist_guide &&
-                       btn_av_open_rect_.contains(pt.x, pt.y);
       const bool hfs = btn_finish_star_rect_.contains(pt.x, pt.y);
       const bool hf = btn_finish_rect_.contains(pt.x, pt.y);
-      if (hr != hover_retest_ || hw != hover_wiki_ || hav != hover_av_open_ ||
+      if (hr != hover_retest_ || hw != hover_wiki_ ||
           hfs != hover_finish_star_ || hf != hover_finish_) {
         hover_retest_ = hr;
         hover_wiki_ = hw;
-        hover_av_open_ = hav;
         hover_finish_star_ = hfs;
         hover_finish_ = hf;
         invalidate();
@@ -1326,7 +1236,7 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
 
   if (e.type == MouseEventType::Up) {
     pressed_banner_ = pressed_paste_ = pressed_enter_ = pressed_submit_ = pressed_later_ = false;
-    pressed_retest_ = pressed_wiki_ = pressed_av_open_ = pressed_finish_star_ = pressed_finish_ = false;
+    pressed_retest_ = pressed_wiki_ = pressed_finish_star_ = pressed_finish_ = false;
     invalidate();
 
     // src: :533-542 导入进行中点遮罩/Esc 均不关闭
@@ -1388,12 +1298,6 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
                         L"https://github.com/qiu-yuxiao/clash-win/wiki", nullptr,
                         nullptr, SW_SHOWNORMAL);
         }
-        return true;
-      }
-      if (on_open_whitelist_guide && clip_vp.contains(pt.x, pt.y) &&
-          btn_av_open_rect_.contains(pt.x, pt.y)) {
-        // src: src/pages/_layout/components/first-run-guide-dialog.tsx:1142 打开白名单完整说明，不关闭引导弹窗
-        on_open_whitelist_guide();
         return true;
       }
       if (btn_finish_star_rect_.contains(pt.x, pt.y)) {
@@ -1513,7 +1417,8 @@ size_t FirstRunGuideDialog::a11y_virtual_child_count() const {
     return (!detected_clipboard_url_.empty() && url_.empty()) ? 5u : 4u;
   }
   const bool show_retest = !proxy_ready() && (unconfirmed() || retesting_);
-  return (show_retest ? 5u : 4u) + (on_open_whitelist_guide ? 1u : 0u);
+  // BUG-395：Step 2 防误杀卡片删除，不再计入 UIA 虚拟子项
+  return show_retest ? 5u : 4u;
 }
 
 A11ySubItem FirstRunGuideDialog::a11y_virtual_child(size_t idx) const {
@@ -1578,20 +1483,12 @@ A11ySubItem FirstRunGuideDialog::a11y_virtual_child(size_t idx) const {
     sub.local_bounds = btn_finish_rect_;
     sub.can_invoke = true;
   } else {
-    const bool show_retest = !proxy_ready() && (unconfirmed() || retesting_);
-    const size_t av_idx = show_retest ? 5u : 4u;
-    if (on_open_whitelist_guide && idx == av_idx) {
-      sub.role = A11yRole::Button;
-      sub.name = tr("layout.components.antivirus.briefOpen");
-      sub.local_bounds = btn_av_open_rect_;
-      sub.can_invoke = true;
-    } else {
-      sub.role = A11yRole::Button;
-      sub.name = tr("layout.components.firstRun.retestNodes");
-      sub.local_bounds = btn_retest_rect_;
-      sub.can_invoke = !retesting_;
-      sub.enabled = !retesting_;
-    }
+    // BUG-395：Step 2 防误杀卡片删除，末项恢复为「重测节点」
+    sub.role = A11yRole::Button;
+    sub.name = tr("layout.components.firstRun.retestNodes");
+    sub.local_bounds = btn_retest_rect_;
+    sub.can_invoke = !retesting_;
+    sub.enabled = !retesting_;
   }
   return sub;
 }
@@ -1651,12 +1548,7 @@ bool FirstRunGuideDialog::a11y_invoke_virtual_child(size_t idx) {
     finish();
     return true;
   }
-  const bool show_retest = !proxy_ready() && (unconfirmed() || retesting_);
-  const size_t av_idx = show_retest ? 5u : 4u;
-  if (on_open_whitelist_guide && idx == av_idx) {
-    on_open_whitelist_guide();
-    return true;
-  }
+  // BUG-395：Step 2 防误杀卡片删除，不再有 av_idx 分支
   if (idx == 4 && !proxy_ready() && !retesting_) {
     retesting_ = true;
     gave_up_ = false;

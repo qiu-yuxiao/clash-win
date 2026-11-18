@@ -350,6 +350,12 @@ class AntivirusWhitelistModal : public Widget {
   bool is_open() const { return open_; }
 
   std::function<void()> on_dismiss;
+  // BUG-395 方案一：一键开启「静默启动」；返回当前是否已开启（用于按钮状态）
+  std::function<void()> on_enable_silent_start;
+  std::function<bool()> is_silent_start_enabled;
+  // BUG-395 方案二：复制 whiteinternal.ini 路径 / 追加内容 + 复制成功提示
+  std::function<void(const std::wstring&)> on_copy_text;
+  std::function<void()> on_copied_notice;
 
   void on_arrange(const RectF& area) override;
   void on_paint(IRenderTarget& rt) override;
@@ -365,10 +371,14 @@ class AntivirusWhitelistModal : public Widget {
   bool a11y_is_modal() const override { return open_; }
   A11yRole a11y_default_role() const override { return A11yRole::Dialog; }
   std::wstring a11y_default_name() const override;
-  size_t a11y_virtual_child_count() const override { return 6u; }
+  size_t a11y_virtual_child_count() const override { return 7u; }
   A11ySubItem a11y_virtual_child(size_t idx) const override;
   bool a11y_invoke_virtual_child(size_t idx) override;
 
+  // BUG-395 供测试/UIA 命中新按钮
+  RectF enable_silent_button_rect() const { return btn_enable_silent_rect_; }
+  RectF copy_path_button_rect() const { return btn_copy_path_rect_; }
+  RectF copy_snippet_button_rect() const { return btn_copy_snippet_rect_; }
   RectF card_rect() const { return card_rect_; }
   RectF content_rect() const { return content_rect_; }
   RectF close_button_rect() const { return btn_close_rect_; }
@@ -377,12 +387,14 @@ class AntivirusWhitelistModal : public Widget {
   float max_scroll() const;
 
  private:
-  struct SectionLayout {
+  struct BlockLayout {
     std::wstring title;
     std::wstring body;
     float y_rel = 0.0f;
     float title_h = 19.0f;
     float body_h = 20.0f;
+    float block_h = 0.0f;  // 含卡片内边距/警告/按钮的完整块高
+    int kind = 0;          // 0=原因说明(无卡片) 1=方案一 2=方案二
   };
   void rebuild_sections() const;
 
@@ -394,14 +406,24 @@ class AntivirusWhitelistModal : public Widget {
   RectF content_rect_{};
   RectF actions_rect_{};
   RectF btn_close_rect_{};
+  // BUG-395 新增按钮命中矩形
+  RectF btn_enable_silent_rect_{};
+  RectF btn_copy_path_rect_{};
+  RectF btn_copy_snippet_rect_{};
 
   float title_h_ = 21.0f;
   float total_sections_h_ = 0.0f;
   float scroll_y_ = 0.0f;
-  mutable std::vector<SectionLayout> sections_;
+  mutable std::vector<BlockLayout> sections_;
 
   bool hover_close_ = false;
   bool pressed_close_ = false;
+  bool hover_enable_silent_ = false;
+  bool pressed_enable_silent_ = false;
+  bool hover_copy_path_ = false;
+  bool pressed_copy_path_ = false;
+  bool hover_copy_snippet_ = false;
+  bool pressed_copy_snippet_ = false;
 };
 
 // ============================================================================

@@ -9,8 +9,19 @@
 #include "util/parse_traffic.h"
 #include "util/utf.h"
 #include "ui/i18n_text.h"  // F-D01
+#include "core/connection_stale.h"  // BUG-396
 
 namespace clashwin::ui::scene {
+
+namespace {
+std::wstring upper_ascii_w(const std::wstring& s) {
+  std::wstring out = s;
+  for (wchar_t& c : out) {
+    if (c >= L'a' && c <= L'z') c = static_cast<wchar_t>(c - L'a' + L'A');
+  }
+  return out;
+}
+}  // namespace
 
 ConnectionDetailDialog::ConnectionDetailDialog(Widget* parent) : Widget(parent) {
   set_z_order(950);
@@ -50,6 +61,44 @@ std::vector<std::pair<std::wstring, std::wstring>> ConnectionDetailDialog::field
                               ? raw_host
                               : (raw_host + ":" + item_.metadata.destination_port);
   res.emplace_back(tr("connections.components.fields.host"), utf::utf8_to_utf16(host_disp));
+
+  // BUG-396（connection-detail.tsx:106-143）：主机下方新增"代理节点"行。
+  // 直连显示 DIRECT、封锁显示本地化标签，旧节点追加"（旧节点连接）"标记。
+  const auto nd = core::resolve_connection_node_display(
+      item_.chains, item_.is_synthetic, closed_ || item_.is_closed,
+      current_proxy_now_);
+  std::wstring proxy_node_val = L"--";
+  switch (nd.kind) {
+    case core::ConnectionNodeDisplay::Kind::Proxy: {
+      std::wstring v = utf::utf8_to_utf16(nd.node_name);
+      if (nd.is_stale_proxy_node) {
+        v += L" (" + tr("connections.components.fields.staleNodeTag") + L")";
+      }
+      proxy_node_val = std::move(v);
+      break;
+    }
+    case core::ConnectionNodeDisplay::Kind::Direct: {
+      const std::wstring label =
+          tr("connections.components.miniTable.chainsDirect");
+      proxy_node_val = upper_ascii_w(label) == L"DIRECT"
+                           ? std::wstring(L"DIRECT")
+                           : (label + L" (DIRECT)");
+      break;
+    }
+    case core::ConnectionNodeDisplay::Kind::Reject: {
+      const std::wstring label =
+          tr("connections.components.miniTable.chainsReject");
+      const std::wstring name = utf::utf8_to_utf16(nd.node_name);
+      proxy_node_val = upper_ascii_w(label) == upper_ascii_w(name)
+                           ? name
+                           : (label + L" (" + name + L")");
+      break;
+    }
+    case core::ConnectionNodeDisplay::Kind::None:
+    default:
+      break;
+  }
+  res.emplace_back(tr("connections.components.fields.proxyNode"), proxy_node_val);
 
   // 2. downloaded → 下载量（shared.json:45）
   auto [dv, du] = util::parse_traffic(item_.download);
@@ -110,6 +159,13 @@ std::vector<std::pair<std::wstring, std::wstring>> ConnectionDetailDialog::field
   return res;
 }
 
+bool ConnectionDetailDialog::is_stale_proxy_node() const {
+  return core::resolve_connection_node_display(
+      item_.chains, item_.is_synthetic, closed_ || item_.is_closed,
+      current_proxy_now_)
+      .is_stale_proxy_node;
+}
+
 void ConnectionDetailDialog::on_arrange(const RectF& area) {
   set_bounds(area);
   place_card();
@@ -121,7 +177,7 @@ void ConnectionDetailDialog::place_card() {
   // Mini 纸面 maxWidth 520 / maxHeight 480，内容自适应（overflowY auto）
   // src: connection-detail.tsx:59-61
   const float row_h = 24.0f;  // 12px×行高1.5(18) + gap 0.75(6)：:160/:163
-  const float content_h = 36.0f + 13 * row_h + 34.0f;  // 标题/13 行/底部按钮
+  const float content_h = 36.0f + 14 * row_h + 34.0f;  // 标题/BUG-396 后 14 行/底部按钮
   float cw = std::min(area.w - 2 * kMargin, 520.0f);
   float ch = std::min(area.h - 2 * kMargin, std::min(480.0f, content_h));
   if (cw < 180.0f) cw = area.w;
@@ -210,13 +266,22 @@ void ConnectionDetailDialog::on_paint(IRenderTarget& rt) {
   val_ts.align_v = AlignV::Center;
   val_ts.ellipsis = true;
 
+  const bool stale_warning = is_stale_proxy_node();
+  size_t row_idx = 0;
   for (const auto& [lbl, val] : f_list) {
     if (row_y + row_h > card_rect_.y + card_rect_.h - 34.0f) break;
     // label minWidth 100 + gap 1(=8px) → value 起点 = label 起点 + 108
     // src: connection-detail.tsx:167-168
     rt.draw_text(lbl + L":", {card_rect_.x + 14, row_y, 100, row_h}, label_ts);
-    rt.draw_text(val, {card_rect_.x + 122, row_y, card_rect_.w - 136, row_h}, val_ts);
+    // BUG-396（connection-detail.tsx:219-224）：旧节点连接值用 warning 色 + 600 字重
+    TextStyle row_val_ts = val_ts;
+    if (row_idx == 1 && stale_warning) {
+      row_val_ts.color = tokens.warning_color;
+      row_val_ts.weight = 600;
+    }
+    rt.draw_text(val, {card_rect_.x + 122, row_y, card_rect_.w - 136, row_h}, row_val_ts);
     row_y += row_h;
+    ++row_idx;
   }
 
   // 5. 底部按钮（关闭弹窗或合成行均隐藏断开连接按钮）

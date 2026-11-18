@@ -127,8 +127,9 @@ UT_TEST(t36_b3_theme_card_copyright_vertical_stability) {
     UT_CHECK(tc != nullptr);
     if (!tc) continue;
 
-    // 主题卡自然内容包裹高 ~161.7f (无多余拉伸)
-    UT_CHECK(near_f(tc->bounds().h, 161.7f, 0.5f));
+    // 主题卡自然内容包裹高 165.2f（p8 + 头行 24 + mb4 + 2×23.2 + mt8 + 按钮 24
+    //   + 页脚 pt8+18.26+16.6 + p8），段外框 122×24 撑高头行
+    UT_CHECK(near_f(tc->bounds().h, 165.2f, 0.5f));
 
     UT_CHECK(tc->logs_btn_ != nullptr);
     UT_CHECK(tc->copyright_ != nullptr);

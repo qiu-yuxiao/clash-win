@@ -3,6 +3,7 @@
 
 #include "core/switching_lock.h"
 #include "core/auto_select.h"
+#include "core/connection_stale.h"  // BUG-396
 #include "core/monitor.h"
 #include "core/timer.h"
 #include "cmd/command_service.h"
@@ -774,6 +775,14 @@ void install_cmd_profile(CommandService& svc) {
            return CmdResult::err({errs::kBadArgs, "AUTO_SELECT_BUSY"});
          if (outcome.preempted)
            return CmdResult::err({errs::kBadArgs, "AUTO_SELECT_MANUAL_PREEMPTED"});
+         // BUG-396（cmd/proxy.rs:42-48）：仅前台用户显式操作传 true，
+         // 选中成功后精准清理非目标节点的 PROXY 存量连接；后台自愈路径不传此参数。
+         const bool clean_stale =
+             arg_or(args, {"clean_stale_connections"}, Json(false)) == true;
+         if (select && clean_stale && !outcome.selected_node.empty()) {
+           (void)core::close_stale_proxy_connections(
+               cmd::mihomo_unchecked(), outcome.selected_node);
+         }
          Json arr = Json::array();
          for (auto& [name, delay] : outcome.display) arr.push_back({name, delay});
          return CmdResult::ok(arr);

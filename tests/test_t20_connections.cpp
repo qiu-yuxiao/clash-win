@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "core/connection_stale.h"  // BUG-396
 #include "core/quick_routing.h"
 #include "events/event_bus.h"
 #include "test_ui_helper.h"
@@ -413,59 +414,64 @@ UT_TEST(t20_connection_detail_dialog_fields) {
   UT_CHECK(dialog.is_open());
 
   auto fields = dialog.fields();
-  UT_CHECK_EQ(fields.size(), 13u);
+  UT_CHECK_EQ(fields.size(), 14u);
 
   // 1. Host
   UT_CHECK(fields[0].first == L"主机");
   UT_CHECK(fields[0].second == L"api.clash.win:8443");
 
-  // 2. Downloaded (10 MB)
-  UT_CHECK(fields[1].first == L"下载量");
-  UT_CHECK(fields[1].second.find(L"MB") != std::wstring::npos);
+  // 2. 代理节点（BUG-396：chains 首元素即出口节点，无 currentProxyNow 不标旧节点）
+  UT_CHECK(fields[1].first == L"代理节点");
+  UT_CHECK_EQ(fields[1].second, L"ProxyGroup");
+  UT_CHECK(!dialog.is_stale_proxy_node());
 
-  // 3. Uploaded (2 MB)
-  UT_CHECK(fields[2].first == L"上传量");
+  // 3. Downloaded (10 MB)
+  UT_CHECK(fields[2].first == L"下载量");
   UT_CHECK(fields[2].second.find(L"MB") != std::wstring::npos);
 
-  // 4. Dl Speed
-  UT_CHECK(fields[3].first == L"下载速度");
-  UT_CHECK(fields[3].second.find(L"/s") != std::wstring::npos);
+  // 4. Uploaded (2 MB)
+  UT_CHECK(fields[3].first == L"上传量");
+  UT_CHECK(fields[3].second.find(L"MB") != std::wstring::npos);
 
-  // 5. Ul Speed
-  UT_CHECK(fields[4].first == L"上传速度");
+  // 5. Dl Speed
+  UT_CHECK(fields[4].first == L"下载速度");
   UT_CHECK(fields[4].second.find(L"/s") != std::wstring::npos);
 
-  // 6. Chains (反转展示: DIRECT / HongKong 01 / ProxyGroup)
-  UT_CHECK(fields[5].first == L"链路");
-  UT_CHECK_EQ(fields[5].second, L"DIRECT / HongKong 01 / ProxyGroup");
+  // 6. Ul Speed
+  UT_CHECK(fields[5].first == L"上传速度");
+  UT_CHECK(fields[5].second.find(L"/s") != std::wstring::npos);
 
-  // 7. Rule
-  UT_CHECK(fields[6].first == L"规则");
-  UT_CHECK_EQ(fields[6].second, L"DomainSuffix(clash.win)");
+  // 7. Chains (反转展示: DIRECT / HongKong 01 / ProxyGroup)
+  UT_CHECK(fields[6].first == L"链路");
+  UT_CHECK_EQ(fields[6].second, L"DIRECT / HongKong 01 / ProxyGroup");
 
-  // 8. Process
-  UT_CHECK(fields[7].first == L"进程");
-  UT_CHECK_EQ(fields[7].second, L"clashwin.exe(C:\\Tools\\clashwin.exe)");
+  // 8. Rule
+  UT_CHECK(fields[7].first == L"规则");
+  UT_CHECK_EQ(fields[7].second, L"DomainSuffix(clash.win)");
 
-  // 9. Time
-  UT_CHECK(fields[8].first == L"连接时间");
-  UT_CHECK_EQ(fields[8].second, L"2026-10-28 12:00:00");
+  // 9. Process
+  UT_CHECK(fields[8].first == L"进程");
+  UT_CHECK_EQ(fields[8].second, L"clashwin.exe(C:\\Tools\\clashwin.exe)");
 
-  // 10. Source
-  UT_CHECK(fields[9].first == L"源地址");
-  UT_CHECK_EQ(fields[9].second, L"192.168.1.50:54321");
+  // 10. Time
+  UT_CHECK(fields[9].first == L"连接时间");
+  UT_CHECK_EQ(fields[9].second, L"2026-10-28 12:00:00");
 
-  // 11. Destination
-  UT_CHECK(fields[10].first == L"目标地址");
-  UT_CHECK_EQ(fields[10].second, L"104.21.5.12");
+  // 11. Source
+  UT_CHECK(fields[10].first == L"源地址");
+  UT_CHECK_EQ(fields[10].second, L"192.168.1.50:54321");
 
-  // 12. Destination Port
-  UT_CHECK(fields[11].first == L"目标端口");
-  UT_CHECK_EQ(fields[11].second, L"8443");
+  // 12. Destination
+  UT_CHECK(fields[11].first == L"目标地址");
+  UT_CHECK_EQ(fields[11].second, L"104.21.5.12");
 
-  // 13. Type
-  UT_CHECK(fields[12].first == L"类型");
-  UT_CHECK_EQ(fields[12].second, L"HTTPS(tcp)");
+  // 13. Destination Port
+  UT_CHECK(fields[12].first == L"目标端口");
+  UT_CHECK_EQ(fields[12].second, L"8443");
+
+  // 14. Type
+  UT_CHECK(fields[13].first == L"类型");
+  UT_CHECK_EQ(fields[13].second, L"HTTPS(tcp)");
 
   // 离屏渲染验证无崩溃
   make_offscreen(400, 500, 96);
@@ -559,10 +565,11 @@ UT_TEST(t20_d2d_local_coordinates_no_double_offset) {
   panel.paint_all(rt());
   rt().end_frame();
 
-  // 像素断言：第一行连接的色点位于 panel 局部坐标 {4..12, 68+6..68+14}
-  // 全局绝对坐标应为 x in [250, 258], y in [104, 112]
+  // 像素断言：第一行连接的色点位于 panel 局部坐标 {4..12, 106+6..106+14}
+  //   （数据行自 106 起：表头 76+5=81、高 20、下沿 5px double → 106）
+  // 全局绝对坐标应为 x in [250, 258], y in [142, 150]
   int dot_pixels = 0;
-  for (int y = 104; y < 112; ++y) {
+  for (int y = 142; y < 150; ++y) {
     for (int x = 250; x < 258; ++x) {
       Px p = pixel(x, y);
       // Proxy 色点主色 (含较强 blue 或 primary)
@@ -571,9 +578,9 @@ UT_TEST(t20_d2d_local_coordinates_no_double_offset) {
   }
   UT_CHECK(dot_pixels > 2);
 
-  // 关键断言：如果发生了双偏移（double offset），色点会被错误偏置到 x ≈ 246 + 250 = 496, y ≈ 30 + 104 = 134
+  // 关键断言：如果发生了双偏移（double offset），色点会被错误偏置到 x ≈ 246 + 250 = 496, y ≈ 30 + 142 = 172
   int displaced_pixels = 0;
-  for (int y = 130; y < 138; ++y) {
+  for (int y = 168; y < 176; ++y) {
     for (int x = 492; x < 500; ++x) {
       Px p = pixel(x, y);
       if (p.b > 180 && p.r < 100) ++displaced_pixels;
@@ -661,4 +668,71 @@ UT_TEST(t20_v330_path_control_four_states_reconcile_and_managed_rows) {
   UT_CHECK(store.state().records.empty());
 
   std::filesystem::remove_all(temp_dir, ec);
+}
+
+// BUG-396（Mini v3.5.3 path-control.test.ts:406-437 + monitor.rs:3927）：
+// 精准清理判定保护直连/同节点/内置目标；详情解析正确标记旧节点滞留。
+UT_TEST(t20_bug396_stale_proxy_connection_and_node_display) {
+  using core::ConnectionNodeDisplay;
+  using core::resolve_connection_node_display;
+  using core::should_close_stale_proxy_connection;
+
+  const std::vector<std::string> hk = {"香港1 (181201)", "PROXY"};
+  const std::vector<std::string> sg = {"新加坡4 (181201)", "PROXY"};
+  const std::vector<std::string> jp = {"日本3 (181201)", "PROXY"};
+  const std::vector<std::string> direct = {"DIRECT"};
+  const std::vector<std::string> reject = {"REJECT"};
+
+  // 旧节点必须清理；同节点/直连/封锁/内置目标/空目标一律不动
+  UT_CHECK(should_close_stale_proxy_connection(hk, "PROXY", "日本3 (181201)"));
+  UT_CHECK(should_close_stale_proxy_connection(sg, "PROXY", "日本3 (181201)"));
+  UT_CHECK(!should_close_stale_proxy_connection(jp, "PROXY", "日本3 (181201)"));
+  UT_CHECK(!should_close_stale_proxy_connection(direct, "PROXY", "日本3 (181201)"));
+  UT_CHECK(!should_close_stale_proxy_connection(reject, "PROXY", "日本3 (181201)"));
+  UT_CHECK(!should_close_stale_proxy_connection(hk, "PROXY", ""));
+  UT_CHECK(!should_close_stale_proxy_connection(hk, "PROXY", "DIRECT"));
+  UT_CHECK(!should_close_stale_proxy_connection(hk, "PROXY", "REJECT"));
+  UT_CHECK(!should_close_stale_proxy_connection(hk, "PROXY", "GLOBAL"));
+  // 组名必须命中（无 PROXY 组的多跳链路不误伤）
+  UT_CHECK(!should_close_stale_proxy_connection({"香港1", "OTHER"}, "PROXY", "日本3"));
+
+  // resolveConnectionNodeDisplay 权威用例
+  auto same = resolve_connection_node_display(jp, false, false, "日本3 (181201)");
+  UT_CHECK(same.kind == ConnectionNodeDisplay::Kind::Proxy);
+  UT_CHECK_EQ(same.node_name, std::string("日本3 (181201)"));
+  UT_CHECK(!same.is_stale_proxy_node);
+
+  auto stale = resolve_connection_node_display(hk, false, false, "日本3 (181201)");
+  UT_CHECK(stale.kind == ConnectionNodeDisplay::Kind::Proxy);
+  UT_CHECK(stale.is_stale_proxy_node);
+
+  auto stale_closed = resolve_connection_node_display(hk, false, true, "日本3 (181201)");
+  UT_CHECK(!stale_closed.is_stale_proxy_node);  // 历史连接不标旧节点
+
+  auto d = resolve_connection_node_display(direct, false, false, "日本3 (181201)");
+  UT_CHECK(d.kind == ConnectionNodeDisplay::Kind::Direct);
+  UT_CHECK_EQ(d.node_name, std::string("DIRECT"));
+
+  auto r = resolve_connection_node_display(reject, false, false, "日本3 (181201)");
+  UT_CHECK(r.kind == ConnectionNodeDisplay::Kind::Reject);
+
+  auto syn = resolve_connection_node_display({"PROXY"}, true, false, "日本3 (181201)");
+  UT_CHECK(syn.kind == ConnectionNodeDisplay::Kind::None);
+  UT_CHECK_EQ(syn.node_name, std::string("--"));
+  auto disc = resolve_connection_node_display({"DISCONNECTED"}, true, false, "");
+  UT_CHECK(disc.kind == ConnectionNodeDisplay::Kind::None);
+
+  // 详情弹窗注入当前节点后应显示"旧节点连接"标记
+  ConnItem item;
+  item.id = "stale_conn";
+  item.chains = hk;
+  item.metadata.host = "stale.example.com";
+  ConnectionDetailDialog dialog;
+  dialog.set_current_proxy_now("日本3 (181201)");
+  dialog.open(item, false);
+  UT_CHECK(dialog.is_stale_proxy_node());
+  const auto fields = dialog.fields();
+  UT_CHECK_EQ(fields.size(), 14u);
+  UT_CHECK(fields[1].first == L"代理节点");
+  UT_CHECK(fields[1].second.find(L"旧节点连接") != std::wstring::npos);
 }

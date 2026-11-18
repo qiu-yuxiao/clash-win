@@ -14,6 +14,7 @@
 #include "cmd/cmd_support.h"
 #include "config/config.h"
 #include "core/auto_select.h"
+#include "core/connection_stale.h"  // BUG-396
 #include "events/event_bus.h"
 #include "ui/ui_postbox.h"
 #include "util/log.h"
@@ -525,6 +526,13 @@ DataHooks NodeData::production_hooks(const std::string& group) {
     batch_sum->executed = !outcome.busy && !outcome.display.empty();
     batch_sum->selected = outcome.selected && !outcome.selected_node.empty();
     if (batch_sum->selected) {
+      // BUG-396（proxy-groups.tsx:325-330 第5参 true）：F4/过滤词可见子集
+      // 属于前台用户显式切点，择优切换成功后精准清理旧节点存量连接。
+      auto mc = cmd::mihomo();
+      if (mc.is_ok() && mc.value()) {
+        (void)core::close_stale_proxy_connections(*mc.value(),
+                                                  outcome.selected_node);
+      }
       batch_sum->selected_node = outcome.selected_node;
       for (const auto& [nm, ms] : outcome.display) {
         if (nm == outcome.selected_node) {

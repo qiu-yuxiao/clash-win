@@ -30,7 +30,13 @@ class ConnectionDetailDialog : public Widget {
   const ConnItem& item() const { return item_; }
   bool is_closed() const { return closed_; }
 
-  // 13 字段键值对导出（供单元测试精准断言）
+  // BUG-396：PROXY 组当前节点（Mini 从 useProxiesData().groups 读取），
+  // 用于判定连接是否驻留在旧节点上。缺省空串则不标"旧节点连接"。
+  void set_current_proxy_now(const std::string& now) { current_proxy_now_ = now; }
+  const std::string& current_proxy_now() const { return current_proxy_now_; }
+  bool is_stale_proxy_node() const;
+
+  // 14 字段键值对导出（供单元测试精准断言）
   std::vector<std::pair<std::wstring, std::wstring>> fields() const;
 
   // 纸面矩形（供测试断言 maxWidth 520 / maxHeight 480）
@@ -62,6 +68,7 @@ class ConnectionDetailDialog : public Widget {
   bool open_ = false;
   bool closed_ = false;
   ConnItem item_;
+  std::string current_proxy_now_;  // BUG-396
   RectF anchor_global_;
   RectF card_rect_;
   RectF btn_close_conn_rect_;

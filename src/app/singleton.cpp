@@ -285,7 +285,9 @@ int SingletonClient::send_request(uint16_t port, const std::string& path_and_que
   SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (s == INVALID_SOCKET) return -1;
 
-  DWORD timeout = 500;
+  // BUG-394（Mini v3.5.2 server.rs:54）：单实例唤醒探测超时 500ms → 1500ms，
+  // 首实例重负载下不再误判为"其它程序占用"。
+  DWORD timeout = 1500;
   setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
   setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
 

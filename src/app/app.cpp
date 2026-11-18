@@ -144,6 +144,7 @@ bool App::init() {
   // 都尽力唤醒对方并退出，绝不启动第二个实例。
   // 原实现在「探测非 200」（首实例重负载下 500ms 内未响应 / 端口被无响应进程占用）
   // 时误判为「其它程序占用」而继续启动，导致可双开 Clash Win 自身——与 Mini 行为相悖。
+  // BUG-394：探测超时已对齐 Mini v3.5.2 的 1500ms（singleton.cpp:288）。
   if (!bound) {
     CWLOG_WARN(std::format(
         "App::init：单实例端口 {} 已被占用，判定存在其它实例，尝试唤醒后退出",
@@ -196,7 +197,23 @@ bool App::init() {
   }
   auto verge = config::Config::instance().verge().latest_arc();
   bool is_silent_start = verge ? verge->enable_silent_start.value_or(false) : false;
-  bool should_silent = is_silent_start && has_silent_arg;
+  // BUG-395（Mini v3.5.2 lightweight.rs:has_real_profile_items /
+  //   should_enter_silent_tray_on_launch）：只要开启静默启动且已存在至少一条
+  //   remote/local 真实配置，无论 --silent 开机自启还是手动双击冷启动，一律
+  //   静默进托盘不弹主窗；纯新用户（无任何真实订阅）仍弹窗展示首次引导。
+  auto has_real_profile_items = []() -> bool {
+    auto p = config::Config::instance().profiles().latest_arc();
+    if (!p || !p->items) return false;
+    for (const auto& it : *p->items) {
+      if (it.itype && (*it.itype == "remote" || *it.itype == "local")) return true;
+    }
+    return false;
+  };
+  // has_silent_arg 区分开机自启(--silent)与手动冷启动：Mini v3.5.2 对后者额外弹
+  // NIF_INFO 托盘气泡（notify_silent_running）；Win 当前统一静默驻留不弹窗，
+  // 气泡提示属后续增量（见对齐遗留）。保留该标志供该增量接线。
+  (void)has_silent_arg;
+  bool should_silent = is_silent_start && has_real_profile_items();
 
   // F-D01 ← MF:services/preload.ts:62-97 preloadLanguage / MF:main.tsx:105-110
   //   bootstrap：初始语言优先级「缓存 → verge.language → 浏览器语言 → zh」，

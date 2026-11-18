@@ -121,16 +121,28 @@ UT_TEST(v350_ui_monochrome_switch_and_popup_theme_tokens) {
   ThemeRestoreGuard tg;
   auto& svc = ThemeService::instance();
 
-  // BUG-384: Monochrome SwitchW 28x14 方角 + track_hover_border
+  // BUG-384: Monochrome 与 Cyberpunk 同用 buildSquareSwitchStyle；基础设置 4 个开关
+  // 全部 size="small" → 轨道 18×10、thumb 8×8、两者 borderRadius 0（方角）。
+  // src: src/components/base/base-switch.tsx:26-51 / :456-496
   for (ThemeMode m : {ThemeMode::Light, ThemeMode::Dark}) {
     svc.init(SkinId::Monochrome, m);
     const auto sp = svc.switch_paint();
-    UT_CHECK(near_eq(sp.track_w, 28.0f));
-    UT_CHECK(near_eq(sp.track_h, 14.0f));
+    UT_CHECK(near_eq(sp.track_w, 18.0f));
+    UT_CHECK(near_eq(sp.track_h, 10.0f));
     UT_CHECK(near_eq(sp.track_radius, 0.0f));
+    UT_CHECK(near_eq(sp.thumb_d, 8.0f));
     UT_CHECK(near_eq(sp.thumb_radius, 0.0f));
     UT_CHECK(sp.track_hover);
     UT_CHECK(sp.track_hover_border.a > 0.0f);
+
+    // 与 Cyberpunk 的小开关必须完全一致（同一构造器）
+    svc.init(SkinId::Cyberpunk, m);
+    const auto cp_sw = svc.switch_paint();
+    UT_CHECK(near_eq(cp_sw.track_w, sp.track_w));
+    UT_CHECK(near_eq(cp_sw.track_h, sp.track_h));
+    UT_CHECK(near_eq(cp_sw.thumb_d, sp.thumb_d));
+    UT_CHECK(near_eq(cp_sw.track_radius, sp.track_radius));
+    UT_CHECK(near_eq(cp_sw.thumb_radius, sp.thumb_radius));
   }
 
   // FrostedGlass 弹窗高不透明实底防穿透

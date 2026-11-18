@@ -750,6 +750,59 @@ bool match_node_filter(const std::string& name, const std::string& filter_text) 
   return true;
 }
 
+// BUG-392（Mini v3.5.1 utils/node.ts:528-568）：过滤输入完整性判定。
+namespace {
+std::string normalize_filter_for_tokens(std::string_view text) {
+  std::string s = trim(std::string(text));
+  const std::string fw = "\xEF\xBD\x9C";  // ｜
+  size_t pos = 0;
+  while ((pos = s.find(fw, pos)) != std::string::npos) {
+    s.replace(pos, fw.size(), "|");
+    pos += 1;
+  }
+  return s;
+}
+
+std::string strip_exclusion_prefix(std::string token) {
+  if (starts_with(token, "-") || starts_with(token, "!")) {
+    return trim(token.substr(1));
+  }
+  static const std::string kFullWidthBang = "\xEF\xBC\x81";  // ！
+  if (starts_with(token, kFullWidthBang)) {
+    return trim(token.substr(kFullWidthBang.size()));
+  }
+  return token;
+}
+}  // namespace
+
+bool has_effective_filter_term(const std::string& filter_text) {
+  const std::string normalized = normalize_filter_for_tokens(filter_text);
+  if (normalized.empty()) return false;
+  for (const auto& token : split_ascii_whitespace(normalized)) {
+    for (const auto& part : split_keep_empty(token, '|')) {
+      if (!strip_exclusion_prefix(trim(part)).empty()) return true;
+    }
+  }
+  return false;
+}
+
+bool is_incomplete_filter_input(const std::string& filter_text) {
+  const std::string trimmed = trim(filter_text);
+  if (!has_effective_filter_term(trimmed)) return true;
+  if (trimmed.size() >= 3 &&
+      trimmed.compare(trimmed.size() - 3, 3, "\xEF\xBD\x9C") == 0) {
+    return true;  // 全角 ｜ 结尾
+  }
+  if (!trimmed.empty() && trimmed.back() == '|') return true;
+  const std::string normalized = normalize_filter_for_tokens(trimmed);
+  const auto tokens = split_ascii_whitespace(normalized);
+  if (tokens.empty()) return true;
+  const auto segments = split_keep_empty(tokens.back(), '|');
+  const std::string last_part =
+      segments.empty() ? std::string() : trim(segments.back());
+  return last_part == "-" || last_part == "!" || last_part == "\xEF\xBC\x81";
+}
+
 std::optional<std::string> proxy_endpoint_fingerprint(const YAML::Node& mapping) {
   if (!mapping || !mapping.IsMap()) return std::nullopt;
   const YAML::Node server = static_cast<const YAML::Node&>(mapping)["server"];

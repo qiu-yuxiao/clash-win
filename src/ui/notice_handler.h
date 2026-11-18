@@ -41,26 +41,17 @@ void set_latest_network_health(NetworkHealthIssue issue);
 uint64_t subscribe_network_health(std::function<void(NetworkHealthIssue)> cb);
 void unsubscribe_network_health(uint64_t id);
 
-// ---------- 特约交互增强通知助手（用户拍板补齐双方静默/含糊操作） ----------
-// 1/2. 代理分流模式切换、基础设置开关、外观主题/皮肤/语言切换：
-//      resolve_verge_patch_success_key 返回对应 i18n key（无需弹通知时返回空串）；
-//      resolve_verge_patch_success_message 返回已完成参数插值的本地化提示文本。
+// ---------- 通知助手（用户裁决已删除自编项，仅留 Mini v3.5.3 对应提示） ----------
+// 分流模式切换（Mini 已有的 switchedToGlobalProxy）；其余自编映射与提示已删除。
 std::string resolve_verge_patch_success_key(const std::string& k,
                                             const nlohmann::json& v);
 std::string resolve_verge_patch_success_message(const std::string& k,
                                                 const nlohmann::json& v);
-// 3. 手动点选节点 / 顶栏点击轮换节点 / 顶栏单节点测速结果通知
-void dispatch_node_switch_notice(bool ok, bool changed,
-                                 const std::string& node_name,
-                                 const std::string& err_detail);
-void dispatch_single_delay_notice(const std::string& node_name, int delay_ms);
-// 4. ⚡ 批量测速择优 / F1 全量测速择优 / 过滤输入自动测速择优通知
+// 批量测速：Mini 仅有 busy/notExecuted 提示，无常驻测速条与结果提示
 uint64_t begin_batch_test_notice();
 void finish_batch_test_notice(uint64_t wait_id,
                               const scene::BatchTestSummary& summary);
-void dispatch_sort_mode_notice(int sort_type);
-// 5. 窗口置顶与连接管理通知
-void dispatch_pin_window_notice(bool pinned);
+// 连接管理：仅保留错误原文透传
 void dispatch_close_all_connections_notice(bool ok, const std::string& err_detail);
 
 }  // namespace clashwin::ui

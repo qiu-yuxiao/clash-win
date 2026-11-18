@@ -89,6 +89,28 @@ UT_TEST(v350_match_node_filter_syntax) {
   UT_CHECK(!match_node_filter("英国-01", "-香港|-英国"));
 }
 
+// BUG-392（Mini v3.5.1 node.test.ts:154-201 逐条对应）：
+// 孤立/悬空算子不抢跑测速；合法连字符前缀词条不误拦。
+UT_TEST(v351_filter_input_completeness_bug392) {
+  using util::has_effective_filter_term;
+  using util::is_incomplete_filter_input;
+
+  for (const char* s : {"", "   ", "-", "!", "！", "|", "｜", "- | !", "  -  "}) {
+    UT_CHECK(!has_effective_filter_term(s));
+    UT_CHECK(is_incomplete_filter_input(s));
+  }
+  for (const char* s : {"日本 -", "-香港 -", "-香港|-", "日本|",
+                        "日本 ｜", "日本 !", "日本 ！"}) {
+    UT_CHECK(has_effective_filter_term(s));
+    UT_CHECK(is_incomplete_filter_input(s));
+  }
+  for (const char* s : {"-香港", "!hk", "！倍率", "hk-", "英国-3倍率",
+                        "日本 | 新加坡 -倍率"}) {
+    UT_CHECK(has_effective_filter_term(s));
+    UT_CHECK(!is_incomplete_filter_input(s));
+  }
+}
+
 UT_TEST(v350_fingerprint_and_clone_topology_taint) {
   YAML::Node m1 = YAML::Load("name: node-a\ntype: ss\nserver: 1.2.3.4\nport: 443\ncipher: aes-128-gcm\n");
   YAML::Node m2 = YAML::Load("cipher: aes-128-gcm\nport: 443\nserver: 1.2.3.4\ntype: ss\nname: 公告:test\n");

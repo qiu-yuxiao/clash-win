@@ -819,8 +819,9 @@ A11ySubItem TakeoverSegmented::a11y_virtual_child(size_t index) const {
   if (idx == 0) sub.help_text = tr("settings.mini.takeoverTooltipManual");
   else if (idx == 1) sub.help_text = tr("settings.mini.takeoverTooltipSystem");
   else sub.help_text = tr("settings.mini.takeoverTooltipTun");
-  const float seg_w = bounds().w / 3.0f;
-  sub.local_bounds = {seg_w * static_cast<float>(idx), 0.0f, seg_w, bounds().h};
+  const float seg_w = (bounds().w - 2.0f) / 3.0f;
+  sub.local_bounds = {1.0f + seg_w * static_cast<float>(idx), 1.0f, seg_w,
+                      std::max(0.0f, bounds().h - 2.0f)};
   sub.enabled = enabled();
   sub.focusable = enabled();
   sub.can_invoke = enabled();
@@ -864,8 +865,9 @@ SizeF TakeoverSegmented::on_measure(float max_w, float max_h) {
 }
 
 int TakeoverSegmented::hit_segment(const PointF& local) const {
-  float seg_w = bounds().w / 3.0f;
-  int idx = static_cast<int>(local.x / seg_w);
+  const float seg_w = (bounds().w - 2.0f) / 3.0f;
+  if (seg_w <= 0.0f) return -1;
+  int idx = static_cast<int>((local.x - 1.0f) / seg_w);
   return idx >= 0 && idx < 3 ? idx : -1;
 }
 
@@ -925,16 +927,22 @@ void TakeoverSegmented::on_paint(IRenderTarget& rt) {
   // 容器：src: button-styles.ts:932-990（retro-3d 半透明金 + inset 暗影；
   //   original/modern/frosted/cyber/monochrome 各自底色与边框）
   const float cont_radius = sp.container_radius > 0.01f ? sp.container_radius : 4.0f;
+  // ★ 盒模型同 Segmented：bounds = CSS border box（height:22 + p:1px + border:1px
+  //   = 26 外框）。描边画在框内；段内盒 = border 内缩 1px 的 padding box；
+  //   选中块再内缩 1px（get3DSegmentedActiveStyle left/top 1px）。
+  RectF cbox{r.x + 0.5f, r.y + 0.5f, std::max(0.0f, r.w - 1.0f),
+             std::max(0.0f, r.h - 1.0f)};
+  const float c_radius = std::max(0.0f, cont_radius - 0.5f);
   Brush cont_bg_fill{sp.container_bg};
-  rt.round_rect(r, cont_radius, Pen{Color4f(0, 0, 0, 0), 0.0f}, &cont_bg_fill);
+  rt.round_rect(cbox, c_radius, Pen{Color4f(0, 0, 0, 0), 0.0f}, &cont_bg_fill);
   if (sp.container_inset) {
-    draw_top_inset_shadow(rt, r, cont_radius, sp.container_inset_color,
+    draw_top_inset_shadow(rt, cbox, c_radius, sp.container_inset_color,
                           sp.container_inset_dy, sp.container_inset_blur);
-    draw_left_inset_shadow(rt, r, cont_radius, sp.container_inset_color,
+    draw_left_inset_shadow(rt, cbox, c_radius, sp.container_inset_color,
                            sp.container_inset_dy * 0.75f, sp.container_inset_blur * 0.75f);
   }
   Brush cont_bg{sp.container_bg};
-  rt.round_rect(r, cont_radius, Pen{sp.container_border, 1.0f}, nullptr);
+  rt.round_rect(cbox, c_radius, Pen{sp.container_border, 1.0f}, nullptr);
   if (sp.container_top_hi.a > 0.004f)
     rt.draw_line({r.x + cont_radius, r.bottom() + 0.5f},
                  {r.right() - cont_radius, r.bottom() + 0.5f},
@@ -943,12 +951,13 @@ void TakeoverSegmented::on_paint(IRenderTarget& rt) {
     rt.draw_line({r.x + cont_radius, r.y + 0.5f},
                  {r.right() - cont_radius, r.y + 0.5f},
                  Pen{sp.container_top_hi, 1.0f});
-  float seg_w = r.w / 3.0f;
+  float seg_w = std::max(0.0f, r.w - 2.0f) / 3.0f;
   for (int i = 0; i < 3; ++i) {
-    RectF seg{r.x + seg_w * i, r.y, seg_w, r.h};
+    RectF seg{r.x + 1.0f + seg_w * i, r.y + 1.0f, seg_w,
+              std::max(0.0f, r.h - 2.0f)};
     bool sel = mode_ == takeover_mode(i);
     if (sel) {
-      // src: button-styles.ts:1000-1001 选中块 absolute inset 1px /
+      // src: button-styles.ts:1000-1001 选中块 absolute inset 1px（相对 padding box）
       //   radius 3（retro-3d 135° 六停金渐变 :1006-1007）
       RectF pill{seg.x + 1, seg.y + 1, seg.w - 2, seg.h - 2};
       const bool has_border = sp.active_border.a > 0.001f;

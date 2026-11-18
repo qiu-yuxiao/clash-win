@@ -269,9 +269,10 @@ struct SliderPaint {
 
 // ---------- 开关（base-switch.tsx）绘制参数 ----------
 // 出处：components/base/base-switch.tsx:15-556 的 6 套皮肤 styled() 定义。
-// 尺寸差异（retro/original/modern 28×14、frosted 28×14 且 thumb 12、
-// cyberpunk 18×10、monochrome 28×14 且 thumb 12）、轨道底/边/渐变、
-// 旋钮底/边/径向渐变与阴影全部在此表达。
+// 尺寸差异（按 Mini 实际用法 size="small"，base-switch.tsx:26-51 的
+// `.MuiSwitch-sizeSmall` 覆盖：retro/original/modern 28×14 + thumb 14、
+// frosted 28×14 + thumb 12、cyberpunk 与 monochrome 18×10 + thumb 8）、
+// 轨道底/边/渐变、旋钮底/边/径向渐变与阴影全部在此表达。
 struct SwitchPaint {
   float track_w = 28, track_h = 14, track_radius = 7;
 

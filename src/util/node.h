@@ -29,6 +29,13 @@ bool is_valid_node_server(const std::string& server);
 // ← node.rs::match_node_filter：多关键词过滤（AND/OR `|`/`｜`/排除 `-`/`!`/`！`，大小写不敏感）。
 bool match_node_filter(const std::string& name, const std::string& filter_text);
 
+// BUG-392（Mini v3.5.1 utils/node.ts:528-568）：过滤输入完整性判定。
+// has_effective_filter_term：是否含至少一个非空实际匹配词（排除 ""、"   "、"-"、"|"、"- | !" 等纯符号）。
+bool has_effective_filter_term(const std::string& filter_text);
+// is_incomplete_filter_input：是否处于半输入态（无有效词 / 以 | 结尾 / 末分支以孤立 -、!、！ 结尾）。
+// 注意 "hk-" 是前缀包含词本身，不视为未完成。
+bool is_incomplete_filter_input(const std::string& filter_text);
+
 // ← utils/node.ts:587-604 isSupportedSubscriptionOrNodeInput：判断是否为单条 HTTP(S) 订阅 URL 或单/多行受支持节点 URI。
 bool is_supported_subscription_or_node_input(std::string_view raw);
 

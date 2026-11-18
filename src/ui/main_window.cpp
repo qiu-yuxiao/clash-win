@@ -21,6 +21,7 @@
 #include "config/config.h"
 #include "core/auto_select.h"
 #include "core/autostart.h"
+#include "core/connection_stale.h"  // BUG-396
 #include "cmd/cmd_support.h"
 #include "cmd/command_service.h"
 #include "events/event_bus.h"
@@ -647,24 +648,19 @@ void MainWindow::switch_node_optimistic_async(const std::string& target) {
   // BUG-356：0ms 乐观高亮更新，点击瞬间切换主列表与顶栏活跃节点，失败按代数守卫回滚
   // src: src/hooks/use-proxy-selection.ts:95
   const std::string prev = node_data_->set_now_optimistic(target);
-  const bool changed = (target != prev);
   sync_quick_bar(true);
   const uint64_t epoch =
       switch_epoch_.fetch_add(1, std::memory_order_acq_rel) + 1;
 
-  std::thread([this, target, prev, changed, epoch] {
+  std::thread([this, target, prev, epoch] {
     bool ok = false;
-    std::string err;
     auto mc = cmd::mihomo();
     if (!mc.is_ok() || !mc.value()) {
-      err = mc.is_ok() ? "Mihomo client unavailable" : mc.error().message;
+      CWLOG_WARN("switch node: mihomo client unavailable");
     } else {
       auto r = mc.value()->select_node_for_group("PROXY", target);
-      if (r.is_ok()) {
-        ok = true;
-      } else {
-        err = r.error().message;
-      }
+      ok = r.is_ok();
+      if (!ok) CWLOG_WARN("switch node failed: " + r.error().message);
     }
 
     if (ok) {
@@ -693,23 +689,15 @@ void MainWindow::switch_node_optimistic_async(const std::string& target) {
         }
       }
 
-      if (changed && !prev.empty()) {
-        bool auto_close = true;
-        try {
-          auto_close = config::Config::instance()
-                           .verge()
-                           .latest_arc()
-                           ->auto_close_connection.value_or(true);
-        } catch (...) {
-        }
-        // src: src/hooks/use-proxy-selection.ts:124
-        if (auto_close && mc.is_ok() && mc.value()) {
-          (void)mc.value()->close_all_connections();
-        }
+      // BUG-396（use-proxy-selection.ts:91-92）：前台显式切点后立即精准清理
+      // 仍挂在非目标节点上的 PROXY 存量长连接；不再按旧节点全量断流，
+      // DIRECT/REJECT 与同节点连接保持零中断。
+      if (mc.is_ok() && mc.value()) {
+        (void)core::close_stale_proxy_connections(*mc.value(), target);
       }
     }
 
-    UiPostbox::instance().post([this, target, prev, changed, epoch, ok, err] {
+    UiPostbox::instance().post([this, prev, epoch, ok] {
       if (!node_data_) return;
       if (!ok) {
         if (switch_epoch_.load(std::memory_order_acquire) == epoch) {
@@ -717,12 +705,8 @@ void MainWindow::switch_node_optimistic_async(const std::string& target) {
           node_data_->set_now_optimistic(prev);
           sync_quick_bar(true);
         }
-        dispatch_node_switch_notice(false, changed, target, err);
-        return;
       }
-      if (switch_epoch_.load(std::memory_order_acquire) == epoch) {
-        dispatch_node_switch_notice(true, changed, target, std::string());
-      }
+      // 自编节点切换成功/失败提示已按用户裁决删除（Mini 无对应提示）
     });
   }).detach();
 }
@@ -773,7 +757,7 @@ void MainWindow::test_single_node_async(const std::string& node) {
               .count();
       if (elapsed < 500) {  // src: src/services/delay.ts:373
         std::this_thread::sleep_for(
-            std::chrono::milliseconds(500 - elapsed));  // src: src/services/delay.ts:374
+            std::chrono::milliseconds(500 - elapsed));  // src: src/services/delay.ts:437
       }
     }
 
@@ -805,7 +789,7 @@ void MainWindow::test_single_node_async(const std::string& node) {
           if (quick_bar_ && node == node_data_->now()) {
             quick_bar_->set_badge(delay, true);
           }
-          dispatch_single_delay_notice(node, delay);
+          // 自编单节点测速提示已删除（Mini 无对应提示）
         });
   }).detach();
 }
@@ -914,16 +898,20 @@ void MainWindow::trigger_auto_select_and_refresh(const std::string& uid,
   }
   std::thread([this, uid, user_initiated, wait_id, snap = std::move(snap)]() mutable {
     auto deadline = std::chrono::steady_clock::now() +
-                    std::chrono::seconds(10);  // src: src/pages/_layout/utils/profile-coordination.ts:184
+                    std::chrono::seconds(10);  // src: src/pages/_layout/utils/profile-coordination.ts:240
     while (std::chrono::steady_clock::now() < deadline) {
       if (cmd::mihomo_unchecked().get_base_config().is_ok()) break;
       std::this_thread::sleep_for(
-          std::chrono::milliseconds(200));  // src: src/pages/_layout/utils/profile-coordination.ts:184
+          std::chrono::milliseconds(200));  // src: src/pages/_layout/utils/profile-coordination.ts:240
     }
+    // BUG-396（proxy-groups.tsx:408-415）：仅用户主动 F1/过滤词/F4 传
+    // clean_stale_connections=true；配置切换后的后台初始化不清理存量连接。
     auto r = cmd::CommandService::instance().invoke(
         "trigger_auto_select",
-        nlohmann::json::object(
-            {{"profile_uid", uid}, {"sort_type", 1}, {"select", true}}));
+        nlohmann::json::object({{"profile_uid", uid},
+                                {"sort_type", 1},
+                                {"select", true},
+                                {"clean_stale_connections", user_initiated}}));
 
     scene::BatchTestSummary sum;
     if (user_initiated) {
@@ -1093,9 +1081,8 @@ void MainWindow::build_scene() {
       [](uint64_t wait_id, const scene::BatchTestSummary& sum) {
         finish_batch_test_notice(wait_id, sum);
       };
-  node_list_->on_sort_changed = [](int sort_type) {
-    dispatch_sort_mode_notice(sort_type);
-  };
+  // 自编排序切换提示已删除（Mini 无对应提示）
+  node_list_->on_sort_changed = [](int) {};
   // src: src/pages/_layout/components/active-node-card.tsx:205 handleCycleNode：
   //   在当前过滤+排序后的可见列表中顺序轮换，自动跳过已确认超时（delay==0 || delay>=5000）的节点；
   //   若全部超时则回退至紧邻下一个节点，并走统一乐观切换 + selected 持久化链路（BUG-336/356）。
@@ -1165,10 +1152,14 @@ void MainWindow::build_scene() {
         (latest_network_health() != scene::NetworkHealthIssue::Offline);
     std::thread([this, uid, select_node, snap = std::move(snap)]() mutable {
       // src: src/pages/_layout/components/active-node-card.tsx:121
+      // BUG-396（active-node-card.tsx:155-161）：顶栏异常胶囊前台重测，
+      // 选中节点时同步清理旧节点存量连接（离线仅测速不切换，不清理）。
       auto r = cmd::CommandService::instance().invoke(
           "trigger_auto_select",
-          nlohmann::json::object(
-              {{"profile_uid", uid}, {"sort_type", 0}, {"select", select_node}}));
+          nlohmann::json::object({{"profile_uid", uid},
+                                  {"sort_type", 0},
+                                  {"select", select_node},
+                                  {"clean_stale_connections", select_node}}));
       bool has_healthy = false;
       bool empty_result = false;
       std::string err;
@@ -1304,9 +1295,7 @@ void MainWindow::build_scene() {
         const bool ok = r.is_ok();
         const std::string err = ok ? std::string() : r.error().message;
         UiPostbox::instance().post([this, target_pin, ok, err] {
-          if (ok) {
-            dispatch_pin_window_notice(target_pin);
-          } else {
+          if (!ok) {
             pinned_ = !target_pin;
             if (hwnd_) {
               SetWindowPos(hwnd_, pinned_ ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0,
@@ -1330,14 +1319,9 @@ void MainWindow::build_scene() {
               "close_connection", nlohmann::json::object({{"id", id}}));
           const bool ok = r.is_ok();
           const std::string err = ok ? std::string() : r.error().message;
-          UiPostbox::instance().post([ok, err] {
-            if (ok) {
-              // 豁免: Mini 无对应物 — 用户特约补齐断开单条连接结果提示 1500ms（出处: 无）
-              events::NoticeService::instance().push(
-                  "success", tr8("layout.notices.connectionClosed"), 1500);
-            } else {
-              events::NoticeService::instance().push("error", err);
-            }
+          UiPostbox::instance().post([err] {
+            // 自编断开单条成功提示已删除（Mini 无对应提示），仅透传错误
+            if (!err.empty()) events::NoticeService::instance().push("error", err);
           });
         }).detach();
       };
@@ -1353,12 +1337,8 @@ void MainWindow::build_scene() {
         }).detach();
       };
       cp->on_clear_history = [this] {
-        if (conn_data_) {
-          conn_data_->clear_closed();
-          // 豁免: Mini 无对应物 — 用户特约补齐清空连接历史结果提示 1500ms（出处: 无）
-          events::NoticeService::instance().push(
-              "info", tr8("layout.notices.connectionHistoryCleared"), 1500);
-        }
+        if (conn_data_) conn_data_->clear_closed();
+        // 自编清空历史提示已删除（Mini 无对应提示）
       };
     }
     settings_drawer_->on_open_changed = [this](bool open) {
@@ -1379,12 +1359,8 @@ void MainWindow::build_scene() {
         [this](const std::string& k, const nlohmann::json& v) {
           const std::string success_msg = resolve_verge_patch_success_message(k, v);
           if (k == "clash_mini_control_skin") {
-            // 皮肤偏好已由 SettingsDrawer::select_skin 落盘至 clashwin-skin.json，
-            // 无需调未知 IVerge 字段写盘；直接弹出明确皮肤切换提示。
-            if (!success_msg.empty()) {
-              // 豁免: Mini 无对应物 — 用户特约补齐皮肤切换提示 2000ms（出处: 无）
-              events::NoticeService::instance().push("success", success_msg, 2000);
-            }
+            // 皮肤偏好已由 SettingsDrawer::select_skin 落盘至 clashwin-skin.json；
+            // 自编皮肤切换提示已删除（Mini 无对应提示）。
             return;
           }
           const bool is_clash = (k == "clash_allow_lan" || k == "clash_ipv6");
@@ -1426,10 +1402,8 @@ void MainWindow::build_scene() {
                   if (wait_id) hide_tracked_wait_notice(wait_id);  // finally hideNotice
                   if (!settings_drawer_) return;       // 同 on_takeover_change 生命周期守卫
                   if (ok) {
-                    if (!success_msg.empty()) {
-                      // 豁免: Mini 无对应物 — 用户特约补齐切换操作明确结果提示 2500ms（出处: 无）
-                      notices.push("success", success_msg, 2500);
-                    }
+                    // 仅保留 Mini 已有的分流模式成功提示（success_msg 为空则不弹）
+                    if (!success_msg.empty()) notices.push("success", success_msg);
                   } else {
                     notices.push("error", err);
                     resync_settings_ui();  // ★ ❌5 失败回滚到权威值（Mini mutateInfo）
@@ -1671,8 +1645,8 @@ void MainWindow::build_scene() {
         return;
       }
       if (node_data_) node_data_->clear_delay_cache();
-      const uint64_t wait_id = events::NoticeService::instance().push(
-          "info", tr8("layout.notices.switchingProfile"), 0);
+      // 自编"正在切换订阅"常驻提示已删除（Mini 无对应提示）
+      const uint64_t wait_id = 0;
       std::thread([this, uid, wait_id] {
         cmd::LongOperationGuard long_guard;
         auto r = cmd::CommandService::instance().invoke(
@@ -2098,17 +2072,34 @@ void MainWindow::build_scene() {
       fr->on_dismiss_later = [this] {
         if (settings_drawer_) settings_drawer_->set_open(true);
       };
-      // src: src/pages/_layout.tsx:1979 Ready 步 Card 3 打开安全软件白名单弹窗
-      fr->on_open_whitelist_guide = [this] {
-        if (antivirus_modal_) antivirus_modal_->open();
-      };
+      // BUG-395：Ready 步第 3 张安全软件卡片已删除，防误杀指南改由帮助菜单承载
       root_.add_child(std::move(fr));
     }
-    // 安全软件白名单说明弹窗（src: src/pages/_layout.tsx:1981-1984）
+    // 安全软件防误杀指南弹窗（src: src/pages/_layout.tsx:1981-1984；BUG-395 两方案重构）
     {
       auto av = std::make_unique<scene::AntivirusWhitelistModal>();
       antivirus_modal_ = av.get();
       av->set_z_order(1020);
+      // BUG-395 方案一：一键开启静默启动（对齐 Mini patchVerge({enable_silent_start:true})）
+      av->on_enable_silent_start = [] {
+        std::thread([] {
+          auto r = cmd::CommandService::instance().invoke(
+              "patch_verge_config",
+              nlohmann::json::object({{"enable_silent_start", true}}));
+          CWLOG_INFO(std::string("[AV_GUIDE] enable_silent_start ") +
+                     (r.is_ok() ? "ok" : ("FAIL " + r.error().message)));
+        }).detach();
+      };
+      av->is_silent_start_enabled = [] {
+        auto v = config::Config::instance().verge().latest_arc();
+        return v && v->enable_silent_start.value_or(false);
+      };
+      // BUG-395 方案二：复制 whiteinternal.ini 路径/内容 + 提示
+      av->on_copy_text = [](const std::wstring& s) { write_clipboard_text(s); };
+      av->on_copied_notice = [] {
+        events::NoticeService::instance().push(
+            "success", tr8("layout.components.antivirus.copied"), 2200);
+      };
       root_.add_child(std::move(av));
     }
     // 帮助菜单已改自绘（SettingsDrawer::open_help_menu → ContextMenu），
@@ -2186,13 +2177,11 @@ void MainWindow::run_import_profile_async(
     std::function<void(bool ok, const std::string& err)> done) {
   // ← _layout.tsx:838-908 handleImportProfile（抽屉导入与首次向导共用同一条链路）
   if (profile_importing_.exchange(true)) {
-    const std::string busy_msg = tr8("layout.notices.importingSubscription");
-    events::NoticeService::instance().push("info", busy_msg);
-    if (done) done(false, busy_msg);
+    // 自编"正在导入"提示已删除（Mini 无此常驻提示）
+    if (done) done(false, std::string());
     return;
   }
-  const uint64_t wait_id = events::NoticeService::instance().push(
-      "info", tr8("layout.notices.importingSubscription"), 0);
+  const uint64_t wait_id = 0;  // Mini 无常驻导入提示
   std::thread([this, url, name, wait_id, done = std::move(done)]() mutable {
     cmd::LongOperationGuard long_guard;
     nlohmann::json args = nlohmann::json::object({{"url", url}});

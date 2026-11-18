@@ -16,6 +16,8 @@
 #include "../soft_shadow.h"    // 外阴影/外发光近似（CSS box-shadow 的 D2D 替代）
 #include "config/config.h"
 #include "config/proxy_head_state.h"
+#include "util/node.h"  // BUG-392
+#include "util/str_utils.h"  // BUG-392 trim
 #include "util/log.h"
 #include "util/utf.h"
 #include "ui/i18n_text.h"  // F-D01
@@ -181,7 +183,7 @@ void NodeRowWidget::on_paint(IRenderTarget& rt) {
   ts.align_v = AlignV::Center;
   ts.align_h = AlignH::Right;
   ts.ellipsis = true;
-  // src: proxy-item.tsx:120「textTransform: 'uppercase'」
+  // src: proxy-item.tsx:153「textTransform: 'uppercase'」
   std::wstring wtype = utf::utf8_to_utf16(type_);
   for (auto& c : wtype)
     c = static_cast<wchar_t>(std::towupper(static_cast<wint_t>(c)));
@@ -640,7 +642,7 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   search_wrap_->shrink_to_free = true;  // TextField measure 返回 max_w，需允许收缩
   bar_p->add_child(std::move(search_wrap));
 
-  // 搜索框：input py .3 / px .5 / fontSize 11（src: proxy-head.tsx:146）；
+  // 搜索框：input py .3 / px .5 / fontSize 11（src: proxy-head.tsx:258）；
   //   get3DInputStyle 2px 金描边 + dark 底 rgba(26,22,14,.4)
   // src: button-styles.ts:734-778；base-search-box.tsx:22-34
   auto search = std::make_unique<TextField>();
@@ -668,6 +670,13 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   search_->on_text_changed = [this](const std::wstring& t) {
     set_filter(clashwin::utf::utf16_to_utf8(t));
     ++filter_change_seq_;
+    // BUG-392（proxy-head.tsx:126-133）：孤立/悬空算子（"-"、"!"、"日本 -"、"日本|"）
+    // 属半输入态，不抢跑 700ms 自动测速；无有效词时同步清空去重标记便于后续完整词触发。
+    if (util::is_incomplete_filter_input(filter_)) {
+      if (!util::has_effective_filter_term(filter_)) last_auto_select_filter_.clear();
+      cancel_pending_filter_auto_test();
+      return;
+    }
     if (filter_.empty() || visible_.empty() || filter_ == last_auto_select_filter_) {
       cancel_pending_filter_auto_test();
       return;
@@ -681,8 +690,10 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   };
   search_->on_submit = [this] {
     cancel_pending_filter_auto_test();
+    // BUG-392（proxy-head.tsx:158）：回车提交同样要求至少一个有效检索词
     // G4: 同过滤词不重复触发（← Mini proxy-head.tsx lastTriggeredFilterRef）
-    if (!filter_.empty() && !visible_.empty() && filter_ != last_auto_select_filter_) {
+    if (util::has_effective_filter_term(filter_) && !visible_.empty() &&
+        filter_ != last_auto_select_filter_) {
       last_auto_select_filter_ = filter_;
       trigger_auto_select_visible();
     }
@@ -776,10 +787,17 @@ bool NodeList::cancel_pending_filter_auto_test() {
 }
 
 void NodeList::fire_filter_auto_test_timer() {
+  // BUG-392：尾部重测/BUSY 续试走专用通道，不受"同词去重"拦截
+  if (recheck_timer_armed_) {
+    recheck_timer_armed_ = false;
+    trigger_auto_select_visible();
+    return;
+  }
   if (!pending_auto_test_) return;
   pending_auto_test_ = false;
   refresh_filter_spinner();
-  if (!filter_.empty() && !visible_.empty() && filter_ != last_auto_select_filter_) {
+  if (util::has_effective_filter_term(filter_) && !visible_.empty() &&
+      filter_ != last_auto_select_filter_) {
     last_auto_select_filter_ = filter_;
     trigger_auto_select_visible();
   }
@@ -953,6 +971,17 @@ std::vector<std::string> NodeList::visible_node_names() const {
 }
 
 void NodeList::trigger_auto_select_visible() {
+  // BUG-392（proxy-groups.tsx:247-258）：测速在途期间过滤词已变更为新的完整词，
+  // 登记尾部重测队列，不静默丢弃（避免 last_auto_select_filter_ 提前置位导致永不补跑）。
+  const std::string start_filter = util::trim(filter_);
+  if (is_testing_) {
+    if (start_filter != active_test_filter_ &&
+        util::has_effective_filter_term(start_filter)) {
+      pending_recheck_ = true;
+    }
+    return;
+  }
+  active_test_filter_ = start_filter;
   if (!data_ || visible_.empty()) return;
   std::vector<std::string> names;
   const auto& rows = data_->rows();
@@ -982,6 +1011,31 @@ void NodeList::trigger_auto_select_visible() {
       if (alive && alive->load()) {
         data_ptr->restore_delays_for_still_pending(snaps);
         set_testing(false);
+
+        // BUG-392（proxy-groups.tsx:338-366）：BUSY 有限续试 + 新过滤词尾部重测
+        const std::string latest_filter = util::trim(filter_);
+        bool hit_busy = false;
+        if (sum.busy) {
+          if (util::has_effective_filter_term(latest_filter) &&
+              busy_retry_count_ < 2) {
+            ++busy_retry_count_;
+            hit_busy = true;
+          } else {
+            busy_retry_count_ = 0;
+          }
+        } else {
+          busy_retry_count_ = 0;
+        }
+        const bool queued_new_filter =
+            pending_recheck_ && util::has_effective_filter_term(latest_filter);
+        pending_recheck_ = false;
+        if (queued_new_filter || hit_busy) {
+          if (!hit_busy) busy_retry_count_ = 0;
+          if (on_arm_filter_auto_test_timer) {
+            recheck_timer_armed_ = true;
+            on_arm_filter_auto_test_timer(hit_busy ? 800 : 80);
+          }
+        }
       }
       if (end_cb) end_cb(wait_id, sum);
     });
@@ -1122,7 +1176,7 @@ void NodeList::on_arrange(const RectF& area) {
   //     <ProxyHead/>                                         ← 过滤栏，在框内
   //     <Box overflow:auto>…</Box>                           ← 滚动列表，在框内
   //   </Box>
-  // 外层 margin ← proxy-groups.tsx:327 mx:1 / mb:1 → 左右各 8、底 8（顶部无外边距）。
+  // 外层 margin ← proxy-groups.tsx:519 mx:1 / mb:1 → 左右各 8、底 8（顶部无外边距）。
   // 「4px double」在 border-box 下向内占 4px，故过滤栏与列表都要再内缩 kPanelBorder
   // ——此前把边框画在过滤栏下方、内容又从 x=0 起算，才出现「框和过滤栏分家」。
   const float inset_x = kListInset + kPanelBorder;                      // 12
@@ -1160,7 +1214,7 @@ void NodeList::on_arrange(const RectF& area) {
         {inset_x + (content_w - ls.w) / 2.0f, top + icon_sz, ls.w, ls.h});
   }
 
-  // 滚动置顶按钮：absolute bottom 20 / right 20 —— 相对 proxy-groups.tsx:327 那个
+  // 滚动置顶按钮：absolute bottom 20 / right 20 —— 相对 proxy-groups.tsx:519 那个
   // 带 mx:1 / mb:1 的外层 Box，因此还要让开 8px 外边距
   if (scroll_top_) {
     scroll_top_->layout_tree(
@@ -1228,7 +1282,7 @@ void NodeList::on_paint(IRenderTarget& rt) {
   }
 
   // 工具条底边 1px palette.divider（ProxyHead 的 borderBottom，位于框内）
-  // src: proxy-head.tsx:75 borderBottom 1px divider；proxy-groups.tsx:397
+  // src: proxy-head.tsx:187 borderBottom 1px divider；proxy-groups.tsx:397
   const Color4f bar_divider =
       light ? Color4f(0, 0, 0, 0.12f) : Color4f(1, 1, 1, 0.12f);
   rt.fill_rect({panel.x + kPanelBorder, kPanelBorder + kFilterBarH - 1,

@@ -276,41 +276,12 @@ void uninstall_notice_handler() {
   g_sub_id = 0;
 }
 
+// 用户裁决（2026-11-18）：删除 11 处 Win 自编操作结果提示 + 30 个 Win 独有 locale key，
+// 严格收敛到 Mini v3.5.3。仅保留 Mini 自身已有的提示（settings.mini.* 与原文错误透传）。
 std::string resolve_verge_patch_success_key(const std::string& k,
                                             const nlohmann::json& v) {
-  if (k == "rule_fallback" && v.is_string()) {
-    const std::string fb = v.get<std::string>();
-    if (fb == "proxy") return "layout.notices.switchedToGlobalProxy";
-    if (fb == "direct") return "layout.notices.switchedToGfwList";
-    return {};  // "addurl" 会立即打开添加网址弹窗，提交后再弹规则变更结果
-  }
-  if (k == "theme_mode" && v.is_string()) {
-    const std::string m = v.get<std::string>();
-    if (m == "light") return "layout.notices.themeSwitchedLight";
-    if (m == "dark") return "layout.notices.themeSwitchedDark";
-    return "layout.notices.themeSwitchedSystem";
-  }
-  if (k == "clash_mini_control_skin" && v.is_string()) {
-    return "layout.notices.skinSwitched";
-  }
-  if (k == "language" && v.is_string()) {
-    return "layout.notices.languageSwitched";
-  }
-  const bool on = v.is_boolean() && v.get<bool>();
-  if (k == "enable_auto_launch") {
-    return on ? "layout.notices.autoLaunchEnabled"
-              : "layout.notices.autoLaunchDisabled";
-  }
-  if (k == "enable_silent_start") {
-    return on ? "layout.notices.silentStartEnabled"
-              : "layout.notices.silentStartDisabled";
-  }
-  if (k == "clash_allow_lan") {
-    return on ? "layout.notices.allowLanEnabled"
-              : "layout.notices.allowLanDisabled";
-  }
-  if (k == "clash_ipv6") {
-    return on ? "layout.notices.ipv6Enabled" : "layout.notices.ipv6Disabled";
+  if (k == "rule_fallback" && v.is_string() && v.get<std::string>() == "proxy") {
+    return "layout.notices.switchedToGlobalProxy";  // Mini 已有
   }
   return {};
 }
@@ -318,62 +289,12 @@ std::string resolve_verge_patch_success_key(const std::string& k,
 std::string resolve_verge_patch_success_message(const std::string& k,
                                                 const nlohmann::json& v) {
   const std::string key = resolve_verge_patch_success_key(k, v);
-  if (key.empty()) return {};
-  if (k == "clash_mini_control_skin" && v.is_string()) {
-    const std::string raw = v.get<std::string>();
-    std::string display = raw;
-    if (raw == "retro-3d") display = "Trump-3D";
-    else if (raw == "original") display = "Original";
-    else if (raw == "modern-flat") display = "Modern";
-    else if (raw == "frosted-glass") display = "Frosted";
-    else if (raw == "cyberpunk") display = "Cyberpunk";
-    else if (raw == "monochrome") display = "Monochrome";
-    return tr8(key.c_str(), {{"name", display}});
-  }
-  return tr8(key.c_str());
-}
-
-void dispatch_node_switch_notice(bool ok, bool changed,
-                                 const std::string& node_name,
-                                 const std::string& err_detail) {
-  auto& notices = events::NoticeService::instance();
-  if (ok) {
-    if (!changed || node_name.empty()) return;
-    // 豁免: Mini 无对应物 — 用户特约补齐节点切换成功提示 2000ms（出处: 无）
-    notices.push(
-        "success",
-        tr8("layout.notices.nodeSwitched",
-            {{"name", scene::clean_node_display_name(node_name)}}),
-        2000);
-  } else {
-    notices.push(
-        "error",
-        tr8("layout.notices.nodeSwitchFailed",
-            {{"message", err_detail.empty() ? "Mihomo API error" : err_detail}}));
-  }
-}
-
-void dispatch_single_delay_notice(const std::string& node_name, int delay_ms) {
-  if (node_name.empty()) return;
-  auto& notices = events::NoticeService::instance();
-  const std::string clean = scene::clean_node_display_name(node_name);
-  if (delay_ms > 0 && delay_ms < 10000) {
-    // 豁免: Mini 无对应物 — 用户特约补齐单节点测速结果提示 2000ms（出处: 无）
-    notices.push("success",
-                 tr8("layout.notices.nodeDelayResult",
-                     {{"name", clean}, {"delay", std::to_string(delay_ms)}}),
-                 2000);
-  } else {
-    // 豁免: Mini 无对应物 — 用户特约补齐单节点测速超时提示 2500ms（出处: 无）
-    notices.push("warning",
-                 tr8("layout.notices.nodeDelayTimeout", {{"name", clean}}),
-                 2500);
-  }
+  return key.empty() ? std::string() : tr8(key.c_str());
 }
 
 uint64_t begin_batch_test_notice() {
-  return events::NoticeService::instance().push(
-      "info", tr8("layout.notices.batchTestingNodes"), 0);
+  // Mini 无常驻"测速中"提示（仅 spinner + busy 提示），故不再 push 自编常驻条。
+  return 0;
 }
 
 void finish_batch_test_notice(uint64_t wait_id,
@@ -384,50 +305,15 @@ void finish_batch_test_notice(uint64_t wait_id,
     notices.push("info", tr8("settings.mini.testingInProgress"));
     return;
   }
-  if (summary.selected && !summary.selected_node.empty()) {
-    // 豁免: Mini 无对应物 — 用户特约补齐批量测速择优结果提示 2500ms（出处: 无）
-    notices.push(
-        "success",
-        tr8("layout.notices.batchTestSelected",
-            {{"name", scene::clean_node_display_name(summary.selected_node)},
-             {"delay", std::to_string(summary.selected_delay_ms)}}),
-        2500);
-    return;
-  }
-  if (summary.executed) {
-    notices.push("warning", tr8("layout.notices.batchTestAllTimeout"));
-  } else {
+  if (!summary.executed) {
     notices.push("error", tr8("settings.mini.testNotExecuted"));
   }
-}
-
-void dispatch_sort_mode_notice(int sort_type) {
-  const char* tip_key = "proxies.page.tooltips.sortDefault";
-  if (sort_type == 1) tip_key = "proxies.page.tooltips.sortDelay";
-  else if (sort_type == 2) tip_key = "proxies.page.tooltips.sortName";
-  // 豁免: Mini 无对应物 — 用户特约补齐节点排序切换提示 1500ms（出处: 无）
-  events::NoticeService::instance().push(
-      "info",
-      tr8("layout.notices.sortChanged", {{"mode", tr8(tip_key)}}),
-      1500);
-}
-
-void dispatch_pin_window_notice(bool pinned) {
-  // 豁免: Mini 无对应物 — 用户特约补齐窗口置顶切换提示 2000ms（出处: 无）
-  events::NoticeService::instance().push(
-      "success",
-      tr8(pinned ? "layout.notices.windowPinned"
-                 : "layout.notices.windowUnpinned"),
-      2000);
+  // 择优成功/全部超时：Mini 不弹结果提示，保持静默。
 }
 
 void dispatch_close_all_connections_notice(bool ok,
                                            const std::string& err_detail) {
-  if (ok) {
-    // 豁免: Mini 无对应物 — 用户特约补齐断开全部活动连接结果提示 2000ms（出处: 无）
-    events::NoticeService::instance().push(
-        "success", tr8("layout.notices.allConnectionsClosed"), 2000);
-  } else {
+  if (!ok) {
     events::NoticeService::instance().push(
         "error", err_detail.empty() ? "Failed to close connections" : err_detail);
   }

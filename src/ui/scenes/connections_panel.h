@@ -189,6 +189,11 @@ class ConnectionsPanel : public Widget {
   // 点击热区
   RectF header_host_rect_;
   RectF header_chains_rect_;
+  // 表格几何（on_arrange 写入，on_paint 读取）：表头带 y/高、表头下 5px double 厚、表格外框顶
+  float head_band_y_ = 81.0f;
+  float head_band_h_ = 20.0f;
+  float head_border_h_ = 5.0f;
+  float table_top_ = 76.0f;
 };
 
 }  // namespace clashwin::ui::scene

@@ -185,9 +185,13 @@ void TitleBar::on_paint(IRenderTarget& rt) {
   //   （= _theme.tsx:19-20 primary_text '#000000'/'#FFFFFF'）；每帧跟随主题刷新。
   if (title_label_) title_label_->style.color = svc.text_primary();
   rt.fill_rect(bounds(), Brush{title_bar_bg(svc)});
-  // src: layout.scss:165 border-bottom 1px var(--theme-border)
+  // src: _layout.tsx:1195 inline `borderBottom: '1px solid var(--divider-color)'`
+  //   —— inline 覆盖 layout.scss:165 的 var(--theme-border)；--divider-color 由
+  //   use-custom-theme.ts:366-369 注入且与皮肤无关：
+  //   light rgba(0,0,0,.06) / dark rgba(255,255,255,.06)
   rt.fill_rect({bounds().x, bounds().bottom() - 1, bounds().w, 1},
-               Brush{svc.vars().theme_border});
+               Brush{svc.is_light() ? Color4f::hex(0x000000, 0.06f)
+                                    : Color4f::hex(0xFFFFFF, 0.06f)});
   // src: layout.scss:168 box-shadow 0 1px 4px var(--theme-border-outer)
   //   TitleBar 在 flow_ 内 z_order=10 高于 content_(0)，而 flow_(0) 低于
   //   root_ 顶层浮层（弹窗/TooltipHost/SnackbarW），故在此绘制阴影既能压在

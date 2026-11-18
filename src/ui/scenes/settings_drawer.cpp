@@ -58,20 +58,27 @@ constexpr float kCardPad = 8.0f;
 constexpr float kCloseSize = 28.0f, kCloseTop = 3.0f, kCloseRight = 8.0f;
 
 // 卡高 = MUI 自适应内容流（源码无固定 height）；数值按源码子元素尺寸累加：
-// 组合卡 = p8 + [标题 20.4 + mb 6 + 段 25.2 + mb 8] + [标题 20.4 + mb 6 + 段 25.2] + p8
-//   src: takeover-mode-card.tsx:51-76 title subtitle2(13px→行高 20.4) + mb 0.75(=6)
-//        + 段高 25.2（height:22 content-box + p:'1px' + 1px 边框，
-//        get3DSegmentedContainerStyle:939）+ mb 1(=8)
+// 组合卡 = p8 + [标题 20.4 + mb 6 + 段 26 + mb 8] + [标题 20.4 + mb 6 + 段 26] + p8
+//   src: takeover-mode-card.tsx:51-76 title subtitle2(13px→行高 20.41) + mb 0.75(=6)
+//        + 段外框高 26（height:22 content-box + p:'1px' + 1px 边框，get3DSegmented*）
+//        + mb 1(=8)
 //   src: routing-preference-card.tsx:53-75 同构，但没有 mb 1
-constexpr float kComboH = 128;          // 60 + 52 + 两卡间距/边框累计
-constexpr float kComboTakeoverH = 60;   // 20.4+6+25.2+8
-constexpr float kComboRoutingH = 52;    // 20.4+6+25.2
+//   ★ 盒模型说明：Mini 的 Box 无全局 border-box 重置（无 CssBaseline / 无 `*{}`），
+//     故 `height:22 + p:1px + border:1px` 的外框为 26，不是 22。
+constexpr float kComboH = 128.8f;         // 8 + 60.4 + 52.4 + 8
+constexpr float kComboTakeoverH = 60.4f;  // 20.41+6+26+8
+constexpr float kComboRoutingH = 52.4f;   // 20.41+6+26
 // src: src/pages/_layout/components/basic-settings-card.tsx:300-398 无固定高，内容驱动：
-//   p16 + 标题 20.4 + mb4 + 2×24 + mt2 + 24(tunSniffer) + mt2 + 24(mixedPort) + p16 = 156.4
-constexpr float kBasicH = 156.4f;
+//   p8 + 标题 20.41 + mb4 + 2×23.98 + 2.4(段行高 26.4-23.98?) ... 见下逐行累加
+//   行高：caption 13px×1.66=21.58 + py 0.15×2=2.4 = 23.98（前两行）
+//   嗅探行：段外框 24 撑高 → 24+2.4 = 26.4
+//   端口行：输入框 22.7 撑高 → 22.7+2.4 = 25.1，另有 mt 0.25=2
+//   = 8 + 20.41 + 4 + 23.98×2 + 26.4 + 2 + 25.1 + 8 = 139.87
+constexpr float kBasicH = 139.9f;
 // src: theme-settings-card.tsx:148-476 无固定高（flexShrink 0）：
-//   p8 + 标题 20.4 + mb4 + 2×23.2 + mt8 + 按钮24 + 页脚(pt8+18.3+16.6) + p8 = 161.7
-constexpr float kThemeH = 161.7f;
+//   p8 + 头行 24（标题 20.41 与 118×20→外框 122×24 的段取高者）
+//   + mb4 + 2×23.2 + mt8 + 按钮24 + 页脚(pt8+18.26+16.6) + p8 = 165.22
+constexpr float kThemeH = 165.2f;
 
 bool is_light() { return ThemeService::instance().is_light(); }
 RectF inset_rect(const RectF& r, float d);
@@ -485,9 +492,9 @@ TakeoverCard::TakeoverCard() : Widget(nullptr) {
 
 void TakeoverCard::on_arrange(const RectF& area) {
   set_bounds(area);
-  // src: takeover-mode-card.tsx:51-76 标题 13px/1.57=20.4、mb 6、段 25.2
-  title_->layout_tree({0, 0, area.w, 20.4f});
-  seg_->layout_tree({0, 26.4f, area.w, 25.2f});
+  // src: takeover-mode-card.tsx:51-76 标题 13px/1.57=20.41、mb 6、段外框 26
+  title_->layout_tree({0, 0, area.w, 20.41f});
+  seg_->layout_tree({0, 26.41f, area.w, 26.0f});
 }
 
 // ---------- RoutingCard ----------
@@ -524,9 +531,9 @@ RoutingCard::RoutingCard() : Widget(nullptr) {
 
 void RoutingCard::on_arrange(const RectF& area) {
   set_bounds(area);
-  // src: routing-preference-card.tsx:53-75 标题 20.4、mb 6、段 25.2
-  title_->layout_tree({0, 0, area.w, 20.4f});
-  seg_->layout_tree({0, 26.4f, area.w, 25.2f});
+  // src: routing-preference-card.tsx:53-75 标题 20.41、mb 6、段外框 26
+  title_->layout_tree({0, 0, area.w, 20.41f});
+  seg_->layout_tree({0, 26.41f, area.w, 26.0f});
 }
 
 // ---------- BasicCard ----------
@@ -642,7 +649,7 @@ void BasicCard::on_arrange(const RectF& area) {
   const float gap_x = 12.0f;  // src: src/pages/_layout/components/basic-settings-card.tsx:129
   // 两列等宽（1fr 1fr），允许列收缩省略过长文案，悬停展示完整标签提示（BUG-341）
   const float col_w = (area.w - pad * 2.0f - gap_x) / 2.0f;
-  const float row_h = 24.0f;    // caption 13px*1.66=21.6 + py 0.15*2=2.4（src: :23-29）
+  const float row_h = 23.98f;  // caption 13px*1.66=21.58 + py 0.15*2=2.4
   SwitchW* sws[4] = {sw_auto_launch_, sw_allow_lan_, sw_silent_start_,
                      sw_allow_ipv6_};
   // src: basic-settings-card.tsx:147-150 size="small" + marginRight '1px' + scale(0.85)
@@ -650,11 +657,13 @@ void BasicCard::on_arrange(const RectF& area) {
   const float sw_scale = 0.85f;
   const float sw_w = sp.track_w * sw_scale;
   const float sw_h = sp.track_h * sw_scale;
-  const float sw_body_bottom =
-      std::max(sw_h, 0.5f * (sw_h + sp.thumb_d * sw_scale));
-  // 实时通过 DirectWrite GetOverhangMetrics 测量当前语言与当前系统回退字体下该标签字面底沿，
-  //   令每个开关实体底沿与相邻标签底沿精确处于同一水平线（← basic-settings-card.tsx:25,148）
-  ITextEngine* eng = text_engine();
+  // ★ 垂直定位（Mini 精确模型，替代旧的"底沿=标签墨迹底沿"近似）：
+  //   gridItemSx `alignItems:'center'` + `py:0.15`（=1.2）→ 行内容盒高 = caption 行盒
+  //   13px×1.66=21.58（开关未缩放盒 18×10 更矮，不撑高行）；
+  //   `transform: scale(.85)` 配 `transformOrigin:'right center'` 只收缩视觉尺寸，
+  //   **垂直中心线不变**，故开关视觉盒在内容盒内垂直居中。
+  const float row_pad_y = 1.2f;
+  const float row_content_h = 21.58f;
   for (int i = 0; i < 4; ++i) {
     const bool is_col1 = (i % 2) != 0;
     const float cx = pad + (is_col1 ? (col_w + gap_x) : 0.0f);
@@ -667,38 +676,37 @@ void BasicCard::on_arrange(const RectF& area) {
     const float lb_w = std::max(0.0f, col_w - sw_w - 13.0f);  // src: src/pages/_layout/components/basic-settings-card.tsx:29
     // gridItemSx px:0.5=4 + gap:0.5=4：标签左内缩 4；右侧留给 4px 间距 + 开关宽 + 5px 右距
     labels_[i]->layout_tree({cx + 4.0f, cy, lb_w, row_h});
-    std::wstring probe_txt = labels_[i]->text;
-    // 剔除西文/西里尔小写下伸字母（g/j/p/q/y 等）对基线的干扰，始终对齐字面主底线
-    for (wchar_t& ch : probe_txt) {
-      if (ch == L'g' || ch == L'j' || ch == L'p' || ch == L'q' || ch == L'y') {
-        ch = L'a';
-      }
-    }
-    const float row_bottom_line =
-        eng ? eng->measure_ink_bottom(probe_txt, labels_[i]->style, lb_w, row_h)
-            : 17.65f;  // ← basic-settings-card.tsx:25 无引擎时回退值
-    // 右缘 = cx + col_w - 4(px:0.5) - 1(mr:'1px')；底部与标签字面底沿同水平线
-    sws[i]->layout_tree(
-        {cx + col_w - 5.0f - sw_w, cy + row_bottom_line - sw_body_bottom, sw_w, sw_h});
+    // 右缘 = cx + col_w - 4(px:0.5) - 1(mr:'1px')；垂直中心 = 行内容盒中心
+    const float sw_cy = cy + row_pad_y + row_content_h * 0.5f;
+    sws[i]->layout_tree({cx + col_w - 5.0f - sw_w, sw_cy - sw_h * 0.5f, sw_w, sw_h});
   }
   // TUN 域名嗅探行：grid 第 3 行跨两列（src: src/pages/_layout/components/basic-settings-card.tsx:284-392）
-  const float sniffer_y = grid_y + row_h * 2 + 2.0f;  // src: src/pages/_layout/components/basic-settings-card.tsx:301
-  const float seg_w = 118.0f;  // src: src/pages/_layout/components/basic-settings-card.tsx:324
-  const float seg_h = 20.0f;   // src: src/pages/_layout/components/basic-settings-card.tsx:329
+  // grid 只有 columnGap 1.5（12px），rowGap 缺省 0 → 第 3 行紧接前两行，无额外间距
+  const float sniffer_row_h = 26.4f;   // 段外框 24 撑高 + py 2.4
+  const float sniffer_y = grid_y + row_h * 2.0f;  // src: basic-settings-card.tsx:125-131
+  const float seg_w = 122.0f;  // src: :324 width 118（content）+ p1×2 + border1×2 = 122
+  const float seg_h = 24.0f;   // src: :329 height 20（content）+ p1×2 + border1×2 = 24
   if (sniffer_label_) {
-    sniffer_label_->layout_tree(  // src: src/pages/_layout/components/basic-settings-card.tsx:31-38
-        {pad + 4.0f, sniffer_y, std::max(0.0f, area.w - pad * 2.0f - seg_w - 8.0f), 24.0f});
+    // 行内 px 0.5(4) + 标签 + gap 0.5(4) + 段 122 + px 0.5(4) → 标签宽 = 内容宽 - 134
+    sniffer_label_->layout_tree({pad + 4.0f, sniffer_y,
+                                 std::max(0.0f, area.w - pad * 2.0f - 134.0f),
+                                 sniffer_row_h});
   }
   if (sniffer_seg_) {
     sniffer_seg_->layout_tree(  // src: src/pages/_layout/components/basic-settings-card.tsx:324-329
-        {area.w - pad - 4.0f - seg_w, sniffer_y + (24.0f - seg_h) / 2.0f, seg_w, seg_h});
+        {area.w - pad - 4.0f - seg_w, sniffer_y + (sniffer_row_h - seg_h) / 2.0f,
+         seg_w, seg_h});
   }
   // Mixed Port 行：grid 第 4 行跨两列，mt 0.25=2（src: src/pages/_layout/components/basic-settings-card.tsx:398）
-  const float mixed_y = sniffer_y + 24.0f + 2.0f;
-  // 标签宽 auto：整行余下空间（src: :218-220）
-  port_label_->layout_tree({pad + 4.0f, mixed_y, area.w - pad - 84.0f, 24});
+  const float mixed_h = 25.1f;  // 输入框 22.7 撑高 + py 2.4
+  const float mixed_y = sniffer_y + sniffer_row_h + 2.0f;
+  // 标签宽 auto：整行余下空间（src: :218-220 label 为 flex 1，space-between）
+  //   行内：px 0.5(左4) + 标签 + gap 0.5(4) + 输入框 80 + px 0.5(右4)
+  //   → 标签宽 = area.w - 2*pad - 8 - 80 - 4
+  port_label_->layout_tree({pad + 4.0f, mixed_y,
+                            std::max(0.0f, area.w - pad * 2.0f - 88.0f), mixed_h});
   // 输入框 src: basic-settings-card.tsx:238-251 width 80px，py 2 + 13*1.4375 ≈ 22.7
-  port_field_->layout_tree({area.w - pad - 80.0f, mixed_y + (24.0f - 22.7f) / 2.0f,
+  port_field_->layout_tree({area.w - pad - 80.0f, mixed_y + (mixed_h - 22.7f) / 2.0f,
                            80.0f, 22.7f});
 }
 
@@ -712,7 +720,8 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   title_->style.weight = static_cast<int>(Weight::Bold);
   title_->style.align_v = AlignV::Center;  // src: theme-settings-card.tsx:151 alignItems 'center'
   title_->style.color = card_text();
-  title_->set_i18n_text("settings.components.verge.basic.fields.themeSetting");
+  title_->set_i18n_text("settings.components.verge.theme.title");  // src: theme-settings-card.tsx:164
+  title_->set_i18n_tooltip("settings.components.verge.theme.title");  // src: :164 title= 同键
   add_child(std::move(t));
   const wchar_t* skins[] = {L"3D", L"Org", L"Mod", L"Fro", L"Cyber", L"Mono"};
   for (int i = 0; i < 6; ++i) {
@@ -849,15 +858,16 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
 void ThemeCard::on_arrange(const RectF& area) {
   set_bounds(area);
   const float pad = kCardPad;
-  // 头行 src: theme-settings-card.tsx:182-196（标题左、三段右 118×20、右边距 4px 对齐 BasicCard、mb 4）
-  const float seg_w = 118.0f, seg_h = 20.0f;
-  const float title_lh = 20.4f;  // src: theme-settings-card.tsx:156 subtitle2 13px×1.57
-  mode_seg_->layout_tree({area.w - pad - 4.0f - seg_w, pad + (title_lh - seg_h) * 0.5f,
-                          seg_w, seg_h});
-  title_->layout_tree({pad, pad, std::max(40.0f, area.w - pad * 2 - seg_w - 12.0f), title_lh});
+  // 头行 src: theme-settings-card.tsx:182-196（标题左、三段右 118×20→外框 122×24、
+  //   右边距 4px 对齐 BasicCard、mb 4）；行高取标题 20.41 与段 24 的较大者 = 24
+  const float seg_w = 122.0f, seg_h = 24.0f;
+  const float header_h = 24.0f;
+  mode_seg_->layout_tree({area.w - pad - 4.0f - seg_w, pad, seg_w, seg_h});
+  title_->layout_tree(
+      {pad, pad, std::max(40.0f, area.w - pad * 2 - seg_w - 8.0f), header_h});
   // src: theme-settings-card.tsx:326-333 ListItem dense + py 0.1=0.8 + px 0.5=4；
   //   行高 = caption 13px×1.66=21.6 + 1.6 ≈ 23.2
-  const float row1_y = pad + title_lh + 4.0f;  // 头行 mb 0.5=4（:153）
+  const float row1_y = pad + header_h + 4.0f;  // 头行 mb 0.5=4（:153）
   const float row_h = 23.2f;
   const float slider_w = 100.0f;
   const float wx = pad + 4.0f;                 // ListItem px 0.5=4
@@ -886,17 +896,20 @@ void ThemeCard::on_arrange(const RectF& area) {
 void ThemeCard::on_paint(IRenderTarget& rt) {
   Widget::on_paint(rt);
   if (!copyright_) return;
-  // src: theme-settings-card.tsx:460 borderTop 1px dashed divider
+  // src: theme-settings-card.tsx:460 borderTop 1px dashed divider + :457 pt:1=8
+  //   → 虚线在页脚内容盒（copyright 行盒）上方 8px，且只跨卡片内容宽
+  //   （页脚 Box 是 p:1 卡片的内容子盒：左右各让 8px，不是满卡宽）
   //   divider light rgba(0,0,0,.12) / dark rgba(255,255,255,.12)（_theme.tsx:47）
-  const float y = copyright_->bounds().y - 5.0f;
-  if (y <= 0 || bounds().w <= 0) return;
+  const float y = copyright_->bounds().y - 8.0f;
+  const float x0 = kCardPad, x1 = bounds().w - kCardPad;
+  if (y <= 0 || x1 <= x0) return;
   Brush dash{(theme::ThemeService::instance().skin() == theme::SkinId::Retro3d &&
               !theme::ThemeService::instance().is_light())
                  ? Color4f::hex(0x2C1F03, 0.25f)
                  : (theme::ThemeService::instance().is_light()
                  ? Color4f::hex(0x000000, 0.12f)
                  : Color4f::hex(0xFFFFFF, 0.12f))};
-  for (float x = 0; x + 3.0f < bounds().w; x += 6.0f) {
+  for (float x = x0; x + 3.0f < x1; x += 6.0f) {
     rt.fill_rect({x, y, 3.0f, 1.0f}, dash);
   }
 }

@@ -616,6 +616,11 @@ void ConnectionsPanel::refresh_visible() {
                        auto row = std::make_unique<ConnPanelRowWidget>();
                        row->bind(it, it.is_closed, static_cast<size_t>(idx));
                        row->on_click = [this](const ConnItem& cur, RectF row_global) {
+                         // BUG-396：注入 PROXY 组当前节点，供详情弹窗判定"旧节点连接"
+                         auto grp = cmd::mihomo_unchecked().get_group_by_name("PROXY");
+                         detail_dialog_->set_current_proxy_now(
+                             (grp.is_ok() && grp.value().now) ? *grp.value().now
+                                                              : std::string());
                          detail_dialog_->open(cur, cur.is_closed || cur.is_synthetic, row_global);
                        };
                        row->on_close = [this](const ConnItem& cur) {
@@ -667,6 +672,10 @@ void ConnectionsPanel::show_context_menu(const ConnItem& item, PointF anchor, Re
         if (addr == "--") addr.clear();
         if (!addr.empty()) copy_address_to_clipboard(addr);
       } else if (idx == detail_idx) {
+        // BUG-396：注入 PROXY 组当前节点，供详情弹窗判定"旧节点连接"
+        auto grp = cmd::mihomo_unchecked().get_group_by_name("PROXY");
+        detail_dialog_->set_current_proxy_now(
+            (grp.is_ok() && grp.value().now) ? *grp.value().now : std::string());
         detail_dialog_->open(item, item.is_closed || item.is_synthetic, row_global);
       }
     }
@@ -764,9 +773,13 @@ void ConnTableOverlay::on_paint(IRenderTarget& rt) {
     RectF rr{r.x + inset, r.y + inset, r.w - inset * 2, r.h - inset * 2};
     rt.round_rect(rr, std::max(0.0f, 4.0f - inset), Pen{vars.theme_border, 1.5f}, nullptr);
   };
-  stroke(0.75f);
-  stroke(3.25f);
-  if (!empty) return;
+  // src: connections-panel.tsx:234-236 空态渲染 <BaseEmpty /> **替代** ConnectionTable
+  //   → 空态时没有 5px double 外框，只有居中的「空空如也」
+  if (!empty) {
+    stroke(0.75f);
+    stroke(3.25f);
+    return;
+  }
   // src: base-empty.tsx:19-40 居中「空空如也」（shared.json:52）：
   //   :35 <InboxRounded fontSize='4em' />（4em × 16px = 64px）
   //   :36 <Typography fontSize='1.25em' />（1.25em × 16px = 20px）
@@ -790,7 +803,26 @@ void ConnTableOverlay::on_paint(IRenderTarget& rt) {
 void ConnectionsPanel::on_arrange(const RectF& area) {
   set_bounds(area);
 
-  // 1. 顶部 Header 行 (高 22px): Subtitle + 保存路由 + 导入路由
+  // ★ 纵向节奏（逐条对应 connections-panel.tsx，全部按 CSS 盒模型累加）：
+  //   列 gap 0.5=4；第 2/3 子项另带 mt 0.5=4
+  //   ① Header 行 0..20（按钮 height:20 撑高，标题 11px/1.57=17.3 更矮）
+  //   ② 搜索行 y=20+4+4=28，高 40（MUI TextField size="small" = 8.5×2 + 输入行 23）
+  //   ③ 表格 y=28+40+4+4=76
+  //   表格内：scroll 容器 border 5px double → 表头 81..101（高 20，content-box）
+  //           + 表头 borderBottom 5px double → 数据行自 106 起
+  //   src: connections-panel.tsx:110-220 / connection-table.tsx:58-105,450-455
+  constexpr float kRowGap = 4.0f;
+  constexpr float kHeaderH = 20.0f;
+  constexpr float kSearchY = 28.0f;
+  constexpr float kSearchH = 40.0f;
+  constexpr float kTableY = 76.0f;
+  constexpr float kFrame = 5.0f;
+  constexpr float kHeadY = kTableY + kFrame;      // 81
+  constexpr float kHeadBorder = 5.0f;             // 表头下方 5px double
+  constexpr float kRowsY = kHeadY + kHeaderH + kHeadBorder;  // 106
+  (void)kRowGap;
+
+  // 1. 顶部 Header 行 (高 20px): Subtitle + 保存路由 + 导入路由
   // src: connections-panel.tsx:130-195
   TextStyle title_ts;
   title_ts.size = 11.0f;
@@ -812,35 +844,41 @@ void ConnectionsPanel::on_arrange(const RectF& area) {
   }
   const float btns_x = std::min(4.0f + title_w + 6.0f, std::max(4.0f, area.w - 4.0f - save_w - import_w - 6.0f));
   if (btn_save_routes_) {
-    btn_save_routes_->layout_tree({btns_x, 2.0f, save_w, 18.0f});
+    btn_save_routes_->layout_tree({btns_x, 0.0f, save_w, kHeaderH});
     btn_save_routes_->set_visible(true);
   }
   if (btn_import_routes_) {
     const float imp_x = btns_x + save_w + 6.0f;
     const float imp_fit = std::max(36.0f, std::min(import_w, area.w - 4.0f - imp_x));
-    btn_import_routes_->layout_tree({imp_x, 2.0f, imp_fit, 18.0f});
+    btn_import_routes_->layout_tree({imp_x, 0.0f, imp_fit, kHeaderH});
     btn_import_routes_->set_visible(true);
   }
 
-  // 2. 工具栏行 (高 24px, y = 24px): 搜索框 + 断开全部
-  // src: connections-panel.tsx:198-220
-  float tool_y = 24.0f;
+  // 2. 搜索行 (y = 28, 高 40): 搜索框 + 断开全部（按钮 20 高，居中对齐）
+  // src: connections-panel.tsx:198-220（alignItems:'center'）
+  float tool_y = kSearchY;
   float btn_w = 64.0f;
   float btn_h = 20.0f;
   float sw = area.w - btn_w - 12.0f;
   if (sw < 60.0f) sw = 60.0f;
-  search_->layout_tree({4.0f, tool_y, sw, btn_h});
-  btn_disconnect_all_->layout_tree({4.0f + sw + 4.0f, tool_y, btn_w, btn_h});
+  search_->layout_tree({4.0f, tool_y, sw, kSearchH});
+  btn_disconnect_all_->layout_tree(
+      {4.0f + sw + 4.0f, tool_y + (kSearchH - btn_h) / 2.0f, btn_w, btn_h});
 
-  // 3. 表头行 (高 20px, y = 48px): Host (flex 1) + Chains (74px, src: connection-table.tsx:192-194)
-  header_host_rect_ = {0, 48.0f, area.w - 74.0f, 20.0f};
-  header_chains_rect_ = {area.w - 74.0f, 48.0f, 74.0f, 20.0f};
+  // 3. 表头行 (y = 81, 高 20，位于 5px double 外框内): Host (flex 1) + Chains (74px)
+  //   src: connection-table.tsx:95-113,192-194
+  header_host_rect_ = {0, kHeadY, area.w - 74.0f, kHeaderH};
+  header_chains_rect_ = {area.w - 74.0f, kHeadY, 74.0f, kHeaderH};
 
-  // 4. 虚拟列表 (y = 68px, 高 area.h - 68px)
-  float list_h = area.h - 68.0f;
+  // 4. 虚拟列表 (数据行自 106 起)
+  float list_h = area.h - kRowsY;
   if (list_h < 0) list_h = 0;
-  list_->layout_tree({0, 68.0f, area.w, list_h});
-  if (table_overlay_) table_overlay_->layout_tree({0, 68.0f, area.w, list_h});
+  list_->layout_tree({0, kRowsY, area.w, list_h});
+  if (table_overlay_) table_overlay_->layout_tree({0, kTableY, area.w, std::max(0.0f, area.h - kTableY)});
+  head_band_y_ = kHeadY;
+  head_band_h_ = kHeaderH;
+  head_border_h_ = kHeadBorder;
+  table_top_ = kTableY;
 
   // 5. 覆盖层 (详情弹窗占满本面板局部坐标空间)
   detail_dialog_->layout_tree({0, 0, area.w, area.h});
@@ -860,7 +898,7 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   float title_w = btn_save_routes_ ? std::max(40.0f, btn_save_routes_->bounds().x - 10.0f) : 145.0f;
   title_ts.wrap = false;
   title_ts.ellipsis = true;
-  rt.draw_text(tr("settings.mini.pathControl"), {4.0f, 2.0f, title_w, 18.0f}, title_ts);  // src: connections-panel.tsx:141-153
+  rt.draw_text(tr("settings.mini.pathControl"), {4.0f, 0.0f, title_w, head_band_h_}, title_ts);  // src: connections-panel.tsx:141-153
 
   if (search_) {
     search_->apply_theme();
@@ -868,10 +906,21 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
     search_->caret_color_ = search_->style_.color;
   }
 
-  // 2. 表头背景 (y = 48px, 高 20px)
+  // 2. 表头（位于 5px double 外框内，高 20；下沿 5px double；列间 2px divider）
+  //   src: connection-table.tsx:80-113（SX_HEADER_ROW height 20 + borderBottom 5px double、
+  //        SX_HEADER_CELL_BASE fontSize 12 / fontWeight 600 / px 1.5=12、
+  //        非 chains 列 borderRight 2px divider）
+  const float hy = head_band_y_;
+  const float hh = head_band_h_;
   Brush th_bg{vars.theme_panel_bg};
-  rt.fill_rect({0, 48.0f, bounds().w, 20.0f}, Brush{th_bg});
-  rt.fill_rect({0, 67.0f, bounds().w, 1.0f}, Brush{vars.divider_color});
+  rt.fill_rect({0, hy, bounds().w, hh}, Brush{th_bg});
+  // 表头下沿 5px double：两条 1.5px 线（外沿 y+hh，内侧 y+hh+3.5）
+  {
+    const float b0 = hy + hh + 0.75f;
+    rt.fill_rect({0, b0 - 0.75f, bounds().w, 1.5f}, Brush{vars.theme_border});
+    rt.fill_rect({0, b0 - 0.75f + head_border_h_ - 1.5f, bounds().w, 1.5f},
+                 Brush{vars.theme_border});
+  }
 
   // Host 表头
   // src: locales/zh/connections.json:35 链接目标列名
@@ -881,30 +930,30 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
     if (sort_dir_ == SortDir::Desc) host_title += L" ▼";
   }
   TextStyle th_host_ts;
-  th_host_ts.size = 11.0f;
-  th_host_ts.weight = static_cast<int>(Weight::Bold);
+  th_host_ts.size = 12.0f;    // src: connection-table.tsx:106 fontSize 12px
+  th_host_ts.weight = 600;    // src: connection-table.tsx:107 fontWeight 600
   th_host_ts.color = pal.secondary_text;
   th_host_ts.align_v = AlignV::Center;
-  // src: connection-table.tsx:192-194 Chains 宽 74px
-  rt.draw_text(host_title, {16.0f, 48.0f, bounds().w - 74.0f - 20.0f, 20.0f}, th_host_ts);
+  // 列宽：Chains 74 固定（src: connection-table.tsx:192-194），其余 flex 1
+  rt.draw_text(host_title, {12.0f, hy, bounds().w - 74.0f - 24.0f, hh}, th_host_ts);
 
-  // 表头垂直分割线
-  rt.fill_rect({bounds().w - 74.0f, 48.0f, 1.0f, 20.0f}, Brush{vars.divider_color});
+  // 列间 2px divider（src: connection-table.tsx:200-203 非 chains 列 borderRight 2px）
+  rt.fill_rect({bounds().w - 74.0f - 2.0f, hy, 2.0f, hh}, Brush{vars.divider_color});
 
-  // Chains 表头 (固定 74px 居中)
+  // Chains 表头 (固定 74px 居中, px 0.5=4)
   std::wstring chains_title = tr("connections.components.miniTable.chainsColumn");
   if (sort_col_ == SortCol::Chains) {
     if (sort_dir_ == SortDir::Asc) chains_title += L" ▲";
     if (sort_dir_ == SortDir::Desc) chains_title += L" ▼";
   }
   TextStyle th_chains_ts;
-  th_chains_ts.size = 11.0f;
-  th_chains_ts.weight = static_cast<int>(Weight::Bold);
+  th_chains_ts.size = 12.0f;  // src: connection-table.tsx:106
+  th_chains_ts.weight = 600;  // src: connection-table.tsx:107
   th_chains_ts.color = pal.secondary_text;
   th_chains_ts.align_h = AlignH::Center;
   th_chains_ts.align_v = AlignV::Center;
   // src: connection-table.tsx:192-194
-  rt.draw_text(chains_title, {bounds().w - 74.0f, 48.0f, 74.0f, 20.0f}, th_chains_ts);
+  rt.draw_text(chains_title, {bounds().w - 74.0f, hy, 74.0f, hh}, th_chains_ts);
 }
 
 bool ConnectionsPanel::on_mouse(const MouseEvent& e) {
