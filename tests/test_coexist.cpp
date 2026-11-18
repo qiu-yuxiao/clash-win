@@ -63,3 +63,11 @@ UT_TEST(coexist_service_missing_means_not_own) {
     UT_CHECK(true);  // 服务存在：结果取决于 ImagePath 归属，桌面验证覆盖
   }
 }
+
+UT_TEST(coexist_test_isolation_blocks_host_mutation) {
+  UT_CHECK(clashwin::system::coexist::is_host_mutation_blocked());
+  UT_CHECK_EQ(clashwin::system::coexist::kill_other_processes(), 0);
+  clashwin::system::coexist::remove_orphan_wintun_adapters();
+  UT_CHECK(!clashwin::system::coexist::stop_foreign_service_if_running());
+  UT_CHECK(!clashwin::system::coexist::delete_service_registration());
+}

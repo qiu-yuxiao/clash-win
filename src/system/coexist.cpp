@@ -10,6 +10,7 @@
 #include <bcrypt.h>    // BCrypt SHA256（← 总纲 §5.2.2 借用判定；与 core_updater.cpp 同法）
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <format>
@@ -252,7 +253,25 @@ bool service_image_matches_upstream() {
   return upstream_baseline_equals(file_sha256_hex(exe));
 }
 
+namespace {
+std::atomic<bool> g_host_mutation_blocked{false};
+}  // namespace
+
+void set_host_mutation_blocked(bool blocked) {
+  g_host_mutation_blocked.store(blocked, std::memory_order_release);
+}
+
+bool is_host_mutation_blocked() {
+  if (g_host_mutation_blocked.load(std::memory_order_acquire)) return true;
+  wchar_t buf[4]{};
+  return ::GetEnvironmentVariableW(L"CLASHWIN_HOME_OVERRIDE", buf, 4) > 0;
+}
+
 int kill_other_processes() {
+  if (is_host_mutation_blocked()) {
+    CWLOG_INFO("coexist: 已启用宿主隔离保护，跳过 kill_other_processes");
+    return 0;
+  }
   int killed = 0;
   const DWORD self_pid = ::GetCurrentProcessId();
   HANDLE snap = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -331,6 +350,10 @@ int kill_other_processes() {
 // 触发时机：仅在已提权时执行（TUN 必走提权服务；启动期未提权则跳过，
 //           与「启动期禁止 UAC 弹窗」方针一致；TUN 接管路径必提权，届时自然清掉）。
 void remove_orphan_wintun_adapters() {
+  if (is_host_mutation_blocked()) {
+    CWLOG_INFO("coexist: 已启用宿主隔离保护，跳过 remove_orphan_wintun_adapters");
+    return;
+  }
   if (!is_elevated()) {
     CWLOG_INFO(
         "coexist: 当前未提权，跳过 Wintun 孤儿网卡清理（待 TUN/服务接管路径提权后执行）");
@@ -357,6 +380,10 @@ void remove_orphan_wintun_adapters() {
 }
 
 bool stop_foreign_service_if_running() {
+  if (is_host_mutation_blocked()) {
+    CWLOG_INFO("coexist: 已启用宿主隔离保护，跳过 stop_foreign_service_if_running");
+    return false;
+  }
   namespace sm = core::service_mode;
   if (!sm::is_service_installed() || !sm::is_service_running()) return false;
   if (service_image_is_own()) return false;  // 自家服务不动
@@ -389,6 +416,10 @@ bool stop_foreign_service_if_running() {
 }
 
 bool delete_service_registration() {
+  if (is_host_mutation_blocked()) {
+    CWLOG_INFO("coexist: 已启用宿主隔离保护，跳过 delete_service_registration");
+    return false;
+  }
   namespace sm = core::service_mode;
   if (!sm::is_service_installed()) return true;
 

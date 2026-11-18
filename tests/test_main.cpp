@@ -7,10 +7,13 @@
 #include <exception>
 #include <filesystem>
 
+#include "system/coexist.h"
 #include "test_util.h"
 #include "ui/widget.h"
 
 int main(int argc, char** argv) {
+  // ★ 测试进程全局禁止碰触宿主 Clash Mini/Win 进程、clash_verge_service 与 Wintun 网卡
+  clashwin::system::coexist::set_host_mutation_blocked(true);
   // 无缓冲输出：崩溃/段错误时不丢失已完成用例的进度
   setvbuf(stdout, nullptr, _IONBF, 0);
   const char* filter = argc > 1 ? argv[1] : nullptr;

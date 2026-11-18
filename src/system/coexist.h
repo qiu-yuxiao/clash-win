@@ -54,4 +54,11 @@ bool stop_foreign_service_if_running();
 // 供 install_service 接管路径调用；服务本就不存在 → 直接 true。
 bool delete_service_registration();
 
+// 测试/沙盒隔离保护：开启后（或检测到 CLASHWIN_HOME_OVERRIDE 非空时），
+// kill_other_processes / remove_orphan_wintun_adapters /
+// stop_foreign_service_if_running / delete_service_registration 一律跳过宿主副作用，
+// 防止单元测试或沙盒实例误杀宿主 Clash Mini/Win 进程或改动宿主服务/Wintun 网卡。
+void set_host_mutation_blocked(bool blocked);
+bool is_host_mutation_blocked();
+
 }  // namespace clashwin::system::coexist
