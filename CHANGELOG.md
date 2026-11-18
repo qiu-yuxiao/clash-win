@@ -8,7 +8,7 @@ Format reference: `Changelog.md` in the Clash Mini repository (newest first, `##
 
 ---
 
-## Unreleased (post v1.0.0)
+## v1.0.1 (2026-11-18)
 
 ### Upstream v3.5.3 Sync & Code-Level Pixel Parity
 - **BUG-392 (v3.5.1) Filter Race**: Added `has_effective_filter_term` / `is_incomplete_filter_input` (mirrors `node.ts`), stopped arming the 700ms debounce on half-typed input, and introduced an in-flight re-test queue so a newly typed filter term is never silently dropped (`AUTO_SELECT_BUSY` retried up to twice).
@@ -18,6 +18,7 @@ Format reference: `Changelog.md` in the Clash Mini repository (newest first, `##
 - **BUG-396 (v3.5.3) Foreground Switch Cleanup**: New `core/connection_stale.h` closes only the previous node's connections under `PROXY` on every foreground switch point, plus a `proxyNode` row (with stale-node highlight) in the connection detail dialog.
 - **Removed Self-Authored Extras**: Deleted 11 fabricated operation-result notices and 30 Win-only `layout.notices.*` locale keys across 13 languages.
 - **Code-Level Pixel Parity (round 1)**: Established the MUI `content-box` conversion rule (`height + p:1px + border:1px` -> outer `+4`), corrected all four segmented controls (`122x24` / `26` tall, border stroked inside, segments split over the padding box, thumb inset 2), replaced the switch ink-baseline hack with the flex-centre model, re-derived card heights (`basic 141.9`, `theme 165.3`, `combo 128.8`), inset the theme-card dashed footer, switched the title-bar underline to `--divider-color`, and re-based the connections panel rhythm (search row `28/40`, table `76`, header `81`, rows `106`) with the header now inside the 5px double frame. Full ledger: `docs/pixel-parity-audit.md`.
+- **Code-Level Pixel Parity (round 2, MUI input box model)**: Second conversion rule — MUI's `InputBase` root carries `lineHeight: '1.4375em'`, which resolves to an **absolute 23px** at the root's 16px font size and is inherited verbatim by the `input`/`textarea` (`font: inherit`), so an inline `fontSize: 13px` does **not** shrink the line box back to 18.7. All input geometry re-derived from that 23px line box: Mixed-Port field `80x22.7` -> `88x27` (inline `width:80` is content-box, `+ pl4 pr4`), profile-import textarea `46` -> `48` (multiline+small root `p 8.5x2` + textarea `31`), card neck `124.4` -> `126.4`; basic card `141.9` -> `146.2`. Theme-card footer now accounts for its `borderTop: 1px dashed` layout height (copyright top = button bottom + 9, dashed rule drawn at the footer's top edge, card `165.3` -> `166.3`). Add-URL dialog: input `88` -> `125` (`4x23 + root p16.5x2`), buttons now derived as `1.75xfs + pyx2 + skinBorderx2` (border-box) instead of hard-coded `34/30`, title `py 10.8` / line `20.25`. Ledger P12~P16; V1/V2/V3 closed, V6 registered (Multi-line input *inner* line spacing still uses DWrite's default metrics — fixing it needs `SetLineSpacing` in the render layer and an on-screen check).
 
 ## v1.0.0 (2026-11-17)
 
