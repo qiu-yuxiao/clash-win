@@ -48,7 +48,7 @@ ${UnStrStr}
 
 ; ---------- 可覆盖定义（构建脚本传入绝对路径） ----------
 !ifndef VERSION
-  !define VERSION "1.0.0"
+  !define VERSION "1.0.1"
 !endif
 !ifndef STAGEDIR
   !define STAGEDIR "stage"
@@ -698,9 +698,9 @@ Section "Install"
   ; 同名内核/服务：仅杀对方（路径含 Clash Mini / clash-mini 且不在本方 $INSTDIR）。
   ; ClashWin 自身内核=win-mihomo.exe、Clash Mini 内核=mini-mihomo.exe，二者皆在名单内，
   ; Where 过滤保证只杀异路径实例（本方 $INSTDIR 下的 win-mihomo 绝不误杀）。
-  nsExec::Exec "powershell -NoProfile -NonInteractive -Command $\"Get-Process -Name mini-mihomo,win-mihomo -ErrorAction SilentlyContinue | Where-Object { ($_.Path -NotLike '$INSTDIR*') -and (($_.Path -Like '*Clash Mini*') -or ($_.Path -Like '*clash-mini*')) } | Stop-Process -Force$\""
+  nsExec::Exec "powershell -NoProfile -NonInteractive -Command $\"Get-Process -Name mini-mihomo,win-mihomo -ErrorAction SilentlyContinue | Where-Object { ($$_.Path -NotLike '$INSTDIR*') -and (($$_.Path -Like '*Clash Mini*') -or ($$_.Path -Like '*clash-mini*')) } | Stop-Process -Force$\""
   Pop $0
-  nsExec::Exec "powershell -NoProfile -NonInteractive -Command $\"Get-Process clash-verge-service -ErrorAction SilentlyContinue | Where-Object { ($_.Path -NotLike '$INSTDIR*') -and (($_.Path -Like '*Clash Mini*') -or ($_.Path -Like '*clash-mini*')) } | Stop-Process -Force$\""
+  nsExec::Exec "powershell -NoProfile -NonInteractive -Command $\"Get-Process clash-verge-service -ErrorAction SilentlyContinue | Where-Object { ($$_.Path -NotLike '$INSTDIR*') -and (($$_.Path -Like '*Clash Mini*') -or ($$_.Path -Like '*clash-mini*')) } | Stop-Process -Force$\""
   Pop $0
 
   ; 服务「借用与归还」（总纲 §5.2.2，2026-11-10 裁决）：服务二进制是同一个上游
