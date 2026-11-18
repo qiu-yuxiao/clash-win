@@ -14,6 +14,13 @@
 namespace clashwin::ui {
 
 namespace {
+// ★ MUI 输入框行盒 = 23px 绝对值：InputBase 根 `lineHeight:'1.4375em'` 在 16px
+//   根字号下结算为 23px（docs/pixel-parity-audit.md P12）。多行输入框（P14 高 48、
+//   P16 高 125）的行距、光标步进、选区高都按这个行盒走；单行仍用单行行高。
+constexpr float kMuiRowH = 23.0f;
+// 字形内容盒（ascent+descent ≈ 1.33em）：光标高度取此值，并在 23px 行盒内居中。
+constexpr float kCaretScale = 1.33f;
+
 std::function<std::wstring()>& clip_get() {
   static std::function<std::wstring()> f;
   return f;
@@ -432,8 +439,16 @@ PointF TextField::caret_point() const {
                 scroll_x_;
     }
   }
-  const float line_h = std::min(r.h - 6.0f, std::round(ts.size * 1.4375f));
-  float cy = multiline_ ? 4.0f : std::max(3.0f, (r.h - line_h) * 0.5f);
+  const float line_h = multiline_
+                           ? kMuiRowH
+                           : std::min(r.h - 6.0f, std::round(ts.size * 1.4375f));
+  // 多行：字形盒在 23px 行盒内居中（Chromium 半行距），光标高 = 字形盒高
+  const float caret_h =
+      multiline_
+          ? std::min(r.h - 8.0f, std::round(ts.size * kCaretScale))
+          : line_h;
+  float cy = multiline_ ? 4.0f + (kMuiRowH - caret_h) * 0.5f
+                        : std::max(3.0f, (r.h - line_h) * 0.5f);
   if (multiline_ && composition_.empty() && text_r.w > 16.0f) {
     if (ITextEngine* eng = text_engine()) {
       int line_start = 0;
@@ -450,7 +465,8 @@ PointF TextField::caret_point() const {
       }
       const int max_line = std::max(0, static_cast<int>((r.h - 8.0f) / line_h) - 1);
       line_idx = std::min(line_idx, max_line);
-      cy = 4.0f + static_cast<float>(line_idx) * line_h;
+      cy = 4.0f + static_cast<float>(line_idx) * line_h +
+           (kMuiRowH - caret_h) * 0.5f;
       cx = 8.0f + eng->measure_text(
                       text_.substr(static_cast<size_t>(line_start),
                                    static_cast<size_t>(cursor_ - line_start)),
@@ -465,6 +481,8 @@ PointF TextField::caret_point() const {
 float TextField::caret_height() const {
   TextStyle ts = style_;
   ts.size = (style_.size > 0) ? style_.size : 13;
+  if (multiline_)  // 23px 行盒内的字形盒高（V6）
+    return std::min(bounds().h - 8.0f, std::round(ts.size * kCaretScale));
   return std::min(bounds().h - 6.0f, std::round(ts.size * 1.4375f));
 }
 
@@ -550,6 +568,7 @@ void TextField::on_paint(IRenderTarget& rt) {
       if (multiline_) {
         ts.wrap = true;
         ts.align_v = AlignV::Top;
+        ts.line_h = kMuiRowH;  // 占位符与正文同行盒（V6）
         // src: profile-import-card.tsx:164 '& .MuiInputBase-input': { py: '4px' }
         rt.draw_text(placeholder_, {text_r.x, 4.0f, text_r.w, r.h - 8.0f}, ts);
       } else {
@@ -571,8 +590,11 @@ void TextField::on_paint(IRenderTarget& rt) {
       sx0 = x0 - scroll_x_;
       sx1 = x1 - scroll_x_;
       Brush sel_b{selection_bg_};
-      // src: profile-import-card.tsx:145-165 单行行高 13px * 1.4375
-      const float sel_h = std::min(r.h - 6.0f, std::round(ts.size * 1.4375f));
+      // src: profile-import-card.tsx:145-165 单行行高 13px * 1.4375；
+      //      多行按 MUI 行盒 23（P12）铺满一整行
+      const float sel_h =
+          multiline_ ? kMuiRowH
+                     : std::min(r.h - 6.0f, std::round(ts.size * 1.4375f));
       const float sel_y = multiline_ ? 4.0f : (r.h - sel_h) * 0.5f;
       rt.fill_rect({sx0, sel_y, sx1 - sx0, sel_h}, sel_b);
     }
@@ -583,9 +605,12 @@ void TextField::on_paint(IRenderTarget& rt) {
     } else {
       if (multiline_) {
         // src: profile-import-card.tsx:140-165 multiline minRows=2, py='4px'
+        // ★ 行盒 23px（InputBase lineHeight 1.4375em @16，P12/P14）：不给 line_h
+        //   则 DWrite 用默认 1.33em（13px≈17.3/行），比 Mini 紧密 5.7px/行。
         TextStyle mts = ts;
         mts.wrap = true;
         mts.align_v = AlignV::Top;
+        mts.line_h = kMuiRowH;
         rt.draw_text(text_, {text_r.x, 4.0f, text_r.w, r.h - 8.0f}, mts);
       } else {
         rt.draw_text(text_, text_rect, ts);
@@ -617,8 +642,15 @@ void TextField::on_paint(IRenderTarget& rt) {
       }
     }
     // src: profile-import-card.tsx:145-165 单行行高 13px * 1.4375，multiline 时光标按折行落位且保持单行高度
-    const float line_h = std::min(r.h - 6.0f, std::round(ts.size * 1.4375f));
-    float cy = multiline_ ? 4.0f : std::max(3.0f, (r.h - line_h) * 0.5f);
+    const float line_h = multiline_
+                             ? kMuiRowH
+                             : std::min(r.h - 6.0f, std::round(ts.size * 1.4375f));
+    // 多行：光标高 = 字形盒高，在 23px 行盒内垂直居中（Chromium 半行距）
+    const float caret_h =
+        multiline_ ? std::min(r.h - 8.0f, std::round(ts.size * kCaretScale))
+                   : line_h;
+    float cy = multiline_ ? 4.0f + (kMuiRowH - caret_h) * 0.5f
+                          : std::max(3.0f, (r.h - line_h) * 0.5f);
     if (multiline_ && composition_.empty() && text_r.w > 16.0f) {
       if (ITextEngine* eng = text_engine()) {
         int line_start = 0;
@@ -635,14 +667,15 @@ void TextField::on_paint(IRenderTarget& rt) {
         }
         const int max_line = std::max(0, static_cast<int>((r.h - 8.0f) / line_h) - 1);
         line_idx = std::min(line_idx, max_line);
-        cy = 4.0f + static_cast<float>(line_idx) * line_h;
+        cy = 4.0f + static_cast<float>(line_idx) * line_h +
+             (kMuiRowH - caret_h) * 0.5f;
         cx = 8.0f + eng->measure_text(
                         text_.substr(static_cast<size_t>(line_start),
                                      static_cast<size_t>(cursor_ - line_start)),
                         ts, 0).w;
       }
     }
-    rt.fill_rect({cx, cy, 1.5f, line_h}, Brush{caret_color_});
+    rt.fill_rect({cx, cy, 1.5f, caret_h}, Brush{caret_color_});
   }
 
   // BUG-360: 尾部加载旋转环（src: src/components/proxy/proxy-head.tsx:250-263）

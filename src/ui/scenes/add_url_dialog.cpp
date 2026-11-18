@@ -306,6 +306,9 @@ void AddUrlDialog::on_paint(IRenderTarget& rt) {
     ts.size = 13.0f;  // src: get3DInputStyle fontSize 13px
     ts.color = ip.text;
     ts.wrap = true;
+    // ★ V6：行盒 23px（InputBase lineHeight 1.4375em @16）。框内 4 行必须与
+    //   P16 的外框几何（4×23+16.5×2=125）同源，否则文字比框紧 5.7px/行。
+    ts.line_h = kLineH;
     ts.max_lines = static_cast<int>(kRows);
     std::wstring body = utf::utf8_to_utf16(payload_);
     if (body.empty()) {

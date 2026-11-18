@@ -83,6 +83,12 @@ struct TextStyle {
   bool wrap = false;               // 自动换行
   bool ellipsis = false;           // 末尾省略号（trimming）
   int max_lines = 0;               // 0 = 不限；配合 wrap 生效
+  // 行盒高（逻辑 px）。0 = 用 DirectWrite 字体默认行距（≈1.33×size）。
+  // ★ MUI 输入框根 `lineHeight:'1.4375em'` 在 16px 根字号下结算为 23px 绝对值
+  //   （docs/pixel-parity-audit.md P12），多行输入框必须显式给 23，行距才与 Mini
+  //   逐行对齐（V6）。取值时按 Chromium 半行距模型摆基线：
+  //   基线 = 行顶 + (行盒 − 字面盒)/2 + ascent。
+  float line_h = 0;
 };
 
 struct Brush {

@@ -306,6 +306,22 @@ std::wstring resolve_skin_font(IDWriteFactory* f,
   }
   return L"Segoe UI";
 }
+
+// V6：MUI 输入框行盒 = 23px 绝对值（InputBase 根 `lineHeight:'1.4375em'`
+//   在 16px 根字号下结算，见 docs/pixel-parity-audit.md P12）。
+//   Chromium 半行距模型：字面盒（ascent+descent）在行盒内居中，基线随之平移。
+//   DirectWrite 的 UNIFORM 行距按「行顶→基线」的绝对值摆放基线，因此用默认
+//   行距下首行的 baseline/height 反推（只取第 1 行，避免多行高度累加干扰）。
+//   lineGap≠0 的字体上误差为 lineGap/2，属亚像素级。
+void apply_line_spacing(IDWriteTextLayout* layout, const TextStyle& ts) {
+  if (!layout || ts.line_h <= 0.0f) return;
+  UINT32 count = 0;
+  DWRITE_LINE_METRICS lm{};
+  if (FAILED(layout->GetLineMetrics(&lm, 1, &count)) || count == 0) return;
+  const float baseline = lm.baseline + (ts.line_h - lm.height) * 0.5f;
+  layout->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, ts.line_h,
+                         baseline > 0.0f ? baseline : 0.0f);
+}
 }  // namespace
 
 IDWriteTextFormat* D2dRenderTarget::format(const TextStyle& ts) {
@@ -359,6 +375,8 @@ SizeF D2dRenderTarget::measure_text(const std::wstring& text,
   h ^= static_cast<uint64_t>(ts.weight) << 24;
   h ^= static_cast<uint64_t>(ts.wrap) << 40;
   h ^= static_cast<uint64_t>(static_cast<int32_t>(max_w * 4)) << 41;
+  // 行盒高参与高度结算（V6），须进 key，否则 0 与 23 会命中同一缓存项
+  h ^= static_cast<uint64_t>(static_cast<uint32_t>(ts.line_h * 4)) << 20;
   // 【FONTSIZE-FIX】测量结果随 dpi 变化（format 字号含 /scale），key 必须含 dpi
   h ^= static_cast<uint64_t>(static_cast<uint32_t>(dpi_)) << 56;
   auto it = measure_cache_.find(h);
@@ -370,6 +388,7 @@ SizeF D2dRenderTarget::measure_text(const std::wstring& text,
       layout_for_measure(ts), max_w > 0 ? max_w : 1e6f,
       1e6f, &layout);
   if (FAILED(hr) || !layout) return {};
+  apply_line_spacing(layout, ts);
   DWRITE_TEXT_METRICS m;
   layout->GetMetrics(&m);
   layout->Release();
@@ -637,13 +656,14 @@ void D2dRenderTarget::draw_text(const std::wstring& text, const RectF& r,
                                      : DWRITE_PARAGRAPH_ALIGNMENT_FAR);
   layout->SetWordWrapping(
       ts.wrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+  apply_line_spacing(layout, ts);
   if (ts.ellipsis) {
     DWRITE_TRIMMING trim{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
     layout->SetTrimming(&trim, nullptr);
   }
   // max_lines：DWrite 无直接接口，超出按行高截断 + trimming 省略（工具箱近似）
   if (ts.max_lines > 0 && ts.wrap) {
-    float line_h = ts.size * 1.33f;
+    float line_h = ts.line_h > 0.0f ? ts.line_h : ts.size * 1.33f;
     float max_h = ts.max_lines * line_h;
     if (r.h > max_h) {
       RectF rr = r;
