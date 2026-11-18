@@ -244,6 +244,9 @@ UT_TEST(t21_first_run_ready_timeout_and_poll) {
 
 // Test 5: AddUrlDialog Layout & Form Fields
 UT_TEST(t21_addurl_modal_layout_and_fields) {
+  // 按钮高度依赖皮肤边框宽（retro-3d 2px / 其余 1px），先锁皮肤再到断言
+  theme::ThemeService::instance().init(theme::SkinId::Retro3d,
+                                      theme::ThemeMode::Light);
   AddUrlDialog dialog;
   dialog.open();
   UT_CHECK(dialog.is_open());
@@ -252,10 +255,33 @@ UT_TEST(t21_addurl_modal_layout_and_fields) {
   dialog.on_arrange({0, 0, 800, 600});
 
   // 对照源码 popup-styles.ts:120-245：窄窗锁定左侧 271px，全宽纵向堆叠动作区
-  // 高度 = 标题 42 + 内容 112 + 动作 94 = 248
+  //  标题 = py 10.8×2 + lineHeight 1.35×15 = 41.85
+  //  内容 = py 12 + 输入框 125（根 p16.5×2 + 4×23 行）+ pb 12 = 149
+  //  动作 = py 10.8×2 + 主按钮 40.35 + gap 8 + 次按钮 37.08 = 107.03
+  //  （按钮 border-box：line 1.75×fs + py×2 + retro 2px 边框×2）
+  // 合计 297.88
   UT_CHECK_EQ(dialog.card_rect().x, 0.0f);
   UT_CHECK_EQ(dialog.card_rect().w, 271.0f);
-  UT_CHECK_EQ(dialog.card_rect().h, 248.0f);
+  // 纵向节奏（与皮肤无关，用结构断言而非绝对值 —— 按钮高随皮肤边框宽变化）：
+  //   标题带 = py 10.8×2 + lineHeight 1.35×15 = 41.85
+  //   内容带 = py 12 + 输入框 125（根 p16.5×2 + 4×23 行）+ pb 12 = 149
+  //   动作带 = py 10.8×2 + 主按钮 + gap 8 + 次按钮
+  const float card_y = dialog.card_rect().y;
+  UT_CHECK(near_f(dialog.add_btn_rect().y - card_y, 41.85f + 149.0f + 10.8f, 0.05f));
+  UT_CHECK(near_f(dialog.cancel_btn_rect().y,
+                  dialog.add_btn_rect().bottom() + 8.0f, 0.05f));
+  UT_CHECK(near_f(dialog.cancel_btn_rect().bottom() + 10.8f,
+                  card_y + dialog.card_rect().h, 0.05f));
+  // 按钮高 = line 1.75×fs + py×2 + 皮肤边框×2
+  const auto& tsvc = theme::ThemeService::instance();
+  UT_CHECK(near_f(dialog.add_btn_rect().h,
+                  36.35f + tsvc.button_paint("primary", false).border_w * 2.0f,
+                  0.01f));
+  UT_CHECK(near_f(dialog.cancel_btn_rect().h,
+                  35.08f + tsvc.button_paint("default", true).border_w * 2.0f,
+                  0.01f));
+  // 输入框外框 = 根 16.5×2 + 4 行 × 23
+  UT_CHECK(near_f(dialog.input_rect().h, 125.0f, 0.01f));
 
   // 默认策略偏好为 PROXY
   UT_CHECK(dialog.target() == core::quick_routing::RuleTarget::Proxy);

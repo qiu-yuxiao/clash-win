@@ -19,13 +19,25 @@ namespace {
 
 // ---------- 源码常量（逻辑 DIP） ----------
 // src: popup-styles.ts:173-185 窄窗弹窗锁定 271px 左锚定
-constexpr float kTitlePx = 14.0f, kTitlePy = 11.0f, kTitleFs = 15.0f;  // src: popup-styles.ts:198-206
+constexpr float kTitlePx = 14.0f, kTitlePy = 10.8f, kTitleFs = 15.0f;  // src: popup-styles.ts:198-206 py:1.35=10.8
+constexpr float kTitleLineH = 20.25f;      // src: popup-styles.ts:207 lineHeight 1.35 × 15px
 constexpr float kContentPx = 14.0f, kContentPb = 12.0f;  // src: popup-styles.ts:219-220
-constexpr float kActsPx = 14.0f, kActsPy = 11.0f, kActsGap = 8.0f;  // src: popup-styles.ts:239-241
-// src: add-url-dialog.tsx:231-232 multiline minRows 4（13px × 行高 1.4375 ≈ 18.7）
-constexpr float kRows = 4.0f, kLineH = 20.0f;
-// src: add-url-dialog.tsx:247-271 全宽纵向堆叠按钮（Primary + Cancel）
-constexpr float kPrimaryBtnH = 34.0f, kSecondaryBtnH = 30.0f, kBtnFs = 13.0f;
+constexpr float kActsPx = 14.0f, kActsPy = 10.8f, kActsGap = 8.0f;  // src: popup-styles.ts:239-241 py:1.35
+// ★ 输入框盒模型（MUI multiline + 非 small）：
+//   文本域行高不是 13×1.4375，而是 InputBase 根 `lineHeight:'1.4375em'`
+//   在 16px 字号下算出的 **23px 绝对值**（子元素 fontSize 不改行高）；
+//   根内距 16.5×2（OutlinedInput.js:101-106 multiline 分支），文本域自身 padding 0。
+//   → 4 行 = 4×23 = 92，外框 = 92 + 33 = 125
+constexpr float kRows = 4.0f, kLineH = 23.0f;
+constexpr float kInputPadX = 14.0f, kInputPadY = 16.5f;
+// src: add-url-dialog.tsx:249-268 全宽纵向堆叠按钮（Primary + Cancel）
+//   按钮是 border-box（MUI ButtonBase），高度 = line 1.75×fs + py×2 + border×2
+//   主：13×1.75 + 0.85×8×2 = 36.35；次：12.5×1.75 + 0.7×8×2 = 35.08；
+//   retro-3d 皮肤再各加 2×2px 实边框（button-styles.ts:80 border 2px×depth）
+//   border 宽随皮肤（retro 2px / 其余 1px），故只存"内容+内距"部分，
+//   实际高度在 on_arrange 里 + border_w×2（读 ButtonPaint.border_w）
+constexpr float kPrimaryBtnContentH = 36.35f, kSecondaryBtnContentH = 35.08f;
+constexpr float kBtnFs = 13.0f;
 
 std::function<std::wstring()>& test_clipboard_reader() {
   static std::function<std::wstring()> fn;
@@ -230,10 +242,15 @@ void AddUrlDialog::on_arrange(const RectF& area) {
   set_bounds(area);
   // src: popup-styles.ts:120-185 窄窗弹窗锁定左侧 271px
   const float cw = std::min(theme::kPopupPaneWidth, area.w);
-  const float title_h = kTitlePy * 2 + 20.0f;           // 42
-  const float input_h = kRows * kLineH + 8.0f;          // 88
-  const float content_h = 12.0f + input_h + kContentPb; // 112
-  const float acts_h = kActsPy * 2 + kPrimaryBtnH + kActsGap + kSecondaryBtnH;  // 94
+  const float title_h = kTitlePy * 2 + kTitleLineH;      // 41.85
+  const float input_h = kRows * kLineH + kInputPadY * 2;  // 125
+  const float content_h = 12.0f + input_h + kContentPb;   // 149
+  const auto& svc = theme::ThemeService::instance();
+  const float kPrimaryBtnH =
+      kPrimaryBtnContentH + svc.button_paint("primary", false).border_w * 2.0f;
+  const float kSecondaryBtnH =
+      kSecondaryBtnContentH + svc.button_paint("default", true).border_w * 2.0f;
+  const float acts_h = kActsPy * 2 + kPrimaryBtnH + kActsGap + kSecondaryBtnH;
   const float ch = std::min(title_h + content_h + acts_h, std::max(140.0f, area.h - 8.0f));
   const float cx = 0.0f;  // src: popup-styles.ts:123 left: 0
   const float cy = std::max(0.0f, (area.h - ch) / 2.0f);
@@ -295,26 +312,30 @@ void AddUrlDialog::on_paint(IRenderTarget& rt) {
       TextStyle ph = ts;
       ph.color.a *= 0.5f;
       rt.draw_text(tr("settings.mini.addUrlPlaceholder"),
-                   {input_rect_.x + 6, input_rect_.y + 4, input_rect_.w - 12,
-                    input_rect_.h - 8},
+                   {input_rect_.x + kInputPadX, input_rect_.y + kInputPadY,
+                    input_rect_.w - kInputPadX * 2,
+                    input_rect_.h - kInputPadY * 2},
                    ph);
       if (input_focused_) {
-        rt.draw_text(L"|", {input_rect_.x + 6, input_rect_.y + 4,
-                            input_rect_.w - 12, input_rect_.h - 8}, ts);
+        rt.draw_text(L"|", {input_rect_.x + kInputPadX, input_rect_.y + kInputPadY,
+                            input_rect_.w - kInputPadX * 2,
+                            input_rect_.h - kInputPadY * 2}, ts);
       }
     } else {
       if (all_selected_) {
         Color4f sel_bg = svc.primary();
         sel_bg.a = 0.25f;
-        rt.fill_rect({input_rect_.x + 4, input_rect_.y + 4, input_rect_.w - 8,
-                      input_rect_.h - 8},
+        rt.fill_rect({input_rect_.x + kInputPadX, input_rect_.y + kInputPadY,
+                      input_rect_.w - kInputPadX * 2,
+                      input_rect_.h - kInputPadY * 2},
                      Brush{sel_bg});
       } else if (input_focused_) {
         body += L"|";
       }
       rt.draw_text(body,
-                   {input_rect_.x + 6, input_rect_.y + 4, input_rect_.w - 12,
-                    input_rect_.h - 8},
+                   {input_rect_.x + kInputPadX, input_rect_.y + kInputPadY,
+                    input_rect_.w - kInputPadX * 2,
+                    input_rect_.h - kInputPadY * 2},
                    ts);
     }
   }
