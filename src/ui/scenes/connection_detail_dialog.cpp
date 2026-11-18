@@ -14,6 +14,16 @@
 namespace clashwin::ui::scene {
 
 namespace {
+// ---------- 连接详情浮层几何（← components/connection/connection-detail.tsx）----------
+// 该浮层是 MUI Popover：paper sx = getPopupCardStyle + maxWidth 520 / maxHeight 480
+// / overflowY auto / p 2（:56-62）。内容只有字段行与底部关闭区，没有标题与分隔线。
+constexpr float kDetailPad = 16.0f;      // ← connection-detail.tsx:61 p: 2
+constexpr float kDetailRowH = 12.0f * 1.4f;  // ← :157 fontSize 12 × body1 行高 1.4
+constexpr float kDetailGap = 6.0f;       // ← :157 gap: 0.75
+constexpr float kDetailLabelW = 100.0f;  // ← :212 <b style={{ minWidth: 100 }}>
+constexpr float kDetailBtnPadX = 10.0f;  // ← MUI Button size="small" padding '4px 10px'
+constexpr float kDetailBtnPadY = 4.0f;
+
 std::wstring upper_ascii_w(const std::wstring& s) {
   std::wstring out = s;
   for (wchar_t& c : out) {
@@ -174,10 +184,23 @@ void ConnectionDetailDialog::on_arrange(const RectF& area) {
 void ConnectionDetailDialog::place_card() {
   const RectF area = bounds();
   const float kMargin = 16.0f;  // src: MUI Popper marginThreshold 默认 16
-  // Mini 纸面 maxWidth 520 / maxHeight 480，内容自适应（overflowY auto）
-  // src: connection-detail.tsx:59-61
-  const float row_h = 24.0f;  // 12px×行高1.5(18) + gap 0.75(6)：:160/:163
-  const float content_h = 36.0f + 14 * row_h + 34.0f;  // 标题/BUG-396 后 14 行/底部按钮
+  // src: connection-detail.tsx:56-62 纸面 maxWidth 520 / maxHeight 480 / p 2(16)；
+  // 内容 = 字段行（根 Box fontSize 12 / body1 行高 1.4 / gap 0.75）+ 底部关闭区
+  constexpr float kPad = kDetailPad;
+  constexpr float kRowH = kDetailRowH;
+  constexpr float kGap = kDetailGap;
+  const float rows = static_cast<float>(fields().size());
+  const bool can_close_conn = !closed_ && !item_.is_synthetic;
+  // 关闭区 ← :196-199：mt 1(8) + pt 1.25(10) + borderTop 1px，内含 size="small" 按钮
+  // （MUI Button small：padding '4px 10px' / lineHeight 1.75 / 字号沿用 13px）
+  const auto err_paint = theme::ThemeService::instance().button_paint("error");
+  const float btn_h = 13.0f * 1.75f + kDetailBtnPadY * 2.0f + err_paint.border_w * 2.0f;
+  const float close_sec_h = can_close_conn ? (8.0f + 10.0f + 1.0f + btn_h) : 0.0f;
+  // 此前这里把「查看详情」标题与分隔线计入高度（36/34 的魔法数），Mini 的 Popover
+  // 里两者都不存在（:207-247 只有字段行 + 关闭区）。
+  float content_h = kPad * 2.0f + rows * kRowH + std::max(0.0f, rows - 1.0f) * kGap;
+  if (can_close_conn) content_h += kGap + close_sec_h;
+
   float cw = std::min(area.w - 2 * kMargin, 520.0f);
   float ch = std::min(area.h - 2 * kMargin, std::min(480.0f, content_h));
   if (cw < 180.0f) cw = area.w;
@@ -212,9 +235,19 @@ void ConnectionDetailDialog::place_card() {
   }
   card_rect_ = {x, y, cw, ch};
 
-  float btn_y = y + ch - 30.0f;
-  btn_dismiss_rect_ = {x + cw - 62.0f, btn_y, 50.0f, 22.0f};
-  btn_close_conn_rect_ = {x + cw - 146.0f, btn_y, 76.0f, 22.0f};
+  // 关闭连接按钮：右对齐（← :196 textAlign: right），宽 = 文字 + px 10×2（small 按钮）
+  float btn_w = 0.0f;
+  const std::wstring btn_label = tr("connections.components.actions.closeConnection");
+  if (ITextEngine* e = text_engine()) {
+    TextStyle ts;
+    ts.size = 13.0f;
+    ts.weight = err_paint.weight;
+    btn_w = e->measure_text(btn_label, ts, 0).w;
+  }
+  btn_w = std::min(btn_w + kDetailBtnPadX * 2.0f, std::max(40.0f, cw - kPad * 2.0f));
+  const float btn_y = y + ch - kPad - btn_h;
+  btn_close_conn_rect_ = {x + cw - kPad - btn_w, btn_y, btn_w, btn_h};
+  btn_dismiss_rect_ = {0, 0, 0, 0};  // Mini 无独立关闭按钮（点外部关闭）
 }
 
 void ConnectionDetailDialog::on_paint(IRenderTarget& rt) {
@@ -236,81 +269,81 @@ void ConnectionDetailDialog::on_paint(IRenderTarget& rt) {
   }
   ::clashwin::ui::draw_card(rt, card_rect_, card_paint);
 
-  // 3. 标题
-  TextStyle title_ts;
-  title_ts.size = 12.5f;
-  title_ts.weight = static_cast<int>(Weight::Bold);
-  title_ts.color = tokens.primary_text;
-  title_ts.align_v = AlignV::Center;
-  rt.draw_text(tr("connections.components.contextMenu.viewDetail"),
-               {card_rect_.x + 14, card_rect_.y + 8, card_rect_.w - 28, 20},
-               title_ts);
-
-  // 分隔线
-  rt.fill_rect({card_rect_.x + 10, card_rect_.y + 32, card_rect_.w - 20, 1},
-               Brush{tokens.divider_color});
-
-  // 4. 13 项元数据逐行绘制
+  // 3. 字段行（← connection-detail.tsx:207-247：Popover 里没有标题、没有分隔线，
+  //    p 2 之后直接就是字段列表）
   auto f_list = fields();
-  float row_y = card_rect_.y + 36.0f;
-  const float row_h = 24.0f;  // src: connection-detail.tsx:160（12px×1.5）+ :163 gap 6
+  float row_y = card_rect_.y + kDetailPad;
+  const float row_h = kDetailRowH;
+  const float label_x = card_rect_.x + kDetailPad;
+  const float value_x = label_x + kDetailLabelW + 8.0f;  // ← :211 gap: 1(8)
+  const float value_w = std::max(20.0f, card_rect_.w - kDetailPad * 2.0f -
+                                           kDetailLabelW - 8.0f);
   TextStyle label_ts;
-  label_ts.size = 12.0f;  // src: :160 fontSize 12
-  label_ts.weight = static_cast<int>(Weight::Bold);  // src: :168 <b>
+  label_ts.size = 12.0f;  // src: :157 fontSize 12
+  label_ts.weight = static_cast<int>(Weight::Bold);  // src: :212 <b>
   label_ts.color = tokens.secondary_text;  // src: :159
   label_ts.align_v = AlignV::Center;
 
   TextStyle val_ts;
-  val_ts.size = 12.0f;  // src: :160
-  val_ts.color = tokens.primary_text;  // src: :174
+  val_ts.size = 12.0f;  // src: :157
+  val_ts.color = tokens.primary_text;  // src: :231
   val_ts.align_v = AlignV::Center;
   val_ts.ellipsis = true;
 
   const bool stale_warning = is_stale_proxy_node();
+  const bool can_close_conn = !closed_ && !item_.is_synthetic;
+  const float rows_bottom =
+      can_close_conn ? btn_close_conn_rect_.y - 11.0f  // ← :198 pt 1.25(10) + borderTop 1px
+                     : card_rect_.bottom() - kDetailPad;
   size_t row_idx = 0;
   for (const auto& [lbl, val] : f_list) {
-    if (row_y + row_h > card_rect_.y + card_rect_.h - 34.0f) break;
+    if (row_y + row_h > rows_bottom) break;
     // label minWidth 100 + gap 1(=8px) → value 起点 = label 起点 + 108
-    // src: connection-detail.tsx:167-168
-    rt.draw_text(lbl + L":", {card_rect_.x + 14, row_y, 100, row_h}, label_ts);
+    // src: connection-detail.tsx:211-212
+    rt.draw_text(lbl + L":", {label_x, row_y, kDetailLabelW, row_h}, label_ts);
     // BUG-396（connection-detail.tsx:219-224）：旧节点连接值用 warning 色 + 600 字重
     TextStyle row_val_ts = val_ts;
     if (row_idx == 1 && stale_warning) {
       row_val_ts.color = tokens.warning_color;
       row_val_ts.weight = 600;
     }
-    rt.draw_text(val, {card_rect_.x + 122, row_y, card_rect_.w - 136, row_h}, row_val_ts);
-    row_y += row_h;
+    rt.draw_text(val, {value_x, row_y, value_w, row_h}, row_val_ts);
+    row_y += row_h + kDetailGap;
     ++row_idx;
   }
 
-  // 5. 底部按钮（关闭弹窗或合成行均隐藏断开连接按钮）
-  const bool can_close_conn = !closed_ && !item_.is_synthetic;
+  // 4. 关闭区：上边框 + 右对齐按钮（← connection-detail.tsx:196-245）
   if (can_close_conn) {
-    // 断开连接按钮（错误色红底或描边）
-    Color4f btn_bg = hover_close_conn_ ? Color4f::hex(0xD32F2F)  // src: MUI red[700]
-                                        : Color4f::hex(0xEF5350);  // src: MUI red[400]
-    Brush b_bg{btn_bg};
-    rt.round_rect(btn_close_conn_rect_, 4.0f, {}, &b_bg);
+    const float border_y = btn_close_conn_rect_.y - 11.0f;
+    rt.fill_rect({card_rect_.x + kDetailPad, border_y,
+                  card_rect_.w - kDetailPad * 2.0f, 1.0f},
+                 Brush{tokens.divider_color});
+    // 按钮走 button_paint("error")：6 套皮肤的红底/描边/字色/浮雕全部查表
+    const auto bp = theme::ThemeService::instance().button_paint("error");
+    const RectF& r = btn_close_conn_rect_;
+    if (bp.has_shadow)
+      draw_soft_shadow(rt, r, bp.radius, bp.shadow_color, bp.shadow_dy, bp.shadow_blur);
+    if (bp.use_grad) {
+      const GradientStop* gs = hover_close_conn_ ? bp.grad_hover : bp.grad;
+      const int gn = (hover_close_conn_ && bp.grad_hover_count > 0)
+                         ? bp.grad_hover_count
+                         : bp.grad_count;
+      rt.fill_round_rect_gradient_angle(r, bp.radius, gs, gn, bp.grad_angle);
+    } else {
+      Brush b{hover_close_conn_ ? bp.fill_hover : bp.fill};
+      rt.round_rect(r, bp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &b);
+    }
+    if (bp.border_w > 0.01f)
+      rt.round_rect(r, bp.radius, Pen{bp.border, bp.border_w}, nullptr);
     TextStyle btn_ts;
-    btn_ts.size = 11.0f;
-    btn_ts.color = Color4f(1, 1, 1, 1);  // src: MUI Button contrastText #fff
+    btn_ts.size = 13.0f;  // ← MUI Button size="small" 字号
+    btn_ts.weight = bp.weight;
+    btn_ts.color = bp.text;
     btn_ts.align_h = AlignH::Center;
     btn_ts.align_v = AlignV::Center;
     // src: locales/zh/connections.json:28 「"closeConnection": "关闭连接"」（connection-detail.tsx:196）
-    rt.draw_text(tr("connections.components.actions.closeConnection"), btn_close_conn_rect_, btn_ts);
+    rt.draw_text(tr("connections.components.actions.closeConnection"), r, btn_ts);
   }
-
-  // 关闭按钮
-  Color4f dis_bg = hover_dismiss_ ? tokens.subtle_border : tokens.subtle_bg;
-  Brush d_bg{dis_bg};
-  rt.round_rect(btn_dismiss_rect_, 4.0f, {tokens.subtle_border, 1.0f}, &d_bg);
-  TextStyle dis_ts;
-  dis_ts.size = 11.0f;
-  dis_ts.color = tokens.primary_text;
-  dis_ts.align_h = AlignH::Center;
-  dis_ts.align_v = AlignV::Center;
-  rt.draw_text(tr("shared.actions.close"), btn_dismiss_rect_, dis_ts);
 }
 
 bool ConnectionDetailDialog::on_mouse(const MouseEvent& e) {
@@ -321,10 +354,8 @@ bool ConnectionDetailDialog::on_mouse(const MouseEvent& e) {
   if (e.type == MouseEventType::Move) {
     const bool can_close_conn = !closed_ && !item_.is_synthetic;
     bool hc = can_close_conn && btn_close_conn_rect_.contains(pt.x, pt.y);
-    bool hd = btn_dismiss_rect_.contains(pt.x, pt.y);
-    if (hc != hover_close_conn_ || hd != hover_dismiss_) {
+    if (hc != hover_close_conn_) {
       hover_close_conn_ = hc;
-      hover_dismiss_ = hd;
       invalidate();
     }
     return true;
@@ -337,11 +368,7 @@ bool ConnectionDetailDialog::on_mouse(const MouseEvent& e) {
       close();
       return true;
     }
-    if (btn_dismiss_rect_.contains(pt.x, pt.y)) {
-      close();
-      return true;
-    }
-    // 点击卡片外遮罩：关闭
+    // 点击卡片外遮罩：关闭（← Popover 的 click-away；Mini 无独立关闭按钮）
     if (!card_rect_.contains(pt.x, pt.y)) {
       close();
       return true;
@@ -372,7 +399,8 @@ std::wstring ConnectionDetailDialog::a11y_default_name() const {
 
 size_t ConnectionDetailDialog::a11y_virtual_child_count() const {
   const bool can_close_conn = !closed_ && !item_.is_synthetic;
-  return can_close_conn ? 3u : 2u;
+  // 摘要文本 + 关闭连接按钮；Mini 的 Popover 里没有独立「关闭」按钮
+  return can_close_conn ? 2u : 1u;
 }
 
 A11ySubItem ConnectionDetailDialog::a11y_virtual_child(size_t idx) const {
@@ -390,25 +418,16 @@ A11ySubItem ConnectionDetailDialog::a11y_virtual_child(size_t idx) const {
   }
   sub.role = A11yRole::Button;
   sub.can_invoke = enabled();
-  const bool can_close_conn = !closed_ && !item_.is_synthetic;
-  if (can_close_conn && idx == 1) {
-    sub.name = tr("connections.components.actions.closeConnection");
-    sub.local_bounds = btn_close_conn_rect_;
-  } else {
-    sub.name = tr("shared.actions.close");
-    sub.local_bounds = btn_dismiss_rect_;
-  }
+  sub.name = tr("connections.components.actions.closeConnection");
+  sub.local_bounds = btn_close_conn_rect_;
   return sub;
 }
 
 bool ConnectionDetailDialog::a11y_invoke_virtual_child(size_t idx) {
   if (!open_ || !enabled() || idx == 0) return false;
   const bool can_close_conn = !closed_ && !item_.is_synthetic;
-  if (can_close_conn && idx == 1) {
-    if (on_close_connection) on_close_connection(item_.id);
-    close();
-    return true;
-  }
+  if (!can_close_conn) return false;
+  if (on_close_connection) on_close_connection(item_.id);
   close();
   return true;
 }

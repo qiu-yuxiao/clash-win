@@ -214,6 +214,8 @@ class CoreUpdateModal : public Widget {
 
   RectF card_rect_;
   RectF btn_close_x_rect_;
+  // 版本信息盒（← layout-dialogs.tsx:468-505 p 1.25 + radius 6 + subtleSurface 底/边）
+  RectF meta_box_rect_;
   RectF progress_bar_rect_;
   RectF btn_close_rect_;
   RectF btn_upgrade_rect_;

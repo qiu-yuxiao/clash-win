@@ -20,6 +20,43 @@ using theme::ThemeService;
 
 namespace {
 
+// ---------- 弹窗族公共三段几何（← utils/popup-styles.ts）----------
+// 上游所有窄窗弹窗都用同一组 DialogTitle / DialogContent / DialogActions sx：
+//   getPopupTitleSx   :191-212  px 1.75(14) py 1.35(10.8) fontSize 15 bold lineHeight 1.35
+//                                borderBottom 1px dividerColor
+//   getPopupContentSx :215-228  px 1.75 py 1.5(12)（&.MuiDialogContent-root 再 pt 1.5）
+//   getPopupActionsSx :231-246  px 1.75 py 1.35(10.8) gap 1(8) borderTop 1px
+// 按钮高不由 MUI 的 size 决定，而由 lineHeight 1.75 与 py 覆写算出：
+//   高 = fontSize × 1.75 + py × 2 + 皮肤边框宽 × 2（border-box，P16 已按此推导）
+constexpr float kPopupPadX = 14.0f;         // ← popup-styles.ts:198 px: 1.75
+constexpr float kPopupTitlePadY = 10.8f;    // ← popup-styles.ts:199 py: 1.35
+constexpr float kPopupContentPadY = 12.0f;  // ← popup-styles.ts:220 py: 1.5
+constexpr float kPopupActionsPadY = 10.8f;  // ← popup-styles.ts:240 py: 1.35
+constexpr float kPopupActionsGap = 8.0f;    // ← popup-styles.ts:241 gap: 1
+constexpr float kPopupBtnLineH = 1.75f;     // ← MUI Button 根 lineHeight 1.75
+constexpr float kPopupLabelLineH = 1.4f;    // ← use-custom-theme.ts:220 body2 lineHeight 1.4
+// 豁免: MUI TextField size="small" 高 40 = 8.5×2 + 23 行盒（pixel-parity-audit P12）
+constexpr float kPopupFieldH = 40.0f;
+// 标题带：弹窗内层 Box 把 fontSize 覆写成 15.5、lineHeight 1.35
+//   （← layout-dialogs.tsx:152-153 / :286-287，两处一致）
+constexpr float kPopupTitleTextH = 15.5f * 1.35f;
+// 标题带总高 = py×2 + 文字行盒 + 1px 底边线（borderBottom 计入布局）
+constexpr float kPopupTitleBlockH =
+    kPopupTitlePadY * 2.0f + kPopupTitleTextH + 1.0f;
+// body2 行盒：Mini 主题 body2 = 0.75rem × lineHeight 1.4（← use-custom-theme.ts:219-221）
+constexpr float kPopupBody2H = 12.5f * kPopupLabelLineH;
+// 更新日志框：p 1.25(10) + fontSize 12 / lineHeight 1.5 / maxHeight 160
+//   （← layout-dialogs.tsx:341-355）
+constexpr float kChgPad = 10.0f;
+constexpr float kChgLineH = 12.0f * 1.5f;
+constexpr float kChgMaxH = 160.0f;
+
+// 弹窗按钮高：fontSize × 1.75 + py × 2 + 皮肤边框宽 × 2
+float popup_btn_h(const char* ctype, float font_size, float pad_y) {
+  return font_size * kPopupBtnLineH + pad_y * 2.0f +
+         ThemeService::instance().button_paint(ctype).border_w * 2.0f;
+}
+
 std::string get_current_log_time() {
   auto now = std::chrono::system_clock::now();
   std::time_t t = std::chrono::system_clock::to_time_t(now);
@@ -77,21 +114,41 @@ void EditProfileModal::on_arrange(const RectF& area) {
   set_bounds(area);
   // src: popup-styles.ts:120-185 窄窗弹窗锁定左侧 271px
   const float cw = std::min(theme::kPopupPaneWidth, area.w);
-  const float ch = std::min(372.0f, std::max(270.0f, area.h - 16.0f));
   const float cx = 0.0f;  // src: popup-styles.ts:123 left: 0
+
+  // ---- 三段高（← layout-dialogs.tsx:144-263）----
+  // 标题：DialogTitle py 10.8 + 内层 Box fontSize 15.5 / lineHeight 1.35 + 1px 底边线
+  constexpr float kTitleTextH = 15.5f * 1.35f;  // ← layout-dialogs.tsx:152-153
+  const float title_h = kPopupTitlePadY * 2.0f + kTitleTextH + 1.0f;
+  // 内容：三组「label(body2 12.5×1.4 + mb 4) + TextField 40」，组间 gap 1.5(12)
+  constexpr float kLabelH = 12.5f * kPopupLabelLineH + 4.0f;  // ← layout-dialogs.tsx:168-170
+  const float group_h = kLabelH + kPopupFieldH;
+  const float content_h = kPopupContentPadY * 2.0f + 3.0f * group_h + 2.0f * 12.0f;
+  // 动作：Save(13px, py .85) 在上、Cancel(12.5px, py .7) 在下，gap 1(8)
+  const float save_h = popup_btn_h("primary", 13.0f, 6.8f);
+  const float cancel_h = popup_btn_h("default", 12.5f, 5.6f);
+  const float actions_h =
+      kPopupActionsPadY * 2.0f + save_h + kPopupActionsGap + cancel_h;
+
+  // 上游 paper 无固定高：内容撑开，上限 maxHeight = 100vh - topOffset - 8
+  const float need = title_h + content_h + actions_h;
+  const float ch = std::min(need, std::max(200.0f, area.h - 8.0f));
   const float cy = std::max(0.0f, (area.h - ch) / 2.0f);
   card_rect_ = {cx, cy, cw, ch};
 
-  const float pad = 14.0f;
-  const float inner_w = std::max(80.0f, cw - pad * 2.0f);
-  name_input_rect_ = {cx + pad, cy + 72.0f, inner_w, 36.0f};
-  url_input_rect_ = {cx + pad, cy + 134.0f, inner_w, 36.0f};
-  interval_input_rect_ = {cx + pad, cy + 196.0f, inner_w, 36.0f};
+  const float inner_w = std::max(80.0f, cw - kPopupPadX * 2.0f);
+  const float content_y = cy + title_h + kPopupContentPadY;
+  name_input_rect_ = {cx + kPopupPadX, content_y + kLabelH, inner_w, kPopupFieldH};
+  url_input_rect_ = {cx + kPopupPadX, content_y + group_h + 12.0f + kLabelH,
+                     inner_w, kPopupFieldH};
+  interval_input_rect_ = {cx + kPopupPadX, content_y + 2.0f * (group_h + 12.0f) + kLabelH,
+                          inner_w, kPopupFieldH};
 
-  // src: popup-styles.ts:230-245 全宽纵向堆叠按钮（Cancel 在上 / Save 在下，或 Save 在上 / Cancel 在下）
-  const float bh = 28.0f, gap = 6.0f;
-  btn_cancel_rect_ = {cx + pad, cy + ch - 12.0f - bh, inner_w, bh};
-  btn_save_rect_ = {cx + pad, btn_cancel_rect_.y - gap - bh, inner_w, bh};
+  // src: popup-styles.ts:231-246 全宽纵向堆叠按钮（Save 在上 / Cancel 在下）
+  const float actions_y = cy + ch - actions_h;
+  btn_save_rect_ = {cx + kPopupPadX, actions_y + kPopupActionsPadY, inner_w, save_h};
+  btn_cancel_rect_ = {cx + kPopupPadX, btn_save_rect_.bottom() + kPopupActionsGap,
+                      inner_w, cancel_h};
 }
 
 void EditProfileModal::on_paint(IRenderTarget& rt) {
@@ -110,35 +167,41 @@ void EditProfileModal::on_paint(IRenderTarget& rt) {
   // 2. 卡片底座（popup_card_paint：6 皮肤查表 + frosted-glass 实底防穿透）
   ::clashwin::ui::draw_card(rt, card_rect_, svc.popup_card_paint());
 
-  // 3. 标题 + 分隔线（src: popup-styles.ts:191-212）
-  const float pad = 14.0f;
+  // 3. 标题 + 分隔线（src: popup-styles.ts:191-212 + layout-dialogs.tsx:144-159）
+  const float pad = kPopupPadX;
   const float inner_w = std::max(80.0f, card_rect_.w - pad * 2.0f);
+  constexpr float kTitleTextH = 15.5f * 1.35f;  // ← layout-dialogs.tsx:152-153
+  constexpr float kLabelGapH = 12.5f * kPopupLabelLineH + 4.0f;  // label 行高 + mb 0.5
   TextStyle title_ts;
-  title_ts.size = 15.0f;
+  title_ts.size = 15.5f;  // ← layout-dialogs.tsx:152 内层 Box fontSize '15.5px'
   title_ts.weight = static_cast<int>(Weight::Bold);
   title_ts.color = tokens.primary_text;
   title_ts.align_h = AlignH::Center;
   title_ts.align_v = AlignV::Center;
   rt.draw_text(L"⚙️ " + tr("layout.components.dialogs.editProfile.title"),
-               {card_rect_.x + pad, card_rect_.y + 10.0f, inner_w, 24.0f},
+               {card_rect_.x + pad, card_rect_.y + kPopupTitlePadY, inner_w, kTitleTextH},
                title_ts);
-  rt.fill_rect({card_rect_.x, card_rect_.y + 44.0f, card_rect_.w, 1.0f},
+  rt.fill_rect({card_rect_.x, card_rect_.y + kPopupTitlePadY * 2.0f + kTitleTextH,
+                card_rect_.w, 1.0f},
                Brush{tokens.divider_color});
 
-  // 4. 字段 label（body2 12.5 bold）
+  // 4. 字段 label（body2 12.5 bold，mb 0.5 落在 label 盒之外）
   TextStyle label_ts;
   label_ts.size = 12.5f;
   label_ts.weight = static_cast<int>(Weight::Bold);
   label_ts.color = tokens.primary_text;
   label_ts.align_v = AlignV::Center;
   rt.draw_text(tr("layout.components.dialogs.editProfile.nameLabel"),
-               {card_rect_.x + pad, card_rect_.y + 52.0f, inner_w, 18.0f},
+               {card_rect_.x + pad, name_input_rect_.y - kLabelGapH, inner_w,
+                kLabelGapH - 4.0f},
                label_ts);
   rt.draw_text(tr("layout.components.dialogs.editProfile.urlLabel"),
-               {card_rect_.x + pad, card_rect_.y + 114.0f, inner_w, 18.0f},
+               {card_rect_.x + pad, url_input_rect_.y - kLabelGapH, inner_w,
+                kLabelGapH - 4.0f},
                label_ts);
   rt.draw_text(tr("layout.components.dialogs.editProfile.intervalLabel"),
-               {card_rect_.x + pad, card_rect_.y + 176.0f, inner_w, 18.0f},
+               {card_rect_.x + pad, interval_input_rect_.y - kLabelGapH, inner_w,
+                kLabelGapH - 4.0f},
                label_ts);
 
   // 5. 输入框（get3DInputStyle：6 套皮肤查表）
@@ -180,25 +243,26 @@ void EditProfileModal::on_paint(IRenderTarget& rt) {
   if (focused_field_ == 3) iw += L"|";
   draw_field(interval_input_rect_, iw, 3, is_local_);
 
-  // 6. 按钮（h28 / fs12 / 取消→保存）
-  // src: layout-dialogs.tsx:220-243 取消 defaultBtn3DStyle、保存 primaryBtn3DStyle，
+  // 6. 按钮（Save 13px / py .85，Cancel 12.5px / py .7；全宽，Save 在上）
+  // src: layout-dialogs.tsx:240-263 取消 defaultBtn3DStyle、保存 primaryBtn3DStyle，
   //   两者都是 get3DButtonStyle(theme,'contained', ...) → 6 套皮肤查表
   TextStyle btn_ts;
-  btn_ts.size = 12.0f;
   btn_ts.align_h = AlignH::Center;
   btn_ts.align_v = AlignV::Center;
 
   auto paint_btn = [&](const RectF& r, const char* ctype, bool hover,
-                       const std::wstring& label) {
-    const auto bp = ThemeService::instance().button_paint(ctype);
+                       const std::wstring& label, float fs, bool outlined) {
+    const auto bp = ThemeService::instance().button_paint(ctype, outlined);
     if (bp.has_shadow)
       draw_soft_shadow(rt, r, bp.radius, bp.shadow_color, bp.shadow_dy,
                        bp.shadow_blur);
     if (bp.glow.a > 0) draw_glow(rt, r, bp.radius, bp.glow, bp.glow_blur);
     if (bp.use_grad) {
       const GradientStop* gs = hover ? bp.grad_hover : bp.grad;
-      rt.fill_round_rect_gradient_angle(r, bp.radius, gs, bp.grad_count,
-                                        bp.grad_angle);
+      // outlined default 常态 2 站、悬停 4 站（button-styles.ts:59-63 / :109-111）
+      const int gn = (hover && bp.grad_hover_count > 0) ? bp.grad_hover_count
+                                                        : bp.grad_count;
+      rt.fill_round_rect_gradient_angle(r, bp.radius, gs, gn, bp.grad_angle);
     } else {
       Brush fb{hover ? bp.fill_hover : bp.fill};
       rt.round_rect(r, bp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &fb);
@@ -212,14 +276,16 @@ void EditProfileModal::on_paint(IRenderTarget& rt) {
                    {r.right() - bp.radius, r.bottom() - 1.0f},
                    Pen{bp.bevel_dark, 1.0f});
     }
+    btn_ts.size = fs;
     btn_ts.weight = bp.weight;
     btn_ts.color = bp.text;
     rt.draw_text(label, r, btn_ts);
   };
+  // ← layout-dialogs.tsx:252-259 Cancel 是 get3DButtonStyle(...,'outlined','default')
   paint_btn(btn_cancel_rect_, "default", hover_cancel_,
-            tr("shared.actions.cancel"));
+            tr("shared.actions.cancel"), 12.5f, /*outlined=*/true);
   paint_btn(btn_save_rect_, "primary", hover_save_,
-            tr("shared.actions.save"));
+            tr("shared.actions.save"), 13.0f, /*outlined=*/false);
 }
 
 bool EditProfileModal::on_mouse(const MouseEvent& e) {
@@ -401,29 +467,66 @@ void ClientUpdateModal::set_progress(int p, const std::string& msg) {
 
 void ClientUpdateModal::on_arrange(const RectF& area) {
   set_bounds(area);
+  const auto& svc = ThemeService::instance();
   // src: popup-styles.ts:120-185 窄窗弹窗锁定左侧 271px
   const float cw = std::min(theme::kPopupPaneWidth, area.w);
-  const float ch = std::min(392.0f, std::max(272.0f, area.h - 16.0f));
   const float cx = 0.0f;
+  const float inner_w = std::max(80.0f, cw - kPopupPadX * 2.0f);
+
+  // ---- 三段高（← layout-dialogs.tsx:278-437）----
+  const float update_h = popup_btn_h("primary", 13.0f, 6.8f);   // ← :410-414
+  const float close_h = popup_btn_h("default", 12.5f, 5.6f);    // ← :429-433 outlined
+  const float actions_h =
+      kPopupActionsPadY * 2.0f + update_h + kPopupActionsGap + close_h;
+
+  // 更新日志框高度：文字自然高 + p×2 + 1px 双边框，上限 160（overflowY auto）
+  TextStyle chg_ts;
+  chg_ts.size = 12.0f;
+  chg_ts.wrap = true;
+  chg_ts.line_h = kChgLineH;
+  float text_h = kChgLineH;
+  if (ITextEngine* e = text_engine()) {
+    const std::wstring w =
+        changelog_.empty()
+            ? tr("layout.components.dialogs.client.changelogEmpty")
+            : utf::utf8_to_utf16(changelog_);
+    text_h = e->measure_text(w, chg_ts, inner_w - kChgPad * 2.0f).h;
+  }
+  float chg_box_h =
+      std::min(kChgMaxH, text_h + kChgPad * 2.0f + 2.0f);  // ← :343 maxHeight '160px'
+
+  // 内容带：版本两行（第一行 mb 0.5）→ Box mb 1.25 → 日志标题 mb 0.75 → 日志框
+  //        → 可选进度区（mt 1.5 + 8px 条 + mt 0.75 + 说明文字）
+  const float meta_h = kPopupBody2H + 4.0f + kPopupBody2H;  // ← :296-327
+  const float extra_h =
+      (status_ != "idle") ? 12.0f + 8.0f + 6.0f + kPopupBody2H : 0.0f;  // ← :361-395
+  float need = kPopupTitleBlockH + kPopupContentPadY * 2.0f + meta_h + 10.0f +
+               kPopupBody2H + 6.0f + chg_box_h + extra_h + actions_h;
+  const float max_h = std::max(200.0f, area.h - 8.0f);
+  if (need > max_h) {  // 超出可用高时先压日志框（上游是 overflowY auto）
+    chg_box_h = std::max(56.0f, chg_box_h - (need - max_h));
+    need = max_h;
+  }
+  const float ch = need;
   const float cy = std::max(0.0f, (area.h - ch) / 2.0f);
   card_rect_ = {cx, cy, cw, ch};
 
-  const float pad = 14.0f;
-  const float inner_w = std::max(80.0f, cw - pad * 2.0f);
   btn_close_x_rect_ = {cx + cw - 32.0f, cy + 6.0f, 26.0f, 24.0f};  // 保留成员（Mini 无 ✕，不绘制）
 
-  // src: popup-styles.ts:230-245 全宽纵向堆叠按钮（更新在上，关闭在下）
-  const float close_bh = 28.0f;
-  const float update_bh = 30.0f;
-  const float gap = 6.0f;
-  btn_close_rect_ = {cx + pad, cy + ch - 12.0f - close_bh, inner_w, close_bh};
-  btn_update_rect_ = {cx + pad, btn_close_rect_.y - gap - update_bh, inner_w, update_bh};
+  // 内容带起点与各块纵坐标（on_paint 用同一串常量，避免两处漂移）
+  const float content_y = cy + kPopupTitleBlockH + kPopupContentPadY;
+  changelog_box_rect_ = {cx + kPopupPadX,
+                         content_y + meta_h + 10.0f + kPopupBody2H + 6.0f,
+                         inner_w, chg_box_h};
+  // ← layout-dialogs.tsx:363-381 bar 高 8px / radius 4 / mt 1.5
+  progress_bar_rect_ = {cx + kPopupPadX, changelog_box_rect_.bottom() + 12.0f,
+                        inner_w, 8.0f};
 
-  const float acts_top = btn_update_rect_.y - 11.0f;
-  const float chg_h = std::max(56.0f, acts_top - (cy + 114.0f) - 28.0f);
-  changelog_box_rect_ = {cx + pad, cy + 112.0f, inner_w, chg_h};
-  // ← layout-dialogs.tsx:343 bar 高 8px（radius 4）
-  progress_bar_rect_ = {cx + pad, changelog_box_rect_.bottom() + 8.0f, inner_w, 8.0f};
+  // src: popup-styles.ts:231-246 全宽纵向堆叠按钮（更新在上，关闭在下）
+  const float actions_y = cy + ch - actions_h;
+  btn_update_rect_ = {cx + kPopupPadX, actions_y + kPopupActionsPadY, inner_w, update_h};
+  btn_close_rect_ = {cx + kPopupPadX, btn_update_rect_.bottom() + kPopupActionsGap,
+                     inner_w, close_h};
 }
 
 void ClientUpdateModal::on_paint(IRenderTarget& rt) {
@@ -441,9 +544,9 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
   // 统一弹窗卡片（popup_card_paint：6 套皮肤 + frosted-glass 实底防穿透）
   ::clashwin::ui::draw_card(rt, card_rect_, svc.popup_card_paint());
 
-  const float pad = 14.0f;
+  const float pad = kPopupPadX;
   const float inner_w = std::max(80.0f, card_rect_.w - pad * 2.0f);
-  // 标题 + 分隔线（src: popup-styles.ts:191-212）
+  // 标题 + 分隔线（src: popup-styles.ts:191-212 + layout-dialogs.tsx:278-293）
   TextStyle title_ts;
   title_ts.size = 15.5f;
   title_ts.weight = static_cast<int>(Weight::Bold);
@@ -451,59 +554,68 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
   title_ts.align_h = AlignH::Center;
   title_ts.align_v = AlignV::Center;
   title_ts.ellipsis = true;
-  // src: locales/zh/layout.json:76 「"title": "软件本体更新"」（layout-dialogs.tsx:280 🚀）
+  // src: locales/zh/layout.json:76 「"title": "软件本体更新"」（layout-dialogs.tsx:290 🚀）
   rt.draw_text(L"🚀 " + tr("layout.components.dialogs.client.title"),
-               {card_rect_.x + pad, card_rect_.y + 10.0f, inner_w, 24.0f},
+               {card_rect_.x + pad, card_rect_.y + kPopupTitlePadY, inner_w,
+                kPopupTitleTextH},
                title_ts);
-  rt.fill_rect({card_rect_.x, card_rect_.y + 42.0f, card_rect_.w, 1.0f},
+  rt.fill_rect({card_rect_.x, card_rect_.y + kPopupTitleBlockH - 1.0f, card_rect_.w,
+                1.0f},
                Brush{tokens.divider_color});
 
-  // 版本信息两行（body2 = 13px；最新版本行 bold ← layout-dialogs.tsx:288-306）
+  // 版本信息两行（body2 12.5 × 1.4；最新版本行 bold ← layout-dialogs.tsx:296-327）
+  const float content_y = card_rect_.y + kPopupTitleBlockH + kPopupContentPadY;
+  const float meta_h = kPopupBody2H + 4.0f + kPopupBody2H;
   const std::wstring unknown = tr("layout.components.dialogs.update.unknown");
   TextStyle ver_ts;
-  ver_ts.size = 13.0f;
+  ver_ts.size = 12.5f;
   ver_ts.color = tokens.primary_text;
   ver_ts.align_v = AlignV::Center;
   ver_ts.ellipsis = true;
   rt.draw_text(tr("layout.components.dialogs.update.currentVersion",
                   {{"version", current_version_.empty() ? utf::utf16_to_utf8(unknown)
                                                        : current_version_}}),
-               {card_rect_.x + pad, card_rect_.y + 46.0f, inner_w, 18.0f},
-               ver_ts);
+               {card_rect_.x + pad, content_y, inner_w, kPopupBody2H}, ver_ts);
   TextStyle ver_bold = ver_ts;
   ver_bold.weight = static_cast<int>(Weight::Bold);
   rt.draw_text(tr("layout.components.dialogs.update.latestVersion",
                   {{"version", latest_version_.empty() ? utf::utf16_to_utf8(unknown)
                                                        : latest_version_}}),
-               {card_rect_.x + pad, card_rect_.y + 68.0f, inner_w, 18.0f},
+               {card_rect_.x + pad, content_y + kPopupBody2H + 4.0f, inner_w,
+                kPopupBody2H},
                ver_bold);
 
   TextStyle chg_label = ver_bold;
-  // src: locales/zh/layout.json:77 「"更新日志:"」（layout-dialogs.tsx:318）
+  // src: locales/zh/layout.json:77 「"更新日志:"」（layout-dialogs.tsx:329-340）
   rt.draw_text(tr("layout.components.dialogs.client.changelog"),
-               {card_rect_.x + pad, card_rect_.y + 90.0f, inner_w, 18.0f},
+               {card_rect_.x + pad, content_y + meta_h + 10.0f, inner_w,
+                kPopupBody2H},
                chg_label);
 
-  // 更新日志框（13px pre-wrap；← layout-dialogs.tsx:320-336）
+  // 更新日志框（fontSize 12 / lineHeight 1.5 / p 10 / radius 6 ← layout-dialogs.tsx:341-355）
   Brush cl_bg{tokens.subtle_bg};
-  rt.round_rect(changelog_box_rect_, 4.0f, {tokens.subtle_border, 1.0f}, &cl_bg);
+  rt.round_rect(changelog_box_rect_, 6.0f, {tokens.subtle_border, 1.0f}, &cl_bg);
 
   TextStyle cl_ts;
-  cl_ts.size = 12.5f;
+  cl_ts.size = 12.0f;
   cl_ts.color = tokens.primary_text;
   cl_ts.wrap = true;
+  cl_ts.line_h = kChgLineH;  // ← :348 lineHeight 1.5 × 12 = 18
   // src: locales/zh/layout.json:78 「"暂无详细更新日志"」（layout-dialogs.tsx:335）
   std::wstring chg_w = changelog_.empty() ? tr("layout.components.dialogs.client.changelogEmpty") : utf::utf8_to_utf16(changelog_);
   rt.push_clip(changelog_box_rect_);
-  rt.draw_text(chg_w, {changelog_box_rect_.x + 10.0f, changelog_box_rect_.y + 8.0f,
-                       changelog_box_rect_.w - 20.0f, changelog_box_rect_.h - 16.0f}, cl_ts);
+  rt.draw_text(chg_w, {changelog_box_rect_.x + kChgPad,
+                       changelog_box_rect_.y + kChgPad,
+                       changelog_box_rect_.w - kChgPad * 2.0f,
+                       changelog_box_rect_.h - kChgPad * 2.0f},
+               cl_ts);
   rt.pop_clip();
 
-  // 进度条与状态（仅 status ≠ idle 显示；← layout-dialogs.tsx:338-373）
-  const bool light = svc.is_light();
+  // 进度条与状态（仅 status ≠ idle 显示；← layout-dialogs.tsx:361-395）
   if (status_ != "idle") {
-    Brush bar_bg{light ? Color4f::hex(0x000000, 0.1f) : Color4f::hex(0xFFFFFF, 0.1f)};
-    rt.round_rect(progress_bar_rect_, 4.0f, {}, &bar_bg);
+    // ← :367-368 bgcolor subtleSurfaceBg + 1px subtleSurfaceBorder
+    Brush bar_bg{tokens.subtle_bg};
+    rt.round_rect(progress_bar_rect_, 4.0f, {tokens.subtle_border, 1.0f}, &bar_bg);
     float fill_w = progress_bar_rect_.w * (static_cast<float>(progress_) / 100.0f);
     Brush fill_b{tokens.accent_primary};
     rt.round_rect({progress_bar_rect_.x, progress_bar_rect_.y, fill_w, progress_bar_rect_.h},
@@ -515,12 +627,15 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
     std::wstring stat_str = status_msg_.empty()
                                 ? tr("layout.components.dialogs.progress.clientDownloading")
                                 : utf::utf8_to_utf16(status_msg_);
-    rt.draw_text(stat_str, {progress_bar_rect_.x, progress_bar_rect_.y + 12.0f,
-                            progress_bar_rect_.w, 16.0f}, stat_ts);
+    // ← :385 mt: 0.75（6px）
+    rt.draw_text(stat_str, {progress_bar_rect_.x, progress_bar_rect_.y + 8.0f + 6.0f,
+                            progress_bar_rect_.w, kPopupBody2H},
+                 stat_ts);
   }
 
-  // 动作区分隔线（src: popup-styles.ts:243）
-  rt.fill_rect({card_rect_.x, btn_update_rect_.y - 11.0f, card_rect_.w, 1.0f},
+  // 动作区分隔线（src: popup-styles.ts:243 borderTop 1px）
+  rt.fill_rect({card_rect_.x, btn_update_rect_.y - kPopupActionsPadY, card_rect_.w,
+                1.0f},
                Brush{tokens.divider_color});
 
   // 底部按钮（立即更新 contained primary 上、关闭 outlined 下 ← layout-dialogs.tsx:398-437）
@@ -703,24 +818,37 @@ void CoreUpdateModal::on_arrange(const RectF& area) {
   set_bounds(area);
   // src: popup-styles.ts:120-185 窄窗弹窗锁定左侧 271px
   const float cw = std::min(theme::kPopupPaneWidth, area.w);
-  const float ch = std::min(278.0f, std::max(210.0f, area.h - 16.0f));
   const float cx = 0.0f;
+  const float inner_w = std::max(80.0f, cw - kPopupPadX * 2.0f);
+
+  // ---- 三段高（← layout-dialogs.tsx:441-560）----
+  const float upgrade_h = popup_btn_h("primary", 13.0f, 6.8f);
+  const float close_h = popup_btn_h("default", 12.5f, 5.6f);
+  const float actions_h =
+      kPopupActionsPadY * 2.0f + upgrade_h + kPopupActionsGap + close_h;
+  // 版本盒：p 1.25(10) + 两行 body2（第一行 mb 0.6 = 4.8）+ 1px 双边框（← :468-505）
+  constexpr float kMetaBoxH = kChgPad * 2.0f + kPopupBody2H + 4.8f + kPopupBody2H + 2.0f;
+  const float extra_h =
+      (status_ != "idle") ? 12.0f + 8.0f + 6.0f + kPopupBody2H : 0.0f;  // ← :507-529
+  const float content_h = kPopupContentPadY * 2.0f + kMetaBoxH + extra_h;
+  const float need = kPopupTitleBlockH + content_h + actions_h;
+  const float ch = std::min(need, std::max(200.0f, area.h - 8.0f));
   const float cy = std::max(0.0f, (area.h - ch) / 2.0f);
   card_rect_ = {cx, cy, cw, ch};
 
-  const float pad = 14.0f;
-  const float inner_w = std::max(80.0f, cw - pad * 2.0f);
   btn_close_x_rect_ = {cx + cw - 32.0f, cy + 6.0f, 26.0f, 24.0f};  // 保留成员（Mini 无 ✕，不绘制）
 
-  // src: popup-styles.ts:230-245 全宽纵向堆叠按钮（升级在上，关闭在下）
-  const float close_bh = 28.0f;
-  const float upgrade_bh = 30.0f;
-  const float gap = 6.0f;
-  btn_close_rect_ = {cx + pad, cy + ch - 12.0f - close_bh, inner_w, close_bh};
-  btn_upgrade_rect_ = {cx + pad, btn_close_rect_.y - gap - upgrade_bh, inner_w, upgrade_bh};
+  const float content_y = cy + kPopupTitleBlockH + kPopupContentPadY;
+  meta_box_rect_ = {cx + kPopupPadX, content_y, inner_w, kMetaBoxH};
+  // ← layout-dialogs.tsx:510-516 bar 高 8px / radius 4 / mt 1.5
+  progress_bar_rect_ = {cx + kPopupPadX, meta_box_rect_.bottom() + 12.0f, inner_w, 8.0f};
 
-  // ← layout-dialogs.tsx:484 bar 高 8px
-  progress_bar_rect_ = {cx + pad, cy + 104.0f, inner_w, 8.0f};
+  // src: popup-styles.ts:231-246 全宽纵向堆叠按钮（升级在上，关闭在下）
+  const float actions_y = cy + ch - actions_h;
+  btn_upgrade_rect_ = {cx + kPopupPadX, actions_y + kPopupActionsPadY, inner_w,
+                       upgrade_h};
+  btn_close_rect_ = {cx + kPopupPadX, btn_upgrade_rect_.bottom() + kPopupActionsGap,
+                     inner_w, close_h};
 }
 
 void CoreUpdateModal::on_paint(IRenderTarget& rt) {
@@ -738,9 +866,9 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
   // 统一弹窗卡片（popup_card_paint：6 套皮肤 + frosted-glass 实底防穿透）
   ::clashwin::ui::draw_card(rt, card_rect_, svc.popup_card_paint());
 
-  const float pad = 14.0f;
+  const float pad = kPopupPadX;
   const float inner_w = std::max(80.0f, card_rect_.w - pad * 2.0f);
-  // 标题 + 分隔线（src: popup-styles.ts:191-212）
+  // 标题 + 分隔线（src: popup-styles.ts:191-212 + layout-dialogs.tsx:456-471）
   TextStyle title_ts;
   title_ts.size = 15.5f;
   title_ts.weight = static_cast<int>(Weight::Bold);
@@ -750,37 +878,46 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
   title_ts.ellipsis = true;
   // src: locales/zh/layout.json:82 「"title": "Mihomo 内核更新"」（layout-dialogs.tsx:469 ⚙️）
   rt.draw_text(L"⚙️ " + tr("layout.components.dialogs.core.title"),
-               {card_rect_.x + pad, card_rect_.y + 10.0f, inner_w, 24.0f},
+               {card_rect_.x + pad, card_rect_.y + kPopupTitlePadY, inner_w,
+                kPopupTitleTextH},
                title_ts);
-  rt.fill_rect({card_rect_.x, card_rect_.y + 42.0f, card_rect_.w, 1.0f},
+  rt.fill_rect({card_rect_.x, card_rect_.y + kPopupTitleBlockH - 1.0f, card_rect_.w,
+                1.0f},
                Brush{tokens.divider_color});
 
-  // 版本信息两行（body2 = 13px；最新版本行 bold；formatCoreVersion ← style-helpers.tsx:221）
+  // 版本信息盒（← layout-dialogs.tsx:468-505：p 1.25 / radius 6 / subtleSurface 底与边）
+  Brush mb_bg{tokens.subtle_bg};
+  rt.round_rect(meta_box_rect_, 6.0f, {tokens.subtle_border, 1.0f}, &mb_bg);
+  // 版本两行（body2 12.5 × 1.4；第一行 mb 0.6 = 4.8；最新版本行 bold）
   TextStyle ver_ts;
-  ver_ts.size = 13.0f;
-  ver_ts.color = tokens.primary_text;
+  ver_ts.size = 12.5f;
+  ver_ts.color = tokens.secondary_text;  // ← :482 第一行用 secondaryText
   ver_ts.align_v = AlignV::Center;
   ver_ts.ellipsis = true;
   rt.draw_text(tr("layout.components.dialogs.update.currentVersion",
                   {{"version", format_core_version(current_version_)}}),
-               {card_rect_.x + pad, card_rect_.y + 50.0f, inner_w, 18.0f},
+               {meta_box_rect_.x + kChgPad, meta_box_rect_.y + kChgPad,
+                meta_box_rect_.w - kChgPad * 2.0f, kPopupBody2H},
                ver_ts);
   // src: layout.json:69/83 「最新版本: {{version}} / 获取中...」（layout-dialogs.tsx:492-495）
   TextStyle ver_bold = ver_ts;
   ver_bold.weight = static_cast<int>(Weight::Bold);
+  ver_bold.color = tokens.primary_text;  // ← :497 primaryText
   rt.draw_text(tr("layout.components.dialogs.update.latestVersion",
                   {{"version", latest_version_.empty()
                                    ? utf::utf16_to_utf8(
                                          tr("layout.components.dialogs.core.fetching"))
                                    : format_core_version(latest_version_)}}),
-               {card_rect_.x + pad, card_rect_.y + 72.0f, inner_w, 18.0f},
+               {meta_box_rect_.x + kChgPad,
+                meta_box_rect_.y + kChgPad + kPopupBody2H + 4.8f,
+                meta_box_rect_.w - kChgPad * 2.0f, kPopupBody2H},
                ver_bold);
 
-  // 升级进度条（仅 status ≠ idle；8px/radius4/底 10% 黑白/填充 primary）
-  const bool light = svc.is_light();
+  // 升级进度条（仅 status ≠ idle；← layout-dialogs.tsx:507-529
+  //   bgcolor subtleSurfaceBg + 1px subtleSurfaceBorder + radius 4，填充 primary）
   if (status_ != "idle") {
-    Brush bar_bg{light ? Color4f::hex(0x000000, 0.1f) : Color4f::hex(0xFFFFFF, 0.1f)};
-    rt.round_rect(progress_bar_rect_, 4.0f, {}, &bar_bg);
+    Brush bar_bg{tokens.subtle_bg};
+    rt.round_rect(progress_bar_rect_, 4.0f, {tokens.subtle_border, 1.0f}, &bar_bg);
     float fill_w = progress_bar_rect_.w * (static_cast<float>(progress_) / 100.0f);
     Brush fill_b{tokens.accent_primary};
     rt.round_rect({progress_bar_rect_.x, progress_bar_rect_.y, fill_w, progress_bar_rect_.h},
@@ -790,12 +927,15 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
     msg_ts.size = 12.0f;
     msg_ts.color = tokens.secondary_text;
     std::wstring display_msg = utf::utf8_to_utf16(message_);
-    rt.draw_text(display_msg, {progress_bar_rect_.x, progress_bar_rect_.y + 12.0f,
-                               progress_bar_rect_.w, 18.0f}, msg_ts);
+    // ← :524 mt: 0.75（6px）
+    rt.draw_text(display_msg, {progress_bar_rect_.x, progress_bar_rect_.y + 8.0f + 6.0f,
+                               progress_bar_rect_.w, kPopupBody2H},
+                 msg_ts);
   }
 
-  // 动作区分隔线（src: popup-styles.ts:243）
-  rt.fill_rect({card_rect_.x, btn_upgrade_rect_.y - 11.0f, card_rect_.w, 1.0f},
+  // 动作区分隔线（src: popup-styles.ts:243 borderTop 1px）
+  rt.fill_rect({card_rect_.x, btn_upgrade_rect_.y - kPopupActionsPadY, card_rect_.w,
+                1.0f},
                Brush{tokens.divider_color});
 
   // 底部按钮（立即升级 contained primary 上、关闭 outlined 下 ← layout-dialogs.tsx:530-565）
@@ -1825,25 +1965,30 @@ void AntivirusWhitelistModal::on_arrange(const RectF& area) {
 
   // src: popup-styles.ts:120-185 窄窗弹窗锁定左侧 271px
   const float cw = std::min(theme::kPopupPaneWidth, area.w);
-  const float px = 14.0f;       // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:92 px: 1.75
-  const float py_tb = 12.0f;    // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:93 py: 1.5
-  const float py_c = 14.0f;     // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:118 py: 1.75
+  // 三段 padding 全部来自 popup-styles：该弹窗的 DialogTitle 与 DialogActions 都没
+  // 传 extraSx（antivirus-whitelist-dialog.tsx:122 / :324），只有 DialogContent
+  // 覆写 py 1.5（:140）。此前把 1.5 错用到了标题与动作带，整卡高度虚高 ~5px。
+  const float px = kPopupPadX;              // ← popup-styles.ts:198/:219 px: 1.75
+  const float py_tb = kPopupTitlePadY;      // ← popup-styles.ts:199/:240 py: 1.35
+  const float py_c = kPopupContentPadY;     // ← antivirus-whitelist-dialog.tsx:140 py: 1.5
   const float sec_gap = 12.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:100 mb: 1.5
   const float title_mb = 4.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:107 mb: 0.5
-  const float btn_h = 30.0f;    // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:130-137 py 0.7 + 12.5px
+  // ← :130-137 fullWidth outlined default，py 0.7 / fontSize 12.5
+  const float btn_h = popup_btn_h("default", 12.5f, 5.6f);
 
   const float inner_w = std::max(80.0f, cw - px * 2.0f);
   ITextEngine* te = text_engine();
 
-  title_h_ = 21.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:87-88
+  title_h_ = kPopupTitleTextH;  // ← antivirus-whitelist-dialog.tsx:130 fontSize 15.5 × lineHeight 1.35
   if (te) {
     TextStyle tts;
     tts.size = 15.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:87
     tts.weight = static_cast<int>(Weight::Bold);
     tts.wrap = true;
+    tts.line_h = kPopupTitleTextH;
     const SizeF sz =
         te->measure_text(L"🛡️ " + tr("layout.components.antivirus.title"), tts, inner_w);
-    if (sz.h > 0.0f) title_h_ = std::max(21.0f, sz.h + 2.0f);
+    if (sz.h > 0.0f) title_h_ = std::max(kPopupTitleTextH, sz.h);
   }
 
   // BUG-395 卡片内边距（src: antivirus-whitelist-dialog.tsx cardSx p:1.35 → 10.8px ≈ 11）
@@ -1944,7 +2089,7 @@ void AntivirusWhitelistModal::on_arrange(const RectF& area) {
 }
 
 float AntivirusWhitelistModal::max_scroll() const {
-  const float py_c = 14.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:96
+  const float py_c = kPopupContentPadY;  // ← :140 getPopupContentSx({ py: 1.5 })
   return std::max(0.0f, (py_c * 2.0f + total_sections_h_) - content_rect_.h);
 }
 
@@ -1976,9 +2121,9 @@ void AntivirusWhitelistModal::on_paint(IRenderTarget& rt) {
   // src: popup-styles.ts:90-117 统一弹窗表面
   ::clashwin::ui::draw_card(rt, card_rect_, svc.popup_card_paint());
 
-  const float px = 14.0f;       // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:92
-  const float py_tb = 12.0f;    // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:93
-  const float py_c = 14.0f;     // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:96
+  const float px = kPopupPadX;           // ← popup-styles.ts:198 px: 1.75
+  const float py_tb = kPopupTitlePadY;   // ← popup-styles.ts:199 py: 1.35
+  const float py_c = kPopupContentPadY;  // ← antivirus-whitelist-dialog.tsx:140 py: 1.5
   const float title_mb = 4.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:107
 
   // Title block（src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:79-94）
@@ -1989,6 +2134,7 @@ void AntivirusWhitelistModal::on_paint(IRenderTarget& rt) {
   title_ts.align_h = AlignH::Center;
   title_ts.align_v = AlignV::Center;
   title_ts.wrap = true;
+  title_ts.line_h = kPopupTitleTextH;  // ← :88 lineHeight 1.35 × 15.5
   rt.draw_text(L"🛡️ " + tr("layout.components.antivirus.title"),
                {title_rect_.x + px, title_rect_.y + py_tb,
                 std::max(0.0f, title_rect_.w - px * 2.0f), title_h_},
