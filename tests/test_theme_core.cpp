@@ -156,6 +156,67 @@ UT_TEST(t12_button_paint_table_all_skins) {
   UT_CHECK_EQ(r.weight, 700);
 }
 
+UT_TEST(t12_button_state_table_v8) {
+  // ← button-styles.ts 各皮肤 boxShadow 的 `&:hover` / `&:active` /
+  //   `&.Mui-disabled` 三段（台账 V8）。此前 ButtonPaint 只有常态一套值，
+  //   绘制层还在禁用时把描边整个抹掉，六套皮肤的禁用边框全部消失。
+  auto& svc = ThemeService::instance();
+  auto near = [](float a, float b) { return a > b - 0.01f && a < b + 0.01f; };
+
+  // retro-3d 悬停是「再加一层」，层数本身就变（:89-101 vs :112-126）
+  svc.init(SkinId::Retro3d, ThemeMode::Light);
+  auto r = svc.button_paint("default");
+  UT_CHECK_EQ(r.shadow_n, 1);
+  UT_CHECK_EQ(r.shadow_hover_n, 2);
+  UT_CHECK_EQ(r.shadow_active_n, 1);
+  UT_CHECK(r.shadow_hover[0].blur >= r.shadow[0].blur);
+  UT_CHECK(r.has_glow_hover && r.glow_hover.a > r.glow.a);   // 0.2 → 0.4
+  UT_CHECK(r.has_glow_active && r.glow_active.a < 0.001f);   // 按下无辉光
+  expect_rgb(r.border_disabled, 0xbdbdbd, "retro disabled border #bdbdbd");
+
+  // original：只有 primary/error 有柔影（:193-194），按下收回（:204-205）
+  svc.init(SkinId::Original, ThemeMode::Light);
+  auto op = svc.button_paint("primary");
+  UT_CHECK_EQ(op.shadow_n, 1);
+  UT_CHECK_EQ(op.shadow_hover_n, 1);
+  UT_CHECK(near(op.shadow_hover[0].dy, 2.0f));
+  UT_CHECK(near(op.shadow_hover[0].blur, 6.0f));
+  UT_CHECK(near(op.shadow_active[0].dy, 0.0f));
+  expect_rgb(op.border_disabled, 0xe0e0e0, "original disabled border #e0e0e0");
+
+  // modern-flat：2v/4v → 3v/6v → 1v/2v（:263-274），v=1 时即 2/4 · 3/6 · 1/2
+  svc.init(SkinId::ModernFlat, ThemeMode::Light);
+  auto m = svc.button_paint("default");
+  UT_CHECK(near(m.shadow[0].blur, 4.0f));
+  UT_CHECK(near(m.shadow_hover[0].blur, 6.0f));
+  UT_CHECK(near(m.shadow_active[0].blur, 2.0f));
+  expect_rgb(m.border_disabled, 0xe5e7eb, "modern disabled border #e5e7eb");
+
+  // frosted-glass：4/12 → 6/16 → 2/4（:320-328，CSS 未乘 vibrancy）
+  svc.init(SkinId::FrostedGlass, ThemeMode::Light);
+  auto f = svc.button_paint("default");
+  UT_CHECK(near(f.shadow[0].blur, 12.0f));
+  UT_CHECK(near(f.shadow_hover[0].blur, 16.0f));
+  UT_CHECK(near(f.shadow_active[0].blur, 4.0f));
+
+  // cyberpunk：辉光 5d → 10d → 2d（:404 / :407 / :412）
+  svc.init(SkinId::Cyberpunk, ThemeMode::Dark);
+  auto c = svc.button_paint("default");
+  UT_CHECK(c.has_glow_hover && c.has_glow_active);
+  UT_CHECK(c.glow_hover_blur > c.glow_blur);
+  UT_CHECK(c.glow_active_blur < c.glow_blur);
+
+  // monochrome：三态都没有柔影/辉光（:470 / :475-477），但禁用描边存在（:480）
+  svc.init(SkinId::Monochrome, ThemeMode::Light);
+  auto mo = svc.button_paint("default");
+  UT_CHECK_EQ(mo.shadow_n, 0);
+  UT_CHECK_EQ(mo.shadow_hover_n, 0);
+  UT_CHECK(mo.glow.a < 0.001f);
+  expect_rgb(mo.border_disabled, 0xcccccc, "monochrome disabled border #cccccc");
+
+  svc.init(SkinId::Retro3d, ThemeMode::Light);  // 不留皮肤给后续用例
+}
+
 UT_TEST(t12_segmented_paint_table) {
   // ← get3DSegmented* 三函数
   ThemeService::instance().init(SkinId::Original, ThemeMode::Light);

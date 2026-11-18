@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <sstream>
 
+#include "ui/button_draw.h"
 #include "ui/card_draw.h"
 #include "ui/icon_w.h"  // G9: 日志工具钮 18px MUI 图标
 #include "ui/soft_shadow.h"
@@ -253,29 +254,8 @@ void EditProfileModal::on_paint(IRenderTarget& rt) {
   auto paint_btn = [&](const RectF& r, const char* ctype, bool hover,
                        const std::wstring& label, float fs, bool outlined) {
     const auto bp = ThemeService::instance().button_paint(ctype, outlined);
-    if (bp.has_shadow)
-      draw_soft_shadow(rt, r, bp.radius, bp.shadow_color, bp.shadow_dy,
-                       bp.shadow_blur);
-    if (bp.glow.a > 0) draw_glow(rt, r, bp.radius, bp.glow, bp.glow_blur);
-    if (bp.use_grad) {
-      const GradientStop* gs = hover ? bp.grad_hover : bp.grad;
-      // outlined default 常态 2 站、悬停 4 站（button-styles.ts:59-63 / :109-111）
-      const int gn = (hover && bp.grad_hover_count > 0) ? bp.grad_hover_count
-                                                        : bp.grad_count;
-      rt.fill_round_rect_gradient_angle(r, bp.radius, gs, gn, bp.grad_angle);
-    } else {
-      Brush fb{hover ? bp.fill_hover : bp.fill};
-      rt.round_rect(r, bp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &fb);
-    }
-    if (bp.border_w > 0.01f)
-      rt.round_rect(r, bp.radius, Pen{bp.border, bp.border_w}, nullptr);
-    if (bp.use_grad && bp.bevel_dark.a > 0) {
-      rt.draw_line({r.x + bp.radius, r.y + 1.0f},
-                   {r.right() - bp.radius, r.y + 1.0f}, Pen{bp.bevel_hi, 1.0f});
-      rt.draw_line({r.x + bp.radius, r.bottom() - 1.0f},
-                   {r.right() - bp.radius, r.bottom() - 1.0f},
-                   Pen{bp.bevel_dark, 1.0f});
-    }
+    // 四段视觉（常态 / :hover / :active / 禁用）由统一入口铺底
+    draw_button_skin(rt, r, bp, hover ? 1.0f : 0.0f, /*pressed=*/false);
     btn_ts.size = fs;
     btn_ts.weight = bp.weight;
     btn_ts.color = bp.text;
@@ -644,31 +624,8 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
                               bool disabled, const char* color_type, bool outlined,
                               const std::wstring& label) {
     auto p = svc.button_paint(color_type, outlined);
-    if (!disabled && p.has_shadow)
-      draw_soft_shadow(rt2, r, p.radius, p.shadow_color, p.shadow_dy, p.shadow_blur);
-    if (!disabled && p.glow.a > 0)
-      draw_glow(rt2, r, p.radius, p.glow, p.glow_blur);
-    if (!disabled && p.use_grad) {
-      const GradientStop* gs = hovered ? p.grad_hover : p.grad;
-      rt2.fill_round_rect_gradient_angle(r, p.radius, gs, p.grad_count, p.grad_angle);
-    } else {
-      Color4f fill = disabled ? p.fill_disabled
-                              : (hovered ? p.fill_hover : p.fill);
-      Brush b{fill};
-      rt2.round_rect(r, p.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &b);
-    }
-    if (p.border_w > 0.01f) {
-      Color4f bc = p.border;
-      if (disabled) bc.a *= 0.38f;
-      rt2.round_rect(r, p.radius, Pen{bc, p.border_w}, nullptr);
-    }
-    if (!disabled && p.use_grad && p.bevel_dark.a > 0) {
-      rt2.draw_line({r.x + p.radius, r.y + 1.0f},
-                    {r.right() - p.radius, r.y + 1.0f}, Pen{p.bevel_hi, 1.0f});
-      rt2.draw_line({r.x + p.radius, r.bottom() - 1.0f},
-                    {r.right() - p.radius, r.bottom() - 1.0f},
-                    Pen{p.bevel_dark, 1.0f});
-    }
+    // 四段视觉统一由查表给出（此前禁用描边在这里被乘了个自创的 0.38 alpha）
+    draw_button_skin(rt2, r, p, hovered ? 1.0f : 0.0f, /*pressed=*/false, disabled);
     TextStyle ts;
     ts.size = 12.5f;  // MUI Button body2
     ts.weight = p.weight;
@@ -945,31 +902,8 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
                               bool disabled, const char* color_type, bool outlined,
                               const std::wstring& label) {
     auto p = svc.button_paint(color_type, outlined);
-    if (!disabled && p.has_shadow)
-      draw_soft_shadow(rt2, r, p.radius, p.shadow_color, p.shadow_dy, p.shadow_blur);
-    if (!disabled && p.glow.a > 0)
-      draw_glow(rt2, r, p.radius, p.glow, p.glow_blur);
-    if (!disabled && p.use_grad) {
-      const GradientStop* gs = hovered ? p.grad_hover : p.grad;
-      rt2.fill_round_rect_gradient_angle(r, p.radius, gs, p.grad_count, p.grad_angle);
-    } else {
-      Color4f fill = disabled ? p.fill_disabled
-                              : (hovered ? p.fill_hover : p.fill);
-      Brush b{fill};
-      rt2.round_rect(r, p.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &b);
-    }
-    if (p.border_w > 0.01f) {
-      Color4f bc = p.border;
-      if (disabled) bc.a *= 0.38f;
-      rt2.round_rect(r, p.radius, Pen{bc, p.border_w}, nullptr);
-    }
-    if (!disabled && p.use_grad && p.bevel_dark.a > 0) {
-      rt2.draw_line({r.x + p.radius, r.y + 1.0f},
-                    {r.right() - p.radius, r.y + 1.0f}, Pen{p.bevel_hi, 1.0f});
-      rt2.draw_line({r.x + p.radius, r.bottom() - 1.0f},
-                    {r.right() - p.radius, r.bottom() - 1.0f},
-                    Pen{p.bevel_dark, 1.0f});
-    }
+    // 四段视觉统一由查表给出（此前禁用描边在这里被乘了个自创的 0.38 alpha）
+    draw_button_skin(rt2, r, p, hovered ? 1.0f : 0.0f, /*pressed=*/false, disabled);
     TextStyle ts;
     ts.size = 12.5f;  // MUI Button body2
     ts.weight = p.weight;
@@ -2153,20 +2087,8 @@ void AntivirusWhitelistModal::on_paint(IRenderTarget& rt) {
                       bool pressed, const char* color, const char* variant) {
     const auto p = svc.button_paint(color, true);
     RectF br = r;
-    if (pressed) br.y += 1.0f;
-    if (p.has_shadow) {
-      draw_soft_shadow(rt, br, p.radius, p.shadow_color, p.shadow_dy, p.shadow_blur);
-    }
-    if (p.use_grad) {
-      const GradientStop* gs = hover ? p.grad_hover : p.grad;
-      rt.fill_round_rect_gradient_angle(br, p.radius, gs, p.grad_count, p.grad_angle);
-    } else {
-      Brush b{hover ? p.fill_hover : p.fill};
-      rt.round_rect(br, p.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &b);
-    }
-    if (p.border_w > 0.01f) {
-      rt.round_rect(br, p.radius, Pen{p.border, p.border_w}, nullptr);
-    }
+    if (pressed) br.y += p.translate_active;  // ← :129 / :203 / :272 translateY
+    draw_button_skin(rt, br, p, hover ? 1.0f : 0.0f, pressed);
     TextStyle ts;
     ts.size = 12.0f;
     ts.weight = p.weight;
@@ -2271,20 +2193,8 @@ void AntivirusWhitelistModal::on_paint(IRenderTarget& rt) {
   // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:134
   const auto bp = svc.button_paint("default", true);
   RectF br = btn_close_rect_;
-  if (pressed_close_) br.y += 1.0f;
-  if (bp.has_shadow) {
-    draw_soft_shadow(rt, br, bp.radius, bp.shadow_color, bp.shadow_dy, bp.shadow_blur);
-  }
-  if (bp.use_grad) {
-    const GradientStop* gs = hover_close_ ? bp.grad_hover : bp.grad;
-    rt.fill_round_rect_gradient_angle(br, bp.radius, gs, bp.grad_count, bp.grad_angle);
-  } else {
-    Brush b{hover_close_ ? bp.fill_hover : bp.fill};
-    rt.round_rect(br, bp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &b);
-  }
-  if (bp.border_w > 0.01f) {
-    rt.round_rect(br, bp.radius, Pen{bp.border, bp.border_w}, nullptr);
-  }
+  if (pressed_close_) br.y += bp.translate_active;
+  draw_button_skin(rt, br, bp, hover_close_ ? 1.0f : 0.0f, pressed_close_);
   TextStyle bts;
   bts.size = 12.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:136
   bts.weight = bp.weight;
@@ -2631,24 +2541,8 @@ void DeleteProfileConfirmModal::on_paint(IRenderTarget& rt) {
                        bool hover, bool pressed, const std::wstring& label) {
     const auto bp = svc.button_paint(ctype, outlined);
     RectF r = orig_r;
-    if (pressed) r.y += 1.0f;
-    if (bp.has_shadow && !pressed) {
-      draw_soft_shadow(rt, r, bp.radius, bp.shadow_color, bp.shadow_dy, bp.shadow_blur);
-    }
-    if (bp.glow.a > 0 && !pressed) {
-      draw_glow(rt, r, bp.radius, bp.glow, bp.glow_blur);
-    }
-    if (bp.use_grad) {
-      const GradientStop* gs = hover ? bp.grad_hover : bp.grad;
-      rt.fill_round_rect_gradient_angle(r, bp.radius, gs, bp.grad_count, bp.grad_angle);
-    } else {
-      Color4f fill = pressed ? bp.fill_pressed : (hover ? bp.fill_hover : bp.fill);
-      Brush fb{fill};
-      rt.round_rect(r, bp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &fb);
-    }
-    if (bp.border_w > 0.01f) {
-      rt.round_rect(r, bp.radius, Pen{bp.border, bp.border_w}, nullptr);
-    }
+    if (pressed) r.y += bp.translate_active;
+    draw_button_skin(rt, r, bp, hover ? 1.0f : 0.0f, pressed);
     TextStyle bts;
     bts.size = 12.5f;
     bts.weight = bp.weight;

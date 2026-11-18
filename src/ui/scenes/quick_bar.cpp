@@ -10,6 +10,7 @@
 #include <map>
 
 #include "../theme/theme.h"
+#include "../button_draw.h"
 #include "../card_draw.h"
 #include "../soft_shadow.h"  // 卡面阴影/发光近似（随 depth/vibrancy）
 #include "node_list.h"  // delay_tier / delay_tier_color（与节点表格同源五档色）
@@ -90,42 +91,9 @@ void paint_button_bg(IRenderTarget& rt, const RectF& r, bool primary, bool hover
                      bool pressed) {
   auto& svc = ThemeService::instance();
   const auto p = svc.button_paint(primary ? "primary" : "default");
-  // 外阴影 + 外发光（← boxShadow 常规层与 0 0 N 光晕）
-  if (p.has_shadow) draw_soft_shadow(rt, r, p.radius, p.shadow_color,
-                                     p.shadow_dy, p.shadow_blur);
-  if (p.glow.a > 0) draw_glow(rt, r, p.radius, p.glow, p.glow_blur);
-  // 主体
-  if (p.use_grad) {
-    const GradientStop* gs = hover ? p.grad_hover : p.grad;
-    rt.fill_round_rect_gradient_angle(r, p.radius, gs, p.grad_count, p.grad_angle);
-  } else {
-    Color4f fill = pressed ? p.fill_pressed : (hover ? p.fill_hover : p.fill);
-    Brush fb{fill};
-    rt.round_rect(r, p.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &fb);
-  }
-  if (p.border_w > 0.01f)
-    rt.round_rect(r, p.radius, Pen{p.border, p.border_w}, nullptr);
-  // retro 浮雕：顶部内高光 + 底部 bevel 暗线（← :89-96 多层 boxShadow）
-  if (p.use_grad && p.bevel_dark.a > 0) {
-    rt.draw_line({r.x + p.radius, r.y + 1.0f},
-                 {r.right() - p.radius, r.y + 1.0f}, Pen{p.bevel_hi, 1.0f});
-    rt.draw_line({r.x + p.radius, r.bottom() - 1.0f},
-                 {r.right() - p.radius, r.bottom() - 1.0f},
-                 Pen{p.bevel_dark, 1.0f});
-  }
-  // hover/active 叠加（← button-styles.ts 各皮肤 &:hover / &:active）
-  if (hover || pressed) {
-    Pen none{Color4f(0, 0, 0, 0), 0};
-    Brush ov{1, 1, 1, pressed ? 0.04f : 0.12f};
-    rt.round_rect(r, p.radius, none, &ov);
-  }
-  if (pressed) {
-    Pen none{Color4f(0, 0, 0, 0), 0};
-    Brush ov{0, 0, 0, 0.10f};
-    rt.round_rect({r.x + 2, r.y + 2, r.w - 4, r.h - 4}, p.radius, none, &ov);
-    rt.fill_rect({r.x + 2, r.y + 2, r.w - 4, 1},
-                 Brush{Color4f(1, 1, 1, 0.50f)});
-  }
+  // 四段视觉统一由查表给出。此前这里用「白色 12%/4% 叠加 + 黑色 10% 内压
+  // + 白色 50% 直线」自造按下/悬停反馈，源码里并没有这几层。
+  draw_button_skin(rt, r, p, hover ? 1.0f : 0.0f, pressed);
 }
 }  // namespace
 

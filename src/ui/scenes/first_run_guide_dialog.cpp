@@ -10,6 +10,7 @@
 #include "cmd/command_service.h"
 #include "config/config.h"
 #include "config/profiles.h"
+#include "ui/button_draw.h"
 #include "ui/card_draw.h"
 #include "ui/soft_shadow.h"
 #include "ui/theme/theme.h"
@@ -173,7 +174,6 @@ void paint_button(IRenderTarget& rt, const RectF& orig_r, BtnStyle style,
   const char* ctype = style == BtnStyle::Primary ? "primary" : "default";
   const bool outlined = style != BtnStyle::Primary;
   const auto bp = svc.button_paint(ctype, outlined);
-  const float d = svc.depth_factor();
 
   float ty = 0.0f;
   if (pressed) ty = bp.translate_active;
@@ -181,55 +181,9 @@ void paint_button(IRenderTarget& rt, const RectF& orig_r, BtnStyle style,
 
   RectF r = {orig_r.x, orig_r.y + ty, orig_r.w, orig_r.h};
 
-  if (bp.has_shadow) {
-    if (pressed) {
-      Color4f ds = Color4f::hex(0x000000, svc.is_light() ? 0.45f : 0.65f);
-      draw_soft_shadow(rt, r, bp.radius, ds, 1.0f * d, 1.5f * d);
-    } else {
-      float blur = hover ? (bp.shadow_blur * 1.3f) : bp.shadow_blur;
-      draw_soft_shadow(rt, r, bp.radius, bp.shadow_color, bp.shadow_dy, blur);
-    }
-  }
-  if (bp.glow.a > 0 && !pressed) {
-    float glow_blur = hover ? (bp.glow_blur * 1.4f) : bp.glow_blur;
-    draw_glow(rt, r, bp.radius, bp.glow, glow_blur);
-  }
-
-  if (bp.use_grad && bp.bevel_dark.a > 0 && !pressed) {
-    Color4f ds = Color4f::hex(0x000000, svc.is_light() ? 0.35f : 0.60f);
-    draw_soft_shadow(rt, r, bp.radius, ds, 3.0f * d, 2.0f * d);
-    for (int i = 2; i >= 1; --i) {
-      RectF br{r.x, r.y + i * d, r.w, r.h};
-      Brush bb{bp.bevel_dark};
-      rt.round_rect(br, bp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &bb);
-    }
-  }
-
-  if (bp.use_grad) {
-    const GradientStop* gs = (hover || pressed) ? bp.grad_hover : bp.grad;
-    rt.fill_round_rect_gradient_angle(r, bp.radius, gs, bp.grad_count, bp.grad_angle);
-  } else {
-    Color4f fill = pressed ? bp.fill_pressed : (hover ? bp.fill_hover : bp.fill);
-    Brush b{fill};
-    rt.round_rect(r, bp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &b);
-  }
-
-  if (bp.border_w > 0.01f)
-    rt.round_rect(r, bp.radius, Pen{bp.border, bp.border_w}, nullptr);
-
-  if (bp.bevel_dark.a > 0) {
-    if (pressed) {
-      rt.draw_line({r.x + bp.radius, r.y + 1.0f},
-                   {r.right() - bp.radius, r.y + 1.0f}, Pen{bp.bevel_dark, 1.0f});
-      if (d > 1.0f) {
-        rt.draw_line({r.x + bp.radius, r.y + 2.0f},
-                     {r.right() - bp.radius, r.y + 2.0f}, Pen{bp.bevel_dark, 1.0f});
-      }
-    } else {
-      rt.draw_line({r.x + bp.radius, r.y + 1.0f},
-                   {r.right() - bp.radius, r.y + 1.0f}, Pen{bp.bevel_hi, 1.0f});
-    }
-  }
+  // 四段视觉统一由查表给出。此前这里自创了 hover 时 blur×1.3 / glow×1.4 的
+  // 系数 —— 源码 button-styles.ts:112-126 / :405-409 是明确的数值，不是比例。
+  draw_button_skin(rt, r, bp, hover ? 1.0f : 0.0f, pressed);
 
   if (bp.text_shadow.a > 0 && !pressed) {
     TextStyle ts_sh;

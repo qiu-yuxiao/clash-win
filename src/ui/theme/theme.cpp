@@ -265,6 +265,21 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
       p.weight = 700;      // bold
       p.translate_hover = -2.0f;   // transform: translateY(-2px)
       p.translate_active = 3.0f;   // transform: translateY(3px)
+      // ← :89-101 常态 boxShadow 的柔影层：0 3d 2d rgba(0,0,0,.35 | .6)
+      p.shadow[0] = {Color4f::hex(0x000000, light ? 0.35f : 0.60f),
+                     3.0f * dep, 2.0f * dep};
+      p.shadow_n = 1;
+      // ← :112-126 悬停柔影加深到 .4 | .7，并再叠一层 0 4d 4d rgba(0,0,0,.2 | .3)
+      //   —— 原来只有一层且不随 hover 变化，按钮悬停时缺「抬起来」的落差。
+      p.shadow_hover[0] = {Color4f::hex(0x000000, light ? 0.40f : 0.70f),
+                           3.0f * dep, 2.0f * dep};
+      p.shadow_hover[1] = {Color4f::hex(0x000000, light ? 0.20f : 0.30f),
+                           4.0f * dep, 4.0f * dep};
+      p.shadow_hover_n = 2;
+      // ← :130-136 按下改用 0 d 2px rgba(0,0,0,.5 | .7)，柔影同时收窄
+      p.shadow_active[0] = {Color4f::hex(0x000000, light ? 0.50f : 0.70f),
+                            1.0f * dep, 2.0f};
+      p.shadow_active_n = 1;
       if (is_primary) {
         p.text = Color4f::hex(0x2C1F03);
         p.border = light ? Color4f::hex(0x8A6D00) : Color4f::hex(0x634E00);
@@ -272,6 +287,12 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
         p.bevel_hi = light ? Color4f::hex(0xFFFFFF, 0.8f) : Color4f::hex(0xFFFFFF, 0.08f);
         p.glow = Color4f::hex(0xFFC107, 0.2f * v);  // 0.2*vibrancy
         p.glow_blur = 8.0f * v;
+        // ← :70-73 hover 变 0 0 12v rgba(255,193,7,.4v)；← :128-137 按下
+        //   boxShadow 被 inset 整体替换 → 辉光消失
+        p.has_glow_hover = true;
+        p.glow_hover = Color4f::hex(0xFFC107, 0.4f * v);
+        p.glow_hover_blur = 12.0f * v;
+        p.has_glow_active = true;
         p.text_shadow = Color4f::hex(0xFFFFFF, 0.45f); p.text_shadow_dy = 1.0f;
         p.grad[0] = {0.0f, Color4f::hex(0xFFE082)};
         p.grad[1] = {0.20f, Color4f::hex(0xFFD54F)};
@@ -294,6 +315,11 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
         // ← :66-68 glowColor：error 用 rgba(213,0,0, 0.15*vibrancy)（非 error 为 0.2）
         p.glow = Color4f::hex(0xD50000, 0.15f * v);
         p.glow_blur = 8.0f * v;
+        // ← :70-73 hover 是 0.35*vibrancy / 12v（非 error 为 0.4）
+        p.has_glow_hover = true;
+        p.glow_hover = Color4f::hex(0xD50000, 0.35f * v);
+        p.glow_hover_blur = 12.0f * v;
+        p.has_glow_active = true;
         p.text_shadow = Color4f::hex(0x000000, 0.4f); p.text_shadow_dy = -1.0f;
         p.grad[0] = {0.0f, Color4f::hex(0xFF8A80)};
         p.grad[1] = {0.30f, Color4f::hex(0xFF5252)};
@@ -311,6 +337,11 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
         p.bevel_hi = light ? Color4f::hex(0xFFFFFF, 0.8f) : Color4f::hex(0xFFFFFF, 0.08f);
         p.glow = Color4f::hex(0xFFC107, 0.2f * v);
         p.glow_blur = 8.0f * v;
+        // ← :70-73 hover 0.4*vibrancy / 12v；← :128-137 按下无辉光
+        p.has_glow_hover = true;
+        p.glow_hover = Color4f::hex(0xFFC107, 0.4f * v);
+        p.glow_hover_blur = 12.0f * v;
+        p.has_glow_active = true;
         p.text_shadow = Color4f::hex(0xFFFFFF, 0.45f); p.text_shadow_dy = 1.0f;
         if (outlined) {
           // ← :57-63 outlined && default：linear-gradient(to bottom,
@@ -353,9 +384,11 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
       p.fill = p.grad[p.grad_count / 2].color;   // last_fill_ 兜底
       p.fill_hover = p.grad_hover[p.grad_count / 2].color;
       p.fill_pressed = p.fill;  // active = inset bevel（沿用 default 渐变）
-      // 禁用态：MUI Button.disabled 缺省（src: MUI palette action.disabledBackground / text.disabled）
+      // 禁用态 ← :138-145 `&.Mui-disabled`：bg #e0e0e0/#32323a、border
+      //   #bdbdbd/#4a4a52、文字 #9e9e9e/#6e6e75、boxShadow none
       p.fill_disabled = light ? Color4f::hex(0xe0e0e0) : Color4f::hex(0x32323a);
       p.text_disabled = light ? Color4f::hex(0x9e9e9e) : Color4f::hex(0x6e6e75);
+      p.border_disabled = light ? Color4f::hex(0xbdbdbd) : Color4f::hex(0x4a4a52);
       break;
     }
     case SkinId::Original: {
@@ -377,13 +410,21 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
       p.border_w = 1.0f;          // ← :185 border: '1px solid'
       p.weight = 500;
       p.translate_active = 1.0f;   // transform: translateY(1px)
-      // ← :196 boxShadow：default 无、primary/error 0 1px 3px rgba(0,0,0,.15)
+      // ← :193-194 boxShadow：default 无、primary/error 0 1px 3px rgba(0,0,0,.15)
       if (is_primary || is_error) {
-        p.has_shadow = true;
-        p.shadow_color = Color4f::hex(0x000000, 0.15f);
-        p.shadow_dy = 1.0f;
-        p.shadow_blur = 3.0f;
+        p.shadow[0] = {Color4f::hex(0x000000, 0.15f), 1.0f, 3.0f};
+        p.shadow_n = 1;
+        // ← :199-200 hover 0 2px 6px rgba(0,0,0,.2)
+        p.shadow_hover[0] = {Color4f::hex(0x000000, 0.20f), 2.0f, 6.0f};
+        p.shadow_hover_n = 1;
+        // ← :204-205 active 0 0 2px rgba(0,0,0,.15)
+        p.shadow_active[0] = {Color4f::hex(0x000000, 0.15f), 0.0f, 2.0f};
+        p.shadow_active_n = 1;
       }
+      // 禁用态 ← :207-213
+      p.fill_disabled = light ? Color4f::hex(0xf5f5f5) : Color4f::hex(0x1e1e1e);
+      p.border_disabled = light ? Color4f::hex(0xe0e0e0) : Color4f::hex(0x333333);
+      p.text_disabled = light ? Color4f::hex(0xc0c0c0) : Color4f::hex(0x555555);
       break;
     }
     case SkinId::ModernFlat: {
@@ -408,11 +449,21 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
       p.border_w = 1.0f;          // ← :257 border: '1px solid'
       p.weight = 700;
       p.translate_active = 1.0f;   // transform: translateY(1px)
-      // ← :259 boxShadow 0 2v 4v rgba(0,0,0, .06v)
-      p.has_shadow = true;
-      p.shadow_color = Color4f::hex(0x000000, 0.06f * v);
-      p.shadow_dy = 2.0f * v;
-      p.shadow_blur = 4.0f * v;
+      // ← :263-264 boxShadow 0 2v 4v rgba(0,0,0, .06v)
+      p.shadow[0] = {Color4f::hex(0x000000, 0.06f * v), 2.0f * v, 4.0f * v};
+      p.shadow_n = 1;
+      // ← :268-269 hover 0 3v 6v rgba(0,0,0, .06*2*v)
+      p.shadow_hover[0] = {Color4f::hex(0x000000, 0.06f * 2.0f * v), 3.0f * v,
+                           6.0f * v};
+      p.shadow_hover_n = 1;
+      // ← :273-274 active 0 1v 2v rgba(0,0,0, .06v)
+      p.shadow_active[0] = {Color4f::hex(0x000000, 0.06f * v), 1.0f * v,
+                            2.0f * v};
+      p.shadow_active_n = 1;
+      // 禁用态 ← :276-282
+      p.fill_disabled = light ? Color4f::hex(0xf3f4f6) : Color4f::hex(0x1f2937);
+      p.border_disabled = light ? Color4f::hex(0xe5e7eb) : Color4f::hex(0x374151);
+      p.text_disabled = light ? Color4f::hex(0x9ca3af) : Color4f::hex(0x4b5563);
       break;
     }
     case SkinId::FrostedGlass: {
@@ -432,11 +483,20 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
       p.weight = 400;
       p.translate_hover = -1.0f;   // translateY(-1px)
       p.translate_active = 1.0f;   // translateY(1px)
-      // ← :324 boxShadow 0 4px 12px rgba(0,0,0,.08)
-      p.has_shadow = true;
-      p.shadow_color = Color4f::hex(0x000000, 0.08f);
-      p.shadow_dy = 4.0f;
-      p.shadow_blur = 12.0f * std::max(0.25f, v);
+      // ← :320 boxShadow 0 4px 12px rgba(0,0,0,.08)（CSS 未乘 vibrancy ——
+      //   此前多乘了一个 max(0.25, v)，属自创）
+      p.shadow[0] = {Color4f::hex(0x000000, 0.08f), 4.0f, 12.0f};
+      p.shadow_n = 1;
+      // ← :323-324 hover 0 6px 16px rgba(0,0,0,.12)
+      p.shadow_hover[0] = {Color4f::hex(0x000000, 0.12f), 6.0f, 16.0f};
+      p.shadow_hover_n = 1;
+      // ← :327-328 active 0 2px 4px rgba(0,0,0,.04)
+      p.shadow_active[0] = {Color4f::hex(0x000000, 0.04f), 2.0f, 4.0f};
+      p.shadow_active_n = 1;
+      // 禁用态 ← :330-343（backdropFilter 在 D2D 无对应，只取色值）
+      p.fill_disabled = Color4f::hex(light ? 0x000000 : 0xFFFFFF, 0.03f);
+      p.border_disabled = Color4f::hex(light ? 0x000000 : 0xFFFFFF, light ? 0.08f : 0.05f);
+      p.text_disabled = Color4f::hex(light ? 0x000000 : 0xFFFFFF, light ? 0.26f : 0.25f);
       break;
     }
     case SkinId::Cyberpunk: {
@@ -469,9 +529,20 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
       p.weight = 700;
       p.translate_hover = -1.0f;    // translateY(-1px)
       p.translate_active = 1.0f;    // translateY(1px)
-      // ← :403 boxShadow 0 0 calc(5px * depth) borderClr（常亮，非仅 hover）
+      // ← :404 boxShadow 0 0 calc(5px * depth) borderClr（常态即亮）
       p.glow = with_alpha(p.border, 0.55f);
       p.glow_blur = 5.0f * dep;
+      // ← :407 hover 0 0 10d；← :412 active 0 0 2d（颜色恒为 borderClr）
+      p.has_glow_hover = true;
+      p.glow_hover = p.glow;
+      p.glow_hover_blur = 10.0f * dep;
+      p.has_glow_active = true;
+      p.glow_active = p.glow;
+      p.glow_active_blur = 2.0f * dep;
+      // 禁用态 ← :414-420
+      p.fill_disabled = light ? Color4f::hex(0xf5f5f5) : Color4f::hex(0x0d1117);
+      p.border_disabled = light ? Color4f::hex(0xe0e0e0) : Color4f::hex(0x21262d);
+      p.text_disabled = light ? Color4f::hex(0x9e9e9e) : Color4f::hex(0x484f58);
       break;
     }
     case SkinId::Monochrome: {
@@ -495,7 +566,11 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
       p.border_w = 1.0f * v;  // ← :454 calc(1px * --vibrancy-factor)
       p.weight = 700;
       p.translate_active = 1.0f;   // transform: translateY(1px)
-      // ← :457 boxShadow: 'none'
+      // ← :470 / :475-477 boxShadow 'none'（常态、按下都没有柔影/辉光）
+      // 禁用态 ← :478-484
+      p.fill_disabled = light ? Color4f::hex(0xf5f5f5) : Color4f::hex(0x222222);
+      p.border_disabled = light ? Color4f::hex(0xcccccc) : Color4f::hex(0x444444);
+      p.text_disabled = light ? Color4f::hex(0x999999) : Color4f::hex(0x666666);
       break;
     }
   }

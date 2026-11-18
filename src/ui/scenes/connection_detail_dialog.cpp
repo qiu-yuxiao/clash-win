@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <algorithm>
 
+#include "ui/button_draw.h"
 #include "ui/card_draw.h"
 #include "ui/soft_shadow.h"
 #include "ui/theme/theme.h"
@@ -321,20 +322,7 @@ void ConnectionDetailDialog::on_paint(IRenderTarget& rt) {
     // 按钮走 button_paint("error")：6 套皮肤的红底/描边/字色/浮雕全部查表
     const auto bp = theme::ThemeService::instance().button_paint("error");
     const RectF& r = btn_close_conn_rect_;
-    if (bp.has_shadow)
-      draw_soft_shadow(rt, r, bp.radius, bp.shadow_color, bp.shadow_dy, bp.shadow_blur);
-    if (bp.use_grad) {
-      const GradientStop* gs = hover_close_conn_ ? bp.grad_hover : bp.grad;
-      const int gn = (hover_close_conn_ && bp.grad_hover_count > 0)
-                         ? bp.grad_hover_count
-                         : bp.grad_count;
-      rt.fill_round_rect_gradient_angle(r, bp.radius, gs, gn, bp.grad_angle);
-    } else {
-      Brush b{hover_close_conn_ ? bp.fill_hover : bp.fill};
-      rt.round_rect(r, bp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &b);
-    }
-    if (bp.border_w > 0.01f)
-      rt.round_rect(r, bp.radius, Pen{bp.border, bp.border_w}, nullptr);
+    draw_button_skin(rt, r, bp, hover_close_conn_ ? 1.0f : 0.0f, /*pressed=*/false);
     TextStyle btn_ts;
     btn_ts.size = 13.0f;  // ← MUI Button size="small" 字号
     btn_ts.weight = bp.weight;

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 
+#include "button_draw.h"
 #include "card_draw.h"
 #include "theme/theme.h"
 
@@ -79,94 +80,22 @@ SizeF Button::on_measure(float max_w, float max_h) {
 
 void Button::draw_button_bg(IRenderTarget& rt, const RectF& r) {
   if (themed_) {
-    // T12/F-D02：ThemeService 查表（皮肤 × 亮暗 × 状态）；
-    // 渐变 + 浮雕 + 外发光 + translateY 位移。
-    auto p = theme::ThemeService::instance().button_paint(theme_color_type_, theme_outlined_);
+    // T12/F-D02：查表 + 统一绘制（常态 / :hover / :active / 禁用态四段）
+    auto p = theme::ThemeService::instance().button_paint(theme_color_type_,
+                                                          theme_outlined_);
     const bool disabled = (state() == State::Disabled);
-    const float d = theme::ThemeService::instance().depth_factor();
-    // 外阴影（← 各皮肤 boxShadow 常规层）：D2D 无 box-shadow，多层外扩近似
-    if (p.has_shadow && !disabled)
-      draw_soft_shadow(rt, r, p.radius, p.shadow_color, p.shadow_dy,
-                       p.shadow_blur);
-    // 外发光（← boxShadow 0 0 calc(N * factor) color）。D2D 无模糊滤镜，
-    // 用多层递减 alpha 外扩近似（soft_shadow.h）。
-    if (p.glow.a > 0 && !disabled)
-      draw_glow(rt, r, p.radius, p.glow, p.glow_blur);
-    // 主体：135° 多停渐变（retro）或单色填充（其余皮肤）
-    if (p.use_grad && !disabled) {
-      // ← button-styles.ts:89-96 多层硬 bevel boxShadow（×depth）：
-      //   0 1px 0 bevelDark / 0 d 0 bevelDark / 0 2d 0 bevelDark / 0 3d 2d 黑影
-      //   圆角矩形底沿与内嵌平滑过渡，避免底部断裂直硬线
-      if (p.bevel_dark.a > 0) {
-        if (state() == State::Pressed) {
-          Color4f ds = Color4f::hex(0x000000, theme::ThemeService::instance().is_light() ? 0.45f : 0.65f);
-          draw_soft_shadow(rt, r, p.radius, ds, 1.0f * d, 1.5f * d);
-        } else {
-          Color4f ds = Color4f::hex(0x000000, theme::ThemeService::instance().is_light() ? 0.35f : 0.60f);
-          draw_soft_shadow(rt, r, p.radius, ds, 3.0f * d, 2.0f * d);
-          for (int i = 2; i >= 1; --i) {
-            RectF br{r.x, r.y + i * d, r.w, r.h};
-            Brush bb{p.bevel_dark};
-            rt.round_rect(br, p.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &bb);
-          }
-        }
-      }
-      // 悬停底色按 hover_mix_ 在 grad / grad_hover 之间逐停插值（0.15s ease）
-      // ★ outlined default 的常态 2 站、悬停 4 站（button-styles.ts:59-63 vs :109-111），
-      //   站数不同无法逐站对齐：按较多一侧站数统一，少的一侧用其末站补齐 ——
-      //   补齐段颜色与末站相同，渲染结果与少站版本一致。
-      const int gn = std::min(p.grad_count, 6);
-      const int hn = p.grad_hover_count > 0 ? std::min(p.grad_hover_count, 6) : gn;
-      const int n = std::max(gn, hn);
-      GradientStop mixed[6];
-      const GradientStop* gs = p.grad_hover;
-      int draw_n = hn;
-      if (hover_mix_ < 0.999f) {
-        for (int i = 0; i < n; ++i) {
-          const GradientStop& a = p.grad[std::min(i, gn - 1)];
-          const GradientStop& b = p.grad_hover[std::min(i, hn - 1)];
-          mixed[i] = a;
-          mixed[i].color = mix_color(a.color, b.color, hover_mix_);
-        }
-        draw_n = n;
-        gs = mixed;
-      }
-      rt.fill_round_rect_gradient_angle(r, p.radius, gs, draw_n, p.grad_angle);
-      last_fill_ = gs[draw_n / 2].color;
-      // ← button-styles.ts:84 border: calc(2px * depth) solid borderColor（渐变填充后单独描边）
-      if (p.border_w > 0.01f && p.border.a > 0.001f)
-        rt.round_rect(r, p.radius, Pen{p.border, p.border_w}, nullptr);
-      if (p.bevel_dark.a > 0) {
-        if (state() == State::Pressed) {
-          rt.draw_line(PointF{r.x + p.radius, r.y + 1.0f},
-                       PointF{r.right() - p.radius, r.y + 1.0f},
-                       Pen{p.bevel_dark, 1.0f});
-          if (d > 1.0f) {
-            rt.draw_line(PointF{r.x + p.radius, r.y + 2.0f},
-                         PointF{r.right() - p.radius, r.y + 2.0f},
-                         Pen{p.bevel_dark, 1.0f});
-          }
-        } else {
-          rt.draw_line(PointF{r.x + p.radius, r.y + 1.0f},
-                       PointF{r.right() - p.radius, r.y + 1.0f},
-                       Pen{p.bevel_hi, 1.0f});
-        }
-      }
-      return;
+    const bool pressed = (state() == State::Pressed);
+    draw_button_skin(rt, r, p, hover_mix_, pressed, disabled);
+    // last_fill_：外部取「当前底色」（图标反色、分隔线等）
+    if (disabled) {
+      last_fill_ = p.fill_disabled;
+    } else if (p.use_grad) {
+      const int gn = p.grad_count > 0 ? p.grad_count : 1;
+      last_fill_ = p.grad[gn / 2].color;
+    } else {
+      last_fill_ = pressed ? p.fill_pressed
+                           : mix_color(p.fill, p.fill_hover, hover_mix_);
     }
-    Color4f fill;
-    switch (state()) {
-      case State::Hover:
-        fill = mix_color(p.fill, p.fill_hover, hover_mix_);
-        break;
-      case State::Pressed: fill = p.fill_pressed; break;
-      case State::Disabled: fill = p.fill_disabled; break;
-      default: fill = p.fill; break;
-    }
-    Brush b{fill};
-    Pen bp = disabled ? Pen{Color4f{0, 0, 0, 0}, 0.0f} : Pen{p.border, p.border_w};
-    rt.round_rect(r, p.radius, bp, &b);
-    last_fill_ = fill;
     return;
   }
   if (state() != State::Disabled && paint_params.grad_count > 0) {

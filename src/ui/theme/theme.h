@@ -41,19 +41,46 @@ struct ButtonPaint {
   float grad_angle = 135.0f;
   Color4f bevel_dark{0, 0, 0, 0};       // 浮雕暗边（retro bevelShadowDark）
   Color4f bevel_hi{0, 0, 0, 0};         // 浮雕顶高光（白，light .8 / dark .08）
-  Color4f glow{0, 0, 0, 0};             // 外发光（vibrancy 调制；retro 金/红，cyber 霓虹）
-  float glow_blur = 8.0f;               // 外发光模糊半径（← 0 0 calc(8px*vibrancy)）
+  Color4f glow{0, 0, 0, 0};             // 外发光常态（vibrancy 调制；retro 金/红，cyber 霓虹）
+  float glow_blur = 8.0f;               // 常态模糊半径（← 0 0 calc(8px*vibrancy)）
   Color4f text_shadow{0, 0, 0, 0};      // 文字阴影色（a=0 表示无）
   float text_shadow_dy = 1.0f;          // 文字阴影纵向偏移（px，负=上）
   float translate_hover = 0;             // hover 位移 translateY（px，负=上移）
   float translate_active = 0;            // active 位移 translateY（px）
 
-  // 外阴影（← button-styles.ts 各皮肤 boxShadow 的常规层；
-  //   retro 的多层硬 bevel 由 bevel_dark + depth_factor 单独表达）
-  bool has_shadow = false;
-  Color4f shadow_color;
-  float shadow_dy = 0;
-  float shadow_blur = 0;
+  // ---------- 三态阴影 / 外发光（← button-styles.ts 各皮肤 boxShadow 的
+  //   `&:hover` / `&:active` 覆盖；台账 V8） ----------
+  // D2D 没有 box-shadow：每层柔影用「多层外扩 + 递减 alpha」近似（soft_shadow.h）。
+  // retro-3d 的硬 bevel（0 d 0 / 0 2d 0 实色层）仍由 bevel_dark 单独表达，
+  // 这里只放柔影层。
+  struct ShadowLayer {
+    Color4f color{0, 0, 0, 0};
+    float dy = 0;
+    float blur = 0;
+  };
+  ShadowLayer shadow[2];   // 常态柔影
+  int shadow_n = 0;
+  // 0 → 该状态未覆盖 boxShadow，沿用 shadow。retro-3d 悬停是两层的叠加，
+  // 所以层数本身也随状态变化，不能只存一个「加深系数」。
+  ShadowLayer shadow_hover[2];
+  int shadow_hover_n = 0;
+  ShadowLayer shadow_active[2];
+  int shadow_active_n = 0;
+
+  // 外发光三态（常态字段见上）。has_glow_hover/active=false → 沿用常态；
+  //   =true 且 a=0 → 该状态明确不画（retro-3d 按下时 boxShadow 被 inset
+  //   整体替换，辉光随之消失）。
+  bool has_glow_hover = false;
+  Color4f glow_hover{0, 0, 0, 0};
+  float glow_hover_blur = 0;
+  bool has_glow_active = false;
+  Color4f glow_active{0, 0, 0, 0};
+  float glow_active_blur = 0;
+
+  // 禁用态描边（← 各皮肤 `&.Mui-disabled` 的 borderColor；a=0 表示不画）。
+  // 此前统一套用 retro 的 #bdbdbd，且绘制层在禁用时直接把描边置空，
+  // 导致 monochrome / cyberpunk / modern-flat 的禁用边框整块消失。
+  Color4f border_disabled{0, 0, 0, 0};
 };
 
 struct SegmentedPaint {

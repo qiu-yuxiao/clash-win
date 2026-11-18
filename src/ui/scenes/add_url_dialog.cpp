@@ -5,6 +5,7 @@
 
 #include <algorithm>
 
+#include "ui/button_draw.h"
 #include "ui/card_draw.h"
 #include "ui/soft_shadow.h"
 #include "ui/theme/theme.h"
@@ -351,27 +352,7 @@ void AddUrlDialog::on_paint(IRenderTarget& rt) {
   auto paint_btn = [&](const RectF& r, const char* ctype, bool outlined,
                        bool hover, const std::wstring& label) {
     const auto bp = svc.button_paint(ctype, outlined);
-    if (bp.has_shadow)
-      draw_soft_shadow(rt, r, bp.radius, bp.shadow_color, bp.shadow_dy,
-                       bp.shadow_blur);
-    if (bp.glow.a > 0) draw_glow(rt, r, bp.radius, bp.glow, bp.glow_blur);
-    if (bp.use_grad) {
-      const GradientStop* gs = hover ? bp.grad_hover : bp.grad;
-      rt.fill_round_rect_gradient_angle(r, bp.radius, gs, bp.grad_count,
-                                        bp.grad_angle);
-    } else {
-      Brush fb{hover ? bp.fill_hover : bp.fill};
-      rt.round_rect(r, bp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &fb);
-    }
-    if (bp.border_w > 0.01f)
-      rt.round_rect(r, bp.radius, Pen{bp.border, bp.border_w}, nullptr);
-    if (bp.use_grad && bp.bevel_dark.a > 0) {
-      rt.draw_line({r.x + bp.radius, r.y + 1.0f},
-                   {r.right() - bp.radius, r.y + 1.0f}, Pen{bp.bevel_hi, 1.0f});
-      rt.draw_line({r.x + bp.radius, r.bottom() - 1.0f},
-                   {r.right() - bp.radius, r.bottom() - 1.0f},
-                   Pen{bp.bevel_dark, 1.0f});
-    }
+    draw_button_skin(rt, r, bp, hover ? 1.0f : 0.0f, /*pressed=*/false);
     TextStyle ts;
     ts.size = kBtnFs;
     ts.weight = bp.weight;
