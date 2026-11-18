@@ -17,9 +17,8 @@ namespace {
 // ★ MUI 输入框行盒 = 23px 绝对值：InputBase 根 `lineHeight:'1.4375em'` 在 16px
 //   根字号下结算为 23px（docs/pixel-parity-audit.md P12）。多行输入框（P14 高 48、
 //   P16 高 125）的行距、光标步进、选区高都按这个行盒走；单行仍用单行行高。
+// src: InputBase.js:76-78
 constexpr float kMuiRowH = 23.0f;
-// 字形内容盒（ascent+descent ≈ 1.33em）：光标高度取此值，并在 23px 行盒内居中。
-constexpr float kCaretScale = 1.33f;
 
 std::function<std::wstring()>& clip_get() {
   static std::function<std::wstring()> f;
@@ -442,10 +441,10 @@ PointF TextField::caret_point() const {
   const float line_h = multiline_
                            ? kMuiRowH
                            : std::min(r.h - 6.0f, std::round(ts.size * 1.4375f));
-  // 多行：字形盒在 23px 行盒内居中（Chromium 半行距），光标高 = 字形盒高
+  // 多行：光标高沿用 lineHeight 折算值（13→19），在 23px 行盒内垂直居中
   const float caret_h =
       multiline_
-          ? std::min(r.h - 8.0f, std::round(ts.size * kCaretScale))
+          ? std::min(r.h - 8.0f, std::round(ts.size * 1.4375f))
           : line_h;
   float cy = multiline_ ? 4.0f + (kMuiRowH - caret_h) * 0.5f
                         : std::max(3.0f, (r.h - line_h) * 0.5f);
@@ -481,8 +480,8 @@ PointF TextField::caret_point() const {
 float TextField::caret_height() const {
   TextStyle ts = style_;
   ts.size = (style_.size > 0) ? style_.size : 13;
-  if (multiline_)  // 23px 行盒内的字形盒高（V6）
-    return std::min(bounds().h - 8.0f, std::round(ts.size * kCaretScale));
+  if (multiline_)  // 23px 行盒内的光标高（沿用 lineHeight 折算值，V6）
+    return std::min(bounds().h - 8.0f, std::round(ts.size * 1.4375f));
   return std::min(bounds().h - 6.0f, std::round(ts.size * 1.4375f));
 }
 
@@ -645,9 +644,9 @@ void TextField::on_paint(IRenderTarget& rt) {
     const float line_h = multiline_
                              ? kMuiRowH
                              : std::min(r.h - 6.0f, std::round(ts.size * 1.4375f));
-    // 多行：光标高 = 字形盒高，在 23px 行盒内垂直居中（Chromium 半行距）
+    // 多行：光标高沿用 lineHeight 折算值，在 23px 行盒内垂直居中（Chromium 半行距）
     const float caret_h =
-        multiline_ ? std::min(r.h - 8.0f, std::round(ts.size * kCaretScale))
+        multiline_ ? std::min(r.h - 8.0f, std::round(ts.size * 1.4375f))
                    : line_h;
     float cy = multiline_ ? 4.0f + (kMuiRowH - caret_h) * 0.5f
                           : std::max(3.0f, (r.h - line_h) * 0.5f);

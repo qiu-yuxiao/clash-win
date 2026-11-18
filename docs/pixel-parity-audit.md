@@ -29,7 +29,7 @@
 | P14 | 订阅卡导入框 | `profile-import-card.tsx:138-167` multiline + small：根 `p 8.5×2`（`OutlinedInput.js:111-114`）＋文本域 padding 归零（`:167-170`），TextareaAutosize 令 height = shadow 单行 23 + 补回 padding 8 = 31 | 46（按"2 行 13px 文字"估） | **48**（31+17），卡颈 124.4→126.4 |
 | P15 | 主题卡页脚虚线 | `theme-settings-card.tsx:431-460` 页脚 `borderTop:1px dashed` 与 `pt:1` 同时存在 | 版式未给虚线预留 1px，版权行顶 = 按钮底+8 | 版权行顶 = 按钮底+**9**；虚线画在页脚盒顶（`copyright.y-9`）；卡高 165.3→166.3 |
 | P16 | 新增订阅弹窗几何 | `add-url-dialog.tsx:228-268`：multiline 非 small → 根 `p 16.5×2` + 4 行×23 = **125**；按钮 border-box 高 = `1.75×fs + py×2 + skinBorder×2`；标题 `lineHeight 1.35×15=20.25`、`py 10.8` | 输入框 88（4×20+8）、按钮 34/30、标题 42、py 11 | 输入框 125、按钮 36.35/35.08 + `2×ButtonPaint.border_w`、标题 41.85、py 10.8；卡高 248→294~298（随皮肤边框宽） |
-| P17 | **多行输入框框内行距（V6）** | `InputBase.js:76-78` 根 `lineHeight:'1.4375em'` → 每行 **23px**；`OutlinedInput.js:111-114` 根内距 8.5/16.5，文本域自身 `padding:0`。P14/P16 的外框高本来就是按 23/行推的 | `draw_text` 走 DWrite 默认行距（13px ≈ 17.3/行），框内文字比几何紧 5.7px/行；光标步进 19、选区高 19 | `TextStyle.line_h` + `SetLineSpacing(UNIFORM, 23, …)`，基线 `= 首行 baseline + (23 − 首行高)/2`（Chromium 半行距）；订阅卡导入框 / 新增订阅弹窗 4 行文本域、占位符、光标（字形盒高 17.3，在 23 行盒内居中）、选区高统一按 23 |
+| P17 | **多行输入框框内行距（V6）** | `InputBase.js:76-78` 根 `lineHeight:'1.4375em'` → 每行 **23px**；`OutlinedInput.js:111-114` 根内距 8.5/16.5，文本域自身 `padding:0`。P14/P16 的外框高本来就是按 23/行推的 | `draw_text` 走 DWrite 默认行距（13px ≈ 17.3/行），框内文字比几何紧 5.7px/行；光标步进 19、选区高 19 | `TextStyle.line_h` + `SetLineSpacing(UNIFORM, 23, …)`，基线 `= 首行 baseline + (23 − 首行高)/2`（Chromium 半行距）；订阅卡导入框 / 新增订阅弹窗 4 行文本域、占位符、选区高统一按 23，光标按 23 步进而高取 lineHeight 折算值（13→19）在行盒内居中 |
 
 **验证**：`clashwin_test` 741 cases / 0 failed；`ui_src_gate.ps1` UNRESOLVED=0。
 两条锁死旧模型的断言已按新模型重写（`t36` 主题卡高 165.2；`t37` 改为断言「开关中心 = 标签中心」）。
