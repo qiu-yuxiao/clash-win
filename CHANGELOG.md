@@ -8,6 +8,19 @@ Format reference: `Changelog.md` in the Clash Mini repository (newest first, `##
 
 ---
 
+## 未发布 / Unreleased
+
+### Popup Family & Six-Skin Button Audit (pixel-parity round 3)
+- **Unified three-band popup geometry**: every narrow popup now derives its title / content / actions bands from `popup-styles.ts` — title `px 14 / py 10.8 / 20.925 line + 1px rule = 43.525`, content `py 12`, actions `py 10.8 / gap 8` — and buttons are sized by `fontSize × 1.75 + py × 2 + skinBorder × 2` instead of hard-coded heights.
+  - *Edit profile*: input fields `36 -> 40` (`size="small"` = `8.5×2 + 23`), title `15 -> 15.5`, buttons `28 -> 37.55 / 33.28` (retro, border `2 × depth`), gap `6 -> 8`, card height `372 -> 376.45` (was a hard-coded number).
+  - *Client update*: version rows `13px/18 -> 12.5px/17.5`, changelog box `12px × lineHeight 1.5 + p 10 + radius 6` (was 12.5px / radius 4 / p 8), progress bar now uses `subtleSurfaceBg + 1px subtleSurfaceBorder` instead of an invented 10% black fill, card height follows content with the changelog capped at 160.
+  - *Core update*: regained the missing version card (`p 1.25 / radius 6 / subtleSurface bg + border`, 61.8 tall) and the first row's `secondaryText` colour.
+  - *Antivirus whitelist*: title/actions `py 12 -> 10.8`, content `py 14 -> 12` (the `py 1.5` override belongs to `DialogContent` only), button height by formula.
+- **Six-skin `get3DButtonStyle` branch gaps closed**: monochrome `error` regained its `#333333 / #cccccc` scale (had fallen into the default black/white branch); modern-flat `error` regained hover (`error.dark`) and border (`error.main`) — hover used to jump to grey; `error.main` is now read from the live palette instead of a hard-coded light-mode `#FF3B30` (dark mode is `#FF453A`); `error.dark` recomputed as MUI's `darken(main, 0.3)` instead of Material Red 900; modern-flat primary hover deepened from `0.15` to `0.3`; original primary hover gained its `brightness(0.95)`; retro-3d error glow corrected to `0.15 × vibrancy`.
+- **`outlined` variant wired into button drawing**: secondary buttons in Mini are `get3DButtonStyle(theme,'outlined','default')`. In retro-3d that is a 2-stop translucent gold gradient with a deep-gold border, turning into a 4-stop opaque gold on hover — previously every button was drawn as `contained`, so cancel/save looked identical apart from the label. `Button` gains `theme_outlined_`; `ButtonPaint` gains `grad_hover_count` so the 2-stop normal / 4-stop hover pair interpolates without a visible jump.
+- **Connection detail rebuilt to the Popover structure**: `p 16` (was 14), row box `12 × 1.4 = 16.8` with `gap 6` (was 24), removed the self-authored "view detail" heading, divider and the redundant Close button (click-away closes, matching MUI Popover; a11y children `3 -> 2`), the close-connection button now goes through `button_paint("error")` so all six skins colour it, at 13px with `padding 4×10` right-aligned, and card height is content-driven with the 480 cap.
+- Ledger: `docs/pixel-parity-audit.md` P18~P21; V5 closed, V7 (Help entry is still a native track-popup menu, not Mini's Dialog) and V8 (hover-state shadows/glow and disabled borders not yet modelled) registered.
+
 ## v1.0.2 (2026-11-19)
 
 ### Multi-line Input Line Box (V6 closed)

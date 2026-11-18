@@ -17,7 +17,7 @@ namespace {
 // ★ MUI 输入框行盒 = 23px 绝对值：InputBase 根 `lineHeight:'1.4375em'` 在 16px
 //   根字号下结算为 23px（docs/pixel-parity-audit.md P12）。多行输入框（P14 高 48、
 //   P16 高 125）的行距、光标步进、选区高都按这个行盒走；单行仍用单行行高。
-// src: InputBase.js:76-78
+// src: node_modules/@mui/material/InputBase/InputBase.js:76-78
 constexpr float kMuiRowH = 23.0f;
 
 std::function<std::wstring()>& clip_get() {
