@@ -35,7 +35,7 @@
 | # | 项 | 现状 | 为什么不能只靠代码定论 |
 | --- | --- | --- | --- |
 | V1 | 端口输入框（Mixed Port）外框高 | Win 取 22.7（2+18.69+2） | MUI `OutlinedInput` 根节点内距为 0、fieldset 绝对定位，理论上不加高；但 `input` 行高由浏览器 computed line-height 决定，需实测确认 |
-| V2 | 订阅卡（ProfileImportCard）固定高 124.4 | Win `preferred_height()` 走同一套累加 | 卡片内含可变高列表项（图标按钮 + 进度条），单靠 CSS 推导易差 1~2px |
+| V2 | 订阅卡（ProfileImportCard）卡颈高 | Win `kProfileCardChromeH`=124.4，其中导入框按 **2 行** 计 46px | Mini `profile-import-card.tsx:139-168` 是 `multiline minRows={1}`（无值、占位符 13 字在 215px 宽内不换行）→ 推测只有 **1 行 ≈ 26.7px**；若成立则卡颈高应为 ~105，整列下方全部上移 19px。**未擅改**：`maxRows={4}` 的 textarea 在 Chromium 下是否因 `rows` 属性回退到 2 行需实跑量测 |
 | V3 | MUI Chip 内距（延迟胶囊） | Win 取 4 + icon + 4 + label + 8 | MUI Chip small 的 label/icon 内距是组件内部常量，需按 `@mui/material/Chip` 源码逐一核对 |
 | V4 | 文本墨迹垂直中心 | 全站 Label 以 `AlignV::Center` 盒居中 | DirectWrite 与 Chromium 的 half-leading 取整策略不同，逐字体可能差 0.5~1px |
 
