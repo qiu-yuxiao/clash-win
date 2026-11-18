@@ -1,6 +1,6 @@
 # Clash Win 工程文档索引与现状总览
 
-> **一句话定位**：把 **Clash Mini**（当前 1:1 同步至 **v3.5.0**）原封不动移植为纯 Windows 原生客户端（**C++20 + Win32 + Direct2D/DirectWrite**），零 WebView2、零浏览器运行时，除编程语言与显示名（`Clash Mini` → `Clash Win`）外实现像素级与语义级 1:1 对齐。
+> **一句话定位**：把 **Clash Mini**（当前 1:1 同步至 **v3.5.3**）原封不动移植为纯 Windows 原生客户端（**C++20 + Win32 + Direct2D/DirectWrite**），零 WebView2、零浏览器运行时，除编程语言与显示名（`Clash Mini` → `Clash Win`）外实现像素级与语义级 1:1 对齐。
 
 ---
 
@@ -9,12 +9,12 @@
 | 维度 | 当前状态 |
 | :--- | :--- |
 | **当前发布版本** | `v1.0.0`（单一事实源：`include/clashwin/config/constants.h` 的 `kAppVersion`） |
-| **上游同步基线** | **Clash Mini v3.5.0**（自 `v3.2.2` 起步，完整同步至 `v3.5.0`，含 clone-topology 去重与 24h HTTPS 验真隔离、统一 5 分桶实时+已关闭连接与路由备份导入导出、271px 窄窗左锚定弹窗体系、BUG-384~390 全部收敛） |
+| **上游同步基线** | **Clash Mini v3.5.3**（自 `v3.2.2` 起步，完整同步至 `v3.5.3`：含 clone-topology 去重与 24h HTTPS 验真隔离、统一 5 分桶实时+已关闭连接与路由备份导入导出、271px 窄窗左锚定弹窗体系、BUG-384~396 全部收敛，并删除 Win 自编提示与独有 locale key） |
 | **代理内核与服务** | 上游 `MetaCubeX/mihomo` **v1.19.33**（`with_gvisor`，重命名为 `win-mihomo.exe`，缺失时支持自动下载校验恢复）；系统服务共用 `clash_verge_service` |
 | **与 Clash Mini 关系** | **可同机共处、不可同时运行**（「借用与归还」方针）：双端配置文件隔离、互不删改磁盘与注册表；启动或安装一方时自动礼貌终止另一方运行进程并共用服务，卸载时若对方仍在则自动归还服务路径 |
 | **网络与单实例参数** | 1:1 对齐：Mixed `10801` / SOCKS `10802` / HTTP `10803` / Guard 兜底 `7899` / Controller `9098` / 单实例 `33335` / IPC 管道 `\\.\pipe\mini-mihomo-win` |
 | **视觉与多语言** | 6 套主题皮肤（`retro-3d` / `original` / `modern-flat` / `frosted-glass` / `cyberpunk` / `monochrome`）× 亮暗模式 + 逐皮肤双因子滑块实时驱动 + 13 套 UI 语言包热切换 + 悬浮独立分层 Tooltip |
-| **后台待机与自愈守护** | 真正零渲染轻量化托盘待机 + 双频（`TCP:53` 直连公网 IP / DNS 兜底）15~25 秒断流自愈 + 真 HTTPS 节点验真与 24h 软隔离（已对齐 Mini v3.5.0，退役 `--guardian` 与 `1×1` 哨兵窗） |
+| **后台待机与自愈守护** | 真正零渲染轻量化托盘待机 + 双频（`TCP:53` 直连公网 IP / DNS 兜底）15~25 秒断流自愈 + 真 HTTPS 节点验真与 24h 软隔离（已对齐 Mini v3.5.3，退役 `--guardian` 与 `1×1` 哨兵窗） |
 | **发版与自动更新闭环** | `scripts/release.ps1` 确定性一键发版流水线 + 7 道预检门禁（`release_preflight.ps1`）+ Minisign Ed25519 应用内自动更新强验签闭环 |
 
 ---
@@ -26,6 +26,7 @@
 | [`../移植基本准则.md`](../移植基本准则.md) | **项目最高宪章**：1:1 移植三大铁律、事实源层级、共存互斥「借用与归还」裁决、版本线与允许偏差清单 |
 | [`RELEASE_PROCESS.md`](RELEASE_PROCESS.md) | **标准发版手册**：`scripts/release.ps1` 两步发版法、7 道门禁（GATE 1~7）说明与异常恢复速查 |
 | [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) | **已知限制常青披露**：无商业 Authenticode 签名说明、`sidecar/` 二进制策略、Direct2D 毛玻璃近似等 |
+| [`pixel-parity-audit.md`](pixel-parity-audit.md) | **像素级 1:1 代码核对台账**：MUI content-box 换算铁律、尺寸/位置/字体四维已修项（P1~P11）与待实证项（V1~V4） |
 | [`antivirus-whitelist.md`](antivirus-whitelist.md) | **安全软件相容说明**：轻量后台驻留特性与 360 等信任区加白操作指南 |
 | [`05-sidecar-内核资产.md`](05-sidecar-内核资产.md) | **sidecar 基线台账**：5 个上游 `.exe` 的字节大小、SHA256 基线、`win-mihomo.exe` 溯源与 `verify_sidecar.ps1` 校验规范 |
 

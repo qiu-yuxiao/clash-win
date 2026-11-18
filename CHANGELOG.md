@@ -2,11 +2,22 @@
 
 All notable changes to **Clash Win** are documented here.
 
-Version format follows the project's **own** line starting at `0.1.0` (constitution §5.3): Clash Win versions increment independently and are **not** bound to Clash Mini's `3.x` numbering (`v3.2.2` was the initial port reference anchor, now synced 1:1 through **v3.5.0**).
+Version format follows the project's **own** line starting at `0.1.0` (constitution §5.3): Clash Win versions increment independently and are **not** bound to Clash Mini's `3.x` numbering (`v3.2.2` was the initial port reference anchor, now synced 1:1 through **v3.5.3**).
 
 Format reference: `Changelog.md` in the Clash Mini repository (newest first, `## vX.Y.Z` headings with grouped change bullets). Content here is Clash Win's own history, not a copy of Mini's entries.
 
 ---
+
+## Unreleased (post v1.0.0)
+
+### Upstream v3.5.3 Sync & Code-Level Pixel Parity
+- **BUG-392 (v3.5.1) Filter Race**: Added `has_effective_filter_term` / `is_incomplete_filter_input` (mirrors `node.ts`), stopped arming the 700ms debounce on half-typed input, and introduced an in-flight re-test queue so a newly typed filter term is never silently dropped (`AUTO_SELECT_BUSY` retried up to twice).
+- **BUG-393 (v3.5.1) Whitelist Copy**: Antivirus whitelist copy aligned to the 16 authoritative keys across 13 locales.
+- **BUG-394 (v3.5.2) Single-Instance Probe**: Probe timeout raised `500ms` -> `1500ms` (upstream `server.rs:54`).
+- **BUG-395 (v3.5.2) Silent Tray & Guide Trimming**: `should_silent` now follows `has_real_profile_items()`; the first-run guide's antivirus card was removed (-143 lines); the whitelist modal was rebuilt as a two-option card layout with silent-run / copy buttons.
+- **BUG-396 (v3.5.3) Foreground Switch Cleanup**: New `core/connection_stale.h` closes only the previous node's connections under `PROXY` on every foreground switch point, plus a `proxyNode` row (with stale-node highlight) in the connection detail dialog.
+- **Removed Self-Authored Extras**: Deleted 11 fabricated operation-result notices and 30 Win-only `layout.notices.*` locale keys across 13 languages.
+- **Code-Level Pixel Parity (round 1)**: Established the MUI `content-box` conversion rule (`height + p:1px + border:1px` -> outer `+4`), corrected all four segmented controls (`122x24` / `26` tall, border stroked inside, segments split over the padding box, thumb inset 2), replaced the switch ink-baseline hack with the flex-centre model, re-derived card heights (`basic 141.9`, `theme 165.3`, `combo 128.8`), inset the theme-card dashed footer, switched the title-bar underline to `--divider-color`, and re-based the connections panel rhythm (search row `28/40`, table `76`, header `81`, rows `106`) with the header now inside the 5px double frame. Full ledger: `docs/pixel-parity-audit.md`.
 
 ## v1.0.0 (2026-11-17)
 
