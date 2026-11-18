@@ -81,7 +81,7 @@ void Button::draw_button_bg(IRenderTarget& rt, const RectF& r) {
   if (themed_) {
     // T12/F-D02：ThemeService 查表（皮肤 × 亮暗 × 状态）；
     // 渐变 + 浮雕 + 外发光 + translateY 位移。
-    auto p = theme::ThemeService::instance().button_paint(theme_color_type_);
+    auto p = theme::ThemeService::instance().button_paint(theme_color_type_, theme_outlined_);
     const bool disabled = (state() == State::Disabled);
     const float d = theme::ThemeService::instance().depth_factor();
     // 外阴影（← 各皮肤 boxShadow 常规层）：D2D 无 box-shadow，多层外扩近似
@@ -112,18 +112,27 @@ void Button::draw_button_bg(IRenderTarget& rt, const RectF& r) {
         }
       }
       // 悬停底色按 hover_mix_ 在 grad / grad_hover 之间逐停插值（0.15s ease）
+      // ★ outlined default 的常态 2 站、悬停 4 站（button-styles.ts:59-63 vs :109-111），
+      //   站数不同无法逐站对齐：按较多一侧站数统一，少的一侧用其末站补齐 ——
+      //   补齐段颜色与末站相同，渲染结果与少站版本一致。
+      const int gn = std::min(p.grad_count, 6);
+      const int hn = p.grad_hover_count > 0 ? std::min(p.grad_hover_count, 6) : gn;
+      const int n = std::max(gn, hn);
       GradientStop mixed[6];
       const GradientStop* gs = p.grad_hover;
+      int draw_n = hn;
       if (hover_mix_ < 0.999f) {
-        const int n = std::min(p.grad_count, 6);
         for (int i = 0; i < n; ++i) {
-          mixed[i] = p.grad[i];
-          mixed[i].color = mix_color(p.grad[i].color, p.grad_hover[i].color, hover_mix_);
+          const GradientStop& a = p.grad[std::min(i, gn - 1)];
+          const GradientStop& b = p.grad_hover[std::min(i, hn - 1)];
+          mixed[i] = a;
+          mixed[i].color = mix_color(a.color, b.color, hover_mix_);
         }
+        draw_n = n;
         gs = mixed;
       }
-      rt.fill_round_rect_gradient_angle(r, p.radius, gs, p.grad_count, p.grad_angle);
-      last_fill_ = gs[p.grad_count / 2].color;
+      rt.fill_round_rect_gradient_angle(r, p.radius, gs, draw_n, p.grad_angle);
+      last_fill_ = gs[draw_n / 2].color;
       // ← button-styles.ts:84 border: calc(2px * depth) solid borderColor（渐变填充后单独描边）
       if (p.border_w > 0.01f && p.border.a > 0.001f)
         rt.round_rect(r, p.radius, Pen{p.border, p.border_w}, nullptr);
@@ -186,7 +195,7 @@ void Button::draw_button_bg(IRenderTarget& rt, const RectF& r) {
 void Button::draw_button_text(IRenderTarget& rt, const RectF& r) {
   TextStyle ts = text_style;
   if (themed_) {
-    auto p = theme::ThemeService::instance().button_paint(theme_color_type_);
+    auto p = theme::ThemeService::instance().button_paint(theme_color_type_, theme_outlined_);
     const bool disabled = (state() == State::Disabled);
     ts.color = disabled ? p.text_disabled : p.text;
     ts.weight = p.weight;  // ← button-styles.ts fontWeight
@@ -215,7 +224,7 @@ void Button::on_paint(IRenderTarget& rt) {
   // F-D02：translateY 位移（hover 上移 / active 下移；负=上）
   float ty = 0;
   if (themed_) {
-    auto p = theme::ThemeService::instance().button_paint(theme_color_type_);
+    auto p = theme::ThemeService::instance().button_paint(theme_color_type_, theme_outlined_);
     if (state() == State::Hover) ty = p.translate_hover;
     else if (state() == State::Pressed) ty = p.translate_active;
   }

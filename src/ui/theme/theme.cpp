@@ -244,6 +244,14 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
   const float dep = depth();
   const float g = val1();
   const float v = vibrancy();
+  // ★ 语义色取当前调色板，不硬编码 —— Mini 的 error.main 来自
+  //   use-custom-theme.ts:198 palette.error.main = setting.error_color || 调色板缺省
+  //   （亮 #FF3B30 / 暗 #FF453A，见 palettes.cpp）。此前 original / modern-flat / monochrome
+  //   三套皮肤把 error 色写死成亮色值，暗色模式下按钮红偏亮。
+  const Color4f err = palette_.error_color;
+  // ← :165 / :235 theme.palette.error.dark：MUI augmentColor 的 dark = darken(main, 0.3)
+  //   （@mui/system colorManipulator.darken 对 rgb 逐通道 ×(1-0.3)）
+  const Color4f err_dark = Color4f::lerp(err, Color4f::hex(0x000000), 0.30f);
   ButtonPaint p{};
   p.text_disabled = light ? Color4f::hex(0x9e9e9e) : Color4f::hex(0x6e6e75);
   p.fill_disabled = light ? Color4f::hex(0xe0e0e0) : Color4f::hex(0x32323a);
@@ -283,7 +291,8 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
         p.border = light ? Color4f::hex(0xB71C1C) : Color4f::hex(0x6B0505);
         p.bevel_dark = light ? Color4f::hex(0x8B0000) : Color4f::hex(0x4A0404);
         p.bevel_hi = light ? Color4f::hex(0xFFFFFF, 0.8f) : Color4f::hex(0xFFFFFF, 0.08f);
-        p.glow = Color4f::hex(0xD50000, 0.2f * v);
+        // ← :66-68 glowColor：error 用 rgba(213,0,0, 0.15*vibrancy)（非 error 为 0.2）
+        p.glow = Color4f::hex(0xD50000, 0.15f * v);
         p.glow_blur = 8.0f * v;
         p.text_shadow = Color4f::hex(0x000000, 0.4f); p.text_shadow_dy = -1.0f;
         p.grad[0] = {0.0f, Color4f::hex(0xFF8A80)};
@@ -312,8 +321,6 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
           p.grad[1] = {1.0f, light ? Color4f::hex(0xFFF59D, 0.20f)
                                    : Color4f::hex(0x17140B, 0.20f)};
           p.grad_count = 2;
-          p.grad_hover[0] = p.grad[0];
-          p.grad_hover[1] = p.grad[1];
           // ← :40-52 outlined default：border #D4AF37/#8A6D00、文字 #3C2F0F/#FFE082
           p.border = light ? Color4f::hex(0xD4AF37) : Color4f::hex(0x8A6D00);
           p.text = light ? Color4f::hex(0x3C2F0F) : Color4f::hex(0xFFE082);
@@ -338,6 +345,10 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
           p.grad_hover[2] = {0.50f, Color4f::hex(0xFBC02D)};
           p.grad_hover[3] = {1.0f, Color4f::hex(0xF57F17)};
         }
+        // ← :109-111 `&:hover` 的 default 底色不看 variant：outlined 悬停时同样转成
+        //   4 站不透明的浅金渐变（此前把 grad_hover 复制成 grad，导致 outlined 按钮
+        //   悬停毫无反馈）。
+        if (outlined) p.grad_hover_count = 4;
       }
       p.fill = p.grad[p.grad_count / 2].color;   // last_fill_ 兜底
       p.fill_hover = p.grad_hover[p.grad_count / 2].color;
@@ -349,16 +360,19 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
     }
     case SkinId::Original: {
       // ← :144-196：primary=var(--primary-main) 白字；default 白底/暗 #2e303d
-      p.fill = is_primary ? primary() : (is_error ? Color4f::hex(0xFF3B30)
+      p.fill = is_primary ? primary() : (is_error ? err
                                             : (light ? Color4f::hex(0xffffff)
                                                      : Color4f::hex(0x2e303d)));
-      p.fill_hover = is_primary ? primary() : (is_error ? Color4f::hex(0xB71C1C)
-                                                  : (light ? Color4f::hex(0xf5f5f5)
-                                                           : Color4f::hex(0x242530)));
+      // ← :162-169 hoverBg：error 用 palette.error.dark（= darken(main,0.3)）；
+      //   primary 的 :197 `filter: brightness(0.95)` 在 D2D 无滤镜，按 ×0.95 折算
+      p.fill_hover = is_primary ? Color4f::lerp(primary(), Color4f::hex(0x000000), 0.05f)
+                                : (is_error ? err_dark
+                                            : (light ? Color4f::hex(0xf5f5f5)
+                                                     : Color4f::hex(0x242530)));
       p.fill_pressed = p.fill_hover;
       p.text = (is_primary || is_error) ? Color4f::hex(0xFFFFFF) : text_primary();
       p.border = is_primary ? primary()
-                         : (is_error ? Color4f::hex(0xFF3B30) : vars_.theme_border);
+                         : (is_error ? err : vars_.theme_border);
       p.radius = 4.0f * g;   // ← :186 borderRadius calc(4px * val1)
       p.border_w = 1.0f;          // ← :185 border: '1px solid'
       p.weight = 500;
@@ -374,15 +388,22 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
     }
     case SkinId::ModernFlat: {
       // ← :199-255：primary=palette.primary；default #f3f4f6/#1f2937
-      p.fill = is_primary ? primary() : (is_error ? Color4f::hex(0xFF3B30)
+      p.fill = is_primary ? primary() : (is_error ? err
                                             : (light ? Color4f::hex(0xf3f4f6)
                                                      : Color4f::hex(0x1f2937)));
-      p.fill_hover = is_primary ? Color4f::lerp(primary(), Color4f::hex(0x000000), 0.15f)
-                             : (light ? Color4f::hex(0xe5e7eb) : Color4f::hex(0x374151));
+      // ← :230-237 hoverBg：primary 用 palette.primary.dark、error 用 error.dark
+      //   （两者都是 darken(main, 0.3)，此前 primary 只压 0.15、error 直接漏了分支）
+      p.fill_hover = is_primary ? Color4f::lerp(primary(), Color4f::hex(0x000000), 0.30f)
+                             : (is_error ? err_dark
+                                         : (light ? Color4f::hex(0xe5e7eb)
+                                                  : Color4f::hex(0x374151)));
       p.fill_pressed = p.fill_hover;
       p.text = (is_primary || is_error) ? Color4f::hex(0xFFFFFF) : text_primary();
-      p.border = is_primary ? primary() : (light ? Color4f::hex(0xd1d5db)
-                                              : Color4f::hex(0x4b5563));
+      // ← :239-246 borderClr：primary/error 均取各自 main（此前 error 落到灰边）
+      p.border = is_primary ? primary()
+                         : (is_error ? err
+                                     : (light ? Color4f::hex(0xd1d5db)
+                                              : Color4f::hex(0x4b5563)));
       p.radius = 6.0f * g;   // ← :258 borderRadius calc(6px * val1)
       p.border_w = 1.0f;          // ← :257 border: '1px solid'
       p.weight = 700;
@@ -455,8 +476,14 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
     }
     case SkinId::Monochrome: {
       // ← :424-486：黑白对调
+      // ← :428-439 bg：primary 与 error 有各自的黑白色阶，default 才是纯黑白。
+      //   此前 error 落到 default 分支，出错按钮在单色皮上画成白底（暗色下黑底），
+      //   与 hover 态（#ccc/#333）严重脱节。
       p.fill = is_primary ? (light ? Color4f::hex(0x000000) : Color4f::hex(0xffffff))
-                       : (light ? Color4f::hex(0xffffff) : Color4f::hex(0x000000));
+                       : (is_error ? (light ? Color4f::hex(0x333333)
+                                            : Color4f::hex(0xcccccc))
+                                   : (light ? Color4f::hex(0xffffff)
+                                            : Color4f::hex(0x000000)));
       p.fill_hover = is_primary
                          ? (light ? Color4f::hex(0x333333) : Color4f::hex(0xcccccc))
                          : (light ? Color4f::hex(0xcccccc) : Color4f::hex(0x333333));

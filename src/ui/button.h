@@ -39,6 +39,12 @@ class Button : public Widget {
   // 默认 false 保持 paint_params 直绘。T13 场景挂载时统一开启）
   bool themed_ = false;
   const char* theme_color_type_ = "default";  // "primary" | "error" | "default"
+  // ← button-styles.ts get3DButtonStyle(theme, variant, colorType) 的 variant。
+  //   Mini 的次要按钮一律用 outlined（layout-dialogs.tsx:430 / add-url-dialog.tsx:262
+  //   / help-menu-button.tsx:257 / antivirus-whitelist-dialog.tsx:301 等）；
+  //   retro-3d 皮肤下 outlined+default 是「半透明浅金渐变 + 深金描边」，
+  //   与 contained 的实心金渐变完全不同（:59-63 / :47-51）。
+  bool theme_outlined_ = false;
 
   State state() const { return enabled() ? state_ : State::Disabled; }
   void set_disabled(bool d);

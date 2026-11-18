@@ -34,6 +34,10 @@ struct ButtonPaint {
   GradientStop grad[6];                  // default 态渐变站
   GradientStop grad_hover[6];            // hover 态渐变站（无单独站时回退 default）
   int grad_count = 0;
+  // hover 站的站数：0 = 与 grad_count 相同。
+  // ← button-styles.ts:59-63 vs :109-111：retro-3d 的 outlined default 常态是
+  //   2 站半透明渐变（to bottom），悬停却是 4 站不透明浅金（135deg），两者站数不同。
+  int grad_hover_count = 0;
   float grad_angle = 135.0f;
   Color4f bevel_dark{0, 0, 0, 0};       // 浮雕暗边（retro bevelShadowDark）
   Color4f bevel_hi{0, 0, 0, 0};         // 浮雕顶高光（白，light .8 / dark .08）
