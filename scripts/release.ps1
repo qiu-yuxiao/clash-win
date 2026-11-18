@@ -39,11 +39,25 @@ $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $GhRepo   = 'qiu-yuxiao/clash-win'
 Set-Location $RepoRoot
 
-# 剥离污染代理环境变量（防止 MSBuild 字典键冲突）
+# 剥离污染代理环境变量（防止 MSBuild 字典键冲突），但**先备份**：
+#   MSBuild 只在「构建/打包」阶段跑；git / gh 的联网操作（fetch/push/gh run watch）
+#   必须走代理——本机 DNS 常被 TUN fake-ip 接管，直连 GitHub 会 schannel/TLS 断连。
+#   故构建结束后统一 Restore-ProxyEnv 还原，供步骤 5 与 -WatchOnly 使用。
+$script:SavedProxyEnv = @{}
 foreach ($n in @('HTTP_PROXY','HTTPS_PROXY','http_proxy','https_proxy',
                  'ALL_PROXY','all_proxy','FTP_PROXY','ftp_proxy',
                  'NO_PROXY','no_proxy')) {
+  $v = [Environment]::GetEnvironmentVariable($n, 'Process')
+  if ($v) { $script:SavedProxyEnv[$n] = $v }
   [Environment]::SetEnvironmentVariable($n, $null, 'Process')
+}
+
+function Restore-ProxyEnv {
+  if ($script:SavedProxyEnv.Count -eq 0) { return }
+  foreach ($k in $script:SavedProxyEnv.Keys) {
+    [Environment]::SetEnvironmentVariable($k, $script:SavedProxyEnv[$k], 'Process')
+  }
+  Write-Host "  已还原代理环境供 git/gh 联网（$($script:SavedProxyEnv.Keys -join ',')）" -ForegroundColor DarkGray
 }
 
 function Read-Utf8NoBom([string]$path) {
@@ -169,6 +183,7 @@ $BaseSemVer = $Matches[1]
 $CommaVer   = ($BaseSemVer -replace '\.', ',') + ',0'
 
 if ($WatchOnly) {
+  Restore-ProxyEnv
   Watch-And-VerifyRelease $Version
   exit 0
 }
@@ -323,6 +338,9 @@ if ($porcelain) {
   & git commit -m "chore(release): prepare v$Version"
   if ($LASTEXITCODE -ne 0) { throw 'git commit 失败' }
 }
+
+# 构建/打包已结束，还原代理供 git/gh 联网（否则 fetch/push 被 TLS 断连）
+Restore-ProxyEnv
 
 # 拉取远端引用并自动吸收上一版 CI 回写到 origin/main 的 app-update.json 提交，杜绝 non-fast-forward
 & git fetch origin --prune
