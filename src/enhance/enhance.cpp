@@ -10,6 +10,7 @@
 
 #include "config/config.h"
 #include "config/prfitem.h"
+#include "config/proxy_head_state.h"
 #include "config/runtime_state.h"
 #include "enhance/dns_defaults.h"
 #include "enhance/enhance_constants.h"
@@ -18,6 +19,7 @@
 #include "enhance/mini_agreements.h"
 #include "enhance/seq.h"
 #include "enhance/tun.h"
+#include "util/str_utils.h"
 #include "util/utf.h"
 #include "util/yaml_utils.h"
 
@@ -323,6 +325,8 @@ EnhanceOutput enhance_core(const EnhanceInput& input) {
                     ? "https://cp.cloudflare.com/generate_204"
                     : verge.default_latency_test;
   ma.rule_fallback = verge.rule_fallback.empty() ? "direct" : verge.rule_fallback;
+  ma.preferred_proxy = input.preferred_proxy;
+  ma.filter_text = input.filter_text;
   config = enforce_mini_agreements(config, ma);
 
   // ⑧ use_tun_with_sniffer → ⑨ use_sort → ⑩ apply_mandatory_dns_settings → ⑪ DNS 上游治理 + tunnels 代理清洗
@@ -427,9 +431,46 @@ Result<EnhanceOutput> run_enhance_full_from_config() {
     }
   }
 
+  std::tie(input.preferred_proxy, input.filter_text) =
+      read_persisted_proxy_and_filter();
+
   EnhanceOutput out = enhance_core(input);
   config::RuntimeState::instance().update(out);
   return Result<EnhanceOutput>::ok(std::move(out));
+}
+
+std::pair<std::optional<std::string>, std::string> read_persisted_proxy_and_filter() {
+  std::optional<std::string> persisted;
+  std::string filter_text;
+  try {
+    const auto& profiles = *config::Config::instance().profiles().latest_arc();
+    if (!profiles.current.has_value() || profiles.current->empty()) {
+      return {std::nullopt, std::string()};
+    }
+    const std::string& uid = *profiles.current;
+    if (const config::PrfItem* cur = profiles.get_item(uid)) {
+      if (cur->selected.has_value()) {
+        for (const auto& s : *cur->selected) {
+          if (s.name.has_value() && *s.name == "PROXY" && s.now.has_value()) {
+            const std::string t = util::trim(*s.now);
+            if (!t.empty()) persisted = t;
+            break;
+          }
+        }
+      }
+    }
+    const auto head_state = config::proxy_head_state::load();
+    if (auto gs = config::proxy_head_state::get_group_state(head_state, uid, "PROXY")) {
+      filter_text = util::trim(gs->filter_text);
+    }
+  } catch (...) {
+  }
+  return {persisted, filter_text};
+}
+
+void sync_runtime_proxy_group_head(YAML::Node& config) {
+  auto [persisted, filter_text] = read_persisted_proxy_and_filter();
+  apply_proxy_group_head_and_store_selected(config, persisted, filter_text);
 }
 
 Result<YAML::Node> run_from_config() {

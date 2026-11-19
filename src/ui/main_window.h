@@ -392,6 +392,8 @@ class MainWindow : public app::ILifecycleWindow {
   //   TUN 已开但当前不可用（非管理员且服务不可用）→ 自动关 TUN + 回退系统代理，
   //   并给 info/error 提示。启动 10s 宽限 + 1s 冷却，避免与用户操作互相踩。
   int64_t start_ms_ = 0;                  // create() 时刻
+  int64_t last_visibility_refresh_ms_ = 0;  // ← src/pages/_layout.tsx:435 窗口可见性刷新 3s 节流
+  bool lightweight_wakeup_pending_ = false;  // ← src/pages/_layout.tsx:474 退出轻量模式首轮就绪刷新
   int64_t tun_guard_cool_until_ = 0;      // 1s 冷却（:123-127）
   std::atomic<bool> tun_guard_busy_{false};
   void tun_guard_tick();

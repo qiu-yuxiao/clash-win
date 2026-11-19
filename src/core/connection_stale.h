@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "mihomo/mihomo_client.h"
+#include "util/node.h"
 
 namespace clashwin::core {
 
@@ -53,6 +54,34 @@ inline bool should_close_stale_proxy_connection(
     if (c == target) has_target = true;
   }
   return has_group && !has_target;
+}
+
+// ← monitor.rs:226-247 should_close_excluded_proxy_connection（BUG-405）：
+// 判断经过 group_name 代理组、且实际出口节点已被有效 filter_text 排除的存量连接是否应断开。
+// 半输入态过滤词（如末尾孤立 "-"/"|"）、DIRECT/REJECT 等内置出站绝不误杀。
+inline bool should_close_excluded_proxy_connection(
+    const std::vector<std::string>& chains, const std::string& group_name,
+    const std::string& filter_text) {
+  const std::string trimmed = detail::trim_copy(filter_text);
+  const std::string group = detail::trim_copy(group_name);
+  if (trimmed.empty() || group.empty() ||
+      util::is_incomplete_filter_input(trimmed)) {
+    return false;
+  }
+  if (chains.empty() ||
+      std::find(chains.begin(), chains.end(), group) == chains.end()) {
+    return false;
+  }
+  const std::string exit_node = detail::trim_copy(chains.front());
+  if (exit_node.empty()) return false;
+  const std::string upper_exit = detail::ascii_upper(exit_node);
+  if (upper_exit == "DIRECT" || upper_exit == "REJECT" ||
+      upper_exit == "REJECT-DROP" || upper_exit == "PASS" ||
+      upper_exit == "COMPATIBLE" || upper_exit == "PROXY" ||
+      upper_exit == "GLOBAL") {
+    return false;
+  }
+  return !util::match_node_filter(exit_node, trimmed);
 }
 
 // 连接详情弹窗"代理节点"行的解析结果（← path-control.ts ConnectionNodeDisplay）。
@@ -96,26 +125,53 @@ inline ConnectionNodeDisplay resolve_connection_node_display(
   return out;
 }
 
-// 前台显式切点成功后，精准关闭仍挂在非目标节点的 PROXY 存量长连接。
-// 后台自愈/冷启动严禁调用本函数（保持零断流热切换）。
-// 返回实际发起关闭的连接条数（← mihomo-api.ts closeStaleProxyConnections）。
-inline int close_stale_proxy_connections(mihomo::MihomoClient& client,
-                                         const std::string& target_node,
-                                         const std::string& group_name = "PROXY") {
+namespace detail {
+template <typename Pred>
+inline int close_matching_proxy_connections(mihomo::MihomoClient& client,
+                                            Pred&& pred) {
   auto snapshot = client.get_connections();
   if (!snapshot.is_ok()) return 0;
-  std::vector<std::string> stale_ids;
+  std::vector<std::string> ids;
   for (const auto& conn : snapshot.value().connections) {
-    if (should_close_stale_proxy_connection(conn.chains, group_name,
-                                            target_node)) {
-      stale_ids.push_back(conn.id);
+    if (pred(conn.chains)) {
+      ids.push_back(conn.id);
     }
   }
   int closed = 0;
-  for (const auto& id : stale_ids) {
+  for (const auto& id : ids) {
     if (client.close_connection(id).is_ok()) ++closed;
   }
   return closed;
+}
+}  // namespace detail
+
+// 前台显式切点成功后，精准关闭仍挂在非目标节点的 PROXY 存量长连接。
+// 后台自愈/冷启动严禁调用本函数（保持零断流热切换；过滤越界清理由 close_excluded_proxy_connections 负责）。
+// 返回实际发起关闭的连接条数（← monitor.rs:251 close_stale_proxy_connections）。
+inline int close_stale_proxy_connections(mihomo::MihomoClient& client,
+                                         const std::string& target_node,
+                                         const std::string& group_name = "PROXY") {
+  return detail::close_matching_proxy_connections(
+      client, [&](const std::vector<std::string>& chains) {
+        return should_close_stale_proxy_connection(chains, group_name,
+                                                   target_node);
+      });
+}
+
+// ← monitor.rs:267-280 close_excluded_proxy_connections（BUG-405）：
+// 清理仍绑定在已被过滤词排除的代理节点上的存量连接，绝不触碰合规代理或 DIRECT/REJECT。
+inline int close_excluded_proxy_connections(
+    mihomo::MihomoClient& client, const std::string& filter_text,
+    const std::string& group_name = "PROXY") {
+  const std::string trimmed = detail::trim_copy(filter_text);
+  if (trimmed.empty() || util::is_incomplete_filter_input(trimmed)) {
+    return 0;
+  }
+  return detail::close_matching_proxy_connections(
+      client, [&](const std::vector<std::string>& chains) {
+        return should_close_excluded_proxy_connection(chains, group_name,
+                                                      trimmed);
+      });
 }
 
 }  // namespace clashwin::core

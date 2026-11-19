@@ -329,7 +329,7 @@ IClashTemp IClashTemp::make_template() {
   map["dns"] = dns;
 
   YAML::Node profile(YAML::NodeType::Map);
-  profile["store-selected"] = "true";
+  profile["store-selected"] = "false";
   profile["store-fake-ip"] = "false";
   map["profile"] = profile;
 

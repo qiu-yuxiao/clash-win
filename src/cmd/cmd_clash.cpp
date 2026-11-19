@@ -15,6 +15,7 @@
 
 #include <fstream>
 #include <sstream>
+#include <thread>
 
 namespace clashwin::cmd {
 
@@ -156,6 +157,14 @@ void install_cmd_clash(CommandService& svc) {
          //   sysproxy 回退）；本阶段无 TUN 上下文时直接 sidecar
          auto r = core::CoreManager::instance().start_auto(util::dirs::clash_mini_path());
          if (r.is_err()) return CmdResult::err(r.error());
+         auto& mgr = core::CoreManager::instance();
+         if (!mgr.is_exiting() && !mgr.has_start_auto_test_hooks()) {
+           std::thread([] {
+             core::CoreApiClientAdapter api(&mihomo_unchecked());
+             core::CoreManager::instance().ensure_proxy_group_selection(
+                 api, std::nullopt);
+           }).detach();
+         }
          events::EventBus::refresh_clash();
          return CmdResult::ok(Json::object());
        },

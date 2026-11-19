@@ -3,6 +3,7 @@
 // （← ClashVerge utils/node.rs 全量 1:1 移植）
 // 由 monitor、enhance、core_manager、cmd_proxy、ui 共享。
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -35,6 +36,26 @@ bool has_effective_filter_term(const std::string& filter_text);
 // is_incomplete_filter_input：是否处于半输入态（无有效词 / 以 | 结尾 / 末分支以孤立 -、!、！ 结尾）。
 // 注意 "hk-" 是前缀包含词本身，不视为未完成。
 bool is_incomplete_filter_input(const std::string& filter_text);
+
+// ← node.rs::effective_filter_text（BUG-405）：规范化过滤串；半输入态视作无有效过滤（返回 ""）。
+std::string effective_filter_text(const std::string& filter_text);
+
+// ← node.rs::pick_subset_fallback_node（BUG-405）：
+// 1. 匹配过滤词且已真 HTTPS 验真的有效节点；
+// 2. 匹配过滤词的有效节点；
+// 3. 仅当有效过滤词为空时回退首个有效节点；存在有效过滤且无匹配则返回 nullopt。
+std::optional<std::string> pick_subset_fallback_node(
+    const std::vector<std::string>& all, const std::string& filter_text,
+    const std::function<bool(const std::string&)>& is_valid,
+    const std::function<bool(const std::string&)>& is_verified);
+
+// ← node.rs::promote_preferred_proxy_first（BUG-405）：
+// 将符合过滤范围的持久选中节点（或合规子集首节点）提前至 PROXY.proxies[0]，保留其余节点相对顺序。
+std::optional<std::string> promote_preferred_proxy_first(
+    std::vector<std::string>& names,
+    const std::optional<std::string>& preferred, const std::string& filter_text,
+    const std::function<bool(const std::string&)>& is_valid,
+    const std::function<bool(const std::string&)>& is_verified);
 
 // ← utils/node.ts:587-604 isSupportedSubscriptionOrNodeInput：判断是否为单条 HTTP(S) 订阅 URL 或单/多行受支持节点 URI。
 bool is_supported_subscription_or_node_input(std::string_view raw);

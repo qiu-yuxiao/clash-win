@@ -4,6 +4,7 @@
 #include "cmd/command_service.h"
 #include "config/config.h"
 #include "core/validate.h"
+#include "enhance/enhance.h"
 #include "util/dirs.h"
 
 #include <windows.h>
@@ -104,12 +105,12 @@ UT_TEST(cmd_smoke_verge_port_validate_live) {
 
 UT_TEST(cmd_smoke_runtime_config_enhance_chain) {
   ensure_installed();
-  // get_runtime_config：enhance::run_from_config 全链（空环境 → 模板产物 mapping）
-  auto r = CommandService::instance().invoke("get_runtime_config");
+  // BUG-404：get_runtime_config IPC 已裁剪；直接验证 enhance::run_enhance_full_from_config 链
+  UT_CHECK(!CommandService::instance().exists("get_runtime_config"));
+  auto r = clashwin::enhance::run_enhance_full_from_config();
   UT_CHECK(r.is_ok());
   if (r.is_ok()) {
-    // Option<Mapping>：空环境 current 为空 → None（null）或 mapping，二者皆合法
-    UT_CHECK(r.value().is_null() || r.value().is_object());
+    UT_CHECK(r.value().config.IsMap());
   }
 }
 

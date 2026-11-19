@@ -15,7 +15,7 @@ inline constexpr const char* kProxyHeadState = "proxy_head_state.json";
 
 // ---------- 应用版本（2026-11-06 23:20 用户裁定：Clash Win 独立版本线，
 //   从 0.1.0 起步逐版递增，不与 Clash Mini 版本号绑死；当前 v0.3.3 跟进 Clash Mini v3.3.0） ----------
-inline constexpr const char* kAppVersion = "1.1.0";
+inline constexpr const char* kAppVersion = "1.1.1";
 
 // ---------- 端口（1:1 对齐 Clash Mini 官方规范） ----------
 // 取消开发期同机共存特例，全量端口与密钥回归 1:1 对齐：
@@ -92,12 +92,12 @@ inline constexpr const char* kItemLocal =
     "\n"
     "rules: []\n";
 
-// profile 增强 Merge 模板（全局 Merge 用，含 store-selected）
+// profile 增强 Merge 模板（全局 Merge 用，含 store-selected；BUG-405 默认关闭由客户端接管选点恢复）
 inline constexpr const char* kItemMerge =
     "# Profile Enhancement Merge Template for Clash Verge\n"
     "\n"
     "profile:\n"
-    "  store-selected: true\n";
+    "  store-selected: false\n";
 
 // profile 级 Merge 模板（空）
 inline constexpr const char* kItemMergeEmpty =

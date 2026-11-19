@@ -2,11 +2,11 @@
 
 Thank you for your interest in contributing to **Clash Win**! This guide covers the development setup, the 1:1 parity discipline, and the checks a change must pass before it can be merged.
 
-> **Read first**: [`移植基本准则.md`](移植基本准则.md) (the project constitution) in the repository root. It defines the only permitted deviations from Clash Mini (currently synced through **v3.5.6**), the version line, and the submission/evidence rules. Its rules take precedence over this file.
+> **Read first**: [`移植基本准则.md`](移植基本准则.md) (the project constitution) in the repository root. It defines the only permitted deviations from Clash Mini (currently synced through **v3.5.7**), the version line, and the submission/evidence rules. Its rules take precedence over this file.
 
 ## Relationship to Clash Mini
 
-Clash Win is a **Windows-native C++20 / Win32 / Direct2D 1:1 clone** of Clash Mini (initial port anchor `v3.2.2`, continuously synced through `v3.5.6`). The only public differences are the programming language/stack and the display name `Clash Mini` → `Clash Win`. Consequences for contributors:
+Clash Win is a **Windows-native C++20 / Win32 / Direct2D 1:1 clone** of Clash Mini (initial port anchor `v3.2.2`, continuously synced through `v3.5.7`). The only public differences are the programming language/stack and the display name `Clash Mini` → `Clash Win`. Consequences for contributors:
 
 - **Do not invent behavior.** If Mini's source (TS/TSX + Rust) has a behavior, reproduce it — including its nuances — rather than "improving" it on one side.
 - **Do not add features Mini does not have.** If a native implementation requires something Mini lacks (e.g. Win32 window lifecycle, Direct2D rendering compensations), implement semantic equivalence and register the native-form difference with its rationale in `docs/`.

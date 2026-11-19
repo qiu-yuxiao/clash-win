@@ -10,6 +10,7 @@
 #include "enhance/field.h"
 #include "util/log.h"
 #include "util/node.h"
+#include "util/str_utils.h"
 
 namespace clashwin::enhance {
 
@@ -325,7 +326,60 @@ YAML::Node enforce_mini_agreements(const YAML::Node& config,
     cfg["rule-providers"] = pruned;
   }
 
+  apply_proxy_group_head_and_store_selected(cfg, opt.preferred_proxy, opt.filter_text);
+
   return cfg;
+}
+
+void apply_proxy_group_head_and_store_selected(
+    YAML::Node& config, const std::optional<std::string>& preferred,
+    const std::string& filter_text) {
+  if (config["profile"] && config["profile"].IsMap()) {
+    YAML::Node profile_map = config["profile"];
+    profile_map["store-selected"] = YAML::Node(false);
+  } else {
+    YAML::Node profile_map(YAML::NodeType::Map);
+    profile_map["store-selected"] = YAML::Node(false);
+    config["profile"] = profile_map;
+  }
+
+  YAML::Node groups = config["proxy-groups"];
+  if (!groups || !groups.IsSequence()) return;
+  for (size_t gi = 0; gi < groups.size(); ++gi) {
+    YAML::Node group = groups[gi];
+    if (!group || !group.IsMap()) continue;
+    const YAML::Node gname = static_cast<const YAML::Node&>(group)["name"];
+    if (!field::is_string_key(gname) || gname.Scalar() != "PROXY") continue;
+
+    const YAML::Node proxies_val =
+        static_cast<const YAML::Node&>(group)["proxies"];
+    if (!proxies_val || !proxies_val.IsSequence()) break;
+
+    std::vector<std::string> names;
+    names.reserve(proxies_val.size());
+    for (const auto& item : proxies_val) {
+      if (field::is_string_key(item)) {
+        names.push_back(item.Scalar());
+      }
+    }
+    auto promoted = util::promote_preferred_proxy_first(
+        names, preferred, filter_text,
+        [](const std::string& n) {
+          return n != "DIRECT" && n != "REJECT" && !util::is_dummy_node(n) &&
+                 !util::is_confirmed_fake_node(n);
+        },
+        [](const std::string& n) { return util::is_verified_true_node(n); });
+    if (promoted.has_value()) {
+      YAML::Node seq(YAML::NodeType::Sequence);
+      for (const auto& p : names) {
+        YAML::Node n(p);
+        n.SetTag("!");
+        seq.push_back(n);
+      }
+      group["proxies"] = seq;
+    }
+    break;
+  }
 }
 
 }  // namespace clashwin::enhance

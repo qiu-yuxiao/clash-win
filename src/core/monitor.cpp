@@ -588,6 +588,9 @@ CoreMonitor::Action CoreMonitor::heal(const std::string& uid,
       std::lock_guard<std::mutex> lock(switch_rate_m_);
       recent_auto_switches_ms_.push_back(now);
     }
+    if (origin == SelfHealOrigin::NodeMigration && h.on_node_migration_healed) {
+      h.on_node_migration_healed();
+    }
     return Action::Healed;
   }
   if ((r.is_ok() && !r.value()) ||
@@ -786,6 +789,22 @@ CoreMonitor::Action CoreMonitor::tick_once() {
       }
       return Action::Idle;
     }
+  }
+
+  // ★ BUG-405：活跃出口已被当前过滤词排除且存在合规候选 → 立即触发迁移（NodeMigration，受 20s 宽限期保护）
+  if (h.should_migrate_filtered_out && h.should_migrate_filtered_out()) {
+    absorb_pending_manual_switch(now_fn());
+    if (in_switch_grace()) {
+      CWLOG_INFO("CoreMonitor: 活跃节点越界过滤词迁移处于 20s 切换宽限期内，暂缓切点");
+      return Action::Idle;
+    }
+    CWLOG_WARN("CoreMonitor: 当前活跃节点已被过滤词排除，触发越界迁移 (NodeMigration)");
+    node_fail_count_.store(0);
+    std::string uid = h.current_uid ? h.current_uid() : std::string();
+    if (!uid.empty()) {
+      return heal(uid, SelfHealOrigin::NodeMigration, observed_active);
+    }
+    return Action::Idle;
   }
 
   // ★ §5.8 测速失真复核（← Mini monitor.rs:1526-1670）：不可用或主 URL 失真 → 本轮不判死
@@ -1452,9 +1471,29 @@ bool CoreMonitor::persisted_exit_is_usable(
       confirmed_fake) {
     return false;
   }
-  if (!util::match_node_filter(*now, util::trim(filter_text))) return false;
+  if (!util::match_node_filter(*now, util::effective_filter_text(filter_text))) {
+    return false;
+  }
   if (!all) return false;
   return std::find(all->begin(), all->end(), *now) != all->end();
+}
+
+bool CoreMonitor::should_migrate_filtered_out_active(
+    const std::string& active_node, const std::vector<std::string>& members,
+    const std::string& filter_text,
+    const std::function<bool(const std::string&)>& is_fake) {
+  const std::string effective = util::effective_filter_text(filter_text);
+  if (effective.empty() || util::match_node_filter(active_node, effective)) {
+    return false;
+  }
+  for (const auto& m : members) {
+    if (m != active_node && m != "DIRECT" && m != "REJECT" &&
+        !util::is_dummy_node(m) && (!is_fake || !is_fake(m)) &&
+        util::match_node_filter(m, effective)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool CoreMonitor::is_https_verify_backoff_active(

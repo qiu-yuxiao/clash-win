@@ -759,12 +759,11 @@ Result<void> CoreUpdater::start_core_upgrade(const GithubRelease& release) {
     return Result<void>::err(make_err("application exiting"));
   }
 
-  // Snapshot active proxy group (BUG-335: fallback to persisted non-dummy selection)
+  // Snapshot compliant active proxy group (BUG-335 + BUG-405)
   std::optional<std::string> saved_proxy_now;
   if (api_client_) {
-    saved_proxy_now = CoreManager::instance().snapshot_proxy_group_now(*api_client_);
-  }
-  if (!saved_proxy_now.has_value()) {
+    saved_proxy_now = CoreManager::instance().resolve_desired_proxy_selection(*api_client_);
+  } else {
     saved_proxy_now = CoreManager::instance().read_persisted_proxy_selection("PROXY");
   }
 
@@ -797,8 +796,8 @@ Result<void> CoreUpdater::start_core_upgrade(const GithubRelease& release) {
     } else {
       CoreManager::instance().start_auto(util::dirs::clash_mini_path());
     }
-    if (saved_proxy_now.has_value() && api_client_) {
-      CoreManager::instance().restore_proxy_group_now(*api_client_, *saved_proxy_now);
+    if (api_client_) {
+      CoreManager::instance().ensure_proxy_group_selection(*api_client_, saved_proxy_now);
     }
     emit_progress("error", 0, "解压替换失败: " + extract_res.error().message);
     return extract_res;
@@ -819,9 +818,9 @@ Result<void> CoreUpdater::start_core_upgrade(const GithubRelease& release) {
     return Result<void>::err(make_err(err_msg));
   }
 
-  // Restore proxy group
-  if (saved_proxy_now.has_value() && api_client_) {
-    CoreManager::instance().restore_proxy_group_now(*api_client_, *saved_proxy_now);
+  // Ensure compliant proxy group selection & clean excluded connections (BUG-405)
+  if (api_client_) {
+    CoreManager::instance().ensure_proxy_group_selection(*api_client_, saved_proxy_now);
   }
 
   emit_progress("done", 100, "内核更新成功！核心已成功重启。");

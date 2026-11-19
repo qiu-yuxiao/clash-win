@@ -25,6 +25,7 @@
 
 #include "clashwin/config/constants.h"
 #include "clashwin/update/client_updater.h"
+#include "cmd/command_service.h"
 #include "ui/textfield.h"
 #include "ui/theme/palettes.h"
 #include "ui/theme/theme.h"
@@ -225,16 +226,16 @@ UT_TEST(t35_update_manifest_is_clash_win_not_mini) {
 }
 
 UT_TEST(t35_uninstall_service_has_no_ui_path) {
-  // 与 Mini 一致（用户 2026-11-09 裁决「跟 Mini 一样」）：
-  //   Mini 后端 cmd/service.rs:20-23 注册了 uninstall_service，但 src/ 前端零调用点；
-  //   Win 同样只保留后端能力（t25_service_mock_install_uninstall 的 Case C 固定能力存在）。
-  // 防误接：src/ui、src/app 只要出现该命令字面量，就说明卸载被接到了可见路径上。
+  // BUG-404：uninstall_service 与 get_runtime_config 已全面移除（不仅 UI/App 无路径，cmd 注册表亦无残留）。
+  cmd::CommandService::instance().install_all();
+  UT_CHECK(!cmd::CommandService::instance().exists("uninstall_service"));
+  UT_CHECK(!cmd::CommandService::instance().exists("get_runtime_config"));
   const fs::path root = repo_root();
   UT_CHECK(!root.empty());
   if (root.empty()) return;
 
   std::vector<std::string> hits;
-  for (const char* sub : {"src/ui", "src/app"}) {
+  for (const char* sub : {"src/ui", "src/app", "src/cmd"}) {
     std::error_code ec;
     const fs::path dir = root / sub;
     if (!fs::exists(dir, ec)) continue;
@@ -246,7 +247,11 @@ UT_TEST(t35_uninstall_service_has_no_ui_path) {
       if (!f.good()) continue;
       std::ostringstream ss;
       ss << f.rdbuf();
-      if (ss.str().find("uninstall_service") != std::string::npos) hits.push_back(e.path().string());
+      const std::string content = ss.str();
+      if (content.find("uninstall_service") != std::string::npos ||
+          content.find("get_runtime_config") != std::string::npos) {
+        hits.push_back(e.path().string());
+      }
     }
   }
   UT_CHECK_MSG(hits.empty(), hits.empty() ? "" : hits.front().c_str());

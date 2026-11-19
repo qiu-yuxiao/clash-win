@@ -2,16 +2,28 @@
 
 All notable changes to **Clash Win** are documented here.
 
-Version format follows the project's **own** line starting at `0.1.0` (constitution §5.3): Clash Win versions increment independently and are **not** bound to Clash Mini's `3.x` numbering (`v3.2.2` was the initial port reference anchor, now synced 1:1 through **v3.5.6**).
+Version format follows the project's **own** line starting at `0.1.0` (constitution §5.3): Clash Win versions increment independently and are **not** bound to Clash Mini's `3.x` numbering (`v3.2.2` was the initial port reference anchor, now synced 1:1 through **v3.5.7**).
 
 Format reference: `Changelog.md` in the Clash Mini repository (newest first, `## vX.Y.Z` headings with grouped change bullets). Content here is Clash Win's own history, not a copy of Mini's entries.
 
 ---
 
+## v1.1.1 (2026-11-19)
+
+### Upstream Clash Mini v3.5.7 Sync (`BUG-404` ~ `BUG-405`)
+- **BUG-405 (Zero-Millisecond Compliant Exit Binding & Filtered-Out Migration)**:
+  - Set `profile.store-selected: false` across built-in templates and runtime enhancement output so Mihomo no longer revives stale excluded cache entries on cold start, restart, or reload.
+  - Added `effective_filter_text`, `pick_subset_fallback_node`, `promote_preferred_proxy_first`, and `apply_proxy_group_head_and_store_selected` / `sync_runtime_proxy_group_head` to promote the persisted compliant node (or compliant subset fallback) to `PROXY.proxies[0]` before writing `clash-win.yaml`.
+  - Unified `resolve_desired_proxy_selection` and `ensure_proxy_group_selection` across `start_core`, `restart_with_restore`, `apply_config`, and `CoreUpdater` (with 50ms fast initial polling during the first 2s), followed by `close_excluded_proxy_connections` cleanup so no live proxy connection stays pinned to an excluded node.
+  - Added `CoreMonitor::should_migrate_filtered_out_active` (`NodeMigration`) with incomplete-filter protection (`effective_filter_text` in `persisted_exit_is_usable`) and post-heal excluded connection cleanup.
+- **BUG-404 (Dead IPC Removal & Visibility Refresh Convergence)**:
+  - Removed dead IPC commands `get_runtime_config` and `uninstall_service` from `CommandService`.
+  - Retired active visibility wakeup latency probing (`silent_test_on_wakeup`) on normal window show in favor of a `3000ms`-throttled passive `reload_nodes()` state sync, keeping active probing and self-healing centralized in `CoreMonitor` (while preserving `skipProbeIfFresh` on lightweight-mode wake).
+
 ## v1.1.0 (2026-11-19)
 
 ### 1:1 Naming, Packaging & Installer Migration Alignment
-- **Aligned executable, install path & artifact naming**: Renamed the Windows binary to `clash-win.exe` (matching `clash-mini.exe`), changed the default NSIS installation folder to `Clash Win` (matching `Clash Mini`), and standardized distribution archives to `Clash.Win_<version>_x64-setup.exe` and `Clash.Win_<version>_x64_portable.zip` while keeping runtime coexistence mutual exclusion intact.
+- **Aligned executable, install path & artifact naming**: Renamed the Windows binary to `clash-win.exe` (matching upstream naming), changed the default NSIS installation folder to `Clash Win` (matching `Clash Mini`), and standardized distribution archives to `Clash.Win_<version>_x64-setup.exe` and `Clash.Win_<version>_x64_portable.zip` while keeping runtime coexistence mutual exclusion intact.
 - **Upgrade migration cleanup**: NSIS setup automatically cleans up legacy `v1.0.x` `ClashWin` / `clashwin.exe` remnants when upgrading in place without affecting side-by-side Clash Mini installations.
 
 ### Pixel-Level UI, Traffic Graph, Drawer & Modal Parity

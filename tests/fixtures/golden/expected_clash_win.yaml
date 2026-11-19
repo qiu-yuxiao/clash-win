@@ -9,7 +9,7 @@ unified-delay: true
 bind-address: '*'
 find-process-mode: strict
 profile:
-  store-selected: true
+  store-selected: false
   store-fake-ip: true
 tcp-concurrent: true
 ntp:

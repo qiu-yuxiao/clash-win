@@ -172,7 +172,7 @@ UT_TEST(t03_first_launch_clash_yaml_diff_empty) {
       "  enable: true\n"
       "  cache-size: 512\n"
       "profile:\n"
-      "  store-selected: true\n"
+      "  store-selected: false\n"
       "  store-fake-ip: false\n"
       "external-controller: 127.0.0.1:9098\n"
       "external-controller-pipe: \\\\.\\pipe\\mini-mihomo-win\n"

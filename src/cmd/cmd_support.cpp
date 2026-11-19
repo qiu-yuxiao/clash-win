@@ -319,9 +319,11 @@ core::validate::ValidationOutcome run_enhance_pipeline() {
   if (runtime.is_err()) {
     return ValidationOutcome::invalid_from_message(runtime.error().message);
   }
-  // ② 落盘 clash-win.yaml（← Config::generate_file(Run)）
+  // ② 同步 PROXY.proxies[0] 与 store-selected=false，并落盘 clash-win.yaml（← Config::generate_file(Run) / BUG-405）
+  YAML::Node runtime_cfg = runtime.value();
+  enhance::sync_runtime_proxy_group_head(runtime_cfg);
   std::ostringstream oss;
-  oss << runtime.value();
+  oss << runtime_cfg;
   std::string yaml_text = oss.str();
   auto run_path = util::dirs::clash_mini_path();
   {

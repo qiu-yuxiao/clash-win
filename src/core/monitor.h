@@ -130,6 +130,10 @@ class CoreMonitor {
     std::function<void(const std::string& uid)> restore_selected_nodes;
     // ← v3.5.5 Alive 但 HTTPS 验真失败 → ShouldMigrate（在 probe_metrics_with_fallback 之后且受 20s 宽限期保护）
     std::function<bool()> should_migrate_untrusted;
+    // ← v3.5.7 (BUG-405)：活跃出口已被过滤词排除且组内存在合规候选 → NodeMigration
+    std::function<bool()> should_migrate_filtered_out;
+    // ← v3.5.7 (BUG-405)：NodeMigration 自愈成功后清理已排除节点上的代理连接
+    std::function<void()> on_node_migration_healed;
     // 时钟（Unix 毫秒；测试注入虚拟时钟）
     std::function<int64_t()> now_ms;
   };
@@ -340,6 +344,12 @@ class CoreMonitor {
       const std::optional<std::string>& now,
       const std::vector<std::string>* all, const std::string& filter_text,
       bool confirmed_fake);
+  // ← monitor.rs:1617 should_migrate_filtered_out_active（BUG-405）：
+  // 活跃出口在有效过滤词下已被排除且组内至少存在 1 个合规真实候选时返回 true
+  static bool should_migrate_filtered_out_active(
+      const std::string& active_node, const std::vector<std::string>& members,
+      const std::string& filter_text,
+      const std::function<bool(const std::string&)>& is_fake);
   static bool is_https_verify_backoff_active(std::optional<int64_t> elapsed_secs);
 
   // ---- BUG-359：网络健康状态去重广播（network_health::ok / offline / all_dead） ----

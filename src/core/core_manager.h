@@ -92,6 +92,10 @@ struct ICoreApiClient {
   virtual Result<void> select_node_for_group(const std::string& group, const std::string& node) = 0;
   // PUT /configs?force=true（30s 梯度）
   virtual Result<void> reload_config(bool force, const std::string& config_path) = 0;
+  // BUG-405：清理滞留于已排除节点上的 PROXY 连接（默认空实现兼容现有单测 mock）
+  virtual int close_excluded_connections(const std::string& /*filter_text*/) {
+    return 0;
+  }
 };
 
 class CoreApiClientAdapter : public ICoreApiClient {
@@ -101,6 +105,7 @@ class CoreApiClientAdapter : public ICoreApiClient {
   Result<mihomo::ProxyItem> get_group_by_name(const std::string& name) override;
   Result<void> select_node_for_group(const std::string& group, const std::string& node) override;
   Result<void> reload_config(bool force, const std::string& config_path) override;
+  int close_excluded_connections(const std::string& filter_text) override;
 
  private:
   mihomo::MihomoClient* client_;
@@ -209,13 +214,29 @@ class CoreManager {
   Result<void> apply_config(ICoreApiClient& api, const std::string& config_path,
                             const CoreOps& ops, const RestoreTimings& t = {});
 
-  // ---- 快照/恢复（公开供 T24 core_updater 复用，← lifecycle.rs:282-416） ----
+  // ---- 快照/恢复（公开供 T24 core_updater 复用，← lifecycle.rs:282-470 / BUG-405） ----
   std::optional<std::string> snapshot_proxy_group_now(ICoreApiClient& api);
   // BUG-335: 从当前 profile 持久化 selected 列表读取指定组非伪节点选择（快照缺失时统一保底）
   std::optional<std::string> read_persisted_proxy_selection(
       const std::string& group = "PROXY") const;
+  // BUG-405: 综合实时快照、持久化 selected 与 filterText 解析重启/重载前合规目标节点
+  std::optional<std::string> resolve_desired_proxy_selection(
+      ICoreApiClient& api,
+      std::optional<std::pair<std::optional<std::string>, std::string>>
+          override_state = std::nullopt);
+  // BUG-405: 统一保障启动/重启/重载后的 PROXY 组选点合规性，并在收尾清理已排除节点的代理连接
+  bool ensure_proxy_group_selection(
+      ICoreApiClient& api,
+      std::optional<std::string> preferred = std::nullopt,
+      const RestoreTimings& t = {},
+      std::optional<std::pair<std::optional<std::string>, std::string>>
+          override_state = std::nullopt);
   void restore_proxy_group_now(ICoreApiClient& api, const std::string& node,
                                const RestoreTimings& t = {});
+
+  void set_is_exiting_check(std::function<bool()> fn);
+  bool is_exiting() const;
+  bool has_start_auto_test_hooks() const;
 
   // 告警通知（默认 CWLOG_WARN；T09 接 notice-service）
   void set_notifier(Notifier n) { notifier_ = std::move(n); }
@@ -247,6 +268,7 @@ class CoreManager {
   mutable std::mutex test_hooks_mu_;
   ProcEnumerator proc_enumerator_;
   std::optional<StartAutoTestHooks> start_auto_test_hooks_;
+  std::function<bool()> is_exiting_fn_;
   void* child_ = nullptr;          // HANDLE（避免头文件引入 windows.h）
   uint32_t pid_ = 0;
   void* stdout_read_ = nullptr;    // 管道读端 HANDLE

@@ -8,9 +8,11 @@
 #include "clashwin/config/constants.h"
 #include "config/config.h"
 #include "config/proxy_head_state.h"
+#include "core/connection_stale.h"
 #include "core/monitor.h"
 #include "core/service_mode.h"
 #include "clashwin/core/core_updater.h"
+#include "enhance/enhance.h"
 #include "events/event_bus.h"
 #include "mihomo/service_ipc.h"
 #include "system/service_runner.h"
@@ -365,6 +367,11 @@ Result<void> CoreApiClientAdapter::reload_config(bool force, const std::string& 
   return client_->reload_config(force, config_path);
 }
 
+int CoreApiClientAdapter::close_excluded_connections(const std::string& filter_text) {
+  if (!client_) return 0;
+  return close_excluded_proxy_connections(*client_, filter_text);
+}
+
 // ---------- 恢复语义 ----------
 bool is_builtin_outbound(const std::string& name) {
   return name == "DIRECT" || name == "REJECT" || name == "REJECT-DROP" || name == "PASS" ||
@@ -407,32 +414,20 @@ std::string pick_subset_fallback_node(
     const std::vector<std::string>& all, const std::string& filter_text,
     const std::function<bool(const std::string&)>& is_valid,
     const std::function<bool(const std::string&)>& is_verified) {
-  const std::string trimmed = util::trim(filter_text);
-  auto check_valid = [&](const std::string& n) {
-    return !n.empty() && (is_valid ? is_valid(n)
-                                   : (!util::is_dummy_node(n) &&
-                                      !util::is_confirmed_fake_node(n)));
-  };
-  auto check_verified = [&](const std::string& n) {
-    return is_verified ? is_verified(n) : util::is_verified_true_node(n);
-  };
-  for (const auto& n : all) {
-    if (check_valid(n) && check_verified(n) &&
-        util::match_node_filter(n, trimmed)) {
-      return n;
-    }
-  }
-  for (const auto& n : all) {
-    if (check_valid(n) && util::match_node_filter(n, trimmed)) {
-      return n;
-    }
-  }
-  if (trimmed.empty()) {
-    for (const auto& n : all) {
-      if (check_valid(n)) return n;
-    }
-  }
-  return {};
+  auto valid_fn = is_valid ? is_valid
+                           : std::function<bool(const std::string&)>(
+                                 [](const std::string& n) {
+                                   return !n.empty() && !is_builtin_outbound(n) &&
+                                          !util::is_dummy_node(n) &&
+                                          !util::is_confirmed_fake_node(n);
+                                 });
+  auto verified_fn = is_verified ? is_verified
+                                 : std::function<bool(const std::string&)>(
+                                       [](const std::string& n) {
+                                         return util::is_verified_true_node(n);
+                                       });
+  return util::pick_subset_fallback_node(all, filter_text, valid_fn, verified_fn)
+      .value_or(std::string());
 }
 
 std::string pick_fallback_node(const std::vector<std::string>& all,
@@ -440,7 +435,8 @@ std::string pick_fallback_node(const std::vector<std::string>& all,
   return pick_subset_fallback_node(
       all, filter_lower,
       [](const std::string& n) {
-        return !clashwin::util::is_dummy_node(n) &&
+        return !n.empty() && !is_builtin_outbound(n) &&
+               !clashwin::util::is_dummy_node(n) &&
                !clashwin::util::is_confirmed_fake_node(n);
       },
       [](const std::string& n) {
@@ -1021,132 +1017,256 @@ std::optional<std::string> CoreManager::read_persisted_proxy_selection(
   return std::nullopt;
 }
 
+void CoreManager::set_is_exiting_check(std::function<bool()> fn) {
+  std::lock_guard<std::mutex> lk(test_hooks_mu_);
+  is_exiting_fn_ = std::move(fn);
+}
+
+bool CoreManager::is_exiting() const {
+  std::function<bool()> fn;
+  {
+    std::lock_guard<std::mutex> lk(test_hooks_mu_);
+    fn = is_exiting_fn_;
+  }
+  return fn ? fn() : false;
+}
+
+bool CoreManager::has_start_auto_test_hooks() const {
+  std::lock_guard<std::mutex> lk(test_hooks_mu_);
+  return start_auto_test_hooks_.has_value();
+}
+
 Result<void> CoreManager::restart_with_restore(ICoreApiClient& api, const CoreOps& ops,
                                                const RestoreTimings& t) {
-  // ← lifecycle.rs:108-136 + BUG-335：快照 → 持久化保底 → 停 → 启 → 恢复
-  auto saved = snapshot_proxy_group_now(api);
-  if (!saved.has_value()) {
-    saved = read_persisted_proxy_selection("PROXY");
-  }
+  // ← lifecycle.rs:106-148 + BUG-405：记录过滤合规目标（快照优先，越界/缺失回退持久化）→ 停 → 启 → 统一保障
+  auto saved = resolve_desired_proxy_selection(api);
   auto st = ops.stop();
   if (st.is_err()) return st;
   st = ops.start();
   if (st.is_err()) return st;
-  if (saved.has_value()) {
-    restore_proxy_group_now(api, *saved, t);
-  } else {
-    // 进程冷启动 / 无历史 snapshot 时，自动在 filterText 子集内兜底选点，
-    // 避免 Selector 落回首个广告/假节点（← lifecycle.rs:354-416 兜底防线）
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(t.api_ready_budget_ms);
-    while (std::chrono::steady_clock::now() < deadline) {
-      if (api.get_base_config().is_ok()) break;
-      std::this_thread::sleep_for(std::chrono::milliseconds(t.api_ready_poll_ms));
-    }
-    select_fallback_in_subset(api, read_filter_text_lower());
-  }
+  (void)ensure_proxy_group_selection(api, saved, t);
   CoreMonitor::instance().kick();
   return Result<void>::ok();
 }
 
 std::optional<std::string> CoreManager::snapshot_proxy_group_now(ICoreApiClient& api) {
-  // ← lifecycle.rs:284-302 + BUG-335：读取失败 / now 空 / 伪节点 / 已拉黑假节点 → 交由持久化保底或子集恢复
+  // ← lifecycle.rs:296-315 + BUG-335 + BUG-405：读取失败 / now 空 / 内置出站 / 伪节点 / 已拉黑假节点 → 交由持久化保底或子集恢复
   auto group = api.get_group_by_name("PROXY");
   if (group.is_err()) {
-    CWLOG_WARN("snapshot PROXY group failed (ignored, no restore): " + group.error().message);
+    CWLOG_WARN("snapshot PROXY group failed (will fallback to persisted): " + group.error().message);
     return std::nullopt;
   }
   const auto& now = group.value().now;
-  if (now.has_value() && !now->empty() && !util::is_dummy_node(*now) &&
-      !util::is_confirmed_fake_node(*now)) {
+  if (now.has_value() && !now->empty() && !is_builtin_outbound(*now) &&
+      !util::is_dummy_node(*now) && !util::is_confirmed_fake_node(*now)) {
     CWLOG_INFO("snapshot PROXY group now: " + *now);
     return *now;
   }
   return std::nullopt;
 }
 
-void CoreManager::restore_proxy_group_now(ICoreApiClient& api, const std::string& node,
-                                          const RestoreTimings& t) {
-  // ← lifecycle.rs:307-416
-  // 1) 等 API 就绪（get_base_config ok，200ms 轮询，预算 30s）
-  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(t.api_ready_budget_ms);
+std::optional<std::string> CoreManager::resolve_desired_proxy_selection(
+    ICoreApiClient& api,
+    std::optional<std::pair<std::optional<std::string>, std::string>>
+        override_state) {
+  const auto [persisted, raw_filter] =
+      override_state.has_value() ? *override_state
+                                 : enhance::read_persisted_proxy_and_filter();
+  const std::string effective_filter = util::effective_filter_text(raw_filter);
+  auto is_compliant = [&](const std::string& node) {
+    return !node.empty() && !is_builtin_outbound(node) &&
+           !util::is_dummy_node(node) && !util::is_confirmed_fake_node(node) &&
+           util::match_node_filter(node, effective_filter);
+  };
+
+  if (auto snap = snapshot_proxy_group_now(api); snap.has_value()) {
+    if (is_compliant(*snap)) {
+      return snap;
+    }
+    CWLOG_WARN("快照节点 " + *snap + " 不符合当前过滤范围「" +
+               effective_filter + "」，尝试回退持久化合规选点");
+  }
+  if (persisted.has_value() && is_compliant(*persisted)) {
+    return persisted;
+  }
+  return std::nullopt;
+}
+
+bool CoreManager::ensure_proxy_group_selection(
+    ICoreApiClient& api, std::optional<std::string> preferred,
+    const RestoreTimings& t,
+    std::optional<std::pair<std::optional<std::string>, std::string>>
+        override_state) {
+  if (is_exiting()) return false;
+
+  // 1) 等 API 就绪（总预算默认 30s，前 2s 使用 <=50ms 快速轮询压缩窗口期）
+  const auto api_start = std::chrono::steady_clock::now();
+  const auto api_deadline =
+      api_start + std::chrono::milliseconds(t.api_ready_budget_ms);
   bool api_ready = false;
-  while (std::chrono::steady_clock::now() < deadline) {
+  while (std::chrono::steady_clock::now() < api_deadline) {
+    if (is_exiting()) return false;
     if (api.get_base_config().is_ok()) {
       api_ready = true;
       break;
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(t.api_ready_poll_ms));
+    const auto elapsed_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - api_start)
+            .count();
+    const int step_ms =
+        (elapsed_ms < 2000) ? (std::min)(t.api_ready_poll_ms, 50) : t.api_ready_poll_ms;
+    std::this_thread::sleep_for(std::chrono::milliseconds(step_ms));
   }
   if (!api_ready) {
-    CWLOG_WARN("core API not ready in budget, skip PROXY restore");
-    return;
+    CWLOG_WARN("core API not ready in budget, skip PROXY ensure");
+    return false;
   }
 
-  // 2) 等 PROXY 组成员填充（500ms 轮询，预算 20s），顺带判定目标节点是否在组内
-  deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(t.group_fill_budget_ms);
-  bool node_in_group = false;
-  while (std::chrono::steady_clock::now() < deadline) {
+  // 2) 等 PROXY 组成员填充（总预算默认 20s，前 2s 使用 <=50ms 快速轮询）
+  const auto grp_start = std::chrono::steady_clock::now();
+  const auto grp_deadline =
+      grp_start + std::chrono::milliseconds(t.group_fill_budget_ms);
+  std::vector<std::string> all;
+  std::optional<std::string> current_now;
+  bool grp_loaded = false;
+  while (std::chrono::steady_clock::now() < grp_deadline) {
+    if (is_exiting()) return false;
     auto g = api.get_group_by_name("PROXY");
     if (g.is_ok() && g.value().all.has_value() && !g.value().all->empty()) {
-      node_in_group = std::find(g.value().all->begin(), g.value().all->end(), node) !=
-                      g.value().all->end();
+      all = std::move(*g.value().all);
+      current_now = g.value().now;
+      grp_loaded = true;
       break;
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(t.group_fill_poll_ms));
+    const auto elapsed_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - grp_start)
+            .count();
+    const int step_ms = (elapsed_ms < 2000)
+                            ? (std::min)(t.group_fill_poll_ms, 50)
+                            : (std::min)(t.group_fill_poll_ms, 200);
+    std::this_thread::sleep_for(std::chrono::milliseconds(step_ms));
+  }
+  if (!grp_loaded) {
+    CWLOG_WARN("PROXY group fill timed out, skip PROXY ensure");
+    return false;
   }
 
-  // 3) 内置出站 / 已拉黑假节点 / 不在组内 → 跳过注定失败的 select，直接子集兜底
-  if (is_builtin_outbound(node) || util::is_confirmed_fake_node(node)) {
-    CWLOG_INFO("skip PROXY restore: " + node +
-               " is builtin outbound or confirmed fake, fallback to subset");
-    select_fallback_in_subset(api, read_filter_text_lower());
-    return;
-  }
-  if (!node_in_group) {
-    CWLOG_INFO("skip PROXY restore: node " + node + " not in group, fallback to subset");
-    select_fallback_in_subset(api, read_filter_text_lower());
-    return;
+  const auto [persisted, raw_filter] =
+      override_state.has_value() ? *override_state
+                                 : enhance::read_persisted_proxy_and_filter();
+  const std::string effective_filter = util::effective_filter_text(raw_filter);
+
+  auto is_compliant_member = [&](const std::string& n) {
+    return !n.empty() && !is_builtin_outbound(n) &&
+           !util::is_dummy_node(n) && !util::is_confirmed_fake_node(n) &&
+           util::match_node_filter(n, effective_filter) &&
+           std::find(all.begin(), all.end(), n) != all.end();
+  };
+
+  std::optional<std::string> desired_target;
+  if (preferred.has_value()) {
+    if (is_compliant_member(*preferred)) {
+      desired_target = *preferred;
+    } else {
+      CWLOG_INFO("skip PROXY restore: " + *preferred +
+                 " is builtin/fake/missing/excluded by filter \"" +
+                 effective_filter + "\", fallback to subset");
+    }
+  } else if (current_now.has_value() && is_compliant_member(*current_now)) {
+    desired_target = *current_now;
+  } else if (persisted.has_value() && is_compliant_member(*persisted)) {
+    desired_target = *persisted;
   }
 
-  // 4) 90s 重试预算内 select（BUG-301：冷启动 IPC 可能连续超时，失败重试 3s 间隔）
-  deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(t.select_budget_ms);
-  for (;;) {
-    auto sel = api.select_node_for_group("PROXY", node);
-    if (sel.is_ok()) {
-      CWLOG_INFO("PROXY node restored: " + node);
-      return;
+  auto select_and_persist_fallback = [&]() -> bool {
+    const std::string fb = pick_fallback_node(all, effective_filter);
+    if (fb.empty()) {
+      if (!effective_filter.empty()) {
+        CWLOG_WARN("PROXY subset fallback empty under filter \"" + effective_filter + "\"");
+      }
+      return false;
     }
-    if (std::chrono::steady_clock::now() >= deadline) {
-      CWLOG_WARN("PROXY restore budget exhausted (" + node + "), fallback to subset");
-      select_fallback_in_subset(api, read_filter_text_lower());
-      return;
+    auto sel = api.select_node_for_group("PROXY", fb);
+    if (sel.is_err()) {
+      CWLOG_WARN("PROXY fallback select failed: " + sel.error().message);
+      return false;
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(t.select_retry_ms));
+    CWLOG_INFO("PROXY fallback node selected: " + fb);
+    if (!override_state.has_value() &&
+        util::match_node_filter(fb, effective_filter)) {
+      try {
+        auto& profiles = config::Config::instance().profiles();
+        auto latest = profiles.latest_arc();
+        if (latest && latest->current && !latest->current->empty()) {
+          const std::string uid = *latest->current;
+          bool updated = false;
+          profiles.edit_draft([&](config::IProfiles& d) {
+            if (config::PrfItem* it = d.get_item_mut(uid)) {
+              it->selected = std::vector<config::PrfSelected>{
+                  config::PrfSelected{"PROXY", fb}};
+              updated = true;
+            }
+          });
+          if (updated) {
+            profiles.apply();
+            (void)profiles.data_arc()->save_file();
+          }
+        }
+      } catch (...) {
+      }
+    }
+    return true;
+  };
+
+  bool ok = false;
+  if (desired_target.has_value()) {
+    if (!preferred.has_value() && current_now.has_value() &&
+        *current_now == *desired_target) {
+      CWLOG_INFO("PROXY group already aligned on compliant node: " + *desired_target);
+      ok = true;
+    } else {
+      const auto sel_deadline =
+          std::chrono::steady_clock::now() + std::chrono::milliseconds(t.select_budget_ms);
+      for (;;) {
+        auto sel = api.select_node_for_group("PROXY", *desired_target);
+        if (sel.is_ok()) {
+          CWLOG_INFO("PROXY node ensured: " + *desired_target);
+          ok = true;
+          break;
+        }
+        if (is_exiting() || std::chrono::steady_clock::now() >= sel_deadline) {
+          CWLOG_WARN("PROXY restore budget exhausted (" + *desired_target +
+                     "), fallback to subset");
+          ok = select_and_persist_fallback();
+          break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(t.select_retry_ms));
+      }
+    }
+  } else {
+    ok = select_and_persist_fallback();
   }
+
+  // 收尾清理：清除启动/重载窗口内落入已排除节点上的代理连接（BUG-405）
+  (void)api.close_excluded_connections(raw_filter);
+  return ok;
+}
+
+void CoreManager::restore_proxy_group_now(ICoreApiClient& api, const std::string& node,
+                                          const RestoreTimings& t) {
+  (void)ensure_proxy_group_selection(api, node, t);
 }
 
 Result<void> CoreManager::apply_config(ICoreApiClient& api, const std::string& config_path,
                                        const CoreOps& ops, const RestoreTimings& t) {
-  // ← manager/config.rs:121-167 + BUG-335：snapshot → 持久化保底 → reload(force) → restore；失败整核重启兜底
-  auto saved = snapshot_proxy_group_now(api);
-  if (!saved.has_value()) {
-    saved = read_persisted_proxy_selection("PROXY");
-  }
+  // ← manager/config.rs:121-167 + BUG-405：统一走 resolve_desired_proxy_selection + ensure_proxy_group_selection
+  auto saved = resolve_desired_proxy_selection(api);
   auto reload = api.reload_config(true, config_path);
   if (reload.is_ok()) {
     CWLOG_INFO("Configuration applied");
-    if (saved.has_value()) {
-      restore_proxy_group_now(api, *saved, t);
-    } else {
-      // 进程冷启动 / 无历史 snapshot 时，自动在 filterText 子集内兜底选点，
-      // 避免 Selector 落回首个广告/假节点（← lifecycle.rs:354-416 兜底防线）
-      auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(t.api_ready_budget_ms);
-      while (std::chrono::steady_clock::now() < deadline) {
-        if (api.get_base_config().is_ok()) break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(t.api_ready_poll_ms));
-      }
-      select_fallback_in_subset(api, read_filter_text_lower());
-    }
+    (void)ensure_proxy_group_selection(api, saved, t);
     return Result<void>::ok();
   }
   CWLOG_WARN("Failed to apply config via mihomo api (" + reload.error().message +

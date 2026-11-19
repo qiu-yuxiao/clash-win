@@ -62,6 +62,9 @@ struct EnhanceInput {
   EnhanceVergeOptions verge;
   EnhanceProfileItems profile;
   MergedProxiesSource merged_proxies_source;
+  // ← BUG-405：持久 PROXY 选点与当前过滤词（pure enhance_core 可直接注入）
+  std::optional<std::string> preferred_proxy;
+  std::string filter_text;
 };
 
 struct EnhanceOutput {
@@ -89,6 +92,12 @@ Result<YAML::Node> run_from_config();
 
 // 完整全量流水线：返回 EnhanceOutput 并同步至 config::RuntimeState 缓存
 Result<EnhanceOutput> run_enhance_full_from_config();
+
+// ← mod.rs::read_persisted_proxy_and_filter / sync_runtime_proxy_group_head（BUG-405）：
+// 读取当前激活 Profile 的持久化 PROXY 选点与 proxy_head_state.json filterText，
+// 并同步刷新配置中的 profile.store-selected=false 与 PROXY.proxies[0]。
+std::pair<std::optional<std::string>, std::string> read_persisted_proxy_and_filter();
+void sync_runtime_proxy_group_head(YAML::Node& config);
 
 // 单独格式化 updated → HHMMSS（本地时区；0/异常 → 000000）
 std::string format_updated_suffix(int64_t updated);

@@ -2481,39 +2481,25 @@ void MainWindow::show_and_activate() {
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
   }
   SetForegroundWindow(hwnd_);
-  stealth_.feed_activity(now_ms());
+  const int64_t now = now_ms();
+  stealth_.feed_activity(now);
 
-  // 窗口唤醒防雪崩静默探测（BUG-402：若当前活跃节点已有未过期延迟直接零拨测跳过，否则仅探测当前过滤子集）
-  auto cur = config::Config::instance().profiles().latest_arc()->current;
-  if (cur && !cur->empty()) {
-    std::vector<std::string> visible_names;
-    if (node_list_) {
-      for (const auto& n : node_list_->visible_node_names()) {
-        if (!scene::is_preset_proxy(n) && !util::is_confirmed_fake_node(n)) {
-          visible_names.push_back(n);
-        }
-      }
-    } else if (node_data_) {
-      for (const auto& row : node_data_->rows()) {
-        if (!scene::is_preset_proxy(row.name) &&
-            !util::is_confirmed_fake_node(row.name)) {
-          visible_names.push_back(row.name);
-        }
-      }
+  // ← src/pages/_layout.tsx:474-479 退出轻量唤醒走 skipProbeIfFresh 刷新；普通恢复可见仅 3s 节流同步展示状态（BUG-404）
+  if (lightweight_wakeup_pending_) {
+    lightweight_wakeup_pending_ = false;
+    last_visibility_refresh_ms_ = now;
+    reload_nodes();
+    auto cur = config::Config::instance().profiles().latest_arc()->current;
+    if (cur && !cur->empty()) {
+      trigger_auto_select_and_refresh(*cur, false, true);
     }
-    if (node_data_ && !visible_names.empty() &&
-        node_data_->has_fresh_active_exit_latency(visible_names)) {
-      return;
-    }
-    if (node_data_ && !node_data_->rows().empty() && visible_names.empty()) {
-      return;
-    }
-    std::string uid = *cur;
-    std::optional<std::vector<std::string>> subset;
-    if (!visible_names.empty()) subset = std::move(visible_names);
-    std::thread([uid, subset = std::move(subset)]() mutable {
-      core::AutoSelect::instance().silent_test_on_wakeup(uid, subset);
-    }).detach();
+    return;
+  }
+
+  // ← src/pages/_layout.tsx:548-551 窗口恢复可见仅同步前端状态展示，不触发活跃节点探测雪崩（BUG-404）
+  if (now - last_visibility_refresh_ms_ >= 3000) {
+    last_visibility_refresh_ms_ = now;
+    reload_nodes();
   }
 }
 
@@ -2547,6 +2533,7 @@ void MainWindow::release_d2d_resources() {
 
 void MainWindow::restore_d2d_resources() {
   if (!hwnd_) return;
+  lightweight_wakeup_pending_ = true;
   rt_.create_for_hwnd(hwnd_);
   // 静默启动 defer_render=true 时跳过了 init_render()，此处必须补齐 clock_ 与 frame_clock，
   // 否则后续 SnackbarW / SwitchW 的 invalidate() 全程无法排帧。

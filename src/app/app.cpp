@@ -13,6 +13,7 @@
 #include "config/verge.h"
 #include "core/auto_select.h"
 #include "core/autostart.h"
+#include "core/connection_stale.h"
 #include "core/core_manager.h"
 #include "clashwin/core/core_updater.h"
 #include "util/str_utils.h"
@@ -705,7 +706,7 @@ bool App::init() {
           continue;
         }
         const std::string& node = *sel.now;
-        const std::string filter = util::trim(read_current_filter_text());
+        const std::string filter = util::effective_filter_text(read_current_filter_text());
         if (util::is_dummy_node(node) || util::is_confirmed_fake_node(node) ||
             !util::match_node_filter(node, filter)) {
           CWLOG_WARN("restore_profile_selected_nodes: skip untrusted/out-of-filter node " +
@@ -723,6 +724,20 @@ bool App::init() {
         return false;
       const std::string& active = *grp.value().now;
       return util::is_dummy_node(active) || util::is_confirmed_fake_node(active);
+    };
+    mh.should_migrate_filtered_out = [read_current_filter_text]() -> bool {
+      auto grp = cmd::mihomo_unchecked().get_group_by_name("PROXY");
+      if (grp.is_err() || !grp.value().now || grp.value().now->empty() ||
+          !grp.value().all) {
+        return false;
+      }
+      return core::CoreMonitor::should_migrate_filtered_out_active(
+          *grp.value().now, *grp.value().all, read_current_filter_text(),
+          [](const std::string& n) { return util::is_confirmed_fake_node(n); });
+    };
+    mh.on_node_migration_healed = [read_current_filter_text]() {
+      (void)core::close_excluded_proxy_connections(
+          cmd::mihomo_unchecked(), read_current_filter_text());
     };
     mh.should_migrate_untrusted = [mstate, parse_proxy_delay_age,
                                    read_current_filter_text,
@@ -988,6 +1003,9 @@ bool App::init() {
     monitor.set_hooks(std::move(mh));
 
     core::CoreUpdater::instance().set_is_exiting_check([] {
+      return app::Lifecycle::instance().is_exiting();
+    });
+    core::CoreManager::instance().set_is_exiting_check([] {
       return app::Lifecycle::instance().is_exiting();
     });
 

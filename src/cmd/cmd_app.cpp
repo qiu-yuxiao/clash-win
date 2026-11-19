@@ -117,20 +117,6 @@ void install_cmd_app(CommandService& svc) {
        },
        consts::kTimeoutProbe});
 
-  // ---- get_runtime_config（← cmd/runtime.rs:12-16：enhance 全链产物 mapping）----
-  svc.register_command(
-      "get_runtime_config",
-      {[](const Json&) -> CmdResult {
-         if (!config::RuntimeState::instance().has_runtime()) {
-           (void)enhance::run_enhance_full_from_config();
-         }
-         if (!config::RuntimeState::instance().has_runtime()) {
-           return CmdResult::ok(nullptr);  // ← Option<Mapping> None
-         }
-         return CmdResult::ok(config::RuntimeState::instance().get_runtime_config_json());
-       },
-       consts::kTimeoutConfig});
-
   // ---- exit_app (<- cmd/app.rs:65) ----
   svc.register_command(
       "exit_app",

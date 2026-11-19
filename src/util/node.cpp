@@ -814,6 +814,71 @@ bool is_incomplete_filter_input(const std::string& filter_text) {
   return last_part == "-" || last_part == "!" || last_part == "\xEF\xBC\x81";
 }
 
+std::string effective_filter_text(const std::string& filter_text) {
+  if (is_incomplete_filter_input(filter_text)) return {};
+  return trim(filter_text);
+}
+
+std::optional<std::string> pick_subset_fallback_node(
+    const std::vector<std::string>& all, const std::string& filter_text,
+    const std::function<bool(const std::string&)>& is_valid,
+    const std::function<bool(const std::string&)>& is_verified) {
+  const std::string trimmed = effective_filter_text(filter_text);
+  auto check_valid = [&](const std::string& n) {
+    return is_valid ? is_valid(n) : (!is_dummy_node(n) && !is_confirmed_fake_node(n));
+  };
+  auto check_verified = [&](const std::string& n) {
+    return is_verified ? is_verified(n) : is_verified_true_node(n);
+  };
+  for (const auto& n : all) {
+    if (check_valid(n) && check_verified(n) && match_node_filter(n, trimmed)) {
+      return n;
+    }
+  }
+  for (const auto& n : all) {
+    if (check_valid(n) && match_node_filter(n, trimmed)) {
+      return n;
+    }
+  }
+  if (trimmed.empty()) {
+    for (const auto& n : all) {
+      if (check_valid(n)) return n;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> promote_preferred_proxy_first(
+    std::vector<std::string>& names,
+    const std::optional<std::string>& preferred, const std::string& filter_text,
+    const std::function<bool(const std::string&)>& is_valid,
+    const std::function<bool(const std::string&)>& is_verified) {
+  const std::string effective = effective_filter_text(filter_text);
+  auto check_valid = [&](const std::string& n) {
+    return is_valid ? is_valid(n) : (!is_dummy_node(n) && !is_confirmed_fake_node(n));
+  };
+
+  std::optional<std::string> target;
+  if (preferred.has_value()) {
+    const std::string p = trim(*preferred);
+    if (!p.empty() && check_valid(p) && match_node_filter(p, effective) &&
+        std::find(names.begin(), names.end(), p) != names.end()) {
+      target = p;
+    }
+  }
+  if (!target.has_value()) {
+    target = pick_subset_fallback_node(names, effective, is_valid, is_verified);
+  }
+  if (!target.has_value()) return std::nullopt;
+
+  auto it = std::find(names.begin(), names.end(), *target);
+  if (it == names.end()) return std::nullopt;
+  if (it != names.begin()) {
+    std::rotate(names.begin(), it, it + 1);
+  }
+  return target;
+}
+
 std::optional<std::string> proxy_endpoint_fingerprint(const YAML::Node& mapping) {
   if (!mapping || !mapping.IsMap()) return std::nullopt;
   const YAML::Node server = static_cast<const YAML::Node&>(mapping)["server"];
