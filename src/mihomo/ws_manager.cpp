@@ -175,6 +175,8 @@ struct WsManager::Channel {
   std::shared_ptr<PipeWebSocket> ws;   // 共享底层 WS
   std::atomic<bool> reopen{false};     // configure() / kRefreshClash 后要求断开重连
   uint32_t reconnect_attempt = 0;      // 连续重连退避阶数（连接成功或 refresh_clash 时清零）
+  uint32_t reconnect_stagger_ms = 0;   // BUG-407: 45ms 步进重连错峰
+  uint32_t last_assigned_stagger_ms = 0;  // 最近一次分配的错峰毫秒数（观测用）
   uint64_t wake_epoch = 0;             // 中断当前退避等待的单调纪元
   bool logged_err = false;             // 仅 worker 线程读写：失败只报一次，成功清零
   std::atomic<bool> running{false};
@@ -187,7 +189,7 @@ struct WsManager::Channel {
 WsManager::WsManager() {
   refresh_clash_sub_id_ = events::EventBus::instance().subscribe(
       events::names::kRefreshClash,
-      [this](const events::Payload&) { flush_reconnect_backoff(); });
+      [this](const events::Payload&) { schedule_flush_reconnect_backoff(); });
 }
 
 WsManager::~WsManager() {
@@ -196,6 +198,14 @@ WsManager::~WsManager() {
     refresh_clash_sub_id_ = 0;
   }
   stopping_.store(true, std::memory_order_release);
+  {
+    std::lock_guard<std::mutex> dlk(debounce_mu_);
+    debounce_pending_ = false;
+  }
+  debounce_cv_.notify_all();
+  if (debounce_thread_.joinable()) {
+    debounce_thread_.join();
+  }
   // 顺序铁律：先取走 worker/WS 句柄并唤醒 cv → 锁外 close WS（join 读线程）→ join worker
   // → 最后才销毁 Channel（worker 循环体仍在引用 Channel，必须 join 后 clear，
   // 否则 use-after-free）
@@ -214,7 +224,7 @@ WsManager::~WsManager() {
       if (ch->worker.joinable()) workers.push_back(std::move(ch->worker));
     }
   }
-  for (auto& s : sockets) s->close(500u);
+  for (auto& s : sockets) s->close(0u);
   for (auto& t : workers) t.join();
   {
     std::lock_guard<std::mutex> lk(mu_);
@@ -237,7 +247,7 @@ void WsManager::configure(const std::wstring& pipe_name, const std::string& secr
       ch->cv.notify_all();
     }
   }
-  disconnect_all(500u);  // 立即断开，worker 以新参数第 0ms 重连
+  disconnect_all(0u);  // BUG-406: 0ms 立即断开，worker 以新参数重连
 }
 
 WsManager::Channel& WsManager::channel(const std::string& key, const std::string& ws_path) {
@@ -300,7 +310,7 @@ void WsManager::unsubscribe(uint64_t sub_id) {
       }
     }
   }
-  if (closing) closing->close(500u);  // 锁外 close：避免与读线程 on_message 抢锁死锁
+  if (closing) closing->close(0u);  // 锁外 0ms close：避免与读线程 on_message 抢锁死锁
 }
 
 void WsManager::disconnect_all(std::optional<uint32_t> force_timeout_ms) {
@@ -344,20 +354,64 @@ void WsManager::flush_reconnect_backoff() {
   std::vector<std::shared_ptr<PipeWebSocket>> stale_sockets;
   {
     std::lock_guard<std::mutex> lk(mu_);
+    uint32_t active_idx = 0;
     for (auto& [key, ch] : channels_) {
       {
         std::lock_guard<std::mutex> lk2(ch->mu);
         ch->reconnect_attempt = 0;
         ++ch->wake_epoch;
-        if (!ch->subs.empty() && ch->ws) {
-          ch->reopen.store(true, std::memory_order_release);
-          stale_sockets.push_back(std::move(ch->ws));
+        if (!ch->subs.empty()) {
+          // BUG-407: 多通道按 45ms 步进错峰重连（0ms, 45ms, 90ms, ...）
+          ch->reconnect_stagger_ms = active_idx * kWsReconnectStaggerMs;
+          ch->last_assigned_stagger_ms = ch->reconnect_stagger_ms;
+          ++active_idx;
+          if (ch->ws) {
+            ch->reopen.store(true, std::memory_order_release);
+            stale_sockets.push_back(std::move(ch->ws));
+          }
+        } else {
+          ch->reconnect_stagger_ms = 0;
         }
       }
       ch->cv.notify_all();
     }
   }
-  for (auto& s : stale_sockets) s->close(500u);
+  for (auto& s : stale_sockets) s->close(0u);
+}
+
+void WsManager::debounce_loop() {
+  for (;;) {
+    std::unique_lock<std::mutex> lk(debounce_mu_);
+    debounce_cv_.wait(lk, [&] {
+      return stopping_.load(std::memory_order_acquire) || debounce_pending_;
+    });
+    if (stopping_.load(std::memory_order_acquire)) return;
+    const auto deadline = debounce_deadline_;
+    if (debounce_cv_.wait_until(lk, deadline, [&] {
+          return stopping_.load(std::memory_order_acquire) ||
+                 debounce_deadline_ != deadline;
+        })) {
+      continue;
+    }
+    debounce_pending_ = false;
+    lk.unlock();
+    flush_reconnect_backoff();
+  }
+}
+
+void WsManager::schedule_flush_reconnect_backoff() {
+  if (stopping_.load(std::memory_order_acquire)) return;
+  {
+    std::lock_guard<std::mutex> lk(debounce_mu_);
+    debounce_deadline_ =
+        std::chrono::steady_clock::now() +
+        std::chrono::milliseconds(kRefreshClashDebounceMs);
+    debounce_pending_ = true;
+    if (!debounce_thread_.joinable()) {
+      debounce_thread_ = std::thread([this] { debounce_loop(); });
+    }
+  }
+  debounce_cv_.notify_all();
 }
 
 bool WsManager::channel_connected(const std::string& channel_key) {
@@ -374,6 +428,14 @@ uint32_t WsManager::channel_reconnect_attempt_for_test(const std::string& channe
   if (it == channels_.end()) return 0;
   std::lock_guard<std::mutex> lk2(it->second->mu);
   return it->second->reconnect_attempt;
+}
+
+uint32_t WsManager::channel_last_stagger_ms_for_test(const std::string& channel_key) {
+  std::lock_guard<std::mutex> lk(mu_);
+  auto it = channels_.find(channel_key);
+  if (it == channels_.end()) return 0;
+  std::lock_guard<std::mutex> lk2(it->second->mu);
+  return it->second->last_assigned_stagger_ms;
 }
 
 uint64_t WsManager::subscribe_traffic(WsHandler handler) {
@@ -407,7 +469,7 @@ void WsManager::worker_loop(Channel* ch, WsManager* self, std::string ws_path) {
         std::lock_guard<std::mutex> lk(ch->mu);
         old = std::move(ch->ws);
       }
-      if (old) old->close(500u);
+      if (old) old->close(0u);
     }
 
     std::shared_ptr<PipeWebSocket> idle;
@@ -464,7 +526,7 @@ void WsManager::worker_loop(Channel* ch, WsManager* self, std::string ws_path) {
         }
       }
     }
-    if (idle) idle->close(500u);
+    if (idle) idle->close(0u);
     if (need_disconnect_backoff) {
       const uint32_t delay_ms = compute_ws_reconnect_delay_ms(disconnect_attempt, dist(rng));
       std::unique_lock<std::mutex> lk(ch->mu);
@@ -477,6 +539,28 @@ void WsManager::worker_loop(Channel* ch, WsManager* self, std::string ws_path) {
       continue;
     }
     if (!should_connect) continue;
+
+    // BUG-407: 执行 45ms 错峰重连等待（可中断）
+    {
+      std::unique_lock<std::mutex> lk(ch->mu);
+      const uint32_t stagger_ms = ch->reconnect_stagger_ms;
+      ch->reconnect_stagger_ms = 0;
+      if (stagger_ms > 0) {
+        const uint64_t wait_epoch = ch->wake_epoch;
+        ch->cv.wait_for(lk, std::chrono::milliseconds(stagger_ms), [&] {
+          return !ch->running.load(std::memory_order_acquire) ||
+                 self->stopping_.load(std::memory_order_acquire) ||
+                 ch->reopen.load(std::memory_order_acquire) ||
+                 ch->subs.empty() || ch->wake_epoch != wait_epoch;
+        });
+        if (!ch->running.load(std::memory_order_acquire) ||
+            self->stopping_.load(std::memory_order_acquire) ||
+            ch->reopen.load(std::memory_order_acquire) ||
+            ch->subs.empty() || ch->wake_epoch != wait_epoch) {
+          continue;
+        }
+      }
+    }
 
     // 建立新连接（当前参数）
     std::wstring pipe;
@@ -535,7 +619,7 @@ void WsManager::worker_loop(Channel* ch, WsManager* self, std::string ws_path) {
           was_connected = true;
         }
       }
-      if (drop_immediately) drop_immediately->close(500u);
+      if (drop_immediately) drop_immediately->close(0u);
     } else {
       if (!chp->logged_err) {
         chp->logged_err = true;

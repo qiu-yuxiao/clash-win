@@ -116,8 +116,6 @@ class D2dRenderTarget : public IRenderTarget, public ITextEngine {
                               float cx_ratio, float cy_ratio,
                               float rx, float ry) override;
   void draw_line(const PointF& a, const PointF& b, const Pen& p) override;
-  void draw_dashed_line(const PointF& a, const PointF& b, const Pen& p,
-                        float dash_len, float gap_len) override;
   void fill_polygon_vertical_gradient(const PointF* pts, int count,
                                       float top_y, float bottom_y,
                                       const Color4f& top_color,

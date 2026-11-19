@@ -17,6 +17,7 @@
 #include "mihomo/service_ipc.h"
 #include "system/service_runner.h"
 #include "system/sysproxy.h"
+#include "system/tray.h"
 #include "util/dirs.h"
 #include "util/log.h"
 #include "util/node.h"
@@ -462,6 +463,10 @@ std::string select_fallback_in_subset(ICoreApiClient& api, const std::string& fi
 CoreManager::CoreManager() = default;
 
 CoreManager::~CoreManager() {
+  if (alive_flag_) {
+    alive_flag_->store(false, std::memory_order_release);
+  }
+  selection_ensure_epoch_.fetch_add(1, std::memory_order_acq_rel);
   // 析构兜底：不主动杀进程（生产由退出序列负责），仅关闭句柄
   log_run_.store(false);
   for (auto* t : log_threads_) {
@@ -612,6 +617,7 @@ void CoreManager::fallback_to_system_proxy(bool persist_to_disk) {
       sysopt.refresh_guard(view);
     }
   }
+  system::Tray::sync_from_verge(false, true);
   events::EventBus::refresh_verge();
 }
 
@@ -976,6 +982,24 @@ Result<void> CoreManager::stop_sidecar_locked() {
 }
 
 Result<void> CoreManager::stop() {
+  // BUG-407: 停核立即推进恢复纪元，使在途后台选点恢复任务自动失效退出
+  selection_ensure_epoch_.fetch_add(1, std::memory_order_acq_rel);
+  if (mode_.load() != RunningMode::NotRunning) {
+    // BUG-406: 停核前于锁外执行第 0ms WS 断开与空闲 HTTP 连接池清理，消除关停与重装管道占用阻塞
+    std::function<void()> pre_stop;
+    std::function<mihomo::MihomoClient*()> api_provider;
+    {
+      std::lock_guard<std::mutex> hlk(test_hooks_mu_);
+      pre_stop = pre_stop_hook_;
+      api_provider = api_client_provider_;
+    }
+    if (pre_stop) pre_stop();
+    if (api_provider) {
+      if (auto* client = api_provider()) {
+        client->http().clear_idle();
+      }
+    }
+  }
   std::lock_guard<std::mutex> lock(lifecycle_);
   RunningMode m = mode_.load();
   if (m == RunningMode::Sidecar) {
@@ -1017,6 +1041,24 @@ std::optional<std::string> CoreManager::read_persisted_proxy_selection(
   return std::nullopt;
 }
 
+void CoreManager::set_pre_stop_hook(std::function<void()> fn) {
+  std::lock_guard<std::mutex> lk(test_hooks_mu_);
+  pre_stop_hook_ = std::move(fn);
+}
+
+void CoreManager::set_api_client_provider(std::function<mihomo::MihomoClient*()> fn) {
+  std::lock_guard<std::mutex> lk(test_hooks_mu_);
+  api_client_provider_ = std::move(fn);
+}
+
+uint64_t CoreManager::bump_selection_ensure_epoch() {
+  return selection_ensure_epoch_.fetch_add(1, std::memory_order_acq_rel) + 1;
+}
+
+uint64_t CoreManager::selection_ensure_epoch() const {
+  return selection_ensure_epoch_.load(std::memory_order_acquire);
+}
+
 void CoreManager::set_is_exiting_check(std::function<bool()> fn) {
   std::lock_guard<std::mutex> lk(test_hooks_mu_);
   is_exiting_fn_ = std::move(fn);
@@ -1038,14 +1080,21 @@ bool CoreManager::has_start_auto_test_hooks() const {
 
 Result<void> CoreManager::restart_with_restore(ICoreApiClient& api, const CoreOps& ops,
                                                const RestoreTimings& t) {
-  // ← lifecycle.rs:106-148 + BUG-405：记录过滤合规目标（快照优先，越界/缺失回退持久化）→ 停 → 启 → 统一保障
+  // ← lifecycle.rs:106-148 + BUG-405 + BUG-407：
+  //   记录过滤合规目标（快照优先并回写，越界/缺失回退持久化）→ 停 → 启 →
+  //   生产异步后台选点恢复（不阻塞 lifecycle 锁且取消前序恢复）/ 单测栈 Mock 保持同步 →
+  //   不再在重启瞬间抢发 kick() 触发首轮延迟探针并发冲击。
   auto saved = resolve_desired_proxy_selection(api);
   auto st = ops.stop();
   if (st.is_err()) return st;
   st = ops.start();
   if (st.is_err()) return st;
-  (void)ensure_proxy_group_selection(api, saved, t);
-  CoreMonitor::instance().kick();
+  if (api.is_production_singleton_api()) {
+    spawn_ensure_proxy_group_selection(saved);
+    events::EventBus::refresh_clash();
+  } else {
+    (void)ensure_proxy_group_selection(api, saved, t);
+  }
   return Result<void>::ok();
 }
 
@@ -1081,6 +1130,29 @@ std::optional<std::string> CoreManager::resolve_desired_proxy_selection(
 
   if (auto snap = snapshot_proxy_group_now(api); snap.has_value()) {
     if (is_compliant(*snap)) {
+      if (!override_state.has_value() && persisted != snap) {
+        // BUG-407 (lifecycle.rs:335-339): 将合规实时快照同步落盘到当前 profile selected
+        try {
+          auto& profiles = config::Config::instance().profiles();
+          auto latest = profiles.latest_arc();
+          if (latest && latest->current && !latest->current->empty()) {
+            const std::string uid = *latest->current;
+            bool updated = false;
+            profiles.edit_draft([&](config::IProfiles& d) {
+              if (config::PrfItem* it = d.get_item_mut(uid)) {
+                it->selected = std::vector<config::PrfSelected>{
+                    config::PrfSelected{"PROXY", *snap}};
+                updated = true;
+              }
+            });
+            if (updated) {
+              profiles.apply();
+              (void)profiles.data_arc()->save_file();
+            }
+          }
+        } catch (...) {
+        }
+      }
       return snap;
     }
     CWLOG_WARN("快照节点 " + *snap + " 不符合当前过滤范围「" +
@@ -1096,16 +1168,27 @@ bool CoreManager::ensure_proxy_group_selection(
     ICoreApiClient& api, std::optional<std::string> preferred,
     const RestoreTimings& t,
     std::optional<std::pair<std::optional<std::string>, std::string>>
-        override_state) {
-  if (is_exiting()) return false;
+        override_state,
+    uint64_t expected_epoch,
+    bool* out_selection_changed) {
+  if (out_selection_changed) *out_selection_changed = false;
+  auto should_abort = [&]() -> bool {
+    if (is_exiting()) return true;
+    if (expected_epoch != 0 &&
+        selection_ensure_epoch_.load(std::memory_order_acquire) != expected_epoch) {
+      return true;
+    }
+    return false;
+  };
+  if (should_abort()) return false;
 
-  // 1) 等 API 就绪（总预算默认 30s，前 2s 使用 <=50ms 快速轮询压缩窗口期）
+  // 1) 等 API 就绪（同步恢复默认 30s / 异步后台 12s，前 2s 使用 <=50ms 快速轮询压缩窗口期）
   const auto api_start = std::chrono::steady_clock::now();
   const auto api_deadline =
       api_start + std::chrono::milliseconds(t.api_ready_budget_ms);
   bool api_ready = false;
   while (std::chrono::steady_clock::now() < api_deadline) {
-    if (is_exiting()) return false;
+    if (should_abort()) return false;
     if (api.get_base_config().is_ok()) {
       api_ready = true;
       break;
@@ -1123,7 +1206,7 @@ bool CoreManager::ensure_proxy_group_selection(
     return false;
   }
 
-  // 2) 等 PROXY 组成员填充（总预算默认 20s，前 2s 使用 <=50ms 快速轮询）
+  // 2) 等 PROXY 组成员填充（同步默认 20s / 异步后台 10s，前 2s 使用 <=50ms 快速轮询）
   const auto grp_start = std::chrono::steady_clock::now();
   const auto grp_deadline =
       grp_start + std::chrono::milliseconds(t.group_fill_budget_ms);
@@ -1131,7 +1214,7 @@ bool CoreManager::ensure_proxy_group_selection(
   std::optional<std::string> current_now;
   bool grp_loaded = false;
   while (std::chrono::steady_clock::now() < grp_deadline) {
-    if (is_exiting()) return false;
+    if (should_abort()) return false;
     auto g = api.get_group_by_name("PROXY");
     if (g.is_ok() && g.value().all.has_value() && !g.value().all->empty()) {
       all = std::move(*g.value().all);
@@ -1181,6 +1264,7 @@ bool CoreManager::ensure_proxy_group_selection(
   }
 
   auto select_and_persist_fallback = [&]() -> bool {
+    if (should_abort()) return false;
     const std::string fb = pick_fallback_node(all, effective_filter);
     if (fb.empty()) {
       if (!effective_filter.empty()) {
@@ -1194,6 +1278,9 @@ bool CoreManager::ensure_proxy_group_selection(
       return false;
     }
     CWLOG_INFO("PROXY fallback node selected: " + fb);
+    if (out_selection_changed && (!current_now.has_value() || *current_now != fb)) {
+      *out_selection_changed = true;
+    }
     if (!override_state.has_value() &&
         util::match_node_filter(fb, effective_filter)) {
       try {
@@ -1230,13 +1317,18 @@ bool CoreManager::ensure_proxy_group_selection(
       const auto sel_deadline =
           std::chrono::steady_clock::now() + std::chrono::milliseconds(t.select_budget_ms);
       for (;;) {
+        if (should_abort()) return false;
         auto sel = api.select_node_for_group("PROXY", *desired_target);
         if (sel.is_ok()) {
           CWLOG_INFO("PROXY node ensured: " + *desired_target);
+          if (out_selection_changed &&
+              (!current_now.has_value() || *current_now != *desired_target)) {
+            *out_selection_changed = true;
+          }
           ok = true;
           break;
         }
-        if (is_exiting() || std::chrono::steady_clock::now() >= sel_deadline) {
+        if (should_abort() || std::chrono::steady_clock::now() >= sel_deadline) {
           CWLOG_WARN("PROXY restore budget exhausted (" + *desired_target +
                      "), fallback to subset");
           ok = select_and_persist_fallback();
@@ -1249,9 +1341,67 @@ bool CoreManager::ensure_proxy_group_selection(
     ok = select_and_persist_fallback();
   }
 
+  if (should_abort()) return ok;
   // 收尾清理：清除启动/重载窗口内落入已排除节点上的代理连接（BUG-405）
   (void)api.close_excluded_connections(raw_filter);
   return ok;
+}
+
+void CoreManager::spawn_ensure_proxy_group_selection(
+    std::optional<std::string> preferred) {
+  const uint64_t epoch =
+      selection_ensure_epoch_.fetch_add(1, std::memory_order_acq_rel) + 1;
+  if (is_exiting() || has_start_auto_test_hooks()) return;
+
+  std::function<mihomo::MihomoClient*()> api_provider;
+  {
+    std::lock_guard<std::mutex> lk(test_hooks_mu_);
+    api_provider = api_client_provider_;
+  }
+  auto alive = alive_flag_;
+  std::thread([this, alive, epoch, preferred = std::move(preferred),
+               api_provider = std::move(api_provider)]() mutable {
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds(consts::kAsyncEnsureInitialSettleMs));
+    if (!alive || !alive->load(std::memory_order_acquire) || is_exiting() ||
+        selection_ensure_epoch_.load(std::memory_order_acquire) != epoch) {
+      return;
+    }
+
+    RestoreTimings async_timings;
+    async_timings.api_ready_budget_ms = consts::kAsyncApiReadyBudgetMs;
+    async_timings.api_ready_poll_ms = consts::kAsyncApiReadyPollMs;
+    async_timings.group_fill_budget_ms = consts::kAsyncGroupFillBudgetMs;
+    async_timings.group_fill_poll_ms = consts::kAsyncGroupFillPollMs;
+    async_timings.select_budget_ms = consts::kAsyncSelectBudgetMs;
+    async_timings.select_retry_ms = consts::kAsyncSelectRetryMs;
+
+    std::unique_ptr<mihomo::MihomoClient> local_client;
+    mihomo::MihomoClient* client_ptr = api_provider ? api_provider() : nullptr;
+    if (!client_ptr) {
+      std::string secret;
+      try {
+        auto info = config::Config::instance().clash().latest_arc()->mapping();
+        if (info["secret"] && info["secret"].IsScalar()) {
+          secret = info["secret"].Scalar();
+        }
+      } catch (...) {
+      }
+      local_client = std::make_unique<mihomo::MihomoClient>(
+          util::dirs::ipc_path(), secret);
+      client_ptr = local_client.get();
+    }
+
+    CoreApiClientAdapter api(client_ptr);
+    bool selection_changed = false;
+    (void)ensure_proxy_group_selection(api, std::move(preferred), async_timings,
+                                       std::nullopt, epoch, &selection_changed);
+    if (selection_changed && alive->load(std::memory_order_acquire) &&
+        !is_exiting() &&
+        selection_ensure_epoch_.load(std::memory_order_acquire) == epoch) {
+      events::EventBus::refresh_proxies();
+    }
+  }).detach();
 }
 
 void CoreManager::restore_proxy_group_now(ICoreApiClient& api, const std::string& node,
@@ -1261,12 +1411,18 @@ void CoreManager::restore_proxy_group_now(ICoreApiClient& api, const std::string
 
 Result<void> CoreManager::apply_config(ICoreApiClient& api, const std::string& config_path,
                                        const CoreOps& ops, const RestoreTimings& t) {
-  // ← manager/config.rs:121-167 + BUG-405：统一走 resolve_desired_proxy_selection + ensure_proxy_group_selection
+  // ← manager/config.rs:121-167 + BUG-405 + BUG-407：
+  //   reload_config 后生产改为异步 spawn_ensure_proxy_group_selection 并广播 refresh_clash
   auto saved = resolve_desired_proxy_selection(api);
   auto reload = api.reload_config(true, config_path);
   if (reload.is_ok()) {
     CWLOG_INFO("Configuration applied");
-    (void)ensure_proxy_group_selection(api, saved, t);
+    if (api.is_production_singleton_api()) {
+      spawn_ensure_proxy_group_selection(saved);
+      events::EventBus::refresh_clash();
+    } else {
+      (void)ensure_proxy_group_selection(api, saved, t);
+    }
     return Result<void>::ok();
   }
   CWLOG_WARN("Failed to apply config via mihomo api (" + reload.error().message +

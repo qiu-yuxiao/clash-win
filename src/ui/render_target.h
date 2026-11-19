@@ -154,14 +154,7 @@ class IRenderTarget {
     fill_round_rect_gradient(r, radius, stops, count);
   }
   virtual void draw_line(const PointF& a, const PointF& b, const Pen& p) = 0;
-  // 虚线绘制（src: enhanced-canvas-traffic-graph.tsx hover 十字准线 setLineDash([4,4])）
-  virtual void draw_dashed_line(const PointF& a, const PointF& b, const Pen& p,
-                                float dash_len, float gap_len) {
-    (void)dash_len;
-    (void)gap_len;
-    draw_line(a, b, p);
-  }
-  // 多边形垂直线性渐变填充（src: enhanced-canvas-traffic-graph.tsx createLinearGradient）
+  // 多边形垂直线性渐变填充（src: src/components/layout/traffic-graph.tsx:323-333 createLinearGradient）
   virtual void fill_polygon_vertical_gradient(const PointF* pts, int count,
                                               float top_y, float bottom_y,
                                               const Color4f& top_color,

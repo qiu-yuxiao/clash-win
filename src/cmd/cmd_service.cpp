@@ -18,13 +18,40 @@
 #include "clashwin/core/constants.h"
 #include "core/service_mode.h"
 #include "events/event_bus.h"
+#include "mihomo/service_ipc.h"
 #include "system/coexist.h"
 #include "system/service_runner.h"
 #include "util/log.h"
 
 namespace clashwin::cmd {
 
+void stop_autostarted_service_core_if_sidecar_with(
+    core::RunningMode mode, const std::function<void()>& stop_fn) {
+  // BUG-408 (service.rs): 安装/启动/重装/修复服务后若当前仍以非 Service（Sidecar）运行，
+  // 立即清理 SCM 拉起的服务自启内核，防止 Session 0 内核抢占命名管道或 10801 端口。
+  if (mode != core::RunningMode::Service && stop_fn) {
+    stop_fn();
+  }
+}
+
 namespace {
+
+void stop_autostarted_service_core_if_sidecar() {
+  stop_autostarted_service_core_if_sidecar_with(
+      core::CoreManager::instance().running_mode(), [] {
+        if (!mihomo::ServiceIpc::is_pipe_present()) return;
+        mihomo::ServiceIpc ipc;
+        if (!ipc.connect().is_ok()) return;
+        core::service_mode::ServiceIpcAdapter adapter(&ipc);
+        auto sr = core::service_mode::stop_with_service(adapter);
+        if (sr.is_err()) {
+          CWLOG_WARN("BUG-408 stop autostarted service core failed: " +
+                     sr.error().message);
+        } else {
+          CWLOG_INFO("BUG-408: stopped autostarted Session 0 service core while in Sidecar mode");
+        }
+      });
+}
 
 // 启动 + 就绪等待（不触碰安装器）
 Result<void> service_start(const char* label) {
@@ -38,6 +65,7 @@ Result<void> service_start(const char* label) {
   if (!runner->wait_for_ready(core::consts::kServiceWaitMaxMs)) {
     return Result<void>::err({errs::kIo, "service not ready in 30s budget"});
   }
+  stop_autostarted_service_core_if_sidecar();
   return Result<void>::ok();
 }
 
@@ -69,6 +97,7 @@ CmdResult service_reinstall(const char* op, const char* label) {
     return CmdResult::err({errs::kIo, msg});
   }
   if (runner->is_available()) {
+    stop_autostarted_service_core_if_sidecar();
     events::EventBus::notice_message("reinstall_service::ok",
                                      std::string(label) + " 完成：clash_verge_service 已就绪");
     return CmdResult::ok(Json{{"message", "reinstalled"}});
@@ -106,6 +135,7 @@ void install_cmd_service(CommandService& svc) {
            if (runner->is_image_upstream_baseline()) {
              CWLOG_INFO("install_service: image matches upstream baseline, sharing registration");
              if (runner->is_available()) {
+               stop_autostarted_service_core_if_sidecar();
                return CmdResult::ok(Json{{"message", "shared_upstream_service"}});
              }
              auto sr = service_start("Shared");
@@ -184,6 +214,7 @@ void install_cmd_service(CommandService& svc) {
          }
          // 已存在：只查询状态；停止则启动，绝不安装/重装/覆盖
          if (runner->is_available()) {
+           stop_autostarted_service_core_if_sidecar();
            return CmdResult::ok(Json{{"message", "service_already_ready"}});
          }
          auto r = service_start("Install");

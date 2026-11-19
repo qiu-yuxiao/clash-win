@@ -88,17 +88,24 @@ struct SwitchGuard {
 };
 
 
-// 生成/校验/应用（30s 超时口径 ← cmd/profile.rs perform_config_update）
+// 生成/校验/应用（30s 超时口径 ← cmd/profile.rs perform_config_update + BUG-407）
 core::validate::ValidationOutcome update_config_forced() {
   auto outcome = run_enhance_pipeline();
-  if (outcome.is_valid() && is_core_running()) {
-    // ← manager/config.rs apply_config：snapshot→reload(force)→restore（T07）
-    auto& mgr = core::CoreManager::instance();
-    core::CoreApiClientAdapter api(&mihomo_unchecked());
-    core::CoreOps ops;
-    ops.start = [] { return Result<void>::err(Error{0, "restart not wired"}); };
-    ops.stop = [] { return Result<void>::err(Error{0, "restart not wired"}); };
-    mgr.apply_config(api, utf::utf16_to_utf8(util::dirs::clash_mini_path()), ops);
+  if (outcome.is_valid()) {
+    if (is_core_running()) {
+      // ← manager/config.rs apply_config：snapshot→reload(force)→restore（T07 + BUG-407）
+      auto& mgr = core::CoreManager::instance();
+      core::CoreApiClientAdapter api(&mihomo_unchecked());
+      core::CoreOps ops;
+      ops.start = [] {
+        return core::CoreManager::instance().start_auto(
+            util::dirs::clash_mini_path());
+      };
+      ops.stop = [] { return core::CoreManager::instance().stop(); };
+      mgr.apply_config(api, utf::utf16_to_utf8(util::dirs::clash_mini_path()), ops);
+    } else {
+      events::EventBus::refresh_clash();
+    }
   }
   return outcome;
 }
@@ -119,20 +126,31 @@ void notify_invalid(const core::validate::ValidationOutcome& o) {
                                           "运行时配置");
 }
 
-// ← save_profile.rs:88-105 profile_affects_runtime：
-//   current 自身，或 current 的 merge/rules/proxies/groups 子项 → 影响运行时
+}  // namespace
+
+// ← save_profile.rs:88-105 + BUG-409:
+//   current 自身、全局 "Merge"，或 current 的 merge/script/rules/proxies/groups 子项（缺省按默认名归一化）→ 影响运行时
 bool profile_affects_runtime(const config::IProfiles& profiles, const std::string& index) {
   const auto& cur = profiles.current;
-  if (!cur.has_value()) return false;
-  if (*cur == index) return true;
+  if (!cur.has_value() || cur->empty()) return false;
+  if (*cur == index || index == "Merge") return true;
   const config::PrfItem* item = profiles.get_item(*cur);
-  if (!item || !item->option.has_value()) return false;
-  const auto& o = *item->option;
-  return (o.merge && *o.merge == index) ||
-         (o.rules && *o.rules == index) || (o.proxies && *o.proxies == index) ||
-         (o.groups && *o.groups == index);
+  if (!item) return false;
+  const config::PrfOption empty_opt{};
+  const config::PrfOption& o = item->option.has_value() ? *item->option : empty_opt;
+  auto trim_or = [](const std::optional<std::string>& v, const char* def) {
+    if (!v.has_value()) return std::string(def);
+    size_t b = 0, e = v->size();
+    while (b < e && std::isspace(static_cast<unsigned char>((*v)[b]))) ++b;
+    while (e > b && std::isspace(static_cast<unsigned char>((*v)[e - 1]))) --e;
+    return b < e ? v->substr(b, e - b) : std::string(def);
+  };
+  return trim_or(o.merge, "Merge") == index ||
+         trim_or(o.script, "Script") == index ||
+         trim_or(o.rules, "Rules") == index ||
+         trim_or(o.proxies, "Proxies") == index ||
+         trim_or(o.groups, "Groups") == index;
 }
-}  // namespace
 
 // T16：DelayManager/AutoSelect 生产 hooks（首次调用绑定；mock 测试自注入；
 // cmd_clash test_group_delay 复用。声明在 cmd_install.h）
@@ -445,9 +463,7 @@ void install_cmd_profile(CommandService& svc) {
       "enhance_profiles",
       {[](const Json&) -> CmdResult {
          auto outcome = update_config_forced();
-         if (outcome.is_valid()) {
-           events::EventBus::refresh_clash();
-         } else if (outcome.status != core::validate::ValidationStatus::Busy) {
+         if (!outcome.is_valid() && outcome.status != core::validate::ValidationStatus::Busy) {
            CWLOG_WARN("enhance_profiles failed validation: " + outcome.message);
            notify_invalid(outcome);
          }
@@ -503,10 +519,7 @@ void install_cmd_profile(CommandService& svc) {
              events::names::kTimerUpdated,
              item_opt->uid.value_or(std::string()));
          // ← profile.rs:132-146 + get_merged_proxies：导入新订阅后同步刷新运行时配置与节点
-         {
-           auto outcome = update_config_forced();
-           if (outcome.is_valid()) events::EventBus::refresh_clash();
-         }
+         (void)update_config_forced();
          return CmdResult::ok(
              Json{{"uid", item_opt->uid.value_or(std::string())}});
        },
@@ -604,8 +617,6 @@ void install_cmd_profile(CommandService& svc) {
          {
            auto outcome = update_config_forced();
            if (outcome.is_valid()) {
-             events::EventBus::refresh_clash();
-             events::EventBus::refresh_proxies();
              if (item_opt->uid)
                events::EventBus::notify_profile_changed(*item_opt->uid);
            } else {
@@ -654,7 +665,6 @@ void install_cmd_profile(CommandService& svc) {
          if (should_update.value() || merged_affected) {
            auto outcome = update_config_forced();
            if (outcome.is_valid()) {
-             events::EventBus::refresh_clash();
              auto latest = profiles.latest_arc();
              events::EventBus::notify_profile_changed(latest->current.value_or(""));
            } else {
@@ -844,7 +854,6 @@ void install_cmd_profile(CommandService& svc) {
          auto outcome = update_config_forced();
          if (outcome.is_valid()) {
            profiles.apply();
-           events::EventBus::refresh_clash();
            if (auto save = profiles.data_arc()->save_file(); !save.is_ok()) {
              CWLOG_WARN("save profiles failed: " + save.error().message);
            }

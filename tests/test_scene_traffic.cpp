@@ -60,13 +60,13 @@ nlohmann::json snapshot_msg(int epoch, int seq,
 
 UT_TEST(t14_traffic_series_window_and_peak) {
   TrafficSeries s;
-  for (int i = 1; i <= 40; ++i) s.append(i * 100, i * 50);
-  // 滚动窗 maxPoint+2=32
-  UT_CHECK_EQ(s.size(), 32u);
+  for (int i = 1; i <= 70; ++i) s.append(i * 100, i * 50);
+  // 滚动窗 kTrafficBufferLen = 63（maxPoint 60 + 3 边缘插值锚点）
+  UT_CHECK_EQ(s.size(), size_t(63));
   // 最新在尾
-  UT_CHECK(s.up().back() == 4000.0f);
-  UT_CHECK(s.down().back() == 2000.0f);
-  UT_CHECK(s.peak() == 4000);
+  UT_CHECK(s.up().back() == 7000.0f);
+  UT_CHECK(s.down().back() == 3500.0f);
+  UT_CHECK(s.peak() == 7000);
 }
 
 UT_TEST(t14_traffic_sample_1000ms_and_disable) {

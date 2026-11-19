@@ -54,8 +54,8 @@ Result<void> reload_or_restart(bool need_restart) {
   if (is_core_running()) {
     core::CoreApiClientAdapter api(&mihomo_unchecked());
     core::CoreOps ops;
-    ops.start = [] { return Result<void>::err(Error{0, "n/a"}); };
-    ops.stop = [] { return Result<void>::err(Error{0, "n/a"}); };
+    ops.start = [] { return mgr_start(); };
+    ops.stop = [] { return core::CoreManager::instance().stop(); };
     return mgr_apply(api, ops);
   }
   return Result<void>::ok();
@@ -63,6 +63,8 @@ Result<void> reload_or_restart(bool need_restart) {
 }  // namespace
 
 void install_cmd_clash(CommandService& svc) {
+  core::CoreManager::instance().set_api_client_provider(
+      []() -> mihomo::MihomoClient* { return &mihomo_unchecked(); });
   // ---- get_clash_info（← clash.rs:22-24：ClashInfo serde 布局）----
   svc.register_command(
       "get_clash_info",
@@ -98,6 +100,7 @@ void install_cmd_clash(CommandService& svc) {
                              ipv6_changed;  // ← feat/config.rs:40-43
 
          clash.edit_draft([&patch](config::IClashTemp& d) { d.patch_config(patch); });
+         const bool core_running = is_core_running();
          auto r = reload_or_restart(need_restart);
          if (r.is_err()) {
            clash.discard();  // ← 失败丢弃 draft
@@ -107,7 +110,9 @@ void install_cmd_clash(CommandService& svc) {
          if (auto save = clash.data_arc()->save_file(); !save.is_ok()) {
            return CmdResult::err(save.error());
          }
-         events::EventBus::refresh_clash();  // ← handle::Handle::refresh_clash()
+         if (!core_running) {
+           events::EventBus::refresh_clash();  // ← handle::Handle::refresh_clash()（运行态已由 apply_config/restart 发射）
+         }
          return CmdResult::ok(Json::object());
        },
        consts::kTimeoutConfig});
@@ -157,14 +162,8 @@ void install_cmd_clash(CommandService& svc) {
          //   sysproxy 回退）；本阶段无 TUN 上下文时直接 sidecar
          auto r = core::CoreManager::instance().start_auto(util::dirs::clash_mini_path());
          if (r.is_err()) return CmdResult::err(r.error());
-         auto& mgr = core::CoreManager::instance();
-         if (!mgr.is_exiting() && !mgr.has_start_auto_test_hooks()) {
-           std::thread([] {
-             core::CoreApiClientAdapter api(&mihomo_unchecked());
-             core::CoreManager::instance().ensure_proxy_group_selection(
-                 api, std::nullopt);
-           }).detach();
-         }
+         core::CoreManager::instance().spawn_ensure_proxy_group_selection(
+             std::nullopt);
          events::EventBus::refresh_clash();
          return CmdResult::ok(Json::object());
        },
@@ -181,27 +180,7 @@ void install_cmd_clash(CommandService& svc) {
        },
        consts::kTimeoutHeavy});
 
-  // ---- restart_core（← clash.rs:60-68：restart_with_restore 语义在 T07）----
-  svc.register_command(
-      "restart_core",
-      {[](const Json&) -> CmdResult {
-         auto outcome = run_enhance_pipeline();
-         if (!outcome.is_valid()) return CmdResult::err({errs::kIo, outcome.message});
-         auto& mgr = core::CoreManager::instance();
-         core::CoreApiClientAdapter api(&mihomo_unchecked());
-         core::CoreOps ops;
-         ops.start = [] {
-           return core::CoreManager::instance().start_auto(
-               util::dirs::clash_mini_path());
-         };
-         ops.stop = [] { return core::CoreManager::instance().stop(); };
-         auto r = mgr.restart_with_restore(api, ops);
-         if (r.is_err()) return CmdResult::err(r.error());
-         core::CoreMonitor::instance().kick();
-         events::EventBus::refresh_clash();
-         return CmdResult::ok(Json::object());
-       },
-       consts::kTimeoutHeavy});
+  // BUG-408 (cmd/clash.rs): 已移除未使用的 IPC 命令 restart_core
 
   // ---- test_delay（← clash.rs:74-84：失败 10000 / 超时 5000 BUG-304）----
   svc.register_command(

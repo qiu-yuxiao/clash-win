@@ -607,6 +607,15 @@ void PipeHttpClient::clear_pool() {
   for (auto& c : drop) close_handle(c.handle);
 }
 
+void PipeHttpClient::clear_idle() {
+  std::deque<Conn> drop;
+  {
+    std::lock_guard lk(mu_);
+    drop.swap(idle_);
+  }
+  for (auto& c : drop) close_handle(c.handle);
+}
+
 size_t PipeHttpClient::idle_count() {
   std::lock_guard lk(mu_);
   return idle_.size();

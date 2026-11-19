@@ -34,6 +34,15 @@ inline constexpr int kGroupFillPollMs = 500;
 inline constexpr int kSelectRestoreBudgetMs = 90000;  // select 重试总预算（BUG-301）
 inline constexpr int kSelectRetryMs = 3000;           // 失败后 3s 重试
 
+// ---------- 后台异步恢复预算（← BUG-407: lifecycle.rs spawn_ensure_proxy_group_selection） ----------
+inline constexpr int kAsyncEnsureInitialSettleMs = 120;
+inline constexpr int kAsyncApiReadyBudgetMs = 12000;
+inline constexpr int kAsyncApiReadyPollMs = 250;
+inline constexpr int kAsyncGroupFillBudgetMs = 10000;
+inline constexpr int kAsyncGroupFillPollMs = 250;
+inline constexpr int kAsyncSelectBudgetMs = 15000;
+inline constexpr int kAsyncSelectRetryMs = 2000;
+
 // ---------- Sidecar 停止（← state.rs::stop_core_by_sidecar） ----------
 inline constexpr int kSidecarStopWaitMs = 2000;  // 杀后等待端口释放上限
 

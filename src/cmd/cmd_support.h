@@ -80,6 +80,13 @@ core::validate::ValidationOutcome run_enhance_pipeline();
 // 并广播 EventBus::refresh_clash()（供 quick_routing 等调用）。
 core::validate::ValidationOutcome enhance_profiles_live();
 
+// BUG-409 (save_profile.rs:88-105): 判断某 profile/merge/script/rules/proxies/groups 文件改动是否影响运行时
+bool profile_affects_runtime(const IProfiles& profiles, const std::string& index);
+
+// BUG-408 (service.rs): 安装/启动/重装/修复服务后若主程序非 Service 模式运行，立即停掉服务自启的 Session 0 内核
+void stop_autostarted_service_core_if_sidecar_with(
+    core::RunningMode mode, const std::function<void()>& stop_fn);
+
 // ---------- 环境探针 ----------
 bool is_admin();
 bool is_core_running();

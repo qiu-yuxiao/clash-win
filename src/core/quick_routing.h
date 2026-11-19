@@ -88,7 +88,8 @@ std::string serialize_custom_routing_backup(
     const std::vector<std::string>& rules,
     const std::string& exported_at_iso = "");
 std::vector<std::string> parse_custom_routing_backup(const std::string& content);
-// 从备份内容导入规则至 Merge.yaml prepend-rules 并触发 live enhance，返回导入条数（无效/空返回 0）
-int import_custom_routing_rules_from_content(const std::string& content);
+// 从备份内容导入规则至 Merge.yaml prepend-rules；apply_live=true 时触发单次 live enhance，返回导入条数（无效/空返回 0）
+int import_custom_routing_rules_from_content(const std::string& content,
+                                             bool apply_live = true);
 
 }  // namespace clashwin::core::quick_routing

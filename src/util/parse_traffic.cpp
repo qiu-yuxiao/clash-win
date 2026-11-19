@@ -1,10 +1,50 @@
 #include "util/parse_traffic.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
 
 namespace clashwin::util {
+
+int resolve_traffic_visible_points(double css_width) {
+  // ← src/utils/parse-traffic.ts:12-28
+  if (!std::isfinite(css_width) || css_width <= kNarrowCanvasWidth) {
+    return kTrafficGraphMinPoints;
+  }
+  const double span = kMaximizedCanvasWidth - kNarrowCanvasWidth;
+  const double ratio =
+      (std::min)(1.0, (std::max)(0.0, (css_width - kNarrowCanvasWidth) / span));
+  return static_cast<int>(std::floor(
+      kTrafficGraphMinPoints +
+      ratio * (kTrafficGraphMaxPoints - kTrafficGraphMinPoints) + 0.5));
+}
+
+double compute_traffic_graph_y(double v, double height) {
+  // ← src/utils/parse-traffic.ts:46-63
+  if (!std::isfinite(height) || height <= 4.0) {
+    return std::isfinite(height) ? (std::max)(0.0, height / 2.0) : 0.0;
+  }
+  if (!std::isfinite(v) || v <= 0.0) return height - 2.0;
+
+  const double dy = height / 7.0;
+  double raw_y = 2.0;
+  if (v <= 10.0) raw_y = height - (v / 10.0) * dy;
+  else if (v <= 100.0) raw_y = height - (v / 100.0 + 1.0) * dy;
+  else if (v <= 1024.0) raw_y = height - (v / 1024.0 + 2.0) * dy;
+  else if (v <= 10240.0) raw_y = height - (v / 10240.0 + 3.0) * dy;
+  else if (v <= 102400.0) raw_y = height - (v / 102400.0 + 4.0) * dy;
+  else if (v <= 1048576.0) raw_y = height - (v / 1048576.0 + 5.0) * dy;
+  else if (v <= 10485760.0) raw_y = height - (v / 10485760.0 + 6.0) * dy;
+  else raw_y = 2.0;
+
+  return (std::min)(height - 2.0, (std::max)(2.0, raw_y));
+}
+
+double compute_traffic_point_x(int index, double dx, double progress) {
+  // ← src/utils/parse-traffic.ts:65-69
+  return dx * static_cast<double>(index - 1) - progress * dx;
+}
 
 namespace {
 

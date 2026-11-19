@@ -5,6 +5,21 @@
 
 namespace clashwin::system {
 
+namespace {
+
+struct GlobalTraySyncRegistry {
+  std::mutex mu;
+  Tray* target = nullptr;
+  std::function<void(std::function<void()>)> dispatcher;
+};
+
+GlobalTraySyncRegistry& global_tray_registry() {
+  static GlobalTraySyncRegistry reg;
+  return reg;
+}
+
+}  // namespace
+
 // ---------- Win32TrayBackend 实现 ----------
 
 bool Win32TrayBackend::add_icon(HWND hwnd, UINT uID, UINT uCallbackMsg, HICON icon, const std::wstring& tip) {
@@ -172,10 +187,45 @@ void Tray::update_icon(bool tun, bool sysproxy) {
 }
 
 void Tray::update_icon_state(TrayIconState state) {
+  std::lock_guard<std::mutex> lk(mu_);
   current_state_ = state;
   if (icon_added_ && backend_ && hwnd_) {
     HICON icon = get_icon_for_state(current_state_);
     backend_->modify_icon(hwnd_, kTrayIconId, icon, tooltip_);
+  }
+}
+
+void Tray::set_global_sync_target(
+    Tray* tray, std::function<void(std::function<void()>)> dispatcher) {
+  auto& reg = global_tray_registry();
+  std::lock_guard<std::mutex> lk(reg.mu);
+  reg.target = tray;
+  reg.dispatcher = std::move(dispatcher);
+}
+
+void Tray::sync_from_verge(bool tun, bool sysproxy) {
+  Tray* tray = nullptr;
+  std::function<void(std::function<void()>)> dispatcher;
+  auto& reg = global_tray_registry();
+  {
+    std::lock_guard<std::mutex> lk(reg.mu);
+    tray = reg.target;
+    dispatcher = reg.dispatcher;
+  }
+  if (!tray) return;
+  if (dispatcher) {
+    dispatcher([tray, tun, sysproxy] {
+      auto& r = global_tray_registry();
+      std::lock_guard<std::mutex> lk(r.mu);
+      if (r.target == tray && r.target != nullptr) {
+        r.target->update_icon(tun, sysproxy);
+      }
+    });
+    return;
+  }
+  std::lock_guard<std::mutex> lk(reg.mu);
+  if (reg.target == tray && reg.target != nullptr) {
+    reg.target->update_icon(tun, sysproxy);
   }
 }
 

@@ -122,6 +122,7 @@ void Button::draw_button_bg(IRenderTarget& rt, const RectF& r) {
 }
 
 void Button::draw_button_text(IRenderTarget& rt, const RectF& r) {
+  if (text.empty()) return;
   TextStyle ts = text_style;
   if (themed_) {
     auto p = theme::ThemeService::instance().button_paint(theme_color_type_, theme_outlined_);
@@ -159,7 +160,7 @@ void Button::on_paint(IRenderTarget& rt) {
   }
   if (ty != 0) r = {r.x, r.y + ty, r.w, r.h};
   draw_button_bg(rt, r);
-  if (!text.empty()) draw_button_text(rt, r);
+  draw_button_text(rt, r);
 }
 
 bool Button::on_mouse(const MouseEvent& e) {

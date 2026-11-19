@@ -115,7 +115,10 @@ Result<void> MihomoClient::reload_config(bool force, const std::string& config_p
                                          int timeout_ms) {
   std::string path = std::string("/configs?force=") + (force ? "true" : "false");
   json body = json::object({{"path", config_path}});
+  // BUG-406: reload 前清空空闲连接避免非幂等 PUT 命中半关管道，reload 后清池丢弃旧内核句柄
+  http_.clear_idle();
   auto resp = request("PUT", path, body.dump(), timeout_ms);
+  http_.clear_idle();
   if (!resp.is_ok()) return Result<void>::err(resp.error());
   if (!resp.value().is_success()) return Result<void>::err(http_error(resp.value()));
   return Result<void>::ok();

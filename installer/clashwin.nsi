@@ -48,7 +48,7 @@ ${UnStrStr}
 
 ; ---------- 可覆盖定义（构建脚本传入绝对路径） ----------
 !ifndef VERSION
-  !define VERSION "1.1.1"
+  !define VERSION "1.1.2"
 !endif
 !ifndef STAGEDIR
   !define STAGEDIR "stage"
@@ -694,6 +694,12 @@ Section "Install"
   Pop $0
   nsExec::Exec 'taskkill /F /IM clashwin.exe'
   Pop $0
+  ; BUG-408: 先通过 SCM 优雅停止服务再清进程，避免事件 7031 异常终止与 5s 重启竞态
+  nsExec::Exec '$SYSDIR\sc.exe stop ${SERVICE_NAME}'
+  Pop $0
+  nsExec::Exec 'net stop ${SERVICE_NAME}'
+  Pop $0
+  Sleep 500
   ; 同名内核/服务：仅杀对方（路径含 Clash Mini / clash-mini 且不在本方 $INSTDIR）。
   ; ClashWin 自身内核=win-mihomo.exe、Clash Mini 内核=mini-mihomo.exe，二者皆在名单内，
   ; Where 过滤保证只杀异路径实例（本方 $INSTDIR 下的 win-mihomo 绝不误杀）。
@@ -705,8 +711,6 @@ Section "Install"
   ; 服务「借用与归还」（总纲 §5.2.2，2026-11-10 裁决）：服务二进制是同一个上游
   ;   组件——注册在位且 ImagePath 二进制哈希与本方一致 → 保留注册共用，不夺不删；
   ;   仅缺失/损坏/哈希不一致（上游分叉）才删注册，由 InstallOrStartService 重装。
-  nsExec::Exec 'net stop ${SERVICE_NAME}'
-  Pop $0
   nsExec::ExecToStack "powershell -NoProfile -NonInteractive -Command $\"$$p=(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\${SERVICE_NAME}' -ErrorAction SilentlyContinue).ImagePath; if($$p){ $$q=[char]34; $$exe=($$p.TrimStart($$q) -split $$q)[0]; if(Test-Path $$exe){ if((Get-FileHash $$exe -Algorithm SHA256).Hash.ToLower() -eq '${SERVICE_EXE_SHA256}'){ exit 0 } } }; exit 1$\""
   Pop $0
   Pop $1
@@ -943,17 +947,16 @@ Section "Uninstall"
 
   !insertmacro un.CheckIfAppIsRunning "${MAINBINARY}"
 
-  ; 内核进程清理（同安装段：共存豁免，仅本目录；ClashWin 内核=win-mihomo.exe）
-  nsExec::Exec "powershell -NoProfile -NonInteractive -Command $\"Get-Process win-mihomo -ErrorAction SilentlyContinue | Where-Object Path -Like '$INSTDIR*' | Stop-Process -Force$\""
-  Pop $0
-
   ; 系统代理还原（总纲 §5.2.2 第 4 条）：ProxyServer 指向本方 mixed 端口 →
   ;   关闭并刷新，避免卸载后到对方启动前整机断网
   Call un.RestoreSystemProxyIfOurs
 
-  ; 服务「归还」（总纲 §5.2.2 第 3 条）：指向本方且 Mini 仍在装 → ImagePath
-  ;   改回 Mini 的服务二进制；未探测到 Mini 才移除注册
+  ; BUG-408: 服务「归还」与 SCM 优雅停服须先于内核进程清扫，防止事件 7031 与残留进程竞态
   Call un.HandBackOrRemoveService
+
+  ; 内核进程清理（同安装段：共存豁免，仅本目录；ClashWin 内核=win-mihomo.exe）
+  nsExec::Exec "powershell -NoProfile -NonInteractive -Command $\"Get-Process win-mihomo -ErrorAction SilentlyContinue | Where-Object Path -Like '$INSTDIR*' | Stop-Process -Force$\""
+  Pop $0
 
   ; 清理陈旧窗口状态文件（← Mini installer.nsi:1100-1104 卸载段）：
   ;   只删两个历史连字符文件；当前状态文件 window_state.json 必须保留

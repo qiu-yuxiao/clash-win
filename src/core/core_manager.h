@@ -96,6 +96,8 @@ struct ICoreApiClient {
   virtual int close_excluded_connections(const std::string& /*filter_text*/) {
     return 0;
   }
+  // BUG-407：区分生产全局长生命周期客户端与测试栈上 Mock，避免向栈 Mock 投递后台脱离线程
+  virtual bool is_production_singleton_api() const { return false; }
 };
 
 class CoreApiClientAdapter : public ICoreApiClient {
@@ -106,6 +108,7 @@ class CoreApiClientAdapter : public ICoreApiClient {
   Result<void> select_node_for_group(const std::string& group, const std::string& node) override;
   Result<void> reload_config(bool force, const std::string& config_path) override;
   int close_excluded_connections(const std::string& filter_text) override;
+  bool is_production_singleton_api() const override { return client_ != nullptr; }
 
  private:
   mihomo::MihomoClient* client_;
@@ -224,15 +227,27 @@ class CoreManager {
       ICoreApiClient& api,
       std::optional<std::pair<std::optional<std::string>, std::string>>
           override_state = std::nullopt);
-  // BUG-405: 统一保障启动/重启/重载后的 PROXY 组选点合规性，并在收尾清理已排除节点的代理连接
+  // BUG-405 + BUG-407: 统一保障启动/重启/重载后的 PROXY 组选点合规性，并在收尾清理已排除节点的代理连接
   bool ensure_proxy_group_selection(
       ICoreApiClient& api,
       std::optional<std::string> preferred = std::nullopt,
       const RestoreTimings& t = {},
       std::optional<std::pair<std::optional<std::string>, std::string>>
-          override_state = std::nullopt);
+          override_state = std::nullopt,
+      uint64_t expected_epoch = 0,
+      bool* out_selection_changed = nullptr);
+  // BUG-407: 非阻塞后台调度，由原子 epoch 自动取消前序未完任务，避免阻塞启停/重载互斥锁
+  void spawn_ensure_proxy_group_selection(
+      std::optional<std::string> preferred = std::nullopt);
+  uint64_t bump_selection_ensure_epoch();
+  uint64_t selection_ensure_epoch() const;
   void restore_proxy_group_now(ICoreApiClient& api, const std::string& node,
                                const RestoreTimings& t = {});
+
+  // BUG-406: 停核前 0ms 断开 WS + 清空 HTTP 空闲连接池
+  void set_pre_stop_hook(std::function<void()> fn);
+  // 注入生产 MihomoClient 提供器（避免 clashwin_core 逆向依赖 clashwin_cmd）
+  void set_api_client_provider(std::function<mihomo::MihomoClient*()> fn);
 
   void set_is_exiting_check(std::function<bool()> fn);
   bool is_exiting() const;
@@ -264,11 +279,16 @@ class CoreManager {
   Result<void> start_service_locked(const std::wstring& config_file);
 
   std::atomic<RunningMode> mode_{RunningMode::NotRunning};
+  std::atomic<uint64_t> selection_ensure_epoch_{0};
+  std::shared_ptr<std::atomic<bool>> alive_flag_{
+      std::make_shared<std::atomic<bool>>(true)};
   std::mutex lifecycle_;           // ← manager/mod.rs lifecycle_lock（串行化启停）
   mutable std::mutex test_hooks_mu_;
   ProcEnumerator proc_enumerator_;
   std::optional<StartAutoTestHooks> start_auto_test_hooks_;
   std::function<bool()> is_exiting_fn_;
+  std::function<void()> pre_stop_hook_;
+  std::function<mihomo::MihomoClient*()> api_client_provider_;
   void* child_ = nullptr;          // HANDLE（避免头文件引入 windows.h）
   uint32_t pid_ = 0;
   void* stdout_read_ = nullptr;    // 管道读端 HANDLE

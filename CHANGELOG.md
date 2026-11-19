@@ -2,11 +2,26 @@
 
 All notable changes to **Clash Win** are documented here.
 
-Version format follows the project's **own** line starting at `0.1.0` (constitution §5.3): Clash Win versions increment independently and are **not** bound to Clash Mini's `3.x` numbering (`v3.2.2` was the initial port reference anchor, now synced 1:1 through **v3.5.7**).
+Version format follows the project's **own** line starting at `0.1.0` (constitution §5.3): Clash Win versions increment independently and are **not** bound to Clash Mini's `3.x` numbering (`v3.2.2` was the initial port reference anchor, now synced 1:1 through **v3.5.9**).
 
 Format reference: `Changelog.md` in the Clash Mini repository (newest first, `## vX.Y.Z` headings with grouped change bullets). Content here is Clash Win's own history, not a copy of Mini's entries.
 
 ---
+
+## v1.1.2 (2026-11-20)
+
+### UI Bugfixes & Pixel-Level Polish
+- **3-State Tray Icon Asset Parity & Instant Mode Sync**: Updated `resources/icons/tray-icon*.ico` (`16×16` / `20×20` / `24×24` / `32×32`) from upstream PNG assets (Default dark grey-blue gear, System Proxy vivid green gear, TUN pink-blue square) and routed post-commit proxy mode changes and TUN fallback through thread-safe `Tray::sync_from_verge` so the system tray stays synchronized immediately regardless of lightweight `EventBus` filtering.
+- **Help & Tools `?` Button Rendering**: Unblocked `Button::on_paint` delegation to `draw_button_text` for icon-only subclasses (`HelpIconButton`) and added the crisp vector `HelpOutlineRounded` SVG path to `IconW`, restoring the visible `?` icon in both bottom-bar (`>830px`) and top-right (`<=830px`) settings drawer layouts.
+- **Maximize Button Breakpoints & Border Alignment**: Fixed `Breakpoints` notification ordering and synchronized `MainScene`, `TrafficPane`, `ContentStack`, and `SettingsDrawer` visibility directly inside `MainWindow::on_client_resized` (plus hiding `NodeList` when the settings drawer is open and omitting orphan column dividers on incomplete 3-column rows), ensuring clicking Maximize (`toggle_large`) updates layout cleanly with zero protruding double-border artifacts.
+- **3-Column Active Node Label Natural Flow**: Updated `NodeRowWidget::on_paint` so the selected node name always occupies the left full column width while localized `- 当前节点` renders inline only when sufficient horizontal room remains, preventing narrow 3-column cards from squeezing out the node name.
+
+### Upstream v3.5.8 ~ v3.5.9 Sync (`BUG-406` ~ `BUG-410`)
+- **BUG-410 (Unified Width-Adaptive Real-Time Traffic Graph & Legacy Graph Removal)**: Unified narrow and wide windows onto a single persistent, logarithmic `CanvasGraph` (`63`-point rolling history buffer preserved seamlessly across both manual drag and titlebar maximize/restore, expanding smoothly from `30s` minimalist reference lines at `<=285px` to `30s -> 60s` with vertical linear-gradient area fills, `1M`/`10K`/`100B` log scale lines, `10s` time grid, and corner time badge in wide windows, plus `[2, height - 2]` stroke clamping and shrinkable lower-pane flex alignment in short wide windows); completely deleted legacy `EnhancedTrafficGraph`, `TrafficDataSampler`, and `draw_dashed_line` dead code.
+- **BUG-406 (Named Pipe Pool Hygiene, 0ms WS Disconnect & Pre-Stop Cleanup)**: Added `PipeHttpClient::clear_idle()` around `PUT /configs` config reloads, enabled `0ms` immediate local named-pipe WebSocket handle release on `PipeWebSocket::close(0)` across `WsManager`, and wired `CoreManager::stop()` pre-stop cleanup to flush WS sockets and idle HTTP connections before stopping the core.
+- **BUG-407 (Async Epoch-Cancellable Proxy Group Ensure & WS Reconnect Stagger)**: Added non-blocking `CoreManager::spawn_ensure_proxy_group_selection` with `selection_ensure_epoch_` cancellation and compliant snapshot persistence, removed premature `CoreMonitor::kick()` on core restart, deduplicated `refresh_clash` / `refresh_proxies` dispatches and `MainWindow` listeners, and added `400ms` WS refresh debounce plus `45ms` per-channel reconnect stagger.
+- **BUG-408 (Session 0 Service Core Cleanup, Dead `restart_core` IPC Removal & Graceful NSIS Stop)**: Immediately stopped any autostarted Session 0 service core when `clash_verge_service` readies while running in Sidecar mode, removed the dead `restart_core` IPC command, and updated NSIS install/uninstall routines to issue graceful SCM `sc stop` prior to residual process termination.
+- **BUG-409 (Global Merge Deduplication & `profile_affects_runtime` Fix)**: Prevented `enhance` from double-applying global `Merge.yaml` when `option.merge` is unset or equals `"Merge"`, fixed `profile_affects_runtime` to always treat global `"Merge"` as affecting runtime when a profile is active, and deduplicated custom routing rule backup imports under `LongOperationGuard`.
 
 ## v1.1.1 (2026-11-19)
 

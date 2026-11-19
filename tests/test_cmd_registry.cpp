@@ -12,11 +12,11 @@
 using namespace clashwin::cmd;
 
 namespace {
-// ← lib.rs generate_handler!（裁剪零调用死命令后保留项；BUG-404 移除 uninstall_service / get_runtime_config）
+// ← lib.rs generate_handler!（裁剪零调用死命令后保留项；BUG-404 移除 uninstall_service / get_runtime_config；BUG-408 移除 restart_core）
 const char* kLibRsCommands[] = {
     "app_is_admin", "is_port_in_use", "get_sys_proxy",
     "show_in_folder", "open_web_url", "open_antivirus_guide", "export_diagnostic_bundle",
-    "restart_core", "get_running_mode", "install_service",
+    "get_running_mode", "install_service",
     "is_service_available", "get_clash_info", "patch_clash_config", "patch_clash_mode",
     "get_proxy_addr", "save_proxy_head_state", "get_proxy_head_state",
     "notify_node_switched", "get_confirmed_fake_proxy_names",
@@ -47,6 +47,7 @@ UT_TEST(cmd_registry_lib_rs_complete) {
   UT_CHECK_EQ(missing, 0);
   UT_CHECK(!CommandService::instance().exists("uninstall_service"));
   UT_CHECK(!CommandService::instance().exists("get_runtime_config"));
+  UT_CHECK(!CommandService::instance().exists("restart_core"));
 }
 
 UT_TEST(cmd_registry_extras_complete) {
@@ -60,17 +61,17 @@ UT_TEST(cmd_registry_extras_complete) {
   UT_CHECK_EQ(missing, 0);
   UT_CHECK(!CommandService::instance().exists("uninstall_service"));
   UT_CHECK(!CommandService::instance().exists("get_runtime_config"));
+  UT_CHECK(!CommandService::instance().exists("restart_core"));
 }
 
 UT_TEST(cmd_registry_counts_and_timeouts) {
   auto& svc = CommandService::instance();
   auto names = svc.command_names();
   std::printf("  registry size = %zu\n", names.size());
-  UT_CHECK(names.size() >= 53);
+  UT_CHECK(names.size() >= 52);
   // 超时梯度抽测（01§5-A：探针 10/15s、配置 30s、内核/导入/测速 60s）
   UT_CHECK_EQ(svc.timeout_of("test_delay"), consts::kTimeoutHeavy);
   UT_CHECK_EQ(svc.timeout_of("import_profile"), consts::kTimeoutHeavy);
-  UT_CHECK_EQ(svc.timeout_of("restart_core"), consts::kTimeoutHeavy);
   UT_CHECK_EQ(svc.timeout_of("patch_verge_config"), consts::kTimeoutConfig);
   UT_CHECK_EQ(svc.timeout_of("patch_clash_config"), consts::kTimeoutConfig);
   UT_CHECK_EQ(svc.timeout_of("get_profiles"), consts::kTimeoutProbe);

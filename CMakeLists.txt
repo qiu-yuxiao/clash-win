@@ -193,7 +193,6 @@ add_library(clashwin_ui STATIC
   src/ui/notice_handler.cpp
   src/ui/tooltip_w.cpp
   src/ui/canvas_graph.cpp
-  src/ui/enhanced_traffic_graph.cpp
   src/ui/text_viewer.cpp
   src/ui/ui_postbox.cpp
   src/ui/theme/palettes.cpp
@@ -364,6 +363,7 @@ add_executable(clashwin_test
   tests/test_v350_ui_parity.cpp
   tests/test_v110_parity.cpp
   tests/test_v111_parity.cpp
+  tests/test_v112_ui_fixes.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_app clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32 bcrypt)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)

@@ -205,22 +205,39 @@ void NodeRowWidget::on_paint(IRenderTarget& rt) {
   ns.color = pal.primary_text;
   ns.align_v = AlignV::Center;
   ns.ellipsis = true;
-  // src: proxy-item.tsx:51 名称清洗；:185-193 selected 时追加「 - 当前节点」
-  //   （text.secondary / 11px / ml 0.5=4）
-  float suffix_w = 0;
-  if (selected_ && !name_.empty()) {
-    const std::wstring suffix = L" - 当前节点";
-    TextStyle ss;
-    ss.size = 11;
-    ss.color = pal.secondary_text;
-    ss.align_v = AlignV::Center;
-    ss.align_h = AlignH::Right;
-    suffix_w = text_engine()->measure_text(suffix, ss, 1e6f).w + 4.0f;
-    rt.draw_text(suffix, {name_r.right() - 8 - suffix_w, name_r.y, suffix_w, text_h},
-                 ss);
+  // src: src/components/proxy/proxy-item.tsx:55,200,218-226
+  //   节点名始终居左占满可用宽度（px: 1 = 左右各 8px）；
+  //   选中项仅在节点名右侧仍有足够剩余空间时并列追加「- 当前节点」（11px / ml 0.5=4px），
+  //   窄列（如宽窗 3 列）空间不足时自然挤出不显示，绝不反客为主挤占或覆盖节点名。
+  const std::wstring clean_name =
+      strip_six_digit_suffix(utf::utf8_to_utf16(name_));
+  // src: src/components/proxy/proxy-item.tsx:200 px: 1 (8px)
+  const float text_x = name_r.x + 8.0f;
+  // src: src/components/proxy/proxy-item.tsx:200 px: 1 (左右各 8px = 16px)
+  const float avail_w = std::max(0.0f, name_r.w - 16.0f);
+  rt.draw_text(clean_name, {text_x, name_r.y, avail_w, text_h}, ns);
+  if (selected_ && !clean_name.empty() && avail_w > 0.0f) {
+    if (ITextEngine* eng = text_engine()) {
+      const float name_actual_w = eng->measure_text(clean_name, ns, 1e6f).w;  // src: src/components/proxy/proxy-item.tsx:218
+      const std::wstring suffix =
+          L"- " + tr("home.components.currentProxy.title");
+      TextStyle ss;
+      ss.size = 11;  // src: src/components/proxy/proxy-item.tsx:222 fontSize: '11px'
+      ss.color = pal.secondary_text;
+      ss.align_v = AlignV::Center;
+      ss.align_h = AlignH::Left;
+      const float suffix_w = eng->measure_text(suffix, ss, 1e6f).w;  // src: src/components/proxy/proxy-item.tsx:224
+      // src: src/components/proxy/proxy-item.tsx:222 ml: 0.5 (4px)
+      constexpr float kSuffixGap = 4.0f;
+      if (name_actual_w + kSuffixGap + suffix_w <= avail_w) {
+        // src: src/components/proxy/proxy-item.tsx:220-226
+        rt.draw_text(
+            suffix,
+            {text_x + name_actual_w + kSuffixGap, name_r.y, suffix_w + 2.0f, text_h},
+            ss);
+      }
+    }
   }
-  rt.draw_text(strip_six_digit_suffix(utf::utf8_to_utf16(name_)),
-               {name_r.x + 8, name_r.y, name_r.w - 16 - suffix_w, text_h}, ns);
   rt.fill_rect({name_r.right() - kNodeBorderW, r.y, kNodeBorderW, r.h},
                divider);
 
@@ -341,7 +358,7 @@ std::wstring NodeRowWidget::tooltip_text() const {
   // src: src/components/proxy/proxy-item.tsx:180 名称列悬停显示完整名称（选中项附「 - 当前节点」）
   if (hover_x_ < bounds().w - kNodeDelayColW) {
     std::wstring tip = clashwin::utf::utf8_to_utf16(name_);
-    if (selected_) tip += L" - " + tr("proxies.components.item.currentNode");
+    if (selected_) tip += L" - " + tr("home.components.currentProxy.title");
     return tip;
   }
   // BUG-357: 右侧 65px 延迟列悬停提示单节点测速（预设节点除外）
@@ -454,9 +471,11 @@ void NodeGridRowWidget::on_paint(IRenderTarget& rt) {
   if (cols_ <= 1) return;
   const float w = bounds().w, h = bounds().h;
   const float card_w = w / static_cast<float>(cols_);
-  for (int i = 0; i + 1 < cols_; ++i) {
-    const float x = (i + 1) * card_w;  // 简化为双线夹 1px 空隙近似 double
+  // src: src/components/proxy/proxy-render.tsx:32-48 仅实际存在的卡片（且非末列）绘制右 double 边框
+  for (size_t i = 0; i < cards_.size() && static_cast<int>(i) + 1 < cols_; ++i) {
+    const float x = static_cast<float>(i + 1) * card_w;  // src: src/components/proxy/proxy-render.tsx:45
     rt.fill_rect({x - 2.5f, 1.0f, 1.34f, h - 2.0f}, Brush{bc});
+    // src: src/components/proxy/proxy-render.tsx:45 borderRight: '5px double var(--theme-border)'
     rt.fill_rect({x + 1.5f, 1.0f, 1.34f, h - 2.0f}, Brush{bc});
   }
 }

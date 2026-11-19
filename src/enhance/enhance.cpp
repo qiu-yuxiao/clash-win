@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <cctype>
 #include <ctime>
 #include <fstream>
 #include <map>
@@ -401,9 +402,26 @@ Result<EnhanceOutput> run_enhance_full_from_config() {
         empty.kind = fallback_kind;
         return empty;
       };
-      input.profile.merge_item =
-          load_item(cur->option ? cur->option->merge : std::nullopt, "Merge",
-                    ChainItem::Kind::Merge);
+      // BUG-409 (enhance/mod.rs): global_merge 已无条件加载并合并全局 "Merge"（Merge.yaml）；
+      //   仅当 cur->option->merge 显式指向非空且非 "Merge" 的独立项时才加载 merge_item，
+      //   避免未指定或等于 "Merge" 时再次应用全局 Merge.yaml 导致规则翻倍。
+      std::optional<std::string> profile_merge_uid;
+      if (cur->option && cur->option->merge) {
+        const std::string& raw = *cur->option->merge;
+        size_t b = 0, e = raw.size();
+        while (b < e && std::isspace(static_cast<unsigned char>(raw[b]))) ++b;
+        while (e > b && std::isspace(static_cast<unsigned char>(raw[e - 1]))) --e;
+        const std::string trimmed = raw.substr(b, e - b);
+        if (!trimmed.empty() && trimmed != "Merge") {
+          profile_merge_uid = trimmed;
+        }
+      }
+      if (profile_merge_uid.has_value()) {
+        input.profile.merge_item =
+            load_item(profile_merge_uid, "Merge", ChainItem::Kind::Merge);
+      } else {
+        input.profile.merge_item = ChainItem{};
+      }
       input.profile.rules_item =
           load_item(cur->option ? cur->option->rules : std::nullopt, "Rules",
                     ChainItem::Kind::Rules);

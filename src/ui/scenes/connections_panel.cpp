@@ -355,14 +355,13 @@ std::string ConnectionsPanel::export_routes_to_string() const {
 
 int ConnectionsPanel::import_routes_from_string(const std::string& content,
                                                 bool run_enhance) {
-  const int added = core::quick_routing::import_custom_routing_rules_from_content(content);
+  // BUG-409: 由 import_custom_routing_rules_from_content 按 apply_live 单次执行热重载与 refresh_clash，避免重复触发
+  const int added =
+      core::quick_routing::import_custom_routing_rules_from_content(content,
+                                                                    run_enhance);
   if (added <= 0) return 0;
-  if (run_enhance) {
-    cmd::CommandService::instance().invoke("enhance_profiles", nlohmann::json::object());
-  }
   reload_managed_rules();
   refresh_visible();
-  events::EventBus::refresh_clash();
   return added;
 }
 
@@ -455,12 +454,10 @@ void ConnectionsPanel::handle_import_custom_routes() {
   set_routes_io_busy(true);
   auto alive = alive_;
   std::thread([this, alive, content = std::move(content)]() mutable {
+    cmd::LongOperationGuard long_guard;
     const int added =
-        core::quick_routing::import_custom_routing_rules_from_content(content);
-    if (added > 0) {
-      (void)cmd::CommandService::instance().invoke(
-          "enhance_profiles", nlohmann::json::object());
-    }
+        core::quick_routing::import_custom_routing_rules_from_content(content,
+                                                                      true);
     UiPostbox::instance().post([this, alive, added] {
       if (!alive->load(std::memory_order_acquire)) return;
       set_routes_io_busy(false);
@@ -472,7 +469,6 @@ void ConnectionsPanel::handle_import_custom_routes() {
       }
       reload_managed_rules();
       refresh_visible();
-      events::EventBus::refresh_clash();
       events::NoticeService::instance().push(
           "success",
           i18n::I18n::instance().t("settings.mini.routesImportSuccess",

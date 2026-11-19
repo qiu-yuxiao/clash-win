@@ -668,7 +668,8 @@ std::vector<std::string> parse_custom_routing_backup(const std::string& content)
   return valid_rules;
 }
 
-int import_custom_routing_rules_from_content(const std::string& content) {
+int import_custom_routing_rules_from_content(const std::string& content,
+                                             bool apply_live) {
   auto imported_rules = parse_custom_routing_backup(content);
   if (imported_rules.empty()) return 0;
 
@@ -694,7 +695,9 @@ int import_custom_routing_rules_from_content(const std::string& content) {
     }
   }
 
-  cmd::enhance_profiles_live();
+  if (apply_live) {
+    cmd::enhance_profiles_live();
+  }
   events::EventBus::notice_message(
       "quick_rules_imported", std::to_string(imported_rules.size()));
   return static_cast<int>(imported_rules.size());

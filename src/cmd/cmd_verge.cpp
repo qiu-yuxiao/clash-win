@@ -14,6 +14,7 @@
 #include "system/sysproxy.h"
 #include "system/service_runner.h"
 #include "system/coexist.h"
+#include "system/tray.h"
 #include "util/log.h"
 #include "util/dirs.h"
 #include "util/utf.h"
@@ -175,8 +176,10 @@ Result<void> process_flags(uint16_t flags, const IVerge& patch) {
     if (is_core_running()) {
       core::CoreApiClientAdapter api(&mihomo_unchecked());
       core::CoreOps ops;
-      ops.start = [] { return Result<void>::err(Error{0, "n/a"}); };
-      ops.stop = [] { return Result<void>::err(Error{0, "n/a"}); };
+      ops.start = [] {
+        return core::CoreManager::instance().start_auto(util::dirs::clash_mini_path());
+      };
+      ops.stop = [] { return core::CoreManager::instance().stop(); };
       auto r = core::CoreManager::instance().apply_config(
           api, utf::utf16_to_utf8(util::dirs::clash_mini_path()), ops);
       if (r.is_err()) return r;
@@ -184,18 +187,15 @@ Result<void> process_flags(uint16_t flags, const IVerge& patch) {
         auto runner = system::get_service_runner();
         if (runner) (void)runner->stop_service();
       }
+    } else {
+      events::EventBus::refresh_clash();
     }
-    events::EventBus::refresh_clash();
   }
-  if (flags & kFVergeConfig) events::EventBus::refresh_verge();
   if (flags & kFLaunch) {
     core::AutostartManager::instance().update_launch(patch.enable_auto_launch);
   }
   if (flags & kFLanguage) {
     CWLOG_INFO("patch_verge: LANGUAGE flag → " + patch.language.value_or("?"));
-  }
-  if (flags & kFSysTrayIcon) {
-    events::EventBus::refresh_verge();
   }
   if ((flags & (kFLogLevel | kFLogFile)) || patch.auto_log_clean.has_value()) {
     auto cur = config::Config::instance().verge().latest_arc();
@@ -269,6 +269,19 @@ void install_cmd_verge(CommandService& svc) {
            verge.edit_draft([&old](IVerge& d) { d = old; });
            verge.apply();
            return CmdResult::err(save.error());
+         }
+         // 仅在提交并落盘成功后同步三态托盘图标与 verge 刷新事件，避免失败/回滚污染托盘状态，
+         // 且绕过 EventBus 轻量过滤门控实现 0ms 即时同步。
+         if (flags & kFSysTrayIcon) {
+           auto cur = verge.latest_arc();
+           if (cur) {
+             system::Tray::sync_from_verge(
+                 cur->enable_tun_mode.value_or(false),
+                 cur->enable_system_proxy.value_or(false));
+           }
+         }
+         if (flags & (kFVergeConfig | kFSysTrayIcon)) {
+           events::EventBus::refresh_verge();
          }
          return CmdResult::ok(Json::object());
        },

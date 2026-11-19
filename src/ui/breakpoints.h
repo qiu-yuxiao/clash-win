@@ -27,9 +27,9 @@ inline constexpr double kMiniHeightThreshold = 126;  // 极小窗高度门槛
 // 物理域判定容差（← mini-window.ts MINI_PHYS_SLACK：125%/175% 档取整方向）
 inline constexpr double kMiniPhysSlack = 1;
 
-// ---- 主场景骨架常量（← _layout.tsx:119-120 / window-provider FEAT-003） ----
-inline constexpr int kTrafficPaneWide = 135;     // src: _layout.tsx:119
-inline constexpr int kTrafficPaneMinimal = 100;  // src: _layout.tsx:120 TRAFFIC_PANE_HEIGHT_MINIMAL
+// ---- 主场景骨架常量（← _layout.tsx:125-126 / window-provider FEAT-003） ----
+inline constexpr int kTrafficPaneWide = 135;     // src: _layout.tsx:125
+inline constexpr int kTrafficPaneMinimal = 100;  // src: _layout.tsx:126 TRAFFIC_PANE_HEIGHT_MINIMAL
 inline constexpr int kTitleBarH = 30;            // 标题栏高
 inline constexpr int kIdleHideDelayMs = 10000;   // FEAT-003 空闲隐藏标题栏
 

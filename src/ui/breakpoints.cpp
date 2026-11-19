@@ -8,22 +8,30 @@ namespace clashwin::ui::win {
 void Breakpoints::set_physical_size(int phys_w, int phys_h,
                                     double scale_factor) {
   WinState prev = state();
+  const bool prev_narrow = narrow_;
+  const bool prev_mini = mini_;
   narrow_ = static_cast<double>(phys_w) <=
             kMiniWidthThreshold * scale_factor + kMiniPhysSlack;
   mini_ = narrow_ && static_cast<double>(phys_h) <=
                        kMiniHeightThreshold * scale_factor + kMiniPhysSlack;
   logical_w_ = static_cast<double>(phys_w) / scale_factor;
   logical_h_ = static_cast<double>(phys_h) / scale_factor;
-  if (state() != prev) notify(prev);
+  if (state() != prev || narrow_ != prev_narrow || mini_ != prev_mini) {
+    notify(prev);
+  }
 }
 
 void Breakpoints::set_logical_size(double w, double h) {
   WinState prev = state();
+  const bool prev_narrow = narrow_;
+  const bool prev_mini = mini_;
   narrow_ = w <= kMiniWidthThreshold;
   mini_ = narrow_ && h <= kMiniHeightThreshold;
   logical_w_ = w;
   logical_h_ = h;
-  if (state() != prev) notify(prev);
+  if (state() != prev || narrow_ != prev_narrow || mini_ != prev_mini) {
+    notify(prev);
+  }
 }
 
 void Breakpoints::set_large(bool large) {

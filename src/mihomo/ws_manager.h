@@ -15,6 +15,8 @@
 #include "clashwin/mihomo/models.h"
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -22,6 +24,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace clashwin::mihomo {
@@ -49,21 +52,25 @@ class WsManager {
   // 退订（任意通道通用）；通道订阅归零后底层 WS 随之关闭
   void unsubscribe(uint64_t sub_id);
 
-  // ws_disconnect 语义：立即断开全部底层 WS（有界写超时 BUG-325）；订阅保留、自动重连
-  void disconnect_all(std::optional<uint32_t> force_timeout_ms = std::nullopt);
+  // ws_disconnect 语义：立即断开全部底层 WS（默认 0ms 本地命名管道即时释放 BUG-406）；订阅保留、自动重连
+  void disconnect_all(std::optional<uint32_t> force_timeout_ms = 0u);
   // 轻量模式静默：断开 WS 并暂停 worker 自动重连，直至 resume_all()（← lightweight.rs）
-  void pause_all(std::optional<uint32_t> force_timeout_ms = 500u);
+  void pause_all(std::optional<uint32_t> force_timeout_ms = 0u);
   void resume_all();
   bool is_paused() const { return paused_.load(std::memory_order_acquire); }
 
-  // BUG-347: 内核重启/配置重载（verge://refresh-clash-config）时清零全部通道退避计数，
-  // 主动关闭陈旧半死句柄并第 0ms 唤醒重连守护线程。
+  // BUG-347 + BUG-407: 内核重启/配置重载（verge://refresh-clash-config）时清零全部通道退避计数，
+  // 主动关闭陈旧半死句柄并按 45ms 错峰重连；schedule_flush_reconnect_backoff 合并 400ms 内连发刷新。
   void flush_reconnect_backoff();
+  void schedule_flush_reconnect_backoff();
 
-  // 观测（测试用）：通道当前是否有活跃底层连接
+  // 观测（测试用）：通道当前是否有活跃底层连接，以及最近一次分配的重连错峰偏移
   bool channel_connected(const std::string& channel_key);
   uint32_t channel_reconnect_attempt_for_test(const std::string& channel_key);
+  uint32_t channel_last_stagger_ms_for_test(const std::string& channel_key);
 
+  static constexpr uint32_t kRefreshClashDebounceMs = 400;
+  static constexpr uint32_t kWsReconnectStaggerMs = 45;
   static constexpr const char* kTraffic = "traffic";
   static constexpr const char* kMemory = "memory";
   static constexpr const char* kConnections = "connections";
@@ -78,6 +85,7 @@ class WsManager {
   uint64_t subscribe_generic(const std::string& key, const std::string& ws_path,
                              WsHandler handler);
   static void worker_loop(Channel* ch, WsManager* self, std::string ws_path);
+  void debounce_loop();
 
   std::mutex mu_;
   std::map<std::string, std::unique_ptr<Channel>> channels_;
@@ -87,6 +95,12 @@ class WsManager {
   std::atomic<bool> stopping_{false};
   std::atomic<bool> paused_{false};
   uint64_t refresh_clash_sub_id_ = 0;
+
+  std::mutex debounce_mu_;
+  std::condition_variable debounce_cv_;
+  bool debounce_pending_ = false;
+  std::chrono::steady_clock::time_point debounce_deadline_{};
+  std::thread debounce_thread_;
 };
 
 }  // namespace clashwin::mihomo

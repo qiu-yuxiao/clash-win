@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 
 namespace clashwin::system {
@@ -97,6 +98,13 @@ class Tray {
 
   void set_backend(std::unique_ptr<ITrayBackend> backend) { backend_ = std::move(backend); }
   ITrayBackend* backend() const { return backend_.get(); }
+  HICON icon_for_state_for_test(TrayIconState state) { return get_icon_for_state(state); }
+
+  // 注册全局托盘同步目标及 UI 调度器（独立于 EventBus 轻量静默门控，对齐 Mini Tray::update_icon）
+  static void set_global_sync_target(
+      Tray* tray,
+      std::function<void(std::function<void()>)> dispatcher = nullptr);
+  static void sync_from_verge(bool tun, bool sysproxy);
 
   const std::wstring& tooltip() const { return tooltip_; }
   HWND hwnd() const { return hwnd_; }
@@ -105,6 +113,7 @@ class Tray {
   HICON get_icon_for_state(TrayIconState state);
   void load_icons();
 
+  mutable std::mutex mu_;
   HWND hwnd_ = nullptr;
   std::unique_ptr<ITrayBackend> backend_;
   TrayIconState current_state_ = TrayIconState::Default;

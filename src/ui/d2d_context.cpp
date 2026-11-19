@@ -796,27 +796,6 @@ void D2dRenderTarget::draw_line(const PointF& a, const PointF& b, const Pen& p) 
                          p.width);
 }
 
-void D2dRenderTarget::draw_dashed_line(const PointF& a, const PointF& b,
-                                       const Pen& p, float dash_len,
-                                       float gap_len) {
-  if (!active_rt_ || p.width <= 0.0f) return;
-  ID2D1SolidColorBrush* br = brush(p.color);
-  if (!br) return;
-  const float dashes[2] = {
-      dash_len > 0.0f ? dash_len / p.width : 4.0f,
-      gap_len > 0.0f ? gap_len / p.width : 4.0f,
-  };
-  ID2D1StrokeStyle* style = nullptr;
-  HRESULT hr = ctx_.d2d()->CreateStrokeStyle(
-      D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT,
-                                  D2D1_CAP_STYLE_FLAT, D2D1_LINE_JOIN_MITER,
-                                  10.0f, D2D1_DASH_STYLE_CUSTOM, 0.0f),
-      dashes, 2, &style);
-  active_rt_->DrawLine(D2D1::Point2F(a.x, a.y), D2D1::Point2F(b.x, b.y), br,
-                       p.width, SUCCEEDED(hr) ? style : nullptr);
-  if (style) style->Release();
-}
-
 void D2dRenderTarget::fill_polygon_vertical_gradient(
     const PointF* pts, int count, float top_y, float bottom_y,
     const Color4f& top_color, const Color4f& bottom_color) {

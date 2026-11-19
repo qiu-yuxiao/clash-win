@@ -30,6 +30,7 @@
 #include "system/signals.h"
 #include "ui/theme/theme.h"
 #include "ui/main_window.h"
+#include "ui/ui_postbox.h"
 #include "util/dirs.h"
 #include "util/log.h"
 #include "util/node.h"
@@ -151,6 +152,7 @@ App::~App() {
     singleton_server_.reset();
   }
   app::Lifecycle::instance().reset();
+  system::Tray::set_global_sync_target(nullptr);
   if (tray_) {
     tray_->destroy();
     tray_.reset();
@@ -372,6 +374,10 @@ bool App::init() {
   tray_->init(main_window_->hwnd(),
               system::calculate_state(tun_enabled, sys_enabled));
   tray_->set_is_exiting_check([] { return app::Lifecycle::instance().is_exiting(); });
+  system::Tray::set_global_sync_target(
+      tray_.get(), [](std::function<void()> fn) {
+        ui::UiPostbox::instance().post(std::move(fn));
+      });
   main_window_->set_tray(tray_.get());
   app::Lifecycle::instance().set_window(main_window_);
   app::Lifecycle::instance().set_tray(tray_.get());
@@ -405,7 +411,7 @@ bool App::init() {
         if (v && tray_) {
           bool tun_on = v->enable_tun_mode.value_or(false);
           bool sys_on = v->enable_system_proxy.value_or(false);
-          tray_->update_icon(tun_on, sys_on);
+          system::Tray::sync_from_verge(tun_on, sys_on);
         }
       });
 
@@ -464,7 +470,6 @@ bool App::init() {
       if (!rr.is_ok()) {
         CWLOG_WARN("restart_core: 内核重启失败: " + rr.error().message);
       }
-      events::EventBus::refresh_clash();
       return rr;
     };
     mh.network_online = [net_probe] {

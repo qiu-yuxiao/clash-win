@@ -556,15 +556,18 @@ void PipeWebSocket::close(uint16_t code, const std::string& reason,
   if (!handle_) return;
   bool already = closing_.exchange(true, std::memory_order_acq_rel);
   if (!already && open_.load(std::memory_order_acquire)) {
-    // BUG-325: 严格限制 close 帧写超时上限（force_timeout.unwrap_or(1000).max(500)），
+    // BUG-406: force_timeout_ms == 0 时立即 0ms 释放本地命名管道（跳过 0x8 Close 帧阻塞）；
+    // BUG-325: 非零超时下限制 close 帧写超时上限（force_timeout.unwrap_or(1000).max(500)），
     // 且必须在置位 stop_event_ / CancelIoEx 之前发送，杜绝管道满缓冲时无限阻塞或自取消。
-    const uint32_t close_timeout_ms =
-        (std::max)(force_timeout_ms.value_or(1000u), 500u);
-    std::string body;
-    body += static_cast<char>((code >> 8) & 0xFF);
-    body += static_cast<char>(code & 0xFF);
-    body += reason;
-    send_frame(0x8, body, close_timeout_ms);
+    if (!(force_timeout_ms.has_value() && *force_timeout_ms == 0u)) {
+      const uint32_t close_timeout_ms =
+          (std::max)(force_timeout_ms.value_or(1000u), 500u);
+      std::string body;
+      body += static_cast<char>((code >> 8) & 0xFF);
+      body += static_cast<char>(code & 0xFF);
+      body += reason;
+      send_frame(0x8, body, close_timeout_ms);
+    }
   }
   if (stop_event_) SetEvent(static_cast<HANDLE>(stop_event_));
   // 取消未决 I/O 使读循环尽快退出，然后 join（禁止在回调内调用 close：会自 join 死锁）

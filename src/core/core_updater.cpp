@@ -798,6 +798,8 @@ Result<void> CoreUpdater::start_core_upgrade(const GithubRelease& release) {
     }
     if (api_client_) {
       CoreManager::instance().ensure_proxy_group_selection(*api_client_, saved_proxy_now);
+    } else {
+      CoreManager::instance().spawn_ensure_proxy_group_selection(saved_proxy_now);
     }
     emit_progress("error", 0, "解压替换失败: " + extract_res.error().message);
     return extract_res;
@@ -818,9 +820,11 @@ Result<void> CoreUpdater::start_core_upgrade(const GithubRelease& release) {
     return Result<void>::err(make_err(err_msg));
   }
 
-  // Ensure compliant proxy group selection & clean excluded connections (BUG-405)
+  // Ensure compliant proxy group selection & clean excluded connections (BUG-405 + BUG-407)
   if (api_client_) {
     CoreManager::instance().ensure_proxy_group_selection(*api_client_, saved_proxy_now);
+  } else {
+    CoreManager::instance().spawn_ensure_proxy_group_selection(saved_proxy_now);
   }
 
   emit_progress("done", 100, "内核更新成功！核心已成功重启。");

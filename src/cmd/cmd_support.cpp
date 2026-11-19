@@ -560,15 +560,19 @@ core::validate::ValidationOutcome enhance_profiles_live() {
       auto& mgr = core::CoreManager::instance();
       core::CoreApiClientAdapter api(&mihomo_unchecked());
       core::CoreOps ops;
-      ops.start = [] { return Result<void>::err(Error{0, "restart not wired"}); };
-      ops.stop = [] { return Result<void>::err(Error{0, "restart not wired"}); };
+      ops.start = [] {
+        return core::CoreManager::instance().start_auto(
+            util::dirs::clash_mini_path());
+      };
+      ops.stop = [] { return core::CoreManager::instance().stop(); };
       auto r = mgr.apply_config(
           api, utf::utf16_to_utf8(util::dirs::clash_mini_path()), ops);
       if (r.is_err()) {
         CWLOG_WARN("enhance_profiles_live apply_config failed: " + r.error().message);
       }
+    } else {
+      events::EventBus::refresh_clash();
     }
-    events::EventBus::refresh_clash();
   }
   return outcome;
 }

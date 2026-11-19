@@ -157,6 +157,7 @@ std::optional<std::pair<double, double>> LargeModeController::load(
 MainWindow::MainWindow() = default;
 
 MainWindow::~MainWindow() {
+  core::CoreManager::instance().set_pre_stop_hook(nullptr);
   if (alive_) {
     alive_->store(false, std::memory_order_release);
   }
@@ -283,7 +284,7 @@ bool MainWindow::create(bool show_immediately, bool defer_render) {
     // T14：Mini → 流量条占满上栏空间（census 极小窗布局）
     if (traffic_pane_) {
       traffic_pane_->set_mini(bp_.state() == WinState::Mini);
-      traffic_pane_->set_narrow(bp_.is_narrow());  // src: _layout.tsx:1774 宽窄内距分支
+      traffic_pane_->set_narrow(bp_.is_narrow());  // src: _layout.tsx:1483 宽窄内距与曲线模式分支
     }
     // T17：皮肤条高≤830 隐藏（census 口径；窗口客户区逻辑高）
     if (settings_drawer_ && hwnd_) {
@@ -512,13 +513,10 @@ void MainWindow::build_widget_tree() {
   install_notice_handler();
 
   // 订阅刷新代理配置事件（择优选点/配置刷新时触发）：自动重新同步活跃节点
+  // BUG-407: kRefreshClash 统一由 postbox_sub_refresh_（下方第 1275 行，含 node_retry_left_ = 8）处理，
+  // 避免双重订阅导致每次 refresh_clash 执行两次 reload_nodes()。
   events::EventBus::instance().subscribe(
       events::names::kRefreshProxies,
-      [this](const events::Payload&) {
-        UiPostbox::instance().post([this] { reload_nodes(); });
-      });
-  events::EventBus::instance().subscribe(
-      events::names::kRefreshClash,
       [this](const events::Payload&) {
         UiPostbox::instance().post([this] { reload_nodes(); });
       });
@@ -578,7 +576,7 @@ void MainWindow::build_widget_tree() {
 
 void ContentStack::on_arrange(const RectF& area) {
   set_bounds(area);
-  const float h = area.h - (bottom_inset > 0.0f ? bottom_inset : 0.0f);
+  const float h = (std::max)(0.0f, area.h - (bottom_inset > 0.0f ? bottom_inset : 0.0f));
   for (size_t i = 0; i < child_count(); ++i) {
     Widget* c = child(i);
     if (!c->visible()) continue;
@@ -1370,9 +1368,12 @@ void MainWindow::build_scene() {
       };
     }
     settings_drawer_->on_open_changed = [this](bool open) {
-      // src: _layout.tsx:1309「{!drawerOpen && (…)}」→ 抽屉打开时整条 quickbar 不渲染
+      // src: _layout.tsx:1047,1132「!drawerOpen」→ 抽屉打开时快捷栏与节点列表均不渲染
       if (quick_bar_) quick_bar_->set_visible(!open);
-      if (node_list_) node_list_->set_a11y_hidden(open);
+      if (node_list_) {
+        node_list_->set_visible(!open);
+        node_list_->set_a11y_hidden(open);
+      }
       update_conn_ws_state();
     };
     // patch_verge 键 → patch_verge_config；clash 键 → patch_clash_config
@@ -2339,6 +2340,14 @@ void MainWindow::resync_settings_ui() {
 void MainWindow::build_ws_pipes() {
   // T14：WS 订阅 → UiPostbox 转投 UI 线程（复用 T13 范式）
   ws_ = std::make_unique<mihomo::WsManager>();
+  // BUG-406: 停核前第 0ms 断开全部本地命名管道 WS 与空闲 HTTP 连接池句柄
+  auto alive = alive_;
+  core::CoreManager::instance().set_pre_stop_hook([this, alive] {
+    if (alive && alive->load(std::memory_order_acquire) && ws_) {
+      ws_->disconnect_all(0u);
+    }
+    cmd::mihomo_unchecked().http().clear_idle();
+  });
   ws_->configure(clashwin::util::dirs::ipc_path(),
                  clashwin::config::consts::kDefaultSecret);
   ws_sub_traffic_ = ws_->subscribe_traffic([this](const std::string& payload) {
@@ -2615,6 +2624,7 @@ void MainWindow::toggle_large() {
   }
   update_conn_ws_state();
   stealth_.feed_activity(now_ms());
+  if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
 // ---------- 几何 ----------
@@ -2635,9 +2645,24 @@ void MainWindow::on_client_resized(int cw, int ch, bool persist) {
   double lw = static_cast<double>(cw) / s;
   double lh = static_cast<double>(ch) / s;
   large_.on_resized(lw, lh);
-  bp_.set_large(large_.is_large());
   bp_.set_physical_size(cw, ch, s);
+  bp_.set_large(large_.is_large());
   stealth_.set_mini(bp_.is_mini());
+  if (title_bar_) title_bar_->set_large_mode(bp_.is_large());
+  if (scene_) {
+    scene_->apply_state(bp_.state(), bp_.state());
+    scene_->set_narrow(bp_.is_narrow());
+  }
+  if (traffic_pane_) {
+    traffic_pane_->set_mini(bp_.is_mini());
+    traffic_pane_->set_narrow(bp_.is_narrow());
+  }
+  if (settings_drawer_ && settings_drawer_->theme_card()) {
+    // src: src/pages/_layout.tsx:1312 @media (max-height: 830px)
+    const bool show_skin = lh > 830.0;
+    for (auto* b : settings_drawer_->theme_card()->skin_buttons_)
+      b->set_visible(show_skin);
+  }
   // src: _layout.tsx:224-228「if (drawerOpen && isMiniStatus) setDrawerOpen(false)」
   if (bp_.is_mini() && settings_drawer_ && settings_drawer_->is_open())
     settings_drawer_->set_open(false);
@@ -2941,6 +2966,7 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       // 显式 Resize 使像素尺寸恒等于客户区（DIP=px/scale 恒为 271x680）。
       rt_.resize(cw, ch);
       on_client_resized(cw, ch);
+      InvalidateRect(hwnd_, nullptr, FALSE);
       stealth_.feed_activity(now_ms());  // 几何变化 = 交互（续期）
       return 0;
     }

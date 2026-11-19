@@ -91,21 +91,25 @@ void MainScene::on_arrange(const RectF& area) {
       traffic_->layout_tree({0, traffic_y, w, std::max(0.0f, area.h - traffic_y)});
     }
   } else {
-    int traffic_h = narrow_ ? kTrafficPaneMinimal : kTrafficPaneWide;
-    float upper_h = std::max(0.0f, area.h - static_cast<float>(traffic_h));
+    // src: pages/_layout.tsx:1006-1013, 1481-1496 Upper flex: '1 1 0%', minHeight: 0; Lower flex: 0 1 135px, maxHeight: 100%
+    const float avail_h = (std::max)(0.0f, area.h);
+    const float target_traffic_h =
+        static_cast<float>(narrow_ ? kTrafficPaneMinimal : kTrafficPaneWide);
+    const float traffic_h = (std::min)(avail_h, target_traffic_h);
+    const float upper_h = (std::max)(0.0f, avail_h - traffic_h);
     if (upper_) {
       upper_->set_visible(true);
       upper_->layout_tree({0, 0, w, upper_h});
     }
     if (traffic_) {
       traffic_->set_visible(true);
-      traffic_->layout_tree({0, upper_h, w, static_cast<float>(traffic_h)});
+      traffic_->layout_tree({0, upper_h, w, traffic_h});
     }
   }
 }
 
 void MainScene::on_paint(IRenderTarget& rt) {
-  // src: pages/_layout.tsx:1293 .layout-content 透明承接 .layout theme_bg 与 .layout::before 极光
+  // src: pages/_layout.tsx:990-991 .layout-content 透明承接 .layout theme_bg 与 .layout::before 极光
   // 底色由 MainWindow::paint_window 先铺 theme_bg + 极光，本层不铺不透明底色避免遮挡极光
   (void)rt;
 }

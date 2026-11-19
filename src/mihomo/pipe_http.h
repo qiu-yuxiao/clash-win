@@ -54,6 +54,8 @@ class PipeHttpClient {
   void set_pool(int min, int max, int idle_s);
   // 关闭全部空闲连接并停止清理线程（重建线程在下次 connect）
   void clear_pool();
+  // BUG-406: 仅清空当前空闲连接池，保持 connected_/janitor_ 存活（用于 reload/pre-stop 防半关复用）
+  void clear_idle();
 
   Result<HttpResponse> send(const std::string& method, const std::string& path,
                             const std::map<std::string, std::string>& headers,
