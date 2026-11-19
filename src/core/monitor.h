@@ -37,21 +37,23 @@ namespace clashwin::core {
 
 class CoreMonitor {
  public:
-  // ← monitor.rs:42 HEALTH_DATA_FRESH_SECS = 60（Sync-1：v3.3.0 从 20s 回调至 60s 避免频繁后台测速）
-  static constexpr int64_t kHealthDataFreshSecs = 60;
-  // ← monitor.rs:70 DEAD_CONFIRM_MIN_INTERVAL_SECS = 10
-  static constexpr int64_t kDeadConfirmMinIntervalSecs = 10;
-  // ← monitor.rs v3.5.0 Continuity-First & Traffic Liveness 常量
+  // ← monitor.rs v3.5.0 ~ v3.5.6 Continuity-First & Traffic Liveness 常量
   static constexpr uint64_t kSuspectWindowSecs = 30;
-  static constexpr int64_t kPassiveTrafficMaxSkipSecs = 480;
-  static constexpr int64_t kIdleHealthFreshSecs = 300;
+  static constexpr int64_t kPassiveTrafficMaxSkipSecs = 1800;  // BUG-399: 480s -> 1800s (30min)
+  static constexpr int64_t kIdleHealthFreshSecs = 900;         // BUG-399: 300s -> 900s (15min)
   static constexpr int64_t kStallReprobeCooldownSecs = 60;
   static constexpr int64_t kMinAutoSwitchIntervalSecs = 120;
   static constexpr int64_t kAutoSwitchWindowSecs = 600;
   static constexpr size_t kMaxAutoSwitchesPerWindow = 3;
-  static constexpr int64_t kHttpsVerifyIntervalSecs = 180;
+  static constexpr int64_t kHttpsVerifyIntervalSecs = 600;     // BUG-400: 180s -> 600s (10min)
+  static constexpr size_t kPeriodicHttpsVerifySufficientStandbys = 3;       // BUG-400
+  static constexpr size_t kSingleTargetSkipFallbackMinHealthyPeers = 3;     // BUG-401
+  static constexpr int64_t kOnlineCheckFlowingSkipSecs = 60;                // BUG-403
+  static constexpr int kPrimaryNetProbeTimeoutMs = 250;                     // BUG-403
   static constexpr int64_t kActiveVerifyCooldownSecs = 60;
   static constexpr int64_t kHttpsVerifyAllFailedBackoffSecs = 600;
+  static constexpr int64_t kProbeCoalesceWindowMs = 1500;
+  static constexpr int64_t kSelfHealSnapshotReuseMs = 10000;
   static constexpr bool kDeadConnCleanupEnabled = false;
   static constexpr const char* kVerifyHttpsUrlPrimary =
       "https://github.githubassets.com/favicons/favicon.svg";
@@ -60,7 +62,7 @@ class CoreMonitor {
   // ← monitor.rs:1277-1280 物理网络双频探测间隔（在线 60s / 离线 5s）
   static constexpr int64_t kOnlineProbeIntervalMs = 60000;
   static constexpr int64_t kOfflineProbeIntervalMs = 5000;
-  // ← monitor.rs:302-307（BUG-317 / BUG-345）：3 路 TCP:53 并发竞速上限 600ms，总预算下限 2s
+  // ← monitor.rs（BUG-317 / BUG-345 / BUG-403）：备用两路 TCP:53 并发竞速上限 600ms，总预算下限 2s
   static constexpr int kTcp53RaceTimeoutMs = 600;
   static constexpr uint64_t kMinProbeBudgetSecs = 2;
   static constexpr uint32_t kSupervisorRestartDelayMs = 2000;
@@ -124,6 +126,10 @@ class CoreMonitor {
     std::function<bool()> api_recovery_keep_alive;
     // ← v3.5.0 后台定期真 HTTPS 验真（每 180s 周期调用，可选）
     std::function<void()> periodic_https_verify;
+    // ← v3.5.5 无头/冷启动恢复 profile.selected 到 PROXY 组（在 persisted_exit_usable 前）
+    std::function<void(const std::string& uid)> restore_selected_nodes;
+    // ← v3.5.5 Alive 但 HTTPS 验真失败 → ShouldMigrate（在 probe_metrics_with_fallback 之后且受 20s 宽限期保护）
+    std::function<bool()> should_migrate_untrusted;
     // 时钟（Unix 毫秒；测试注入虚拟时钟）
     std::function<int64_t()> now_ms;
   };
@@ -140,6 +146,8 @@ class CoreMonitor {
   // 非阻塞唤醒：仅通知守护线程尽快 tick，不在调用线程（UI 线程）做网络探测。
   // ← 修复 WM_CLOSE→轻量模式路径同步 tick 造成的消息循环阻塞（AppHangB1）。
   void kick();
+  bool has_pending_kick_for_test() const { return kick_.load(); }
+  void clear_kick_for_test() { kick_.store(false); }
 
   // 状态机单步（测试驱动；生产线程内部调用）
   enum class Action {
@@ -185,10 +193,16 @@ class CoreMonitor {
   static bool probe_physical_network_with(uint64_t timeout_secs,
                                           const std::string& test_url,
                                           const PhysicalNetProbeOps& ops);
-  // 生产入口：优先 TCP:53 并发竞速直连 223.5.5.5 / 119.29.29.29 / 1.1.1.1（600ms 上限），
-  // 全部不通时回退 test_url 域名 DNS 查询兜底（保底 >= 1400ms 预算）。
+  // 生产入口（BUG-403）：首选单路 223.5.5.5:53 (250ms)，失败再并发竞速 119.29.29.29 / 1.1.1.1（600ms），
+  // 全部不通时回退 test_url 域名 DNS 查询兜底。
   static bool is_physical_network_online(uint64_t timeout_secs,
                                          const std::string& test_url);
+
+  // BUG-403：近期真实下行流量（Flowing < 60s）证明物理网卡在线，跳过定期 TCP:53 探针
+  static bool has_recent_flowing_traffic(std::optional<int64_t> elapsed_secs);
+  static void record_flowing_traffic_at(int64_t now_ms);
+  static bool is_recent_flowing_traffic_active(int64_t now_ms);
+  static void reset_flowing_traffic_state();
 
   // ---- BUG-318：自愈双计数器纯函数状态机 ----
   enum class SelfHealAction {
@@ -250,6 +264,15 @@ class CoreMonitor {
                                        bool stall_cooldown_active);
   static bool should_allow_https_migration(ActiveTrafficState traffic);
 
+  // BUG-400：后台定期真 HTTPS 验真资格与“够用即止”（>=3 已验真 Alive 备用）门控
+  static bool should_run_periodic_https_verify_with(
+      const std::vector<std::string>& members,
+      const std::optional<std::string>& active_node,
+      const std::string& filter_text,
+      const std::function<bool(const std::string&)>& is_fake_node,
+      const std::function<bool(const std::string&)>& is_alive,
+      const std::function<bool(const std::string&)>& is_verified);
+
   struct MetricsProbeOutcome {
     std::map<std::string, uint32_t> delays;
     bool primary_url_distorted = false;
@@ -257,6 +280,16 @@ class CoreMonitor {
   static bool should_recheck_with_fallback(
       const std::map<std::string, uint32_t>& primary_delays,
       const std::vector<std::string>& expected_nodes);
+  // BUG-401：单目标主 URL 已有 >=3 个真实节点响应该 URL 时跳过整组备用 URL 复核
+  static bool should_recheck_primary_with_fallback_with(
+      const std::map<std::string, uint32_t>& primary_delays,
+      const std::vector<std::string>& expected_nodes,
+      bool allow_single_target_skip,
+      const std::function<bool(const std::string&)>& is_fake_node);
+  static bool should_recheck_primary_with_fallback(
+      const std::map<std::string, uint32_t>& primary_delays,
+      const std::vector<std::string>& expected_nodes,
+      bool allow_single_target_skip);
   static std::map<std::string, uint32_t> merge_probe_delays(
       std::map<std::string, uint32_t> primary,
       const std::map<std::string, uint32_t>& fallback);
@@ -324,6 +357,7 @@ class CoreMonitor {
   class ThrottledNetProbe {
    public:
     bool check(int64_t now_ms, const std::function<bool()>& probe_fn);
+    bool was_online() const;
     void reset();
 
    private:
@@ -338,10 +372,22 @@ class CoreMonitor {
     std::function<bool()> api_alive;
     std::function<bool()> group_ready;
     std::function<bool()> network_online;
+    std::function<bool()> dns_ready;  // 阶段 4：DNS 解析链（15s 上限，超时放行）
     std::function<int64_t()> now_ms;
     std::function<void(int)> sleep_ms;  // 测试注入假 sleep
   };
   static bool wait_for_clash_ready(const ReadyHooks& h);
+
+  // ---- 全局共享 PROXY__METRICS 拨测锁与快照复用（← monitor.rs:110/657） ----
+  static std::mutex& metrics_probe_mutex();
+  static std::optional<std::map<std::string, uint32_t>> try_reuse_metrics_probe(
+      int64_t now_ms, int64_t max_age_ms,
+      const std::vector<std::string>& expected_nodes, bool check_fallback);
+  static void record_metrics_probe(int64_t now_ms,
+                                   std::map<std::string, uint32_t> delays,
+                                   bool reported_live_to_ui = false);
+  static void invalidate_metrics_probe();
+  static bool mark_metrics_probe_reported_if_unreported();
 
   // 观测（测试断言）
   int api_fail_count() const { return api_fail_count_.load(); }

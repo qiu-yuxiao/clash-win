@@ -13,7 +13,8 @@ nlohmann::json yaml_node_to_json(const YAML::Node& node) {
     const std::string& s = node.Scalar();
     if (s == "true") return true;
     if (s == "false") return false;
-    if (s == "null" || s == "~" || s.empty()) return nullptr;
+    if (s == "null" || s == "~") return nullptr;
+    if (s.empty()) return std::string();
     try {
       size_t pos = 0;
       long long i = std::stoll(s, &pos);

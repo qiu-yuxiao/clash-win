@@ -97,8 +97,6 @@ UT_TEST(t27_switch_grace_blocks_fail_count_within_20s) {
 UT_TEST(t27_v324_bug315_timing_constants_and_bounds) {
   MonitorFixture f;
   auto& m = f.m;
-  UT_CHECK_EQ(CoreMonitor::kHealthDataFreshSecs, 60);
-  UT_CHECK_EQ(CoreMonitor::kDeadConfirmMinIntervalSecs, 10);
   UT_CHECK_EQ(m.params().switch_grace_ms, 20000);
   UT_CHECK_EQ(m.params().heal_cooldown_ms, 25000);
 

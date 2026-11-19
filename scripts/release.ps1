@@ -207,6 +207,8 @@ Replace-RegexStrict (Join-Path $RepoRoot 'src\clashwin.rc') `
   '("FileVersion",\s*")([^"]*)(")' ('${1}' + $Version + '${3}')
 Replace-RegexStrict (Join-Path $RepoRoot 'src\clashwin.rc') `
   '("ProductVersion",\s*")([^"]*)(")' ('${1}' + $Version + '${3}')
+Replace-RegexStrict (Join-Path $RepoRoot 'src\app.manifest') `
+  '(<assemblyIdentity\s+version=")([^"]*)(")' ('${1}' + "$BaseSemVer.0" + '${3}')
 
 # ---------- 3. 检查 / 自动生成 CHANGELOG.md 对应版本章节草稿 ----------
 Write-Host "`n[步骤 2/5] 检查 CHANGELOG.md 发布说明章节" -ForegroundColor Yellow
@@ -267,7 +269,7 @@ if (-not $SkipBuild) {
   & "$PSScriptRoot\portable.ps1" -Version $Version -Configuration Release
   if ($LASTEXITCODE -ne 0) { throw '本地 portable.ps1 打包失败' }
 
-  $buildExeSha = (Get-FileHash -LiteralPath (Join-Path $RepoRoot 'build\bin\Release\clashwin.exe') -Algorithm SHA256).Hash
+  $buildExeSha = (Get-FileHash -LiteralPath (Join-Path $RepoRoot 'build\bin\Release\clash-win.exe') -Algorithm SHA256).Hash
 
   # 若本机装有 NSIS makensis.exe，则一并预演 NSIS 安装包构建与 stage 内核完整性校验
   $installerScript = Join-Path $RepoRoot 'installer\build_installer.ps1'
@@ -280,19 +282,23 @@ if (-not $SkipBuild) {
     & $installerScript -Version $Version -Configuration Release -SkipSign
     if ($LASTEXITCODE -ne 0) { throw '本地 build_installer.ps1 打包失败' }
 
-    $stageExe = Join-Path $RepoRoot 'installer\stage\clashwin.exe'
+    $stageExe = Join-Path $RepoRoot 'installer\stage\clash-win.exe'
     $stageSha = (Get-FileHash -LiteralPath $stageExe -Algorithm SHA256).Hash
     if ($stageSha -ne $buildExeSha) {
-      throw "stage\clashwin.exe 哈希 ($stageSha) 与 build\bin\Release\clashwin.exe ($buildExeSha) 不一致"
+      throw "stage\clash-win.exe 哈希 ($stageSha) 与 build\bin\Release\clash-win.exe ($buildExeSha) 不一致"
     }
-    $stageCore = Join-Path $RepoRoot 'installer\stage\sidecar\win-mihomo.exe'
+    $stageCore = Join-Path $RepoRoot 'installer\stage\win-mihomo.exe'
     $coreHash = (Get-FileHash -LiteralPath $stageCore -Algorithm SHA256).Hash.ToUpperInvariant()
     if ($coreHash -ne '1CDE41CFFFD3DE0AEDAD63C0A8515E1CE5EEA507E8133AED0F637D316C93800A') {
-      throw "stage\sidecar\win-mihomo.exe SHA256 ($coreHash) 与上游基线不一致"
+      throw "stage\win-mihomo.exe SHA256 ($coreHash) 与上游基线不一致"
     }
-    $stageSidecarItems = @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'installer\stage\sidecar') -Recurse -Force)
-    if ($stageSidecarItems.Count -ne 5) {
-      throw "stage\sidecar 内包含多余残留文件（期望恰好 5 个，实际 $($stageSidecarItems.Count) 个）"
+    if (Test-Path -LiteralPath (Join-Path $RepoRoot 'installer\stage\sidecar')) {
+      throw 'stage 内不应存在冗余 sidecar\ 目录（应平铺在根/resources）'
+    }
+    foreach ($resBin in @('clash-verge-service.exe', 'clash-verge-service-install.exe', 'clash-verge-service-uninstall.exe', 'enableLoopback.exe')) {
+      if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot "installer\stage\resources\$resBin"))) {
+        throw "stage\resources 缺少 $resBin"
+      }
     }
     Write-Host "  [PACKAGE OK] 本地便携包 + NSIS 安装包预演全部通过（exe SHA256=$buildExeSha）。" -ForegroundColor Green
   } else {

@@ -8,6 +8,7 @@
 #include "core/timer.h"
 #include "cmd/command_service.h"
 #include "cmd/cmd_install.h"
+#include "events/event_names.h"
 
 #include "config/config.h"
 #include "config/profiles.h"
@@ -30,13 +31,51 @@
 namespace clashwin::cmd {
 
 namespace {
+int parse_2digits(const std::string& t, size_t pos, int* out) {
+  if (pos + 2 > t.size() ||
+      !std::isdigit(static_cast<unsigned char>(t[pos])) ||
+      !std::isdigit(static_cast<unsigned char>(t[pos + 1]))) {
+    return -1;
+  }
+  *out = (t[pos] - '0') * 10 + (t[pos + 1] - '0');
+  return 0;
+}
+
 int64_t parse_rfc3339_epoch_sec(const std::string& t) {
   if (t.size() < 19) return -1;
   std::tm tm{};
   std::istringstream iss(t.substr(0, 19));
   iss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
   if (iss.fail()) return -1;
-  return static_cast<int64_t>(_mkgmtime(&tm));
+  int64_t sec = static_cast<int64_t>(_mkgmtime(&tm));
+  if (sec < 0) return -1;
+
+  size_t pos = 19;
+  if (pos < t.size() && t[pos] == '.') {
+    ++pos;
+    while (pos < t.size() && std::isdigit(static_cast<unsigned char>(t[pos]))) {
+      ++pos;
+    }
+  }
+  int64_t tz_offset_sec = 0;
+  if (pos < t.size()) {
+    if (t[pos] == 'Z' || t[pos] == 'z') {
+      tz_offset_sec = 0;
+    } else if (t[pos] == '+' || t[pos] == '-') {
+      const int sign = (t[pos] == '+') ? 1 : -1;
+      ++pos;
+      int hh = 0;
+      int mm = 0;
+      if (parse_2digits(t, pos, &hh) != 0) return -1;
+      pos += 2;
+      if (pos < t.size() && t[pos] == ':') ++pos;
+      if (parse_2digits(t, pos, &mm) != 0) return -1;
+      if (hh > 23 || mm > 59) return -1;
+      tz_offset_sec = sign * (static_cast<int64_t>(hh) * 3600 +
+                              static_cast<int64_t>(mm) * 60);
+    }
+  }
+  return sec - tz_offset_sec;
 }
 // ← feat::CURRENT_SWITCHING_PROFILE：导入/更新/删除/切换/定时互斥。
 // T15：锁实现上移 core/switching_lock.h（timer 同一把，跨层互斥）
@@ -107,29 +146,66 @@ void ensure_t16_hooks() {
   };
 
   core::DelayProbeHooks dh;
-  dh.group_probe = [get_client](const std::string& metrics_group)
+  dh.group_probe_ex = [get_client](const std::string&,
+                                   const std::vector<std::string>& expected_nodes,
+                                   bool allow_coalesce,
+                                   bool allow_single_target_skip)
       -> std::optional<std::map<std::string, uint32_t>> {
     auto* c = get_client();
     if (!c) return std::nullopt;
+    std::lock_guard<std::mutex> probe_lock(
+        core::CoreMonitor::metrics_probe_mutex());
+    if (allow_coalesce) {
+      const int64_t probe_now = static_cast<int64_t>(GetTickCount64());
+      if (auto reused = core::CoreMonitor::try_reuse_metrics_probe(
+              probe_now, core::CoreMonitor::kProbeCoalesceWindowMs,
+              expected_nodes, true)) {
+        return reused;
+      }
+    }
     std::string url = "https://cp.cloudflare.com/generate_204";
     try {
       const auto& verge = *config::Config::instance().verge().latest_arc();
       url = verge.default_latency_test.value_or(url);
     } catch (...) {}
-    auto r = c->delay_group(metrics_group, url, core::kNodeDelayMaxMs);
-    if (!r.is_ok()) {
-      static constexpr const char* kFallbackTestUrl =
-          "https://www.gstatic.com/generate_204";
-      if (url != kFallbackTestUrl) {
-        r = c->delay_group(metrics_group, kFallbackTestUrl,
-                           core::kNodeDelayMaxMs);
+    static constexpr const char* kPrimaryTestUrl =
+        "https://cp.cloudflare.com/generate_204";
+    static constexpr const char* kFallbackTestUrl =
+        "https://www.gstatic.com/generate_204";
+    const std::string sec_url =
+        (url == kFallbackTestUrl) ? kPrimaryTestUrl : kFallbackTestUrl;
+
+    auto r = c->delay_group("PROXY__METRICS", url, core::kNodeDelayMaxMs);
+    if (r.is_ok()) {
+      std::map<std::string, uint32_t> merged = std::move(r.value());
+      if (core::CoreMonitor::should_recheck_primary_with_fallback(
+              merged, expected_nodes, allow_single_target_skip)) {
+        auto rfb =
+            c->delay_group("PROXY__METRICS", sec_url, core::kNodeDelayMaxMs);
+        if (rfb.is_ok()) {
+          merged = core::CoreMonitor::merge_probe_delays(std::move(merged),
+                                                         rfb.value());
+        } else if (merged.empty()) {
+          core::CoreMonitor::invalidate_metrics_probe();
+          return std::nullopt;
+        }
       }
+      core::CoreMonitor::record_metrics_probe(
+          static_cast<int64_t>(GetTickCount64()), merged, false);
+      return merged;
     }
-    if (!r.is_ok() && metrics_group != "PROXY") {
-      r = c->delay_group("PROXY", url, core::kNodeDelayMaxMs);
+
+    auto r2 = c->delay_group("PROXY__METRICS", sec_url, core::kNodeDelayMaxMs);
+    if (!r2.is_ok()) {
+      core::CoreMonitor::invalidate_metrics_probe();
+      return std::nullopt;
     }
-    if (!r.is_ok()) return std::nullopt;
-    return r.value();
+    core::CoreMonitor::record_metrics_probe(
+        static_cast<int64_t>(GetTickCount64()), r2.value(), false);
+    return r2.value();
+  };
+  dh.group_probe = [ex = dh.group_probe_ex](const std::string& g) {
+    return ex(g, {}, true, false);
   };
   dh.emit_results = [](const std::string& group,
                        const std::vector<std::pair<std::string, uint32_t>>& r,
@@ -222,7 +298,8 @@ void ensure_t16_hooks() {
     auto& profiles = config::Config::instance().profiles();
     bool ok = false;
     profiles.edit_draft([&](config::IProfiles& d) {
-      for (auto& it : d.items.value_or(std::vector<config::PrfItem>{})) {
+      if (!d.items) return;
+      for (auto& it : *d.items) {
         if (it.uid && *it.uid == uid) {
           // 单组架构：selected 只含 PROXY 一项（← monitor.rs:1080 注释）
           it.selected = std::vector<config::PrfSelected>{
@@ -259,6 +336,96 @@ void ensure_t16_hooks() {
     auto g = c->get_group_by_name(group);
     if (!g.is_ok() || !g.value().all) return std::vector<std::string>{};
     return *g.value().all;
+  };
+  ah.is_verified_true = [](const std::string& name) {
+    return util::is_verified_true_node(name);
+  };
+  ah.current_proxy_now = [get_client](const std::string& group)
+      -> std::optional<std::string> {
+    auto* c = get_client();
+    if (!c) return std::nullopt;
+    auto g = c->get_group_by_name(group);
+    if (!g.is_ok()) return std::nullopt;
+    return g.value().now;
+  };
+  ah.run_https_verify = [get_client](const std::vector<std::string>& candidates) {
+    if (!util::has_pending_unverified_nodes(candidates)) return;
+    auto* c = get_client();
+    if (!c) return;
+    if (!core::CoreMonitor::is_recent_flowing_traffic_active(
+            static_cast<int64_t>(GetTickCount64())) &&
+        !core::CoreMonitor::is_physical_network_online(
+            2, "https://cp.cloudflare.com/generate_204")) {
+      return;
+    }
+    std::map<std::string, uint32_t> delays;
+    {
+      std::lock_guard<std::mutex> lock(
+          core::CoreMonitor::metrics_probe_mutex());
+      auto r1 = c->delay_group(
+          "PROXY__METRICS", core::CoreMonitor::kVerifyHttpsUrlPrimary,
+          core::kNodeDelayMaxMs, 5000);
+      if (r1.is_ok() && !r1.value().empty()) {
+        delays = std::move(r1.value());
+      } else {
+        auto r2 = c->delay_group(
+            "PROXY__METRICS", core::CoreMonitor::kVerifyHttpsUrlFallback,
+            core::kNodeDelayMaxMs, 5000);
+        if (r2.is_err()) return;
+        delays = std::move(r2.value());
+      }
+    }
+    std::vector<std::string> passed;
+    for (const auto& [name, d] : delays) {
+      if (d >= core::kNodeDelayMinMs && d < core::kNodeDelayMaxMs) {
+        passed.push_back(name);
+      }
+    }
+    if (passed.empty()) return;
+    std::vector<std::string> failed;
+    for (const auto& cand : candidates) {
+      if (std::find(passed.begin(), passed.end(), cand) == passed.end() &&
+          !util::is_dummy_node(cand) && !util::is_confirmed_fake_node(cand)) {
+        failed.push_back(cand);
+      }
+    }
+    (void)util::record_https_verify_results(passed, failed);
+  };
+  ah.wait_ready = [get_client]() -> bool {
+    core::CoreMonitor::ReadyHooks rh;
+    rh.api_alive = [get_client]() {
+      auto* c = get_client();
+      return c && c->get_base_config().is_ok();
+    };
+    rh.group_ready = [get_client]() {
+      auto* c = get_client();
+      if (!c) return false;
+      auto g = c->get_group_by_name("PROXY");
+      if (!g.is_ok() || !g.value().all) return false;
+      for (const auto& n : *g.value().all) {
+        if (!n.empty() && !util::is_dummy_node(n)) return true;
+      }
+      return false;
+    };
+    rh.network_online = []() {
+      std::string url = "https://cp.cloudflare.com/generate_204";
+      try {
+        auto v = config::Config::instance().verge().latest_arc();
+        if (v && v->default_latency_test && !v->default_latency_test->empty()) {
+          url = *v->default_latency_test;
+        }
+      } catch (...) {}
+      return core::CoreMonitor::is_physical_network_online(2, url);
+    };
+    rh.dns_ready = [get_client]() {
+      auto* c = get_client();
+      if (!c) return true;
+      auto dr = c->dns_query_ready("www.baidu.com");
+      if (dr.is_err()) return true;  // 端点不可用时放行由下游兜底（← monitor.rs:1120）
+      return dr.value();
+    };
+    rh.now_ms = []() { return static_cast<int64_t>(GetTickCount64()); };
+    return core::CoreMonitor::wait_for_clash_ready(rh);
   };
   core::AutoSelect::instance().set_hooks(std::move(ah));
 }
@@ -331,6 +498,10 @@ void install_cmd_profile(CommandService& svc) {
          }
          if (item_opt->uid)
            events::EventBus::notify_profile_changed(*item_opt->uid);
+         core::ProfileTimer::instance().refresh();
+         events::EventBus::instance().publish(
+             events::names::kTimerUpdated,
+             item_opt->uid.value_or(std::string()));
          // ← profile.rs:132-146 + get_merged_proxies：导入新订阅后同步刷新运行时配置与节点
          {
            auto outcome = update_config_forced();
@@ -425,6 +596,9 @@ void install_cmd_profile(CommandService& svc) {
          if (auto save = profiles.data_arc()->save_file(); !save.is_ok()) {
            return CmdResult::err({errs::kIo, save.error().message});
          }
+         core::ProfileTimer::instance().refresh();
+         events::EventBus::instance().publish(events::names::kTimerUpdated,
+                                              index->get<std::string>());
          const size_t cleared_quarantine =
              is_manual_trigger ? util::clear_unverified_https_failures() : 0;
          {
@@ -474,6 +648,9 @@ void install_cmd_profile(CommandService& svc) {
          if (auto save = profiles.data_arc()->save_file(); !save.is_ok()) {
            return CmdResult::err({errs::kIo, save.error().message});
          }
+         core::ProfileTimer::instance().refresh();
+         events::EventBus::instance().publish(events::names::kTimerUpdated,
+                                              index->get<std::string>());
          if (should_update.value() || merged_affected) {
            auto outcome = update_config_forced();
            if (outcome.is_valid()) {
@@ -509,6 +686,9 @@ void install_cmd_profile(CommandService& svc) {
          if (auto save = profiles.data_arc()->save_file(); !save.is_ok()) {
            return CmdResult::err({errs::kIo, save.error().message});
          }
+         core::ProfileTimer::instance().refresh();
+         events::EventBus::instance().publish(events::names::kTimerUpdated,
+                                              index->get<std::string>());
          return CmdResult::ok(Json::object());
        },
        consts::kTimeoutConfig});

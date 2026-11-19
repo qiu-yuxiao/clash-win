@@ -61,6 +61,13 @@ struct AutoSelectHooks {
   std::function<std::optional<std::vector<std::pair<std::string, uint32_t>>>(
       const std::vector<std::string>& nodes)>
       fresh_metrics_subset;
+  // 真 HTTPS 验真判定与全员未验真前置兜底（← monitor.rs:2199-2219）
+  std::function<bool(const std::string& name)> is_verified_true;
+  std::function<void(const std::vector<std::string>& candidates)>
+      run_https_verify;
+  // 连续性优先（← monitor.rs:2262）：读取 PROXY 当前节点，命中则跳过冗余 PUT
+  std::function<std::optional<std::string>(const std::string& group)>
+      current_proxy_now;
 };
 
 class AutoSelect {
@@ -93,7 +100,8 @@ class AutoSelect {
       const std::vector<std::pair<std::string, uint32_t>>& display,
       const std::function<std::vector<std::string>()>& failed_servers = nullptr,
       const std::function<std::map<std::string, std::string>()>&
-          node_server_map = nullptr);
+          node_server_map = nullptr,
+      const std::function<bool(const std::string&)>& is_verified_true = nullptr);
 
   // 激活校准防线（三重之一，← use-profiles activateSelected 语义）：
   // 持久 selected 若不在 filterText 子集内（越界/被污染）→ 不写回内核，
@@ -107,8 +115,10 @@ class AutoSelect {
       const std::function<bool(const std::string&, const std::string&)>&
           write_selected);
 
-  // 唤醒静默测速（T16⑤）：5min 冷却 + 复用 trigger 互斥；T19 挂触发
-  bool silent_test_on_wakeup(const std::string& profile_uid);
+  // 唤醒静默测速（T16⑤ / BUG-402）：5min 冷却 + 复用 trigger 互斥；传入过滤子集以复用 <30s 快照
+  bool silent_test_on_wakeup(
+      const std::string& profile_uid,
+      std::optional<std::vector<std::string>> node_names = std::nullopt);
   int64_t wakeup_cooldown_remaining_ms() const;
   bool is_running() const { return running_.load(); }
 

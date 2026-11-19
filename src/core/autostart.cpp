@@ -79,7 +79,7 @@ class WindowsAutostartAccess : public IAutostartAccess {
     if (len > 0 && len < MAX_PATH) {
       return std::wstring(buf, len);
     }
-    return util::dirs::exe_dir() + L"\\clashwin.exe";
+    return util::dirs::exe_dir() + L"\\clash-win.exe";
   }
 
   // ★ ❌6 StartupApproved\Run\<name>：REG_BINARY，首字节 0x02=批准启用 / 0x03=禁用，

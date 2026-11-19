@@ -16,6 +16,8 @@
 #include "core/quick_routing.h"
 #include "ui/context_menu.h"
 #include "ui/overlay_fade.h"
+#include "ui/textfield.h"
+#include "ui/theme/theme.h"
 #include "ui/widget.h"
 
 namespace clashwin::ui::scene {
@@ -51,8 +53,10 @@ class AddUrlDialog : public Widget {
   bool on_mouse(const MouseEvent& e) override;
   bool on_key(const KeyEvent& e) override;
 
+  // src: src/utils/popup-styles.ts:173-185 窄窗弹窗锁定左侧 271px
   bool hit_self(PointF local) const override {
-    return open_ && Widget::hit_self(local);
+    return open_ && local.x < std::min(theme::kPopupPaneWidth, bounds().w) &&
+           Widget::hit_self(local);
   }
   bool a11y_subtree_visible() const override {
     return open_ && visible() && !a11y_hidden();
@@ -71,17 +75,20 @@ class AddUrlDialog : public Widget {
   RectF input_rect() const { return input_rect_; }
   RectF cancel_btn_rect() const { return btn_cancel_rect_; }
   RectF add_btn_rect() const { return btn_add_rect_; }
+  TextField* url_field() const { return url_field_; }
 
  private:
   void do_submit();
   void copy_payload_to_clipboard();
 
   bool open_ = false;
+  bool syncing_field_ = false;
   // ← MUI Dialog 缺省 Fade 过渡（enter 225ms / leave 195ms）
   OverlayFade fade_;
   std::string payload_;
   core::quick_routing::RuleTarget target_ = core::quick_routing::RuleTarget::Proxy;
   std::string error_message_;
+  TextField* url_field_ = nullptr;
   ContextMenu* context_menu_ = nullptr;
   bool all_selected_ = false;
 

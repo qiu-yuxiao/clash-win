@@ -36,7 +36,7 @@ constexpr float kPopupActionsPadY = 10.8f;  // ← popup-styles.ts:240 py: 1.35
 constexpr float kPopupActionsGap = 8.0f;    // ← popup-styles.ts:241 gap: 1
 constexpr float kPopupBtnLineH = 1.75f;     // ← MUI Button 根 lineHeight 1.75
 constexpr float kPopupLabelLineH = 1.4f;    // ← use-custom-theme.ts:220 body2 lineHeight 1.4
-// 豁免: MUI TextField size="small" 高 40 = 8.5×2 + 23 行盒（pixel-parity-audit P12）
+// src: node_modules/@mui/material/InputBase/InputBase.js:76-78 MUI TextField size="small" 高 40 = 8.5×2 + 23 行盒
 constexpr float kPopupFieldH = 40.0f;
 // 标题带：弹窗内层 Box 把 fontSize 覆写成 15.5、lineHeight 1.35
 //   （← layout-dialogs.tsx:152-153 / :286-287，两处一致）
@@ -68,7 +68,8 @@ std::string get_current_log_time() {
   localtime_r(&t, &tm);
 #endif
   std::ostringstream oss;
-  oss << std::put_time(&tm, "%H:%M:%S");
+  // src: src/components/log/log-item.tsx:45 dayjs MM-DD HH:mm:ss
+  oss << std::put_time(&tm, "%m-%d %H:%M:%S");
   return oss.str();
 }
 
@@ -80,13 +81,300 @@ std::string format_core_version(const std::string& version) {
   return "Ver." + version.substr(i);
 }
 
+// src: src/pages/_layout/components/layout-dialogs.tsx:303 客户端版本前缀 v
+std::string ensure_v_prefix(const std::string& version) {
+  if (version.empty()) return "";
+  if (version[0] == 'v' || version[0] == 'V') return version;
+  return "v" + version;
+}
+
+std::string strip_ver_prefix(std::string ver) {
+  auto trim_ws = [](std::string& s) {
+    while (!s.empty() && s.front() == ' ') s.erase(s.begin());
+    while (!s.empty() && s.back() == ' ') s.pop_back();
+  };
+  trim_ws(ver);
+  if (ver.rfind("Ver.", 0) == 0 || ver.rfind("ver.", 0) == 0) {
+    ver.erase(0, 4);  // 豁免: 字符串前缀长度 "Ver."（出处: 无）
+    trim_ws(ver);
+  }
+  while (!ver.empty() && (ver[0] == 'v' || ver[0] == 'V')) {
+    ver.erase(0, 1);
+  }
+  trim_ws(ver);
+  return ver;
+}
+
+bool versions_equal(const std::string& a, const std::string& b) {
+  const std::string sa = strip_ver_prefix(a);
+  const std::string sb = strip_ver_prefix(b);
+  return !sa.empty() && !sb.empty() && sa == sb;
+}
+
+std::wstring to_lower_w(const std::wstring& s) {
+  std::wstring out = s;
+  for (auto& ch : out) ch = static_cast<wchar_t>(::towlower(ch));
+  return out;
+}
+
+bool icontains_ascii_or_utf8(const std::string& hay, const std::string& needle) {
+  if (needle.empty()) return true;
+  const std::wstring wh = to_lower_w(utf::utf8_to_utf16(hay));
+  const std::wstring wn = to_lower_w(utf::utf8_to_utf16(needle));
+  return wh.find(wn) != std::wstring::npos;
+}
+
+void apply_menu_style_to_list(MenuList* ml, const MenuStyle& st) {
+  if (!ml) return;
+  ml->item_height = st.item_h;
+  ml->sep_height_ = st.sep_h;
+  ml->min_width_ = st.min_w;
+  ml->radius_ = st.radius;
+  ml->font_size_ = st.font_size;
+  ml->font_weight_ = st.font_weight;
+  ml->gold_hover_ = st.gold_hover;
+  ml->gradient_panel_ = st.gradient_panel;
+  ml->pad_top_ = st.pad_v;
+  ml->pad_bottom_ = st.pad_v;
+  ml->padding_h = st.padding_h;
+  ml->hover_inset_ = st.hover_inset;
+  ml->bg_ = st.bg;
+  ml->border_ = st.border;
+  ml->text_ = st.text;
+  ml->disabled_text_ = st.disabled_text;
+  ml->danger_text_ = st.danger_text;
+  ml->selected_bg_ = st.selected_bg;
+  ml->selected_text_ = st.selected_text;
+  ml->hover_grad_ = st.hover_grad;
+  ml->hover_n_ = st.hover_n;
+  ml->hover_angle_ = st.hover_angle;
+  ml->hover_bg_ = st.hover_bg;
+  ml->hover_radius_ = st.hover_radius;
+  ml->hover_text_ = st.hover_text;
+  ml->hover_border_ = st.hover_border;
+  ml->hover_border_w_ = st.hover_border_w;
+  ml->hover_glow_ = st.hover_glow;
+  ml->hover_glow_color_ = st.hover_glow_color;
+  ml->hover_glow_blur_ = st.hover_glow_blur;
+  ml->panel_grad_on_ = st.panel_grad_on;
+  ml->panel_n_ = st.panel_n;
+  ml->panel_angle_ = st.panel_angle;
+  ml->panel_bg_ = st.panel_bg;
+  ml->panel_border_ = st.panel_border;
+  ml->panel_border_w_ = st.panel_border_w;
+  for (int i = 0; i < 4; ++i) {  // src: src/utils/button-styles.ts:44 四停渐变数组长度
+    ml->hover_stops_[i] = st.hover_stops[i];
+    ml->panel_stops_[i] = st.panel_stops[i];
+  }
+}
+
+void draw_text_with_highlights(IRenderTarget& rt, ITextEngine* eng,
+                               const std::wstring& text, const std::wstring& query_w,
+                               const RectF& box, const TextStyle& base_ts) {
+  if (query_w.empty() || !eng || text.empty()) {
+    rt.draw_text(text, box, base_ts);
+    return;
+  }
+  const std::wstring q_low = to_lower_w(query_w);
+  const std::wstring t_low = to_lower_w(text);
+  if (t_low.find(q_low) == std::wstring::npos) {
+    rt.draw_text(text, box, base_ts);
+    return;
+  }
+
+  // 按视觉行拆分（单行/多行统一高亮渲染），对齐 logs highlightText
+  // src: src/components/log/log-item.tsx:48-70 #ffeb3b 高亮块
+  const Brush hl_bg{Color4f::hex(0xFFEB3B, 0.7f)};  // src: src/components/log/log-item.tsx:58
+  constexpr float kRowStep = 16.0f;  // src: src/components/log/log-item.tsx:11 lineHeight 16px
+  std::vector<std::wstring> lines;
+  if (!base_ts.wrap) {
+    lines.push_back(text);
+  } else {
+    size_t pos = 0;
+    const size_t n = text.size();
+    while (pos < n) {
+      size_t end = pos + 1;
+      while (end < n) {
+        if (text[end] == L'\n') break;
+        const float w = eng->measure_text(text.substr(pos, end - pos + 1), base_ts, 0).w;
+        if (w > box.w && end > pos) break;
+        ++end;
+      }
+      lines.push_back(text.substr(pos, end - pos));
+      pos = (end < n && text[end] == L'\n') ? (end + 1) : end;
+    }
+    if (lines.empty()) lines.push_back(text);
+  }
+
+  TextStyle row_ts = base_ts;
+  row_ts.wrap = false;
+  row_ts.ellipsis = false;
+  TextStyle hl_ts = row_ts;
+  hl_ts.color = Color4f::hex(0x000000);  // src: src/components/log/log-item.tsx:59
+
+  const float row_h = base_ts.wrap ? kRowStep : box.h;
+  for (size_t li = 0; li < lines.size(); ++li) {
+    const float ry = box.y + static_cast<float>(li) * row_h;
+    if (ry > box.bottom()) break;
+    const RectF row_rc{box.x, ry, box.w, row_h};
+    rt.draw_text(lines[li], row_rc, row_ts);
+
+    const std::wstring row_low = to_lower_w(lines[li]);
+    size_t search_at = 0;
+    while (true) {
+      const size_t hit = row_low.find(q_low, search_at);
+      if (hit == std::wstring::npos) break;
+      const float x0 = hit > 0 ? eng->measure_text(lines[li].substr(0, hit), row_ts, 0).w : 0.0f;
+      const std::wstring match_s = lines[li].substr(hit, q_low.size());
+      const float mw = eng->measure_text(match_s, row_ts, 0).w;
+      // src: src/components/log/log-item.tsx:58 borderRadius 2px
+      const RectF hl_rc{box.x + x0, ry, mw, row_h};
+      rt.round_rect(hl_rc, 2.0f, Pen{Color4f(0, 0, 0, 0), 0.0f}, &hl_bg);
+      rt.draw_text(match_s, hl_rc, hl_ts);
+      search_at = hit + q_low.size();
+    }
+  }
+}
+
 }  // namespace
 
 // ==========================================
 // 1. EditProfileModal
 // ==========================================
 EditProfileModal::EditProfileModal(Widget* parent) : Widget(parent) {
-  set_z_order(960);
+  set_z_order(960);  // 豁免: Mini 无对应物 — 抽屉模态层序（出处: src/pages/_layout/components/layout-dialogs.tsx:119）
+
+  auto make_field = [&](int idx) -> TextField* {
+    auto tf_up = std::make_unique<TextField>(this);
+    TextField* tf = tf_up.get();
+    // src: node_modules/@mui/material/InputBase/InputBase.js:76-78 MUI size=small 高 40px
+    tf->height_ = kPopupFieldH;
+    // src: src/pages/_layout/components/layout-dialogs.tsx:164-216 fontSize 14px, px 10
+    tf->set_padding_x(10.0f);
+    tf->style_.size = 14.0f;
+    tf->apply_theme();
+    tf->set_visible(false);
+    tf->on_submit = [this] { trigger_save(); };
+    tf->on_key_intercept = [this](const KeyEvent& e) {
+      if (e.type == KeyEventType::Down && (e.key == VK_ESCAPE || e.key == 27)) {
+        close();
+        return true;
+      }
+      if (e.type == KeyEventType::Down && (e.key == VK_RETURN || e.key == 13)) {
+        trigger_save();
+        return true;
+      }
+      return false;
+    };
+    tf->on_context_menu = [this, tf](PointF anchor) { open_field_menu(tf, anchor); };
+    tf->on_text_changed = [this, tf, idx](const std::wstring& w) {
+      if (syncing_fields_) return;
+      focused_field_ = idx;
+      if (idx == 1) {
+        name_ = utf::utf16_to_utf8(w);
+      } else if (idx == 2) {
+        url_ = utf::utf16_to_utf8(w);
+      } else if (idx == 3) {
+        std::wstring digits;
+        digits.reserve(w.size());
+        for (wchar_t ch : w) {
+          if (ch >= L'0' && ch <= L'9') digits.push_back(ch);
+        }
+        int val = digits.empty() ? 0 : _wtoi(digits.c_str());
+        // src: src/pages/_layout/components/layout-dialogs.tsx:207-216 更新间隔上限
+        if (val > 100000) val = 100000;
+        interval_mins_ = val;
+        if (digits != w) {
+          syncing_fields_ = true;
+          tf->set_text(digits);
+          syncing_fields_ = false;
+        }
+      }
+      invalidate();
+    };
+    add_child(std::move(tf_up));
+    return tf;
+  };
+
+  name_field_ = make_field(1);
+  url_field_ = make_field(2);
+  interval_field_ = make_field(3);
+
+  auto fm = std::make_unique<ContextMenu>(this);
+  field_menu_ = fm.get();
+  field_menu_->set_z_order(1020);  // 豁免: Mini 无对应物 — 弹窗内右键菜单叠在输入框之上（出处: src/utils/popup-styles.ts）
+  add_child(std::move(fm));
+}
+
+void EditProfileModal::set_name(const std::string& n) {
+  name_ = n;
+  if (name_field_) {
+    syncing_fields_ = true;
+    name_field_->set_text(utf::utf8_to_utf16(n));
+    syncing_fields_ = false;
+  }
+  invalidate();
+}
+
+void EditProfileModal::set_url(const std::string& u) {
+  url_ = u;
+  if (url_field_) {
+    syncing_fields_ = true;
+    url_field_->set_text(utf::utf8_to_utf16(u));
+    syncing_fields_ = false;
+  }
+  invalidate();
+}
+
+void EditProfileModal::set_interval_mins(int mins) {
+  interval_mins_ = mins;
+  if (interval_field_) {
+    syncing_fields_ = true;
+    interval_field_->set_text(std::to_wstring(mins));
+    syncing_fields_ = false;
+  }
+  invalidate();
+}
+
+void EditProfileModal::trigger_save() {
+  if (on_save) on_save(name_, url_, interval_mins_);
+  close();
+}
+
+void EditProfileModal::open_field_menu(TextField* tf, PointF anchor) {
+  if (!field_menu_ || !tf || !tf->enabled()) return;
+  MenuStyle st;
+  apply_menu_skin(st);
+  // src: src/utils/popup-styles.ts / src/utils/style-helpers.tsx:126 菜单行高 32
+  st.item_h = 32.0f;
+  st.min_w = 160.0f;
+  st.font_size = 13.0f;
+  st.padding_h = 14.0f;
+
+  std::vector<MenuItem> items;
+  items.push_back({tr("shared.actions.cut"), !tf->can_cut(), false, L"", false});
+  items.push_back({tr("shared.actions.copy"), !tf->can_copy(), false, L"", false});
+  items.push_back({tr("shared.actions.paste"), !tf->can_paste(), false, L"", false});
+  items.push_back({tr("shared.actions.selectAll"), !tf->can_select_all(), false, L"", false});
+  items.push_back({L"", false, true, L"", false});
+  items.push_back({tr("shared.actions.clearInput"), !tf->can_clear(), false, L"", true});
+
+  field_menu_->style_ = st;
+  field_menu_->on_select = [tf](int idx) {
+    switch (idx) {
+      case 0: tf->cut(); break;
+      case 1: tf->copy(); break;
+      case 2: tf->paste(); break;
+      case 3: tf->select_all(); break;
+      case 5: tf->clear_text(); break;
+      default: break;
+    }
+  };
+  PointF local = anchor;
+  if (field_menu_->parent()) {
+    local = field_menu_->parent()->to_local(anchor);
+  }
+  field_menu_->open(items, local);
 }
 
 void EditProfileModal::open(const std::string& name, const std::string& url, int interval,
@@ -100,6 +388,37 @@ void EditProfileModal::open(const std::string& name, const std::string& url, int
   hover_cancel_ = false;
   hover_save_ = false;
   focused_field_ = 0;  // src: layout-dialogs.tsx:163-217 各 TextField 无 autoFocus
+
+  syncing_fields_ = true;
+  if (name_field_) {
+    name_field_->apply_theme();
+    name_field_->style_.size = 14.0f;  // src: layout-dialogs.tsx:164 fontSize 14px
+    name_field_->set_text(utf::utf8_to_utf16(name_));
+    name_field_->set_enabled(true);
+    name_field_->set_opacity(1.0f);
+    name_field_->set_visible(true);
+  }
+  // src: node_modules/@mui/material/styles opacity 0.38 disabled
+  constexpr float kDisabledOpacity = 0.38f;
+  if (url_field_) {
+    url_field_->apply_theme();
+    url_field_->style_.size = 14.0f;  // src: layout-dialogs.tsx:184 fontSize 14px
+    url_field_->set_text(utf::utf8_to_utf16(url_));
+    url_field_->set_enabled(!is_local_);
+    url_field_->set_opacity(is_local_ ? kDisabledOpacity : 1.0f);
+    url_field_->set_visible(true);
+  }
+  if (interval_field_) {
+    interval_field_->apply_theme();
+    interval_field_->style_.size = 14.0f;  // src: layout-dialogs.tsx:207 fontSize 14px
+    interval_field_->set_text(std::to_wstring(interval_mins_));
+    interval_field_->set_enabled(!is_local_);
+    interval_field_->set_opacity(is_local_ ? kDisabledOpacity : 1.0f);
+    interval_field_->set_visible(true);
+  }
+  syncing_fields_ = false;
+
+  if (bounds().w > 0.0f && bounds().h > 0.0f) on_arrange(bounds());
   invalidate();
 }
 
@@ -107,6 +426,10 @@ void EditProfileModal::close() {
   if (!open_) return;
   open_ = false;
   fade_.hide();  // 画面延后 195ms 消失，交互立刻失效
+  if (field_menu_ && field_menu_->is_open()) field_menu_->close();
+  if (name_field_) name_field_->set_visible(false);
+  if (url_field_) url_field_->set_visible(false);
+  if (interval_field_) interval_field_->set_visible(false);
   invalidate();
   if (on_dismiss) on_dismiss();
 }
@@ -144,6 +467,11 @@ void EditProfileModal::on_arrange(const RectF& area) {
                      inner_w, kPopupFieldH};
   interval_input_rect_ = {cx + kPopupPadX, content_y + 2.0f * (group_h + 12.0f) + kLabelH,
                           inner_w, kPopupFieldH};
+
+  if (name_field_) name_field_->layout_tree(name_input_rect_);
+  if (url_field_) url_field_->layout_tree(url_input_rect_);
+  if (interval_field_) interval_field_->layout_tree(interval_input_rect_);
+  if (field_menu_) field_menu_->layout_tree({0.0f, 0.0f, area.w, area.h});
 
   // src: popup-styles.ts:231-246 全宽纵向堆叠按钮（Save 在上 / Cancel 在下）
   const float actions_y = cy + ch - actions_h;
@@ -205,44 +533,19 @@ void EditProfileModal::on_paint(IRenderTarget& rt) {
                 kLabelGapH - 4.0f},
                label_ts);
 
-  // 5. 输入框（get3DInputStyle：6 套皮肤查表）
-  TextStyle val_ts;
-  val_ts.size = 14.0f;
-  val_ts.align_v = AlignV::Center;
-  val_ts.ellipsis = true;
-  // src: layout-dialogs.tsx:164-216 各 TextField sx={get3DInputStyle(theme)}
-  const theme::InputPaint ip = ThemeService::instance().input_paint();
-  // src: MUI .Mui-disabled { opacity: 0.38 } —— 整控件（底/描边/文字）统一叠乘
-  const float kDisabledOpacity = 0.38f;
-
-  auto fade = [](Color4f c, float k) {
-    c.a *= k;
-    return c;
-  };
-  auto draw_field = [&](const RectF& r, const std::wstring& text, int field_idx, bool off) {
-    Brush bg{off ? fade(ip.bg, kDisabledOpacity) : ip.bg};
-    const Pen pen{off ? fade(ip.border, kDisabledOpacity)
-                      : (focused_field_ == field_idx ? ip.border_focused : ip.border),
-                  off ? ip.border_w : (focused_field_ == field_idx
-                                           ? ip.border_w_focused
-                                           : ip.border_w)};
-    rt.round_rect(r, ip.radius, pen, &bg);
-    TextStyle ts = val_ts;
-    ts.color = off ? fade(ip.text, kDisabledOpacity) : ip.text;
-    rt.draw_text(text, {r.x + 10.0f, r.y, r.w - 20.0f, r.h}, ts);
-  };
-
-  std::wstring nw = utf::utf8_to_utf16(name_);
-  if (focused_field_ == 1) nw += L"|";
-  draw_field(name_input_rect_, nw, 1, false);
-
-  std::wstring uw = utf::utf8_to_utf16(url_);
-  if (focused_field_ == 2) uw += L"|";
-  draw_field(url_input_rect_, uw, 2, is_local_);
-
-  std::wstring iw = std::to_wstring(interval_mins_);
-  if (focused_field_ == 3) iw += L"|";
-  draw_field(interval_input_rect_, iw, 3, is_local_);
+  // 5. 子控件 TextField 热刷新皮肤主题（src: layout-dialogs.tsx:164-216）
+  if (name_field_) {
+    name_field_->apply_theme();
+    name_field_->style_.size = 14.0f;  // src: layout-dialogs.tsx:164
+  }
+  if (url_field_) {
+    url_field_->apply_theme();
+    url_field_->style_.size = 14.0f;  // src: layout-dialogs.tsx:184
+  }
+  if (interval_field_) {
+    interval_field_->apply_theme();
+    interval_field_->style_.size = 14.0f;  // src: layout-dialogs.tsx:207
+  }
 
   // 6. 按钮（Save 13px / py .85，Cancel 12.5px / py .7；全宽，Save 在上）
   // src: layout-dialogs.tsx:240-263 取消 defaultBtn3DStyle、保存 primaryBtn3DStyle，
@@ -254,16 +557,16 @@ void EditProfileModal::on_paint(IRenderTarget& rt) {
   auto paint_btn = [&](const RectF& r, const char* ctype, bool hover,
                        const std::wstring& label, float fs, bool outlined) {
     const auto bp = ThemeService::instance().button_paint(ctype, outlined);
-    // 四段视觉（常态 / :hover / :active / 禁用）由统一入口铺底
+    // 四段视觉统一由查表给出
     draw_button_skin(rt, r, bp, hover ? 1.0f : 0.0f, /*pressed=*/false);
     btn_ts.size = fs;
     btn_ts.weight = bp.weight;
     btn_ts.color = bp.text;
     rt.draw_text(label, r, btn_ts);
   };
-  // ← layout-dialogs.tsx:252-259 Cancel 是 get3DButtonStyle(...,'outlined','default')
+  // src: layout-dialogs.tsx:252-259 Cancel 是 defaultBtn3DStyle（contained default）
   paint_btn(btn_cancel_rect_, "default", hover_cancel_,
-            tr("shared.actions.cancel"), 12.5f, /*outlined=*/true);
+            tr("shared.actions.cancel"), 12.5f, /*outlined=*/false);
   paint_btn(btn_save_rect_, "primary", hover_save_,
             tr("shared.actions.save"), 13.0f, /*outlined=*/false);
 }
@@ -289,22 +592,24 @@ bool EditProfileModal::on_mouse(const MouseEvent& e) {
       return true;
     }
     if (btn_save_rect_.contains(pt.x, pt.y)) {
-      if (on_save) on_save(name_, url_, interval_mins_);
-      close();
+      trigger_save();
       return true;
     }
     if (name_input_rect_.contains(pt.x, pt.y)) {
       focused_field_ = 1;
+      if (name_field_) name_field_->request_focus();
       invalidate();
       return true;
     }
     if (!is_local_ && url_input_rect_.contains(pt.x, pt.y)) {
       focused_field_ = 2;
+      if (url_field_) url_field_->request_focus();
       invalidate();
       return true;
     }
     if (!is_local_ && interval_input_rect_.contains(pt.x, pt.y)) {
       focused_field_ = 3;
+      if (interval_field_) interval_field_->request_focus();
       invalidate();
       return true;
     }
@@ -326,44 +631,16 @@ bool EditProfileModal::on_key(const KeyEvent& e) {
       return true;
     }
     if (e.key == VK_RETURN || e.key == 13) {
-      if (on_save) on_save(name_, url_, interval_mins_);
-      close();
+      trigger_save();
       return true;
     }
-    if (e.key == VK_BACK) {
-      if (focused_field_ == 1 && !name_.empty()) {
-        name_.pop_back();
-        invalidate();
-        return true;
-      }
-      if (focused_field_ == 2 && !url_.empty()) {
-        url_.pop_back();
-        invalidate();
-        return true;
-      }
-      if (focused_field_ == 3) {
-        interval_mins_ /= 10;
-        invalidate();
-        return true;
-      }
-    }
-  } else if (e.type == KeyEventType::Char) {
-    if (focused_field_ == 1 && e.ch >= 32) {
-      name_ += utf::utf16_to_utf8(std::wstring(1, e.ch));
-      invalidate();
-      return true;
-    }
-    if (focused_field_ == 2 && e.ch >= 32 && e.ch < 127) {
-      url_.push_back(static_cast<char>(e.ch));
-      invalidate();
-      return true;
-    }
-    if (focused_field_ == 3 && e.ch >= '0' && e.ch <= '9') {
-      interval_mins_ = interval_mins_ * 10 + (e.ch - '0');
-      if (interval_mins_ > 100000) interval_mins_ = 100000;
-      invalidate();
-      return true;
-    }
+  }
+  TextField* active_tf = nullptr;
+  if (focused_field_ == 1) active_tf = name_field_;
+  else if (focused_field_ == 2 && !is_local_) active_tf = url_field_;
+  else if (focused_field_ == 3 && !is_local_) active_tf = interval_field_;
+  if (active_tf) {
+    return active_tf->on_key(e);
   }
   return false;
 }
@@ -421,6 +698,8 @@ void ClientUpdateModal::open(const std::string& current_ver, const std::string& 
   latest_version_ = latest_ver;
   changelog_ = changelog;
   download_url_ = download_url;
+  changelog_scroll_y_ = 0.0f;
+  changelog_text_h_ = 0.0f;
   progress_ = 0;
   status_ = "idle";
   is_downloading_ = false;
@@ -428,6 +707,9 @@ void ClientUpdateModal::open(const std::string& current_ver, const std::string& 
   hover_close_x_ = false;
   hover_close_ = false;
   hover_update_ = false;
+  if (bounds().w > 0.0f && bounds().h > 0.0f) {
+    on_arrange(bounds());
+  }
   invalidate();
 }
 
@@ -472,6 +754,7 @@ void ClientUpdateModal::on_arrange(const RectF& area) {
             : utf::utf8_to_utf16(changelog_);
     text_h = e->measure_text(w, chg_ts, inner_w - kChgPad * 2.0f).h;
   }
+  changelog_text_h_ = text_h;
   float chg_box_h =
       std::min(kChgMaxH, text_h + kChgPad * 2.0f + 2.0f);  // ← :343 maxHeight '160px'
 
@@ -498,6 +781,9 @@ void ClientUpdateModal::on_arrange(const RectF& area) {
   changelog_box_rect_ = {cx + kPopupPadX,
                          content_y + meta_h + 10.0f + kPopupBody2H + 6.0f,
                          inner_w, chg_box_h};
+  const float max_chg_scroll = std::max(
+      0.0f, changelog_text_h_ - std::max(0.0f, changelog_box_rect_.h - kChgPad * 2.0f));
+  changelog_scroll_y_ = std::clamp(changelog_scroll_y_, 0.0f, max_chg_scroll);
   // ← layout-dialogs.tsx:363-381 bar 高 8px / radius 4 / mt 1.5
   progress_bar_rect_ = {cx + kPopupPadX, changelog_box_rect_.bottom() + 12.0f,
                         inner_w, 8.0f};
@@ -543,24 +829,29 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
                 1.0f},
                Brush{tokens.divider_color});
 
-  // 版本信息两行（body2 12.5 × 1.4；最新版本行 bold ← layout-dialogs.tsx:296-327）
+  // 版本信息两行（body2 12.5 × 1.4；第一行 secondaryText，最新版本行 bold + primaryText ← layout-dialogs.tsx:296-327）
   const float content_y = card_rect_.y + kPopupTitleBlockH + kPopupContentPadY;
   const float meta_h = kPopupBody2H + 4.0f + kPopupBody2H;
   const std::wstring unknown = tr("layout.components.dialogs.update.unknown");
+  const std::string cur_disp = current_version_.empty()
+                                   ? utf::utf16_to_utf8(unknown)
+                                   : ensure_v_prefix(current_version_);
+  const std::string lat_disp = latest_version_.empty()
+                                   ? utf::utf16_to_utf8(unknown)
+                                   : ensure_v_prefix(latest_version_);
   TextStyle ver_ts;
   ver_ts.size = 12.5f;
-  ver_ts.color = tokens.primary_text;
+  ver_ts.color = tokens.secondary_text;  // src: layout-dialogs.tsx:302
   ver_ts.align_v = AlignV::Center;
   ver_ts.ellipsis = true;
   rt.draw_text(tr("layout.components.dialogs.update.currentVersion",
-                  {{"version", current_version_.empty() ? utf::utf16_to_utf8(unknown)
-                                                       : current_version_}}),
+                  {{"version", cur_disp}}),
                {card_rect_.x + pad, content_y, inner_w, kPopupBody2H}, ver_ts);
   TextStyle ver_bold = ver_ts;
   ver_bold.weight = static_cast<int>(Weight::Bold);
+  ver_bold.color = tokens.primary_text;  // src: layout-dialogs.tsx:317
   rt.draw_text(tr("layout.components.dialogs.update.latestVersion",
-                  {{"version", latest_version_.empty() ? utf::utf16_to_utf8(unknown)
-                                                       : latest_version_}}),
+                  {{"version", lat_disp}}),
                {card_rect_.x + pad, content_y + kPopupBody2H + 4.0f, inner_w,
                 kPopupBody2H},
                ver_bold);
@@ -583,11 +874,14 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
   cl_ts.line_h = kChgLineH;  // ← :348 lineHeight 1.5 × 12 = 18
   // src: locales/zh/layout.json:78 「"暂无详细更新日志"」（layout-dialogs.tsx:335）
   std::wstring chg_w = changelog_.empty() ? tr("layout.components.dialogs.client.changelogEmpty") : utf::utf8_to_utf16(changelog_);
-  rt.push_clip(changelog_box_rect_);
-  rt.draw_text(chg_w, {changelog_box_rect_.x + kChgPad,
-                       changelog_box_rect_.y + kChgPad,
-                       changelog_box_rect_.w - kChgPad * 2.0f,
-                       changelog_box_rect_.h - kChgPad * 2.0f},
+  const RectF chg_inner{changelog_box_rect_.x + kChgPad,
+                        changelog_box_rect_.y + kChgPad,
+                        std::max(10.0f, changelog_box_rect_.w - kChgPad * 2.0f),
+                        std::max(10.0f, changelog_box_rect_.h - kChgPad * 2.0f)};
+  rt.push_clip(chg_inner);
+  rt.draw_text(chg_w,
+               {chg_inner.x, chg_inner.y - changelog_scroll_y_, chg_inner.w,
+                std::max(changelog_text_h_, chg_inner.h)},
                cl_ts);
   rt.pop_clip();
 
@@ -620,6 +914,8 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
 
   // 底部按钮（立即更新 contained primary 上、关闭 outlined 下 ← layout-dialogs.tsx:398-437）
   const bool busy = is_downloading_;
+  const bool same_ver = versions_equal(latest_version_, current_version_);
+  const bool upd_disabled = busy || status_ == "done" || same_ver;
   auto paint_themed_btn = [&](IRenderTarget& rt2, const RectF& r, bool hovered,
                               bool disabled, const char* color_type, bool outlined,
                               const std::wstring& label) {
@@ -640,12 +936,13 @@ void ClientUpdateModal::on_paint(IRenderTarget& rt) {
     upd_label = tr("layout.components.dialogs.client.prepareRestart");
   else if (busy)
     upd_label = tr("layout.components.dialogs.update.updating");
-  else if (!latest_version_.empty() && latest_version_ == current_version_)
+  else if (same_ver)
     upd_label = tr("layout.components.dialogs.update.upToDate");
   else
     upd_label = tr("layout.components.dialogs.update.updateNow");
-  paint_themed_btn(rt, btn_update_rect_, hover_update_, busy, "primary", false, upd_label);
-  paint_themed_btn(rt, btn_close_rect_, hover_close_, busy, "default", true,
+  paint_themed_btn(rt, btn_update_rect_, hover_update_ && !upd_disabled, upd_disabled,
+                   "primary", false, upd_label);
+  paint_themed_btn(rt, btn_close_rect_, hover_close_ && !busy, busy, "default", true,
                    tr("shared.actions.close"));
 }
 
@@ -664,6 +961,20 @@ bool ClientUpdateModal::on_mouse(const MouseEvent& e) {
     return true;
   }
 
+  if (e.type == MouseEventType::Wheel) {
+    if (changelog_box_rect_.contains(pt.x, pt.y)) {
+      const float max_scroll = std::max(
+          0.0f, changelog_text_h_ - std::max(0.0f, changelog_box_rect_.h - kChgPad * 2.0f));
+      if (max_scroll > 0.0f) {
+        // 豁免: Mini 无对应物 — Win32 滚轮 120 刻度映射 36px（出处: src/pages/_layout/components/layout-dialogs.tsx:343）
+        const float delta = static_cast<float>(e.wheel_delta) / 120.0f * 36.0f;
+        changelog_scroll_y_ = std::clamp(changelog_scroll_y_ - delta, 0.0f, max_scroll);
+        invalidate();
+      }
+    }
+    return true;
+  }
+
   if (e.type == MouseEventType::Up) {
     if (btn_close_rect_.contains(pt.x, pt.y)) {
       // src: layout-dialogs.tsx:250-254 仅非 downloading 时 onClose 生效
@@ -672,7 +983,10 @@ bool ClientUpdateModal::on_mouse(const MouseEvent& e) {
     }
     if (btn_update_rect_.contains(pt.x, pt.y)) {
       // src: use-client-update.ts:56-62 无更新对象/已是新版 → 不发起下载
-      if (download_url_.empty() || is_downloading_ || progress_ >= 100) return true;
+      if (download_url_.empty() || is_downloading_ || status_ == "done" ||
+          progress_ >= 100 || versions_equal(latest_version_, current_version_)) {
+        return true;
+      }
       // ← use-client-update.ts:63-67 点击后先显示 clientDownloading
       handle_progress_event("downloading", 0,
                             utf::utf16_to_utf8(
@@ -712,6 +1026,15 @@ CoreUpdateModal::~CoreUpdateModal() {
   unsubscribe_events();
 }
 
+void CoreUpdateModal::set_external_event_driver(bool ext) {
+  external_event_driver_ = ext;
+  if (ext) {
+    unsubscribe_events();
+  } else if (listener_id_ == 0) {
+    subscribe_events();
+  }
+}
+
 void CoreUpdateModal::open(const std::string& current_ver, const std::string& latest_ver) {
   open_ = true;
   fade_.show();
@@ -719,10 +1042,14 @@ void CoreUpdateModal::open(const std::string& current_ver, const std::string& la
   latest_version_ = latest_ver;
   progress_ = 0;
   status_ = "idle";
+  is_upgrading_ = false;
   message_.clear();
   hover_close_x_ = false;
   hover_close_ = false;
   hover_upgrade_ = false;
+  if (bounds().w > 0.0f && bounds().h > 0.0f) {
+    on_arrange(bounds());
+  }
   invalidate();
 }
 
@@ -898,6 +1225,9 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
   // 底部按钮（立即升级 contained primary 上、关闭 outlined 下 ← layout-dialogs.tsx:530-565）
   const bool busy = is_upgrading_ || status_ == "checking" || status_ == "downloading" ||
                     status_ == "extracting";
+  const bool same_ver =
+      !latest_version_.empty() && versions_equal(current_version_, latest_version_);
+  const bool upd_disabled = busy || status_ == "done" || same_ver;
   auto paint_themed_btn = [&](IRenderTarget& rt2, const RectF& r, bool hovered,
                               bool disabled, const char* color_type, bool outlined,
                               const std::wstring& label) {
@@ -918,10 +1248,13 @@ void CoreUpdateModal::on_paint(IRenderTarget& rt) {
     upd_label = tr("layout.components.dialogs.core.updateDone");
   else if (busy)
     upd_label = tr("layout.components.dialogs.update.updating");
+  else if (same_ver)
+    upd_label = tr("layout.components.dialogs.update.upToDate");
   else
     upd_label = tr("layout.components.dialogs.update.updateNow");
-  paint_themed_btn(rt, btn_upgrade_rect_, hover_upgrade_, busy, "primary", false, upd_label);
-  paint_themed_btn(rt, btn_close_rect_, hover_close_, busy, "default", true,
+  paint_themed_btn(rt, btn_upgrade_rect_, hover_upgrade_ && !upd_disabled, upd_disabled,
+                   "primary", false, upd_label);
+  paint_themed_btn(rt, btn_close_rect_, hover_close_ && !busy, busy, "default", true,
                    tr("shared.actions.close"));
 }
 
@@ -950,7 +1283,11 @@ bool CoreUpdateModal::on_mouse(const MouseEvent& e) {
       return true;
     }
     if (btn_upgrade_rect_.contains(pt.x, pt.y)) {
-      if (status_ != "done") {
+      const bool busy = is_upgrading_ || status_ == "checking" || status_ == "downloading" ||
+                        status_ == "extracting";
+      const bool same_ver =
+          !latest_version_.empty() && versions_equal(current_version_, latest_version_);
+      if (!busy && status_ != "done" && !same_ver) {
         is_upgrading_ = true;
         // ← use-core-update.ts:98-100 点击后 coreStarting
         handle_progress_event("checking", 5,
@@ -993,19 +1330,52 @@ LogViewerModal::LogViewerModal(Widget* parent) : Widget(parent) {
   set_z_order(960);
   line_height_ = 38.0f;
   last_flush_time_ = std::chrono::steady_clock::now();
+
+  // src: src/components/base/base-search-box.tsx:117-126 真实可编辑过滤框
+  {
+    auto sf = std::make_unique<TextField>(this);
+    search_field_ = sf.get();
+    search_field_->height_ = 28.0f;  // src: src/pages/logs.tsx:191-221
+    search_field_->set_padding_x(6.0f);
+    search_field_->style_.size = 11.0f;
+    search_field_->set_placeholder(tr("shared.placeholders.filter"));
+    search_field_->set_i18n_a11y_name("shared.placeholders.filter");
+    search_field_->set_clear_button(true, tr("shared.placeholders.resetInput"));
+    search_field_->apply_theme();
+    search_field_->set_visible(false);
+    search_field_->on_text_changed = [this](const std::wstring& w) {
+      if (syncing_search_) return;
+      set_search_query(utf::utf16_to_utf8(w));
+    };
+    search_field_->on_key_intercept = [this](const KeyEvent& e) {
+      if (e.type == KeyEventType::Down && (e.key == VK_ESCAPE || e.key == 27)) {
+        close();
+        return true;
+      }
+      return false;
+    };
+    search_field_->on_context_menu = [this](PointF anchor) { open_search_menu(anchor); };
+    add_child(std::move(sf));
+  }
+
   // src: logs.tsx:179-191 BaseStyledSelect 5 项
   //   （shared.json:135-141 ALL/DEBUG/INFO/WARN/ERROR）
   auto menu = std::make_unique<MenuList>();
   lvl_menu_ = menu.get();
   {
     const wchar_t* labels[5] = {L"ALL", L"DEBUG", L"INFO", L"WARN", L"ERROR"};
-    for (auto* l : labels) {
+    for (int k = 0; k < 5; ++k) {
       MenuItem it;
-      it.label = l;
+      it.label = labels[k];
+      it.selected = (k == 0);
       menu->items.push_back(it);
     }
-    menu->item_height = 28;
-    menu->min_width_ = 140;
+    MenuStyle mst;
+    apply_menu_skin(mst);
+    // src: src/utils/style-helpers.tsx:126 MenuItem 32px
+    mst.item_h = 32.0f;
+    mst.min_w = 100.0f;
+    apply_menu_style_to_list(lvl_menu_, mst);
     menu->set_visible(false);
     menu->on_select = [this](int i) {
       static const char* vals[5] = {"all", "debug", "info", "warn", "error"};
@@ -1017,6 +1387,11 @@ LogViewerModal::LogViewerModal(Widget* parent) : Widget(parent) {
     };
   }
   add_child(std::move(menu));
+
+  auto sm = std::make_unique<ContextMenu>(this);
+  search_menu_ = sm.get();
+  search_menu_->set_z_order(1020);  // 豁免: Mini 无对应物 — 弹窗内搜索右键菜单叠在搜索框之上（出处: src/pages/logs.tsx:215）
+  add_child(std::move(sm));
 }
 
 void LogViewerModal::open() {
@@ -1027,6 +1402,14 @@ void LogViewerModal::open() {
   hover_pause_ = false;
   hover_order_ = false;
   hover_clear_ = false;
+  if (search_field_) {
+    search_field_->apply_theme();
+    search_field_->style_.size = 11.0f;  // src: src/components/base/base-search-box.tsx:117
+    search_field_->set_visible(true);
+  }
+  if (bounds().w > 0.0f && bounds().h > 0.0f) {
+    on_arrange(bounds());
+  }
   invalidate();
 }
 
@@ -1034,8 +1417,59 @@ void LogViewerModal::close() {
   if (!open_) return;
   open_ = false;
   fade_.hide();  // 画面延后 195ms 消失，交互立刻失效
+  if (lvl_menu_) lvl_menu_->set_visible(false);
+  if (search_menu_ && search_menu_->is_open()) search_menu_->close();
+  if (search_field_) {
+    search_field_->blur();
+    search_field_->set_visible(false);
+  }
   invalidate();
   if (on_dismiss) on_dismiss();
+}
+
+void LogViewerModal::set_paused(bool p) {
+  if (paused_ == p) return;
+  paused_ = p;
+  if (!paused_) flush_incoming();
+  invalidate();
+  if (on_pause_changed) on_pause_changed(paused_);
+}
+
+void LogViewerModal::open_search_menu(PointF anchor) {
+  if (!search_menu_ || !search_field_ || !search_field_->enabled()) return;
+  MenuStyle st;
+  apply_menu_skin(st);
+  // src: src/utils/style-helpers.tsx:126 菜单行高 32
+  st.item_h = 32.0f;
+  st.min_w = 160.0f;
+  st.font_size = 13.0f;
+  st.padding_h = 14.0f;
+
+  std::vector<MenuItem> items;
+  items.push_back({tr("shared.actions.cut"), !search_field_->can_cut(), false, L"", false});
+  items.push_back({tr("shared.actions.copy"), !search_field_->can_copy(), false, L"", false});
+  items.push_back({tr("shared.actions.paste"), !search_field_->can_paste(), false, L"", false});
+  items.push_back({tr("shared.actions.selectAll"), !search_field_->can_select_all(), false, L"", false});
+  items.push_back({L"", false, true, L"", false});
+  items.push_back({tr("shared.actions.clearInput"), !search_field_->can_clear(), false, L"", true});
+
+  search_menu_->style_ = st;
+  search_menu_->on_select = [this](int idx) {
+    if (!search_field_) return;
+    switch (idx) {
+      case 0: search_field_->cut(); break;
+      case 1: search_field_->copy(); break;
+      case 2: search_field_->paste(); break;
+      case 3: search_field_->select_all(); break;
+      case 5: search_field_->clear_text(); break;
+      default: break;
+    }
+  };
+  PointF local = anchor;
+  if (search_menu_->parent()) {
+    local = search_menu_->parent()->to_local(anchor);
+  }
+  search_menu_->open(items, local);
 }
 
 void LogViewerModal::push_log(const std::string& level, const std::string& msg,
@@ -1143,6 +1577,14 @@ void LogViewerModal::set_level_filter(const std::string& lvl) {
 void LogViewerModal::set_search_query(const std::string& q) {
   if (search_query_ == q) return;
   search_query_ = q;
+  if (search_field_ && !syncing_search_) {
+    const std::wstring wq = utf::utf8_to_utf16(q);
+    if (search_field_->text() != wq) {
+      syncing_search_ = true;
+      search_field_->set_text_silent(wq);
+      syncing_search_ = false;
+    }
+  }
   recompute_total_height();
   if (!desc_ && stick_to_bottom_) {
     scroll_y_ = max_scroll();
@@ -1203,7 +1645,9 @@ bool LogViewerModal::matches_filter(const LogEntry& entry) const {
     if (!hit) return false;
   }
   if (!search_query_.empty()) {
-    if (entry.message.find(search_query_) == std::string::npos) {
+    if (!icontains_ascii_or_utf8(entry.time, search_query_) &&
+        !icontains_ascii_or_utf8(entry.level, search_query_) &&
+        !icontains_ascii_or_utf8(entry.message, search_query_)) {
       return false;
     }
   }
@@ -1234,6 +1678,8 @@ void LogViewerModal::on_arrange(const RectF& area) {
   seg_level_rect_ = {toolbar_rect_.x, toolbar_rect_.y + 5.0f, 95.0f, 28.0f};
   search_box_rect_ = {seg_level_rect_.x + seg_level_rect_.w + 6.0f, toolbar_rect_.y + 5.0f,
                       toolbar_rect_.w - (seg_level_rect_.w + 6.0f), 28.0f};
+  if (search_field_) search_field_->layout_tree(search_box_rect_);
+  if (search_menu_) search_menu_->layout_tree({0.0f, 0.0f, area.w, area.h});
 
   // G6: 日志区起于 header44 + 过滤行39 + mb4 = cy+87；底边距 8 不变
   log_area_rect_ = {cx + 10.0f, cy + 87.0f, cw - 20.0f, ch - 95.0f};
@@ -1359,18 +1805,13 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
   arrow_ts.align_v = AlignV::Center;
   rt.draw_text(L"▼", {seg_level_rect_.x, seg_level_rect_.y, seg_level_rect_.w - 6.0f, seg_level_rect_.h}, arrow_ts);
 
-  // 搜索框（走主题输入框变量 → 随皮肤/亮暗）
-  Brush sb{vars.theme_input_bg};
-  rt.round_rect(search_box_rect_, 4.0f, {vars.theme_input_border, 1.0f}, &sb);
-  TextStyle search_ts;
-  search_ts.size = 10.0f;
-  search_ts.color =
-      search_query_.empty() ? pal.secondary_text : pal.primary_text;
-  search_ts.align_v = AlignV::Center;
-  // src: locales/zh/shared.json:65 「"filter": "过滤条件"」（base-search-box.tsx:117）
-  std::wstring s_text = search_query_.empty() ? tr("shared.placeholders.filter") : utf::utf8_to_utf16(search_query_);
-  rt.draw_text(s_text, {search_box_rect_.x + 6.0f, search_box_rect_.y, search_box_rect_.w - 12.0f,
-                        search_box_rect_.h}, search_ts);
+  // 搜索框由真实子控件 search_field_ 自绘，仅随主题热刷新参数
+  if (search_field_) {
+    search_field_->apply_theme();
+    // src: src/components/base/base-search-box.tsx:117 fontSize 11px
+    search_field_->style_.size = 11.0f;
+    search_field_->set_placeholder(tr("shared.placeholders.filter"));
+  }
   }
 
   // src: components/log/log-item.tsx:8-14 日志项底色随页面（无终端暗底），
@@ -1401,6 +1842,7 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
   log_ts.wrap = true;       // G10: overflowWrap 'anywhere'（log-item.tsx .data）
   log_ts.ellipsis = false;  // 271px 下无横向滚动、自动折行
   const auto& pal = theme::ThemeService::instance().palette();
+  const std::wstring q_w = utf::utf8_to_utf16(search_query_);
 
   float x = log_area_rect_.x + 6.0f;
   float item_w = log_area_rect_.w - 12.0f;
@@ -1409,8 +1851,7 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
     const std::wstring t_msg = utf::utf8_to_utf16(e->message);
 
     // G10: 条目高度随折行数自适应（Mini VirtualList estimateSize 50 动态高）；
-    //   视区上方条目也需测高以正确推进 y。注：每次重绘逐条测高，日志量大时
-    //   如出现滚动卡顿，再引入按条目高度缓存优化
+    //   视区上方条目也需测高以正确推进 y。
     log_ts.size = 10.0f;
     log_ts.weight = static_cast<int>(Weight::Normal);
     log_ts.color = pal.primary_text;
@@ -1421,7 +1862,7 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
     if (y + item_h >= log_area_rect_.y && y <= log_area_rect_.y + log_area_rect_.h) {
       // 对齐 Mini log-item.tsx:108-118 双行呈现：
       // 第 1 行：时间 (text.secondary) + 级别 (error/warning/info 主色，大写加粗)
-      // 第 2 行：正文 payload (text.primary，G10 折行)
+      // 第 2 行：正文 payload (text.primary，G10 折行 + 搜索词 #ffeb3b 高亮)
       // 底部：1px divider 分隔线
       const std::wstring t_time = utf::utf8_to_utf16(e->time);
       std::wstring t_type = utf::utf8_to_utf16(e->level);
@@ -1436,18 +1877,22 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
       log_ts.size = 9.5f;
       log_ts.weight = static_cast<int>(Weight::Normal);
       log_ts.color = pal.secondary_text;
-      rt.draw_text(t_time, {x, y + 2.0f, item_w, 14.0f}, log_ts);
+      draw_text_with_highlights(rt, text_engine(), t_time, q_w,
+                                {x, y + 2.0f, item_w, 14.0f}, log_ts);
 
       float time_w = text_engine()->measure_text(t_time, log_ts, 0).w;
       log_ts.weight = static_cast<int>(Weight::Bold);
       log_ts.color = type_c;
-      rt.draw_text(t_type, {x + time_w + 8.0f, y + 2.0f, item_w - time_w - 8.0f, 14.0f}, log_ts);
+      draw_text_with_highlights(rt, text_engine(), t_type, q_w,
+                                {x + time_w + 8.0f, y + 2.0f, item_w - time_w - 8.0f, 14.0f},
+                                log_ts);
 
-      // 第 2 行：payload 正文（G10 折行，高度 = 实测行数）
+      // 第 2 行：payload 正文（G10 折行，高度 = 测量行数）
       log_ts.size = 10.0f;
       log_ts.weight = static_cast<int>(Weight::Normal);
       log_ts.color = pal.primary_text;
-      rt.draw_text(t_msg, {x, y + 17.0f, item_w, msg_h}, log_ts);
+      draw_text_with_highlights(rt, text_engine(), t_msg, q_w,
+                                {x, y + 17.0f, item_w, msg_h}, log_ts);
 
       // 底部 1px 分隔线
       rt.fill_rect({x, y + item_h - 1.0f, item_w, 1.0f},
@@ -1483,7 +1928,7 @@ bool LogViewerModal::on_mouse(const MouseEvent& e) {
     bool hx = btn_close_x_rect_.contains(pt.x, pt.y);
     bool hp = btn_pause_rect_.contains(pt.x, pt.y);
     bool ho = btn_order_rect_.contains(pt.x, pt.y);
-    bool hc = btn_clear_rect_.contains(pt.x, pt.y);
+    const bool hc = btn_clear_rect_.contains(pt.x, pt.y);
     if (hx != hover_close_x_ || hp != hover_pause_ || ho != hover_order_ || hc != hover_clear_) {
       hover_close_x_ = hx;
       hover_pause_ = hp;
@@ -1522,23 +1967,21 @@ bool LogViewerModal::on_mouse(const MouseEvent& e) {
       if (lvl_menu_) {
         const bool opening = !lvl_menu_->visible();
         if (opening) {
+          MenuStyle st;
+          apply_menu_skin(st);
+          // src: src/utils/style-helpers.tsx:126 MenuItem 32px
+          st.item_h = 32.0f;
+          st.min_w = 100.0f;
+          apply_menu_style_to_list(lvl_menu_, st);
           const float menu_w = 100.0f;
-          const float menu_h = 5.0f * lvl_menu_->item_height + 4.0f;
+          const float menu_h = lvl_menu_->content_height() + 2.0f;
           float menu_x = std::max(card_rect_.x + 8.0f,
                                   std::min(seg_level_rect_.x, card_rect_.x + card_rect_.w - menu_w - 8.0f));
           float menu_y = (seg_level_rect_.bottom() + 2.0f + menu_h <= card_rect_.y + card_rect_.h - 8.0f)
                              ? (seg_level_rect_.bottom() + 2.0f)
                              : (seg_level_rect_.y - menu_h - 2.0f);
           lvl_menu_->layout_tree({menu_x, menu_y, menu_w, menu_h});
-          lvl_menu_->min_width_ = menu_w;
           lvl_menu_->set_z_order(1000);
-          MenuStyle st;
-          apply_menu_skin(st);
-          lvl_menu_->bg_ = st.bg;
-          lvl_menu_->border_ = st.border;
-          lvl_menu_->text_ = st.text;
-          lvl_menu_->hover_bg_ = st.hover_bg;
-          lvl_menu_->selected_bg_ = st.selected_bg;
         }
         lvl_menu_->set_visible(opening);
       }
@@ -1655,31 +2098,39 @@ std::wstring ClientUpdateModal::a11y_default_name() const {
 A11ySubItem ClientUpdateModal::a11y_virtual_child(size_t idx) const {
   A11ySubItem sub;
   const bool busy = is_downloading_;
+  const bool same_ver = versions_equal(latest_version_, current_version_);
   if (idx == 0) {
     sub.role = A11yRole::Text;
     const std::wstring unknown = tr("layout.components.dialogs.update.unknown");
+    const std::string cur_disp = current_version_.empty()
+                                     ? utf::utf16_to_utf8(unknown)
+                                     : ensure_v_prefix(current_version_);
+    const std::string lat_disp = latest_version_.empty()
+                                     ? utf::utf16_to_utf8(unknown)
+                                     : ensure_v_prefix(latest_version_);
     sub.name = tr("layout.components.dialogs.update.currentVersion",
-                  {{"version", current_version_.empty() ? utf::utf16_to_utf8(unknown)
-                                                        : current_version_}}) +
+                  {{"version", cur_disp}}) +
                L", " +
                tr("layout.components.dialogs.update.latestVersion",
-                  {{"version", latest_version_.empty() ? utf::utf16_to_utf8(unknown)
-                                                       : latest_version_}});
+                  {{"version", lat_disp}});
     sub.local_bounds = card_rect_;
     return sub;
   }
   sub.role = A11yRole::Button;
-  sub.enabled = !busy;
-  sub.can_invoke = !busy;
   if (idx == 1) {
+    sub.enabled = !busy;
+    sub.can_invoke = !busy;
     sub.name = tr("shared.actions.close");
     sub.local_bounds = btn_close_rect_;
   } else {
+    const bool upd_disabled = busy || status_ == "done" || same_ver;
+    sub.enabled = !upd_disabled;
+    sub.can_invoke = !upd_disabled && !download_url_.empty() && progress_ < 100;
     if (status_ == "done")
       sub.name = tr("layout.components.dialogs.client.prepareRestart");
     else if (busy)
       sub.name = tr("layout.components.dialogs.update.updating");
-    else if (!latest_version_.empty() && latest_version_ == current_version_)
+    else if (same_ver)
       sub.name = tr("layout.components.dialogs.update.upToDate");
     else
       sub.name = tr("layout.components.dialogs.update.updateNow");
@@ -1696,7 +2147,10 @@ bool ClientUpdateModal::a11y_invoke_virtual_child(size_t idx) {
     return true;
   }
   if (idx == 2) {
-    if (download_url_.empty() || is_downloading_ || progress_ >= 100) return false;
+    if (download_url_.empty() || is_downloading_ || status_ == "done" ||
+        progress_ >= 100 || versions_equal(latest_version_, current_version_)) {
+      return false;
+    }
     handle_progress_event("downloading", 0,
                           utf::utf16_to_utf8(
                               tr("layout.components.dialogs.progress.clientDownloading")));
@@ -1714,30 +2168,37 @@ A11ySubItem CoreUpdateModal::a11y_virtual_child(size_t idx) const {
   A11ySubItem sub;
   const bool busy = is_upgrading_ || status_ == "checking" ||
                     status_ == "downloading" || status_ == "extracting";
+  const bool same_ver =
+      !latest_version_.empty() && versions_equal(current_version_, latest_version_);
   if (idx == 0) {
     sub.role = A11yRole::Text;
     sub.name = tr("layout.components.dialogs.update.currentVersion",
-                  {{"version", current_version_}}) +
+                  {{"version", format_core_version(current_version_)}}) +
                L", " +
                tr("layout.components.dialogs.update.latestVersion",
                   {{"version", latest_version_.empty()
                                    ? utf::utf16_to_utf8(
                                          tr("layout.components.dialogs.core.fetching"))
-                                   : latest_version_}});
+                                   : format_core_version(latest_version_)}});
     sub.local_bounds = card_rect_;
     return sub;
   }
   sub.role = A11yRole::Button;
-  sub.enabled = !busy;
-  sub.can_invoke = !busy;
   if (idx == 1) {
+    sub.enabled = !busy;
+    sub.can_invoke = !busy;
     sub.name = tr("shared.actions.close");
     sub.local_bounds = btn_close_rect_;
   } else {
+    const bool upd_disabled = busy || status_ == "done" || same_ver;
+    sub.enabled = !upd_disabled;
+    sub.can_invoke = !upd_disabled;
     if (status_ == "done")
       sub.name = tr("layout.components.dialogs.core.updateDone");
     else if (busy)
       sub.name = tr("layout.components.dialogs.update.updating");
+    else if (same_ver)
+      sub.name = tr("layout.components.dialogs.update.upToDate");
     else
       sub.name = tr("layout.components.dialogs.update.updateNow");
     sub.local_bounds = btn_upgrade_rect_;
@@ -1749,13 +2210,15 @@ bool CoreUpdateModal::a11y_invoke_virtual_child(size_t idx) {
   if (!open_ || !enabled()) return false;
   const bool busy = is_upgrading_ || status_ == "checking" ||
                     status_ == "downloading" || status_ == "extracting";
+  const bool same_ver =
+      !latest_version_.empty() && versions_equal(current_version_, latest_version_);
   if (idx == 1) {
     if (busy) return false;
     close();
     return true;
   }
   if (idx == 2) {
-    if (busy || status_ == "done") return false;
+    if (busy || status_ == "done" || same_ver) return false;
     is_upgrading_ = true;
     handle_progress_event("checking", 5,
                           utf::utf16_to_utf8(
@@ -1834,579 +2297,6 @@ bool LogViewerModal::a11y_set_virtual_child_value(size_t idx, const std::wstring
 }
 
 // ==========================================
-// 6. AntivirusWhitelistModal —— 安全软件白名单说明弹窗
-//   src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx
-// ==========================================
-AntivirusWhitelistModal::AntivirusWhitelistModal(Widget* parent)
-    : Widget(parent) {
-  set_z_order(1020);  // src: src/pages/_layout.tsx:1990（置于 FirstRunGuideDialog(980) 之上）
-}
-
-void AntivirusWhitelistModal::open() {
-  open_ = true;
-  fade_.show();
-  scroll_y_ = 0.0f;
-  hover_close_ = false;
-  pressed_close_ = false;
-  if (bounds().w > 0.0f && bounds().h > 0.0f) {
-    on_arrange(bounds());
-  }
-  invalidate();
-}
-
-void AntivirusWhitelistModal::close() {
-  if (!open_) return;
-  open_ = false;
-  fade_.hide();
-  invalidate();
-  if (on_dismiss) on_dismiss();
-}
-
-// BUG-395：360 底层硬白名单文件与追加内容（品牌替换为 Clash Win，对齐 Mini v3.5.2）
-// src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:24-27
-static const wchar_t* const kWhiteInternalIniPath =
-    L"C:\\Program Files (x86)\\360\\360Safe\\netmon\\whiteinternal.ini";
-static const wchar_t* const kWhiteInternalIniSnippet =
-    L"path1=Clash Win\\clashwin.exe\r\npath2=Clash Win\\win-mihomo.exe";
-
-void AntivirusWhitelistModal::rebuild_sections() const {
-  sections_.clear();
-  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:133-276
-  // 原因说明（无卡片）→ 方案一卡片 → 方案二卡片
-  BlockLayout why;
-  why.kind = 0;
-  why.title = tr("layout.components.antivirus.whyTitle");
-  why.body = tr("layout.components.antivirus.why");
-  sections_.push_back(std::move(why));
-
-  BlockLayout easy;
-  easy.kind = 1;
-  easy.title = tr("layout.components.antivirus.easyTitle");
-  easy.body = tr("layout.components.antivirus.easyBody");
-  sections_.push_back(std::move(easy));
-
-  BlockLayout root;
-  root.kind = 2;
-  root.title = tr("layout.components.antivirus.rootTitle");
-  root.body = tr("layout.components.antivirus.rootIntro") + L"\n" +
-              tr("layout.components.antivirus.rootSteps");
-  sections_.push_back(std::move(root));
-}
-
-void AntivirusWhitelistModal::on_arrange(const RectF& area) {
-  set_bounds(area);
-  rebuild_sections();
-
-  // src: popup-styles.ts:120-185 窄窗弹窗锁定左侧 271px
-  const float cw = std::min(theme::kPopupPaneWidth, area.w);
-  // 三段 padding 全部来自 popup-styles：该弹窗的 DialogTitle 与 DialogActions 都没
-  // 传 extraSx（antivirus-whitelist-dialog.tsx:122 / :324），只有 DialogContent
-  // 覆写 py 1.5（:140）。此前把 1.5 错用到了标题与动作带，整卡高度虚高 ~5px。
-  const float px = kPopupPadX;              // ← popup-styles.ts:198/:219 px: 1.75
-  const float py_tb = kPopupTitlePadY;      // ← popup-styles.ts:199/:240 py: 1.35
-  const float py_c = kPopupContentPadY;     // ← antivirus-whitelist-dialog.tsx:140 py: 1.5
-  const float sec_gap = 12.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:100 mb: 1.5
-  const float title_mb = 4.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:107 mb: 0.5
-  // ← :130-137 fullWidth outlined default，py 0.7 / fontSize 12.5
-  const float btn_h = popup_btn_h("default", 12.5f, 5.6f);
-
-  const float inner_w = std::max(80.0f, cw - px * 2.0f);
-  ITextEngine* te = text_engine();
-
-  title_h_ = kPopupTitleTextH;  // ← antivirus-whitelist-dialog.tsx:130 fontSize 15.5 × lineHeight 1.35
-  if (te) {
-    TextStyle tts;
-    tts.size = 15.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:87
-    tts.weight = static_cast<int>(Weight::Bold);
-    tts.wrap = true;
-    tts.line_h = kPopupTitleTextH;
-    const SizeF sz =
-        te->measure_text(L"🛡️ " + tr("layout.components.antivirus.title"), tts, inner_w);
-    if (sz.h > 0.0f) title_h_ = std::max(kPopupTitleTextH, sz.h);
-  }
-
-  // BUG-395 卡片内边距（src: antivirus-whitelist-dialog.tsx cardSx p:1.35 → 10.8px ≈ 11）
-  const float card_pad = 11.0f;
-  const float inner_btn_h = 28.0f;   // 方案一/二按钮 size=small py≈0.6 + 12.5px
-  const float code_box_h = 34.0f;    // 代码框两行 11px/1.45 + padding
-
-  float y_rel = 0.0f;
-  for (size_t i = 0; i < sections_.size(); ++i) {
-    auto& sec = sections_[i];
-    sec.y_rel = y_rel;
-    sec.title_h = 19.0f;  // src: antivirus-whitelist-dialog.tsx:108-109 fontSize 13
-    sec.body_h = 20.0f;   // src: antivirus-whitelist-dialog.tsx:119 fontSize 12.5
-    if (te) {
-      TextStyle sts;
-      sts.size = 13.0f;
-      sts.weight = static_cast<int>(Weight::Bold);
-      sts.wrap = true;
-      const SizeF st_sz = te->measure_text(sec.title, sts, inner_w);
-      if (st_sz.h > 0.0f) sec.title_h = std::max(19.0f, st_sz.h + 2.0f);
-
-      TextStyle bts;
-      bts.size = 12.5f;
-      bts.weight = static_cast<int>(Weight::Normal);
-      bts.wrap = true;
-      const SizeF sb_sz = te->measure_text(sec.body, bts, inner_w);
-      if (sb_sz.h > 0.0f) sec.body_h = std::max(20.0f, sb_sz.h + 4.0f);
-    }
-
-    float block_h = sec.title_h + title_mb + sec.body_h;
-    if (sec.kind == 1) {
-      // 方案一：warning 框 + 一键静默按钮（卡片内）
-      if (te) {
-        TextStyle wt;
-        wt.size = 12.0f;
-        wt.wrap = true;
-        const SizeF ws =
-            te->measure_text(tr("layout.components.antivirus.easyWarning"), wt,
-                             inner_w - card_pad * 2.0f);
-        sec.body_h += (ws.h > 0.0f ? ws.h : 34.0f) + 10.0f;  // 警告框高+上间距
-        block_h = sec.title_h + title_mb + sec.body_h;
-      }
-      block_h += card_pad * 2.0f + inner_btn_h + 8.0f;
-    } else if (sec.kind == 2) {
-      // 方案二：两个代码框 + 两个复制按钮（卡片内）
-      block_h += card_pad * 2.0f + code_box_h * 2.0f + 6.0f +
-                 inner_btn_h + 8.0f;
-    } else {
-      block_h += 0.0f;  // 原因说明无卡片内边距
-    }
-    sec.block_h = block_h;
-    y_rel += block_h;
-    if (i + 1 < sections_.size()) y_rel += sec_gap;
-  }
-  total_sections_h_ = y_rel;
-
-  const float title_block_h = py_tb * 2.0f + title_h_ + 1.0f;
-  const float actions_block_h = 1.0f + py_tb * 2.0f + btn_h;
-  const float natural_h = title_block_h + py_c * 2.0f + total_sections_h_ + actions_block_h;
-  // 豁免: Mini 无对应物 — 矮视口下夹紧弹窗高度为 area.h - 16，并允许正文区垂直滚动（出处: antivirus-whitelist-dialog.tsx:96）
-  const float ch = std::min(natural_h, std::max(160.0f, area.h - 16.0f));
-  const float cx = 0.0f;  // src: popup-styles.ts:123 left: 0
-  const float cy = std::max(0.0f, (area.h - ch) / 2.0f);
-  card_rect_ = {cx, cy, cw, ch};
-  title_rect_ = {cx, cy, cw, title_block_h};
-  actions_rect_ = {cx, cy + ch - actions_block_h, cw, actions_block_h};
-  content_rect_ = {cx, title_rect_.bottom(), cw,
-                   std::max(0.0f, actions_rect_.y - title_rect_.bottom())};
-  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:130-142 fullWidth 按钮
-  btn_close_rect_ = {cx + px, actions_rect_.y + 1.0f + py_tb, inner_w, btn_h};
-
-  // BUG-395：三个新增按钮的相对 y（相对 content 顶部，未含 scroll；y 存相对偏移）
-  // 遍历块累加到方案一/方案二内部的按钮位置
-  {
-    float off = py_c;
-    for (const auto& sec : sections_) {
-      if (sec.kind == 1) {
-        // body 内已含 warning 框高；按钮在 body 之后、卡片底内边距之前
-        const float btn_y = off + sec.title_h + title_mb + sec.body_h + card_pad;
-        btn_enable_silent_rect_ = {cx + px + card_pad, btn_y,
-                                   inner_w - card_pad * 2.0f, inner_btn_h};
-      } else if (sec.kind == 2) {
-        // 两个代码框 + 复制按钮，紧跟 body
-        const float after_body = off + sec.title_h + title_mb + sec.body_h + card_pad;
-        const float copy_y = after_body + code_box_h * 2.0f + 6.0f;
-        const float half_w = (inner_w - card_pad * 2.0f - 6.0f) / 2.0f;
-        btn_copy_path_rect_ = {cx + px + card_pad, copy_y, half_w, inner_btn_h};
-        btn_copy_snippet_rect_ = {cx + px + card_pad + half_w + 6.0f, copy_y,
-                                  half_w, inner_btn_h};
-      }
-      off += sec.block_h + sec_gap;
-    }
-  }
-
-  const float ms = max_scroll();
-  if (scroll_y_ > ms) scroll_y_ = ms;
-  if (scroll_y_ < 0.0f) scroll_y_ = 0.0f;
-}
-
-float AntivirusWhitelistModal::max_scroll() const {
-  const float py_c = kPopupContentPadY;  // ← :140 getPopupContentSx({ py: 1.5 })
-  return std::max(0.0f, (py_c * 2.0f + total_sections_h_) - content_rect_.h);
-}
-
-void AntivirusWhitelistModal::set_scroll_y(float y) {
-  const float clamped = std::clamp(y, 0.0f, max_scroll());
-  if (std::abs(clamped - scroll_y_) > 0.1f) {
-    scroll_y_ = clamped;
-    invalidate();
-  }
-}
-
-void AntivirusWhitelistModal::on_paint(IRenderTarget& rt) {
-  if (fade_.advance()) invalidate();
-  set_opacity(fade_.value());
-  if (fade_.hidden()) return;
-
-  if (card_rect_.w <= 0.0f && bounds().w > 0.0f && bounds().h > 0.0f) {
-    on_arrange(bounds());
-  }
-
-  const auto& svc = ThemeService::instance();
-  const auto tokens = svc.popup_tokens();
-
-  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:76 窄窗 271px Backdrop rgba(0,0,0,.5)
-  const float pane_w = std::min(theme::kPopupPaneWidth, bounds().w);
-  rt.fill_rect({0.0f, 0.0f, pane_w, bounds().h},
-               Brush{Color4f(0.0f, 0.0f, 0.0f, 0.5f)});
-
-  // src: popup-styles.ts:90-117 统一弹窗表面
-  ::clashwin::ui::draw_card(rt, card_rect_, svc.popup_card_paint());
-
-  const float px = kPopupPadX;           // ← popup-styles.ts:198 px: 1.75
-  const float py_tb = kPopupTitlePadY;   // ← popup-styles.ts:199 py: 1.35
-  const float py_c = kPopupContentPadY;  // ← antivirus-whitelist-dialog.tsx:140 py: 1.5
-  const float title_mb = 4.0f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:107
-
-  // Title block（src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:79-94）
-  TextStyle title_ts;
-  title_ts.size = 15.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:87
-  title_ts.weight = static_cast<int>(Weight::Bold);
-  title_ts.color = tokens.primary_text;
-  title_ts.align_h = AlignH::Center;
-  title_ts.align_v = AlignV::Center;
-  title_ts.wrap = true;
-  title_ts.line_h = kPopupTitleTextH;  // ← :88 lineHeight 1.35 × 15.5
-  rt.draw_text(L"🛡️ " + tr("layout.components.antivirus.title"),
-               {title_rect_.x + px, title_rect_.y + py_tb,
-                std::max(0.0f, title_rect_.w - px * 2.0f), title_h_},
-               title_ts);
-  rt.fill_rect({card_rect_.x, title_rect_.bottom() - 1.0f, card_rect_.w, 1.0f},
-               Brush{tokens.divider_color});
-
-  // Content block（BUG-395：原因说明 + 方案一卡片 + 方案二卡片）
-  const float inner_w = std::max(0.0f, content_rect_.w - px * 2.0f);
-  const float card_pad = 11.0f;
-  const float code_box_h = 34.0f;
-  const bool silent_on = is_silent_start_enabled ? is_silent_start_enabled() : false;
-
-  // 通用按钮绘制 lambda（对齐 svc.button_paint 皮肤语义）
-  auto draw_btn = [&](const RectF& r, const std::wstring& label, bool hover,
-                      bool pressed, const char* color, const char* variant) {
-    const auto p = svc.button_paint(color, true);
-    RectF br = r;
-    if (pressed) br.y += p.translate_active;  // ← :129 / :203 / :272 translateY
-    draw_button_skin(rt, br, p, hover ? 1.0f : 0.0f, pressed);
-    TextStyle ts;
-    ts.size = 12.0f;
-    ts.weight = p.weight;
-    ts.color = p.text;
-    ts.align_h = AlignH::Center;
-    ts.align_v = AlignV::Center;
-    rt.draw_text(label, br, ts);
-    (void)variant;
-  };
-
-  rt.push_clip(content_rect_);
-  for (const auto& sec : sections_) {
-    const float sy = content_rect_.y + py_c + sec.y_rel - scroll_y_;
-    const float sh_total = sec.block_h;
-    if (sy + sh_total < content_rect_.y || sy > content_rect_.bottom()) continue;
-
-    // 方案一/二用卡片底色+边框（对齐 Mini cardSx）
-    if (sec.kind != 0) {
-      Brush card_bg{tokens.subtle_bg};
-      rt.round_rect({content_rect_.x + px, sy, inner_w, sec.block_h}, 8.0f,
-                    Pen{tokens.subtle_border, 1.0f}, &card_bg);
-    }
-
-    TextStyle st_ts;
-    st_ts.size = 13.0f;
-    st_ts.weight = 700;
-    st_ts.color = tokens.primary_text;
-    st_ts.align_h = AlignH::Left;
-    st_ts.align_v = AlignV::Top;
-    st_ts.wrap = true;
-    const float tx = content_rect_.x + px + (sec.kind ? card_pad : 0.0f);
-    const float tw = inner_w - (sec.kind ? card_pad * 2.0f : 0.0f);
-    rt.draw_text(sec.title, {tx, sy + (sec.kind ? card_pad : 0.0f), tw, sec.title_h}, st_ts);
-
-    TextStyle sb_ts;
-    sb_ts.size = 12.5f;
-    sb_ts.weight = static_cast<int>(Weight::Normal);
-    sb_ts.color = tokens.secondary_text;
-    sb_ts.align_h = AlignH::Left;
-    sb_ts.align_v = AlignV::Top;
-    sb_ts.wrap = true;
-    const float body_y = sy + (sec.kind ? card_pad : 0.0f) + sec.title_h + title_mb;
-    const float body_h = sec.body_h - (sec.kind == 1 ? 44.0f : 0.0f);
-    rt.draw_text(sec.body, {tx, body_y, tw, std::max(16.0f, body_h)}, sb_ts);
-
-    if (sec.kind == 1) {
-      // 方案一：警告框 + 一键静默按钮
-      const float warn_h = sec.body_h - 44.0f - 10.0f;
-      const float warn_y = body_y + sec.body_h - 44.0f - warn_h - 4.0f;
-      Brush warn_bg{tokens.subtle_bg};
-      rt.round_rect({tx, warn_y, tw, std::max(18.0f, warn_h)}, 6.0f,
-                    Pen{tokens.warning_color, 0.6f}, &warn_bg);
-      TextStyle wt;
-      wt.size = 12.0f;
-      wt.wrap = true;
-      wt.color = tokens.warning_color;
-      wt.align_v = AlignV::Top;
-      rt.draw_text(tr("layout.components.antivirus.easyWarning"),
-                   {tx + 6.0f, warn_y + 3.0f, tw - 12.0f, std::max(16.0f, warn_h - 4.0f)}, wt);
-      const RectF sr = {btn_enable_silent_rect_.x,
-                        btn_enable_silent_rect_.y + content_rect_.y - scroll_y_,
-                        btn_enable_silent_rect_.w, btn_enable_silent_rect_.h};
-      draw_btn(sr,
-               silent_on ? L"✅ " + tr("layout.components.antivirus.silentEnabledBtn")
-                         : L"⚡ " + tr("layout.components.antivirus.enableSilentBtn"),
-               hover_enable_silent_, pressed_enable_silent_,
-               silent_on ? "default" : "primary", silent_on ? "outlined" : "contained");
-    } else if (sec.kind == 2) {
-      // 方案二：两个代码框 + 两个复制按钮
-      const float bx = tx;
-      const float by = body_y + sec.body_h + card_pad;
-      const float bw = tw;
-      const Brush code_bg{tokens.subtle_bg};
-      rt.round_rect({bx, by, bw, code_box_h}, 6.0f, Pen{tokens.subtle_border, 1.0f}, &code_bg);
-      rt.round_rect({bx, by + code_box_h + 6.0f, bw, code_box_h}, 6.0f,
-                    Pen{tokens.subtle_border, 1.0f}, &code_bg);
-      TextStyle ct;
-      ct.size = 11.0f;
-      ct.wrap = true;
-      ct.color = tokens.primary_text;
-      ct.align_v = AlignV::Center;
-      rt.draw_text(std::wstring(kWhiteInternalIniPath), {bx + 7.0f, by, bw - 14.0f, code_box_h}, ct);
-      rt.draw_text(std::wstring(kWhiteInternalIniSnippet),
-                   {bx + 7.0f, by + code_box_h + 6.0f, bw - 14.0f, code_box_h}, ct);
-      const RectF pr = {btn_copy_path_rect_.x,
-                        btn_copy_path_rect_.y + content_rect_.y - scroll_y_,
-                        btn_copy_path_rect_.w, btn_copy_path_rect_.h};
-      const RectF nr = {btn_copy_snippet_rect_.x,
-                        btn_copy_snippet_rect_.y + content_rect_.y - scroll_y_,
-                        btn_copy_snippet_rect_.w, btn_copy_snippet_rect_.h};
-      draw_btn(pr, L"📋 " + tr("layout.components.antivirus.copyPath"),
-               hover_copy_path_, pressed_copy_path_, "default", "outlined");
-      draw_btn(nr, L"📋 " + tr("layout.components.antivirus.copySnippet"),
-               hover_copy_snippet_, pressed_copy_snippet_, "default", "outlined");
-    }
-  }
-  rt.pop_clip();
-
-  // Actions block（src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:130-142）
-  rt.fill_rect({card_rect_.x, actions_rect_.y, card_rect_.w, 1.0f},
-               Brush{tokens.divider_color});
-  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:134
-  const auto bp = svc.button_paint("default", true);
-  RectF br = btn_close_rect_;
-  if (pressed_close_) br.y += bp.translate_active;
-  draw_button_skin(rt, br, bp, hover_close_ ? 1.0f : 0.0f, pressed_close_);
-  TextStyle bts;
-  bts.size = 12.5f;  // src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx:136
-  bts.weight = bp.weight;
-  bts.color = bp.text;
-  bts.align_h = AlignH::Center;
-  bts.align_v = AlignV::Center;
-  rt.draw_text(tr("layout.components.antivirus.close"), br, bts);
-}
-
-bool AntivirusWhitelistModal::on_mouse(const MouseEvent& e) {
-  if (!open_) return false;
-  const PointF pt = e.pos;
-
-  // 相对 y 偏移 → 屏幕矩形（三个新按钮）
-  const float oy = content_rect_.y - scroll_y_;
-  auto scr = [oy](const RectF& r) {
-    return RectF{r.x, r.y + oy, r.w, r.h};
-  };
-  const bool silent_on = is_silent_start_enabled ? is_silent_start_enabled() : false;
-  const RectF rs = scr(btn_enable_silent_rect_);
-  const RectF rp = scr(btn_copy_path_rect_);
-  const RectF rn = scr(btn_copy_snippet_rect_);
-  // 已开启静默时按钮禁用，不参与命中
-  const bool silent_hit = !silent_on && rs.contains(pt.x, pt.y);
-
-  if (e.type == MouseEventType::Leave) {
-    if (hover_close_ || pressed_close_ || hover_enable_silent_ ||
-        pressed_enable_silent_ || hover_copy_path_ || pressed_copy_path_ ||
-        hover_copy_snippet_ || pressed_copy_snippet_) {
-      hover_close_ = pressed_close_ = false;
-      hover_enable_silent_ = pressed_enable_silent_ = false;
-      hover_copy_path_ = pressed_copy_path_ = false;
-      hover_copy_snippet_ = pressed_copy_snippet_ = false;
-      invalidate();
-    }
-    return true;
-  }
-
-  if (e.type == MouseEventType::Move) {
-    const bool hc = btn_close_rect_.contains(pt.x, pt.y);
-    const bool he = silent_hit;
-    const bool hpa = rp.contains(pt.x, pt.y);
-    const bool hsn = rn.contains(pt.x, pt.y);
-    if (hc != hover_close_ || he != hover_enable_silent_ ||
-        hpa != hover_copy_path_ || hsn != hover_copy_snippet_) {
-      hover_close_ = hc;
-      hover_enable_silent_ = he;
-      hover_copy_path_ = hpa;
-      hover_copy_snippet_ = hsn;
-      invalidate();
-    }
-    return true;
-  }
-
-  if (e.type == MouseEventType::Wheel) {
-    if (content_rect_.contains(pt.x, pt.y) || card_rect_.contains(pt.x, pt.y)) {
-      const float delta = static_cast<float>(e.wheel_delta) / 120.0f * 36.0f;  // 豁免: Mini 无对应物 — 桌面滚轮步长 36px（出处: antivirus-whitelist-dialog.tsx:96）
-      set_scroll_y(scroll_y_ - delta);
-    }
-    return true;
-  }
-
-  if (e.type == MouseEventType::Down) {
-    pressed_close_ = btn_close_rect_.contains(pt.x, pt.y);
-    pressed_enable_silent_ = silent_hit;
-    pressed_copy_path_ = rp.contains(pt.x, pt.y);
-    pressed_copy_snippet_ = rn.contains(pt.x, pt.y);
-    if (pressed_close_ || pressed_enable_silent_ || pressed_copy_path_ ||
-        pressed_copy_snippet_) {
-      invalidate();
-    }
-    return true;
-  }
-
-  if (e.type == MouseEventType::Up) {
-    const bool pc = pressed_close_, pe = pressed_enable_silent_;
-    const bool pp = pressed_copy_path_, pn = pressed_copy_snippet_;
-    pressed_close_ = pressed_enable_silent_ = false;
-    pressed_copy_path_ = pressed_copy_snippet_ = false;
-    invalidate();
-    if (pc && btn_close_rect_.contains(pt.x, pt.y)) {
-      close();
-      return true;
-    }
-    if (pe && silent_hit) {
-      if (on_enable_silent_start) on_enable_silent_start();
-      return true;
-    }
-    if (pp && rp.contains(pt.x, pt.y)) {
-      if (on_copy_text) on_copy_text(std::wstring(kWhiteInternalIniPath));
-      if (on_copied_notice) on_copied_notice();
-      return true;
-    }
-    if (pn && rn.contains(pt.x, pt.y)) {
-      if (on_copy_text) on_copy_text(std::wstring(kWhiteInternalIniSnippet));
-      if (on_copied_notice) on_copied_notice();
-      return true;
-    }
-    if (!card_rect_.contains(pt.x, pt.y)) {
-      close();
-      return true;
-    }
-    return true;
-  }
-
-  return true;
-}
-
-bool AntivirusWhitelistModal::on_key(const KeyEvent& e) {
-  if (!open_) return false;
-  if (e.type == KeyEventType::Down) {
-    if (e.key == VK_ESCAPE || e.key == 27 || e.key == VK_RETURN || e.key == 13) {
-      close();
-      return true;
-    }
-    if (e.key == VK_DOWN) {
-      set_scroll_y(scroll_y_ + 36.0f);
-      return true;
-    }
-    if (e.key == VK_UP) {
-      set_scroll_y(scroll_y_ - 36.0f);
-      return true;
-    }
-    if (e.key == VK_NEXT) {
-      set_scroll_y(scroll_y_ + std::max(40.0f, content_rect_.h * 0.8f));
-      return true;
-    }
-    if (e.key == VK_PRIOR) {
-      set_scroll_y(scroll_y_ - std::max(40.0f, content_rect_.h * 0.8f));
-      return true;
-    }
-  }
-  return false;
-}
-
-std::wstring AntivirusWhitelistModal::a11y_default_name() const {
-  return tr("layout.components.antivirus.title");
-}
-
-A11ySubItem AntivirusWhitelistModal::a11y_virtual_child(size_t idx) const {
-  if (sections_.empty()) rebuild_sections();
-  A11ySubItem sub;
-  const float oy = content_rect_.y - scroll_y_;
-  const bool silent_on = is_silent_start_enabled ? is_silent_start_enabled() : false;
-  if (idx < 3u && idx < sections_.size()) {
-    // 0=原因 1=方案一 2=方案二
-    const auto& sec = sections_[idx];
-    sub.role = A11yRole::Text;
-    sub.name = sec.title + L"\n" + sec.body;
-    const float sy = content_rect_.y + 14.0f + sec.y_rel - scroll_y_;
-    const float sh = sec.title_h + 4.0f + sec.body_h;
-    sub.local_bounds = {content_rect_.x + 14.0f, sy,
-                        std::max(0.0f, content_rect_.w - 28.0f), sh};
-  } else if (idx == 3u) {
-    sub.role = A11yRole::Button;
-    sub.name = silent_on
-                   ? tr("layout.components.antivirus.silentEnabledBtn")
-                   : tr("layout.components.antivirus.enableSilentBtn");
-    sub.local_bounds = {btn_enable_silent_rect_.x,
-                        btn_enable_silent_rect_.y + oy, btn_enable_silent_rect_.w,
-                        btn_enable_silent_rect_.h};
-    sub.can_invoke = !silent_on;
-    sub.focusable = !silent_on;
-  } else if (idx == 4u) {
-    sub.role = A11yRole::Button;
-    sub.name = tr("layout.components.antivirus.copyPath");
-    sub.local_bounds = {btn_copy_path_rect_.x, btn_copy_path_rect_.y + oy,
-                        btn_copy_path_rect_.w, btn_copy_path_rect_.h};
-    sub.can_invoke = true;
-    sub.focusable = true;
-  } else if (idx == 5u) {
-    sub.role = A11yRole::Button;
-    sub.name = tr("layout.components.antivirus.copySnippet");
-    sub.local_bounds = {btn_copy_snippet_rect_.x, btn_copy_snippet_rect_.y + oy,
-                        btn_copy_snippet_rect_.w, btn_copy_snippet_rect_.h};
-    sub.can_invoke = true;
-    sub.focusable = true;
-  } else {
-    sub.role = A11yRole::Button;
-    sub.name = tr("layout.components.antivirus.close");
-    sub.local_bounds = btn_close_rect_;
-    sub.can_invoke = true;
-    sub.focusable = true;
-  }
-  return sub;
-}
-
-bool AntivirusWhitelistModal::a11y_invoke_virtual_child(size_t idx) {
-  if (!open_ || !enabled()) return false;
-  if (idx == 3u) {
-    const bool silent_on = is_silent_start_enabled ? is_silent_start_enabled() : false;
-    if (!silent_on && on_enable_silent_start) on_enable_silent_start();
-    return !silent_on;
-  }
-  if (idx == 4u) {
-    if (on_copy_text) on_copy_text(std::wstring(kWhiteInternalIniPath));
-    if (on_copied_notice) on_copied_notice();
-    return true;
-  }
-  if (idx == 5u) {
-    if (on_copy_text) on_copy_text(std::wstring(kWhiteInternalIniSnippet));
-    if (on_copied_notice) on_copied_notice();
-    return true;
-  }
-  if (idx == 6u) {
-    close();
-    return true;
-  }
-  return false;
-}
-
-// ==========================================
 // 7. DeleteProfileConfirmModal (BUG-390)
 //   src: src/pages/_layout/components/layout-dialogs.tsx:643-698
 // ==========================================
@@ -2441,11 +2331,11 @@ void DeleteProfileConfirmModal::close() {
 
 void DeleteProfileConfirmModal::on_arrange(const RectF& area) {
   set_bounds(area);
-  // src: layout-dialogs.tsx:647-650 + popup-styles.ts:120-185 窄窗 271px 左锚定
+  // src: layout-dialogs.tsx:647-698 + popup-styles.ts:120-246 窄窗 271px 左锚定
   const float cw = std::min(theme::kPopupPaneWidth, area.w);
-  const float pad = 14.0f;
+  const float pad = kPopupPadX;
   const float inner_w = std::max(80.0f, cw - pad * 2.0f);
-  const float title_h = 44.0f;
+  const float title_h = kPopupTitleBlockH;
   float name_h = 0.0f;
   float msg_h = 22.0f;
   if (ITextEngine* te = text_engine()) {
@@ -2465,16 +2355,21 @@ void DeleteProfileConfirmModal::on_arrange(const RectF& area) {
   } else if (!profile_name_.empty()) {
     name_h = 22.0f;
   }
-  const float content_h = 12.0f + name_h + (name_h > 0.0f ? 8.0f : 0.0f) + msg_h + 12.0f;
-  const float acts_h = 11.0f + 28.0f + 8.0f + 28.0f + 11.0f;
+  const float content_h =
+      kPopupContentPadY * 2.0f + name_h + (name_h > 0.0f ? 8.0f : 0.0f) + msg_h;
+  // src: layout-dialogs.tsx:676-695 Cancel(12.5px, py .7) 在上 / Delete(13px, py .85) 在下
+  const float cancel_h = popup_btn_h("default", 12.5f, 5.6f);
+  const float delete_h = popup_btn_h("error", 13.0f, 6.8f);
+  const float acts_h =
+      kPopupActionsPadY * 2.0f + cancel_h + kPopupActionsGap + delete_h;
   const float ch = std::min(title_h + content_h + acts_h, std::max(140.0f, area.h - 16.0f));
   const float cx = 0.0f;
   const float cy = std::max(0.0f, (area.h - ch) / 2.0f);
   card_rect_ = {cx, cy, cw, ch};
 
   const float acts_top = cy + ch - acts_h;
-  btn_cancel_rect_ = {cx + pad, acts_top + 11.0f, inner_w, 28.0f};
-  btn_delete_rect_ = {cx + pad, btn_cancel_rect_.bottom() + 8.0f, inner_w, 28.0f};
+  btn_cancel_rect_ = {cx + pad, acts_top + kPopupActionsPadY, inner_w, cancel_h};
+  btn_delete_rect_ = {cx + pad, btn_cancel_rect_.bottom() + kPopupActionsGap, inner_w, delete_h};
 }
 
 void DeleteProfileConfirmModal::on_paint(IRenderTarget& rt) {
@@ -2494,28 +2389,30 @@ void DeleteProfileConfirmModal::on_paint(IRenderTarget& rt) {
                Brush{Color4f(0.0f, 0.0f, 0.0f, 0.5f)});
   ::clashwin::ui::draw_card(rt, card_rect_, svc.popup_card_paint());
 
-  const float pad = 14.0f;
+  const float pad = kPopupPadX;
   const float inner_w = std::max(80.0f, card_rect_.w - pad * 2.0f);
+  // src: layout-dialogs.tsx:654 fontSize '15.5px'
   TextStyle title_ts;
-  title_ts.size = 15.0f;
+  title_ts.size = 15.5f;
   title_ts.weight = static_cast<int>(Weight::Bold);
   title_ts.color = tokens.primary_text;
   title_ts.align_h = AlignH::Center;
   title_ts.align_v = AlignV::Center;
   rt.draw_text(tr("profiles.modals.confirmDelete.title"),
-               {card_rect_.x + pad, card_rect_.y + 10.0f, inner_w, 24.0f},
+               {card_rect_.x + pad, card_rect_.y + kPopupTitlePadY, inner_w, kPopupTitleTextH},
                title_ts);
-  rt.fill_rect({card_rect_.x, card_rect_.y + 43.0f, card_rect_.w, 1.0f},
+  rt.fill_rect({card_rect_.x, card_rect_.y + kPopupTitleBlockH - 1.0f, card_rect_.w, 1.0f},
                Brush{tokens.divider_color});
 
-  float text_y = card_rect_.y + 56.0f;
+  float text_y = card_rect_.y + kPopupTitleBlockH + kPopupContentPadY;
   if (!profile_name_.empty()) {
     TextStyle nts;
     nts.size = 13.0f;
     nts.weight = static_cast<int>(Weight::Bold);
     nts.color = tokens.primary_text;
     nts.wrap = true;
-    const float max_h = std::max(20.0f, btn_cancel_rect_.y - 11.0f - text_y - 24.0f);
+    const float max_h =
+        std::max(20.0f, btn_cancel_rect_.y - kPopupActionsPadY - text_y - 24.0f);
     rt.draw_text(utf::utf8_to_utf16(profile_name_),
                  {card_rect_.x + pad, text_y, inner_w, max_h}, nts);
     if (ITextEngine* te = text_engine()) {
@@ -2531,29 +2428,31 @@ void DeleteProfileConfirmModal::on_paint(IRenderTarget& rt) {
   mts.wrap = true;
   rt.draw_text(tr("profiles.modals.confirmDelete.message"),
                {card_rect_.x + pad, text_y, inner_w,
-                std::max(18.0f, btn_cancel_rect_.y - 16.0f - text_y)},
+                std::max(18.0f, btn_cancel_rect_.y - kPopupActionsPadY - kPopupContentPadY - text_y)},
                mts);
 
-  rt.fill_rect({card_rect_.x, btn_cancel_rect_.y - 11.0f, card_rect_.w, 1.0f},
+  rt.fill_rect({card_rect_.x, btn_cancel_rect_.y - kPopupActionsPadY, card_rect_.w, 1.0f},
                Brush{tokens.divider_color});
 
   auto paint_btn = [&](const RectF& orig_r, const char* ctype, bool outlined,
-                       bool hover, bool pressed, const std::wstring& label) {
+                       float fs, bool hover, bool pressed,
+                       const std::wstring& label) {
     const auto bp = svc.button_paint(ctype, outlined);
     RectF r = orig_r;
     if (pressed) r.y += bp.translate_active;
     draw_button_skin(rt, r, bp, hover ? 1.0f : 0.0f, pressed);
     TextStyle bts;
-    bts.size = 12.5f;
+    bts.size = fs;
     bts.weight = bp.weight;
     bts.color = bp.text;
     bts.align_h = AlignH::Center;
     bts.align_v = AlignV::Center;
     rt.draw_text(label, r, bts);
   };
-  paint_btn(btn_cancel_rect_, "default", true, hover_cancel_, pressed_cancel_,
+  // src: layout-dialogs.tsx:676-695
+  paint_btn(btn_cancel_rect_, "default", true, 12.5f, hover_cancel_, pressed_cancel_,
             tr("shared.actions.cancel"));
-  paint_btn(btn_delete_rect_, "error", false, hover_delete_, pressed_delete_,
+  paint_btn(btn_delete_rect_, "error", false, 13.0f, hover_delete_, pressed_delete_,
             tr("shared.actions.delete"));
 }
 

@@ -53,7 +53,7 @@ if (-not $Version) {
     if (-not $Version) { $Version = '0.1.0' }
 }
 
-$OutFile = Join-Path $DistDir "ClashWin_${Version}_x64_portable.zip"
+$OutFile = Join-Path $DistDir "Clash.Win_${Version}_x64_portable.zip"
 
 # ---------- 2. 校验构建产物 ----------
 if (-not (Test-Path -LiteralPath $BinDir)) {
@@ -61,7 +61,7 @@ if (-not (Test-Path -LiteralPath $BinDir)) {
 }
 
 $required = @(
-    (Join-Path $BinDir 'clashwin.exe'),
+    (Join-Path $BinDir 'clash-win.exe'),
     (Join-Path $BinDir 'sidecar\win-mihomo.exe'),
     (Join-Path $BinDir 'sidecar\clash-verge-service.exe'),
     (Join-Path $BinDir 'sidecar\clash-verge-service-install.exe'),
@@ -70,6 +70,8 @@ $required = @(
     (Join-Path $BinDir 'resources\Country.mmdb'),
     (Join-Path $BinDir 'resources\geosite.dat'),
     (Join-Path $BinDir 'resources\gfwlist.yaml'),
+    (Join-Path $BinDir 'resources\用户必读.txt'),
+    (Join-Path $BinDir 'resources\轻量模式防误杀指南.txt'),
     (Join-Path $BinDir 'locales')
 )
 $missing = @()
@@ -81,35 +83,37 @@ if ($missing.Count -gt 0) {
 }
 
 # 仅当运行中的进程锁定了构建输出目录时才拦截
-$running = Get-Process -Name 'clashwin' -ErrorAction SilentlyContinue |
+$running = Get-Process -Name 'clash-win','clashwin' -ErrorAction SilentlyContinue |
            Where-Object { $_.Path -and $_.Path.StartsWith($BinDir, [System.StringComparison]::OrdinalIgnoreCase) }
 if ($running) {
-    Fail ("clashwin.exe 正在运行（PID " + (($running | ForEach-Object { $_.Id }) -join ',') + "），先退出再打包。")
+    Fail ("clash-win.exe 正在运行（PID " + (($running | ForEach-Object { $_.Id }) -join ',') + "），先退出再打包。")
 }
 
-# ---------- 3. 暂存（安装后布局 + 便携标记） ----------
+# ---------- 3. 暂存（1:1 对齐 Clash Mini 安装后布局 + 便携标记） ----------
 $stage = Join-Path $env:TEMP ("clashwin-portable-" + [Guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Path $stage | Out-Null
 
 try {
-    Copy-Item -LiteralPath (Join-Path $BinDir 'clashwin.exe') -Destination (Join-Path $stage 'clashwin.exe') -Force
-    $stageSidecar = Join-Path $stage 'sidecar'
-    New-Item -ItemType Directory -Path $stageSidecar | Out-Null
-    foreach ($scName in @('win-mihomo.exe', 'clash-verge-service.exe', 'clash-verge-service-install.exe', 'clash-verge-service-uninstall.exe', 'enableLoopback.exe')) {
-        Copy-Item -LiteralPath (Join-Path $BinDir "sidecar\$scName") -Destination (Join-Path $stageSidecar $scName) -Force
-    }
+    Copy-Item -LiteralPath (Join-Path $BinDir 'clash-win.exe') -Destination (Join-Path $stage 'clash-win.exe') -Force
+    Copy-Item -LiteralPath (Join-Path $BinDir 'sidecar\win-mihomo.exe') -Destination (Join-Path $stage 'win-mihomo.exe') -Force
     Copy-Item -LiteralPath (Join-Path $BinDir 'resources') -Destination (Join-Path $stage 'resources') -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $BinDir 'locales')   -Destination (Join-Path $stage 'locales')   -Recurse -Force
+    foreach ($name in @('clash-verge-service.exe', 'clash-verge-service-install.exe', 'clash-verge-service-uninstall.exe', 'enableLoopback.exe')) {
+        Copy-Item -LiteralPath (Join-Path $BinDir "sidecar\$name") `
+                  -Destination (Join-Path (Join-Path $stage 'resources') $name) -Force
+    }
 
     # 便携标记：空的 .config\PORTABLE（← portable.mjs:25-27 / dirs.cpp:75-81）
     $cfgDir = Join-Path $stage '.config'
     New-Item -ItemType Directory -Path $cfgDir | Out-Null
     [System.IO.File]::WriteAllBytes((Join-Path $cfgDir 'PORTABLE'), @())
 
-    # 根目录再放一份用户必读（← portable.mjs:48 的同名做法）
-    $readme = Join-Path $stage 'resources\用户必读.txt'
-    if (Test-Path -LiteralPath $readme) {
-        Copy-Item -LiteralPath $readme -Destination (Join-Path $stage '用户必读.txt') -Force
+    # 根目录放用户必读与轻量模式防误杀指南（← portable.mjs:48 / BUG-398）
+    foreach ($docName in @('用户必读.txt', '轻量模式防误杀指南.txt')) {
+        $docSrc = Join-Path $stage "resources\$docName"
+        if (Test-Path -LiteralPath $docSrc) {
+            Copy-Item -LiteralPath $docSrc -Destination (Join-Path $stage $docName) -Force
+        }
     }
 
     # ---------- 4. 打包 ----------
@@ -137,12 +141,15 @@ finally {
 
 # ---------- 5. 校验 zip 内容（关键条目必须在，防止空包） ----------
 $mustHave = @(
-    'clashwin.exe',
+    'clash-win.exe',
     '.config/PORTABLE',
-    'sidecar/win-mihomo.exe',
+    'win-mihomo.exe',
     'resources/Country.mmdb',
+    'resources/clash-verge-service.exe',
+    'resources/enableLoopback.exe',
     'locales/zh/home.json',
-    '用户必读.txt'
+    '用户必读.txt',
+    '轻量模式防误杀指南.txt'
 )
 
 $zip = [System.IO.Compression.ZipFile]::OpenRead($OutFile)
@@ -164,7 +171,7 @@ $item = Get-Item -LiteralPath $OutFile
 Write-Host ""
 Write-Host "Portable package ready: $($item.FullName)" -ForegroundColor Green
 Write-Host ("Size: {0:N0} bytes ({1} MB), {2} entries" -f $item.Length, [math]::Round($item.Length / 1MB, 2), $names.Count) -ForegroundColor Green
-Write-Host "Layout: clashwin.exe + sidecar\ + resources\ + locales\ + .config\PORTABLE + 用户必读.txt" -ForegroundColor Gray
+Write-Host "Layout: clash-win.exe + win-mihomo.exe + resources\ + locales\ + .config\PORTABLE + 用户必读.txt + 轻量模式防误杀指南.txt" -ForegroundColor Gray
 
 # 显式声明成功退出码：CI (release.yml "Build portable ZIP") 用
 #   if ($LASTEXITCODE -ne 0) { throw ... } 判定本脚本。

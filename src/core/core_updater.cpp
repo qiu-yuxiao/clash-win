@@ -13,15 +13,13 @@
 #include <thread>
 
 #include "clashwin/config/constants.h"
+#include "config/config.h"
 #include "events/event_bus.h"
 #include "system/net_http.h"
 #include "util/dirs.h"
 #include "util/log.h"
 #include "util/str_utils.h"
 #include "util/utf.h"
-
-#pragma comment(lib, "bcrypt.lib")
-#pragma comment(lib, "winhttp.lib")
 
 namespace clashwin::core {
 
@@ -38,6 +36,17 @@ inline Error make_err(const std::string& msg, int code = 1) {
   return Error{code, msg};
 }
 
+uint16_t resolve_verge_mixed_port() {
+  try {
+    auto v = config::Config::instance().verge().latest_arc();
+    if (v && v->verge_mixed_port && *v->verge_mixed_port > 0) {
+      return *v->verge_mixed_port;
+    }
+  } catch (...) {
+  }
+  return config::consts::kDefaultMixed;
+}
+
 class DefaultCoreUpdateDownloader : public ICoreUpdateDownloader {
  public:
   Result<std::string> fetch_latest_release_json() override {
@@ -50,6 +59,9 @@ class DefaultCoreUpdateDownloader : public ICoreUpdateDownloader {
       opts.proxy_type = pt;
       opts.timeout_seconds = 15;
       opts.user_agent = "ClashWin-CoreUpdater";
+      opts.localhost_mixed_port = []() -> std::optional<uint16_t> {
+        return resolve_verge_mixed_port();
+      };
       auto res = system::http_get(url, opts);
       if (res.is_ok() && res.value().is_success()) {
         return Result<std::string>::ok(res.value().body);
@@ -67,6 +79,9 @@ class DefaultCoreUpdateDownloader : public ICoreUpdateDownloader {
       opts.proxy_type = pt;
       opts.timeout_seconds = 20;
       opts.user_agent = "ClashWin-CoreUpdater";
+      opts.localhost_mixed_port = []() -> std::optional<uint16_t> {
+        return resolve_verge_mixed_port();
+      };
       auto res = system::http_get(url, opts);
       if (res.is_ok() && res.value().is_success()) {
         return Result<std::string>::ok(res.value().body);
@@ -82,148 +97,18 @@ class DefaultCoreUpdateDownloader : public ICoreUpdateDownloader {
         system::ProxyType::Localhost, system::ProxyType::System, system::ProxyType::None};
 
     for (auto pt : proxy_types) {
-      auto r = download_via_winhttp(url, dest_path, pt, on_progress);
+      system::HttpOptions opts;
+      opts.proxy_type = pt;
+      opts.timeout_seconds = 300;
+      opts.user_agent = "ClashWin-CoreUpdater";
+      opts.max_response_bytes = 256ULL * 1024 * 1024;
+      opts.localhost_mixed_port = []() -> std::optional<uint16_t> {
+        return resolve_verge_mixed_port();
+      };
+      auto r = system::http_download_file(url, dest_path, opts, on_progress);
       if (r.is_ok()) return r;
     }
     return Result<void>::err(make_err("所有网络连接（代理/直连）均下载失败"));
-  }
-
- private:
-  Result<void> download_via_winhttp(
-      const std::string& url, const std::wstring& dest_path, system::ProxyType proxy_type,
-      std::function<void(uint64_t downloaded, uint64_t total)> on_progress) {
-    auto parsed = system::parse_http_url(url);
-    if (!parsed.is_ok()) return Result<void>::err(make_err("invalid download url"));
-
-    HINTERNET session = WinHttpOpen(
-        L"ClashWin-CoreUpdater", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!session) return Result<void>::err(make_err("WinHttpOpen failed"));
-
-    std::wstring proxy_str;
-    if (proxy_type == system::ProxyType::Localhost) {
-      proxy_str = L"127.0.0.1:" + std::to_wstring(static_cast<uint32_t>(config::consts::kDefaultMixed));
-    } else if (proxy_type == system::ProxyType::System) {
-      auto sys = system::read_system_proxy();
-      if (sys.has_value()) proxy_str = utf8_to_utf16(*sys);
-    }
-
-    std::string current_url = url;
-    int redirects = 0;
-    while (redirects < 10) {
-      auto p = system::parse_http_url(current_url);
-      if (!p.is_ok()) {
-        WinHttpCloseHandle(session);
-        return Result<void>::err(make_err("parse redirect failed"));
-      }
-      auto parts = p.value();
-      HINTERNET connect = WinHttpConnect(
-          session, utf8_to_utf16(parts.host).c_str(), parts.effective_port(), 0);
-      if (!connect) {
-        WinHttpCloseHandle(session);
-        return Result<void>::err(make_err("WinHttpConnect failed"));
-      }
-
-      const bool is_https = (parts.scheme == "https");
-      HINTERNET request = WinHttpOpenRequest(
-          connect, L"GET", utf8_to_utf16(parts.request_target()).c_str(),
-          nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
-          is_https ? WINHTTP_FLAG_SECURE : 0);
-      if (!request) {
-        WinHttpCloseHandle(connect);
-        WinHttpCloseHandle(session);
-        return Result<void>::err(make_err("WinHttpOpenRequest failed"));
-      }
-
-      if (!proxy_str.empty()) {
-        WINHTTP_PROXY_INFO pi{};
-        pi.dwAccessType = WINHTTP_ACCESS_TYPE_NAMED_PROXY;
-        pi.lpszProxy = const_cast<LPWSTR>(proxy_str.c_str());
-        WinHttpSetOption(request, WINHTTP_OPTION_PROXY, &pi, sizeof(pi));
-      }
-
-      DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
-      WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof(policy));
-      WinHttpSetTimeouts(request, 15000, 15000, 30000, 30000);
-
-      if (!WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                              WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
-          !WinHttpReceiveResponse(request, nullptr)) {
-        WinHttpCloseHandle(request);
-        WinHttpCloseHandle(connect);
-        WinHttpCloseHandle(session);
-        return Result<void>::err(make_err("WinHttp request failed"));
-      }
-
-      DWORD status_code = 0;
-      DWORD size = sizeof(status_code);
-      WinHttpQueryHeaders(request,
-                          WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-                          WINHTTP_HEADER_NAME_BY_INDEX, &status_code, &size,
-                          WINHTTP_NO_HEADER_INDEX);
-
-      if (status_code == 301 || status_code == 302 || status_code == 303 ||
-          status_code == 307 || status_code == 308) {
-        wchar_t loc[2048] = {0};
-        DWORD loc_size = sizeof(loc);
-        if (WinHttpQueryHeaders(request, WINHTTP_QUERY_LOCATION,
-                                WINHTTP_HEADER_NAME_BY_INDEX, loc, &loc_size,
-                                WINHTTP_NO_HEADER_INDEX)) {
-          current_url = utf16_to_utf8(loc);
-          WinHttpCloseHandle(request);
-          WinHttpCloseHandle(connect);
-          redirects++;
-          continue;
-        }
-      }
-
-      if (status_code != 200) {
-        WinHttpCloseHandle(request);
-        WinHttpCloseHandle(connect);
-        WinHttpCloseHandle(session);
-        return Result<void>::err(make_err("HTTP error: " + std::to_string(status_code)));
-      }
-
-      // Read Content-Length
-      uint64_t total_size = 0;
-      wchar_t cl_buf[64] = {0};
-      DWORD cl_size = sizeof(cl_buf);
-      if (WinHttpQueryHeaders(request, WINHTTP_QUERY_CONTENT_LENGTH,
-                              WINHTTP_HEADER_NAME_BY_INDEX, cl_buf, &cl_size,
-                              WINHTTP_NO_HEADER_INDEX)) {
-        total_size = std::wcstoull(cl_buf, nullptr, 10);
-      }
-
-      // Write stream to file
-      std::ofstream out(dest_path, std::ios::binary);
-      if (!out.is_open()) {
-        WinHttpCloseHandle(request);
-        WinHttpCloseHandle(connect);
-        WinHttpCloseHandle(session);
-        return Result<void>::err(make_err("failed to open output destination file"));
-      }
-
-      uint64_t downloaded = 0;
-      std::vector<char> buffer(65536);
-      DWORD bytes_read = 0;
-      while (WinHttpReadData(request, buffer.data(), static_cast<DWORD>(buffer.size()), &bytes_read) &&
-             bytes_read > 0) {
-        out.write(buffer.data(), bytes_read);
-        downloaded += bytes_read;
-        if (on_progress) {
-          on_progress(downloaded, total_size);
-        }
-      }
-      out.close();
-
-      WinHttpCloseHandle(request);
-      WinHttpCloseHandle(connect);
-      WinHttpCloseHandle(session);
-      return Result<void>::ok();
-    }
-
-    WinHttpCloseHandle(session);
-    return Result<void>::err(make_err("too many redirects"));
   }
 };
 
@@ -763,6 +648,9 @@ Result<void> CoreUpdater::extract_core_binary(const std::wstring& archive_path,
 }
 
 Result<GithubRelease> CoreUpdater::check_latest_release() {
+  if (is_exiting_check_ && is_exiting_check_()) {
+    return Result<GithubRelease>::err(make_err("application exiting"));
+  }
   if (!downloader_) {
     return Result<GithubRelease>::err(make_err("downloader not configured"));
   }
@@ -781,6 +669,17 @@ Result<GithubRelease> CoreUpdater::check_latest_release() {
 }
 
 Result<void> CoreUpdater::start_core_upgrade(const GithubRelease& release) {
+  auto check_exiting = [&](const char* stage) -> bool {
+    if (is_exiting_check_ && is_exiting_check_()) {
+      CWLOG_INFO(std::string("CoreUpdater: aborted during ") + stage +
+                 " (application exiting)");
+      return true;
+    }
+    return false;
+  };
+  if (check_exiting("start")) {
+    return Result<void>::err(make_err("application exiting"));
+  }
   emit_progress("checking", 5, "正在检测适合您系统架构的内核包...");
 
   auto asset_opt = match_target_asset(release);
@@ -819,6 +718,11 @@ Result<void> CoreUpdater::start_core_upgrade(const GithubRelease& release) {
   };
 
   auto dl_res = downloader_->download_asset(asset.browser_download_url, temp_download_path, on_progress);
+  if (check_exiting("download")) {
+    std::error_code ec;
+    std::filesystem::remove(temp_download_path, ec);
+    return Result<void>::err(make_err("application exiting"));
+  }
   if (!dl_res.is_ok()) {
     std::error_code ec;
     std::filesystem::remove(temp_download_path, ec);
@@ -848,6 +752,11 @@ Result<void> CoreUpdater::start_core_upgrade(const GithubRelease& release) {
         }
       }
     }
+  }
+  if (check_exiting("verify")) {
+    std::error_code ec;
+    std::filesystem::remove(temp_download_path, ec);
+    return Result<void>::err(make_err("application exiting"));
   }
 
   // Snapshot active proxy group (BUG-335: fallback to persisted non-dummy selection)

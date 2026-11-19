@@ -91,11 +91,12 @@ UT_TEST(t31_switch_hover_scale_per_skin) {
   UT_CHECK(almost_eq(p.thumb_radius, 0.0f));
   UT_CHECK(almost_eq(p.track_hover_border.r, 0.0f));
 
-  // original / frosted-glass 无 hover 规则
+  // original 无 hover 规则；frosted-glass 按 base-switch.tsx:447 悬停放大 1.1x
   svc.init(SkinId::Original, ThemeMode::Light);
   UT_CHECK(!svc.switch_paint().thumb_hover);
   svc.init(SkinId::FrostedGlass, ThemeMode::Light);
-  UT_CHECK(!svc.switch_paint().thumb_hover);
+  UT_CHECK(svc.switch_paint().thumb_hover);
+  UT_CHECK(almost_eq(svc.switch_paint().thumb_hover_scale, 1.10f));
   svc.init(SkinId::Retro3d, ThemeMode::Light);
 }
 

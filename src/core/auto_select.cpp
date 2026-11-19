@@ -51,7 +51,8 @@ std::optional<std::string> AutoSelect::pick_fastest(
     const std::vector<std::pair<std::string, uint32_t>>& display,
     const std::function<std::vector<std::string>()>& failed_servers,
     const std::function<std::map<std::string, std::string>()>&
-        node_server_map) {
+        node_server_map,
+    const std::function<bool(const std::string&)>& is_verified_true) {
   std::vector<std::pair<std::string, uint32_t>> candidates;
   for (const auto& [name, d] : display) {
     if (d >= kNodeDelayMinMs && d < kNodeDelayMaxMs)
@@ -82,6 +83,17 @@ std::optional<std::string> AutoSelect::pick_fastest(
           CWLOG_WARN("AutoSelect: 全部候选都在失败服务器上，放弃避让");
         }
       }
+    }
+  }
+
+  // 优先从 verified_true 候选中择优；若全员未验真则保底回退全候选（← monitor.rs:207）
+  if (is_verified_true) {
+    std::vector<std::pair<std::string, uint32_t>> verified;
+    for (const auto& c : candidates) {
+      if (is_verified_true(c.first)) verified.push_back(c);
+    }
+    if (!verified.empty()) {
+      candidates = std::move(verified);
     }
   }
 
@@ -181,14 +193,31 @@ AutoSelect::Outcome AutoSelect::trigger(
     return out;
   }
 
-  // 2. 群测（BUG-344：< 30s 新鲜度门控复用 vs 实测拨测；严禁未执行伪造 0ms）
-  const bool allow_cache_reuse = is_frontend_subset && nodes.size() > 1;
+  // 2. 群测（BUG-344：< 10s 测量组实时快照 / < 30s 子集保鲜；严禁未执行伪造 0ms）
+  bool allow_cache_reuse = is_frontend_subset && nodes.size() > 1;
   std::optional<std::vector<std::pair<std::string, uint32_t>>> cached_subset;
-  if (allow_cache_reuse && hooks_.fresh_metrics_subset) {
+  if (!is_frontend_subset && nodes.size() > 1) {
+    if (auto recent = CoreMonitor::try_reuse_metrics_probe(
+            static_cast<int64_t>(GetTickCount64()),
+            CoreMonitor::kSelfHealSnapshotReuseMs, nodes, true)) {
+      std::vector<std::pair<std::string, uint32_t>> snap;
+      snap.reserve(nodes.size());
+      for (const auto& n : nodes) {
+        auto it = recent->find(n);
+        if (it != recent->end()) snap.emplace_back(n, it->second);
+      }
+      if (!snap.empty()) {
+        allow_cache_reuse = true;
+        cached_subset = std::move(snap);
+      }
+    }
+  }
+  if (!cached_subset && allow_cache_reuse && hooks_.fresh_metrics_subset) {
     cached_subset = hooks_.fresh_metrics_subset(nodes);
   }
   auto& dm = DelayManager::instance();
-  auto outcome = dm.test_group("PROXY", nodes, allow_cache_reuse, cached_subset);
+  auto outcome = dm.test_group("PROXY", nodes, allow_cache_reuse, cached_subset,
+                               is_frontend_subset);
   out.source = outcome.source;
   if (!outcome.injected) {
     // 拨测未执行 → 空 display（严禁伪造 Timeout 0ms）
@@ -208,20 +237,45 @@ AutoSelect::Outcome AutoSelect::trigger(
   }
   sort_display_delays(out.display, effective_sort);
 
-  // 4. select：过滤重检 → 择优 → 双重校验 current_uid → 手动抢占检查 → 切换 → 回写
+  // 4. select：验真兜底 → 过滤重检 → 择优 → 双重校验 current_uid → 手动抢占检查 → 连续性幂等判断 → 切换 → 回写
   if (select) {
+    // 冷启动/全员未验真兜底（← monitor.rs:2199-2206）
+    if (hooks_.run_https_verify) {
+      auto is_ver = [&](const std::string& n) {
+        return hooks_.is_verified_true ? hooks_.is_verified_true(n)
+                                       : util::is_verified_true_node(n);
+      };
+      bool has_reachable = false;
+      bool any_verified = false;
+      for (const auto& entry : out.display) {
+        if (entry.second >= kNodeDelayMinMs && entry.second < kNodeDelayMaxMs) {
+          has_reachable = true;
+          if (is_ver(entry.first)) {
+            any_verified = true;
+            break;
+          }
+        }
+      }
+      if (has_reachable && !any_verified) {
+        hooks_.run_https_verify(nodes);
+      }
+    }
+
     const std::string latest_filter =
         hooks_.filter_text ? hooks_.filter_text() : "";
     std::vector<std::pair<std::string, uint32_t>> matched_display;
     matched_display.reserve(out.display.size());
     for (const auto& entry : out.display) {
-      if (is_frontend_subset ||
-          util::match_node_filter(entry.first, latest_filter)) {
+      if (hooks_.is_confirmed_fake && hooks_.is_confirmed_fake(entry.first)) {
+        continue;
+      }
+      if (util::match_node_filter(entry.first, latest_filter)) {
         matched_display.push_back(entry);
       }
     }
     auto fastest = pick_fastest(
-        matched_display, hooks_.failed_servers, hooks_.node_server_map);
+        matched_display, hooks_.failed_servers, hooks_.node_server_map,
+        hooks_.is_verified_true);
     if (!fastest) {
       events::EventBus::refresh_proxies();
       return out;
@@ -242,7 +296,15 @@ AutoSelect::Outcome AutoSelect::trigger(
       events::EventBus::refresh_proxies();
       return out;
     }
-    if (hooks_.select_node && hooks_.select_node("PROXY", *fastest)) {
+    const bool already_current =
+        hooks_.current_proxy_now &&
+        hooks_.current_proxy_now("PROXY") == *fastest;
+    if (already_current) {
+      CWLOG_INFO("AutoSelect: 最优节点已是当前出口，保持现状（不发起切换写入）: " +
+                 *fastest);
+    }
+    if (already_current ||
+        (hooks_.select_node && hooks_.select_node("PROXY", *fastest))) {
       out.selected = true;
       out.selected_node = *fastest;
       CoreMonitor::instance().emit_network_health_notice("network_health::ok");
@@ -268,8 +330,10 @@ AutoSelect::Outcome AutoSelect::trigger(
   return out;
 }
 
-// 唤醒静默测速（T16⑤）：5min 冷却 + 复用 running_ 互斥；T19 挂触发
-bool AutoSelect::silent_test_on_wakeup(const std::string& profile_uid) {
+// 唤醒静默测速（T16⑤ / BUG-402）：5min 冷却 + 复用 running_ 互斥；传入当前过滤子集以复用 <30s 快照
+bool AutoSelect::silent_test_on_wakeup(
+    const std::string& profile_uid,
+    std::optional<std::vector<std::string>> node_names) {
   int64_t now = static_cast<int64_t>(GetTickCount64());
   constexpr int64_t kCooldownMs = 5 * 60 * 1000;
   int64_t last = last_wakeup_ms_.load();
@@ -279,8 +343,10 @@ bool AutoSelect::silent_test_on_wakeup(const std::string& profile_uid) {
     return false;
   }
   // 仅测速不切换（select=false）；互斥由 trigger 内 Guard 保证
-  auto r = trigger(profile_uid, std::nullopt, 1, /*select=*/false,
-                   /*skip_wait_ready=*/true);
+  // BUG-402：传入过滤子集 `node_names` 允许复用后端 <30s 测量组快照，sort_type=0 按持久排序状态
+  const int sort_type = (node_names.has_value() && !node_names->empty()) ? 0 : 1;
+  auto r = trigger(profile_uid, std::move(node_names), sort_type,
+                   /*select=*/false, /*skip_wait_ready=*/true);
   if (r.busy) return false;  // 忙 → 不更新冷却（下次唤醒再试）
   last_wakeup_ms_.store(now);
   return true;

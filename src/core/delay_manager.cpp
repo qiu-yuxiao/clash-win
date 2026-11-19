@@ -36,7 +36,8 @@ std::vector<std::pair<std::string, uint32_t>> build_display(
 DelayManager::GroupOutcome DelayManager::test_group(
     const std::string& group, const std::vector<std::string>& nodes,
     bool allow_cache_reuse,
-    std::optional<std::vector<std::pair<std::string, uint32_t>>> cached) {
+    std::optional<std::vector<std::pair<std::string, uint32_t>>> cached,
+    bool is_frontend_subset) {
   GroupOutcome out;
   if (nodes.empty()) return out;
 
@@ -55,9 +56,14 @@ DelayManager::GroupOutcome DelayManager::test_group(
     return out;
   }
 
-  // 2. 测量组群测（单调用；BUG-344：彻底废除 120s 陈旧 history 兜底与未执行伪造 0ms）
+  // 2. 测量组群测（单调用；BUG-344 / BUG-401）
+  const bool is_single_node_probe = is_frontend_subset && nodes.size() == 1;
+  const bool allow_coalesce = !is_single_node_probe;
   std::optional<std::map<std::string, uint32_t>> probed;
-  if (hooks_.group_probe) {
+  if (hooks_.group_probe_ex) {
+    probed = hooks_.group_probe_ex(group + "__METRICS", nodes, allow_coalesce,
+                                   is_single_node_probe);
+  } else if (hooks_.group_probe) {
     probed = hooks_.group_probe(group + "__METRICS");
   }
   if (!probed.has_value() || probed->empty()) {
@@ -79,8 +85,8 @@ DelayManager::GroupOutcome DelayManager::test_group(
 
 DelayManager::GroupOutcome DelayManager::test_single(const std::string& group,
                                                      const std::string& node) {
-  // 单点禁用缓存复用（强即时探活意图 ← monitor.rs 单点语义注释）
-  return test_group(group, {node}, false, std::nullopt);
+  // 单点禁用缓存复用（强即时探活意图 ← monitor.rs「单点测速语义必须真实探测」）
+  return test_group(group, {node}, false, std::nullopt, true);
 }
 
 }  // namespace clashwin::core

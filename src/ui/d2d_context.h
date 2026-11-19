@@ -8,6 +8,7 @@
 
 #include <windows.h>
 
+#include <array>
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
@@ -19,12 +20,16 @@ struct ID2D1SolidColorBrush;
 struct ID2D1Bitmap;
 struct ID2D1Layer;
 struct IDWriteFactory;
+struct IDWriteFontCollection1;
+struct IDWriteFontFallback;
+struct IDWriteInMemoryFontFileLoader;
 struct IDWriteTextFormat;
 struct IWICImagingFactory;
 struct IWICBitmap;
 struct IWICBitmapSource;
 
 #include "render_target.h"
+#include "ui/theme/palettes.h"
 
 namespace clashwin::ui {
 
@@ -43,12 +48,23 @@ class D2dContext {
   IDWriteFactory* dwrite() const;
   IWICImagingFactory* wic() const;
 
+  IDWriteFontCollection1* outfit_collection() const { return outfit_collection_; }
+  bool has_outfit_font() const { return outfit_loaded_; }
+  IDWriteFontFallback* skin_fallback(theme::SkinId skin) const;
+
  private:
+  void init_custom_fonts();
+  void init_skin_fallbacks();
+
   bool wic_inited_ = false;
   bool inited_ = false;
   ID2D1Factory* d2d_factory_ = nullptr;
   IDWriteFactory* dwrite_factory_ = nullptr;
   IWICImagingFactory* wic_factory_ = nullptr;
+  IDWriteInMemoryFontFileLoader* mem_font_loader_ = nullptr;
+  IDWriteFontCollection1* outfit_collection_ = nullptr;
+  bool outfit_loaded_ = false;
+  std::array<IDWriteFontFallback*, 6> skin_fallbacks_{};
 };
 
 class D2dRenderTarget : public IRenderTarget, public ITextEngine {
@@ -86,6 +102,9 @@ class D2dRenderTarget : public IRenderTarget, public ITextEngine {
   void fill_rect(const RectF& r, const Brush& b) override;
   void round_rect(const RectF& r, float radius, const Pen& p,
                   const Brush* fill) override;
+  void round_rect_corners(const RectF& r, float radius, int corner_mask,
+                          const Pen& p, const Brush* fill,
+                          int border_sides_mask = 0xF) override;
   void fill_round_rect_gradient(const RectF& r, float radius,
                                 const GradientStop* stops, int count) override;
   void fill_round_rect_gradient_angle(const RectF& r, float radius,
@@ -97,6 +116,12 @@ class D2dRenderTarget : public IRenderTarget, public ITextEngine {
                               float cx_ratio, float cy_ratio,
                               float rx, float ry) override;
   void draw_line(const PointF& a, const PointF& b, const Pen& p) override;
+  void draw_dashed_line(const PointF& a, const PointF& b, const Pen& p,
+                        float dash_len, float gap_len) override;
+  void fill_polygon_vertical_gradient(const PointF* pts, int count,
+                                      float top_y, float bottom_y,
+                                      const Color4f& top_color,
+                                      const Color4f& bottom_color) override;
   void fill_path(const std::vector<std::vector<PointF>>& loops,
                  const Brush& b) override;
   void draw_text(const std::wstring& text, const RectF& r,

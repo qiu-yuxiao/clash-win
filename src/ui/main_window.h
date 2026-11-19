@@ -277,7 +277,9 @@ class MainWindow : public app::ILifecycleWindow {
   void sync_quick_bar(bool empty_as_dash = false); // 同步活跃节点名/延迟/协议胶囊/异步地址到 QuickBar
   void switch_node_optimistic_async(const std::string& target); // BUG-336/356：0ms 乐观切点 + 异步 IPC/回滚 + selected 持久化
   void test_single_node_async(const std::string& node);         // BUG-321/357：单节点测速（QuickBar 胶囊与行右侧热区共用）
-  void trigger_auto_select_and_refresh(const std::string& uid, bool user_initiated = false); // 1:1 对齐 Mini：全量并发测速择优+10s复核
+  void trigger_auto_select_and_refresh(const std::string& uid,
+                                       bool user_initiated = false,
+                                       bool skip_probe_if_fresh = false); // 1:1 对齐 Mini v3.5.6：全量并发测速择优/首启新鲜缓存免测
   void update_ime_position();                      // IME 候选窗跟随光标与 Win32 原生 Caret 同步
   // 首启就绪轮询：只刷新 proxies/activeDelay，不触发组测速
   void sync_first_run_proxy();
@@ -288,6 +290,7 @@ class MainWindow : public app::ILifecycleWindow {
   // ★ ❌5 设置开关失败回滚：patch 失败后用权威配置值回填抽屉开关（set_checked 不触发回调），
   //   对齐 Mini use-minimal-settings.ts:77-79 patch 失败 → mutateInfo() 权威值回滚、开关弹回。
   void resync_settings_ui();
+  void arrange_modal_overlays(float lw, float lh);
   // persist=false：启动期显式重排（create() 两次）跳过 persist_geometry()，
   //   防 dpi 未换挡的中间几何回写 window_state.json 覆盖刚恢复的值；
   //   真实 WM_SIZE/WM_DPICHANGED 及运行时重排默认 true（← Mini 窗口构建前一次注入几何）。
@@ -334,7 +337,6 @@ class MainWindow : public app::ILifecycleWindow {
   scene::LogViewerModal* log_viewer_ = nullptr;  // 主题卡“调试日志”弹窗（Mini 同构）
   scene::AddUrlDialog* add_url_ = nullptr;  // 代理方式第三段“添加网址”（Mini 同构）
   scene::FirstRunGuideDialog* first_run_ = nullptr;  // 首次运行向导（Mini 同构）
-  scene::AntivirusWhitelistModal* antivirus_modal_ = nullptr;  // 安全软件白名单说明弹窗（Mini 同构）
   // 帮助菜单「检查软件更新 / 检查内核更新」→ 弹窗（Mini: _layout.tsx:1948/1956）
   scene::ClientUpdateModal* client_update_ = nullptr;
   scene::CoreUpdateModal* core_update_ = nullptr;
@@ -349,13 +351,13 @@ class MainWindow : public app::ILifecycleWindow {
   uint64_t theme_sub_ = 0;  // ThemeService 热切换订阅（切皮肤/亮暗 → 全窗重绘）
   uint64_t bus_sub_core_upgrade_ = 0;  // kCoreUpgradeProgress → CoreUpdateModal + 结果通知
   uint64_t bus_sub_open_guide_ = 0;    // ui:open_guide → 重开首次向导
-  uint64_t bus_sub_open_av_ = 0;       // ui:open_antivirus_guide → 打开安全软件白名单弹窗
   uint64_t postbox_sub_delay_ = 0;
   uint64_t postbox_sub_refresh_ = 0;
   uint64_t net_health_sub_ = 0;                 // BUG-359：network_health::* 顶栏胶囊订阅
   std::atomic<bool> self_heal_busy_{false};     // BUG-359：点击健康胶囊自愈重测防重入
-  std::atomic<uint64_t> switch_epoch_{0};       // BUG-356：异步切点并发代数守卫
-  std::atomic<uint64_t> last_blur_ms_{0};       // BUG-361：最近一次失焦时刻（GetTickCount64）
+  std::atomic<uint64_t> switch_epoch_{0};          // BUG-356：异步切点并发代数守卫
+  std::atomic<uint64_t> auto_select_coord_gen_{0}; // 后台选点协调代数（切配置即取消）
+  std::atomic<uint64_t> last_blur_ms_{0};          // BUG-361：最近一次失焦时刻（GetTickCount64）
   std::atomic<bool> profile_importing_{false};  // ← _layout.tsx:839 isImportingRef 防重入锁
   int64_t aurora_tick_ms_ = 0;  // 极光动画自续帧节流（10fps；src: layout.scss:23）
 

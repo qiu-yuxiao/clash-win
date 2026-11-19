@@ -93,6 +93,9 @@ class CoreUpdater {
   void set_core_api_client(ICoreApiClient* client);
   void set_lifecycle_ops(CoreOps ops);
   void reset_lifecycle_ops();
+  void set_is_exiting_check(std::function<bool()> fn) {
+    is_exiting_check_ = std::move(fn);
+  }
 
   // Commands
   Result<GithubRelease> check_latest_release();
@@ -119,6 +122,7 @@ class CoreUpdater {
   std::shared_ptr<ICoreUpdateDownloader> downloader_;
   ICoreApiClient* api_client_ = nullptr;
   std::optional<CoreOps> lifecycle_ops_;
+  std::function<bool()> is_exiting_check_;
 };
 
 }  // namespace clashwin::core

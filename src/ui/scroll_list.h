@@ -51,14 +51,19 @@ class ScrollList : public Widget {
     invalidate();
   }
   bool show_scrollbar() const { return show_scrollbar_; }
+  RectF thumb_rect() const;
 
  private:
   void sync_children(float viewport_h);  // 物化窗口对齐 offset_
+  void relayout_materialized();
   int first_visible(float /*viewport_h*/) const {
     return static_cast<int>(offset_ / item_height_);
   }
 
   bool show_scrollbar_ = true;
+  bool thumb_hover_ = false;
+  bool dragging_thumb_ = false;
+  float drag_offset_y_ = 0.0f;
 
   int item_count_ = 0;
   float item_height_ = 0;

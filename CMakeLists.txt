@@ -193,13 +193,13 @@ add_library(clashwin_ui STATIC
   src/ui/notice_handler.cpp
   src/ui/tooltip_w.cpp
   src/ui/canvas_graph.cpp
+  src/ui/enhanced_traffic_graph.cpp
   src/ui/text_viewer.cpp
   src/ui/ui_postbox.cpp
   src/ui/theme/palettes.cpp
   src/ui/theme/theme.cpp
   src/ui/scenes/connection_data.cpp
   src/ui/scenes/path_control.cpp
-  src/ui/scenes/connections_view.cpp
   src/ui/scenes/connections_panel.cpp
   src/ui/scenes/connection_detail_dialog.cpp
   src/ui/scenes/add_url_dialog.cpp
@@ -267,6 +267,7 @@ target_link_options(clashwin PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/MANIFEST:NO>)
 
 add_clashwin_copy_resources(clashwin)
 add_clashwin_copy_locales(clashwin)
+set_target_properties(clashwin PROPERTIES OUTPUT_NAME "clash-win")
 
 # ---------- 单测（T02 util + T03 config） ----------
 add_executable(clashwin_test
@@ -361,6 +362,7 @@ add_executable(clashwin_test
   tests/test_bug317_362_ui.cpp
   tests/test_v350_backend_parity.cpp
   tests/test_v350_ui_parity.cpp
+  tests/test_v110_parity.cpp
 )
 target_link_libraries(clashwin_test PRIVATE clashwin_app clashwin_util clashwin_config clashwin_mihomo clashwin_system clashwin_enhance clashwin_core clashwin_cmd clashwin_ui clashwin_i18n shell32 bcrypt)
 target_compile_options(clashwin_test PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)

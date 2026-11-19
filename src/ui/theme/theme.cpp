@@ -2,6 +2,11 @@
 // 差异标注：CSS 渐变/多层 boxShadow/backdropFilter → C++ 离散色近似。
 #include "theme.h"
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -11,6 +16,38 @@
 namespace clashwin::ui::theme {
 
 namespace {
+// src: src/pages/_layout/hooks/use-custom-theme.ts:12-43 系统 AccentColor 读取
+std::optional<Color4f> query_os_accent_color() {
+  DWORD val = 0;
+  DWORD sz = sizeof(val);
+  if (RegGetValueW(HKEY_CURRENT_USER,
+                   L"SOFTWARE\\Microsoft\\Windows\\DWM",
+                   L"AccentColor", RRF_RT_REG_DWORD, nullptr, &val, &sz) ==
+      ERROR_SUCCESS) {
+    // Windows Registry DWM\AccentColor 为 0xAABBGGRR
+    const uint8_t r = static_cast<uint8_t>(val & 0xFFu);
+    const uint8_t g = static_cast<uint8_t>((val >> 8) & 0xFFu);
+    const uint8_t b = static_cast<uint8_t>((val >> 16) & 0xFFu);
+    return Color4f{r / 255.0f, g / 255.0f, b / 255.0f, 1.0f};
+  }
+  HMODULE dwm = LoadLibraryW(L"dwmapi.dll");
+  if (!dwm) return std::nullopt;
+  using Fn = HRESULT(__stdcall*)(DWORD*, BOOL*);
+  auto fn = reinterpret_cast<Fn>(GetProcAddress(dwm, "DwmGetColorizationColor"));
+  std::optional<Color4f> out;
+  if (fn) {
+    DWORD argb = 0;
+    BOOL opaque = FALSE;
+    if (SUCCEEDED(fn(&argb, &opaque))) {
+      const uint8_t r = static_cast<uint8_t>((argb >> 16) & 0xFFu);
+      const uint8_t g = static_cast<uint8_t>((argb >> 8) & 0xFFu);
+      const uint8_t b = static_cast<uint8_t>(argb & 0xFFu);
+      out = Color4f{r / 255.0f, g / 255.0f, b / 255.0f, 1.0f};
+    }
+  }
+  FreeLibrary(dwm);
+  return out;
+}
 // CSS hex "#RRGGBB" / "#RRGGBBAA" → Color4f（解析失败返回 nullopt）
 std::optional<Color4f> parse_hex(const std::string& css) {
   if (css.size() < 7 || css[0] != '#') return std::nullopt;
@@ -184,10 +221,24 @@ void ThemeService::rebuild() {
       palette_.primary_color = *c;
     else
       CWLOG_WARN("Theme: primary_color 解析失败 " + primary_override_);
+  } else if (allow_os_accent_) {
+    if (auto accent = query_os_accent_color()) {
+      palette_.primary_color = *accent;
+    }
   }
-  // 系统 AccentColor 探测（Windows AccentColor 注册表/DWM）→ T17 接
-  // （use-custom-theme.ts:12-40 用 CSS AccentColor 探测；C++ 侧落 T17）
   vars_ = css_vars(mode_, skin_);
+  if (skin_ == SkinId::Monochrome) {
+    // src: src/assets/styles/index.scss:285-295 monochrome .text-secondary .65 / divider .45
+    palette_.secondary_text.a *= 0.65f;
+    vars_.divider_color.a *= 0.45f;
+  }
+}
+
+void ThemeService::set_allow_os_accent(bool allow) {
+  if (allow_os_accent_ == allow) return;
+  allow_os_accent_ = allow;
+  rebuild();
+  notify();
 }
 
 void ThemeService::notify() {
@@ -355,6 +406,19 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
           // ← :40-52 outlined default：border #D4AF37/#8A6D00、文字 #3C2F0F/#FFE082
           p.border = light ? Color4f::hex(0xD4AF37) : Color4f::hex(0x8A6D00);
           p.text = light ? Color4f::hex(0x3C2F0F) : Color4f::hex(0xFFE082);
+          // src: src/utils/button-styles.ts:109-111 outlined 悬停四停不透明浅金渐变
+          if (light) {
+            p.grad_hover[0] = {0.00f, Color4f::hex(0xFFFDE7)};
+            p.grad_hover[1] = {0.20f, Color4f::hex(0xFFF9C4)};
+            p.grad_hover[2] = {0.50f, Color4f::hex(0xFFF59D)};
+            p.grad_hover[3] = {1.00f, Color4f::hex(0xFFD54F)};
+          } else {
+            p.grad_hover[0] = {0.00f, Color4f::hex(0xFFF9C4)};
+            p.grad_hover[1] = {0.20f, Color4f::hex(0xFFF59D)};
+            p.grad_hover[2] = {0.50f, Color4f::hex(0xFBC02D)};
+            p.grad_hover[3] = {1.00f, Color4f::hex(0xF57F17)};
+          }
+          p.grad_hover_count = 4;
         } else if (light) {
           p.grad[0] = {0.0f, Color4f::hex(0xFFFDE7)};
           p.grad[1] = {0.35f, Color4f::hex(0xFFF9C4)};
@@ -376,10 +440,6 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
           p.grad_hover[2] = {0.50f, Color4f::hex(0xFBC02D)};
           p.grad_hover[3] = {1.0f, Color4f::hex(0xF57F17)};
         }
-        // ← :109-111 `&:hover` 的 default 底色不看 variant：outlined 悬停时同样转成
-        //   4 站不透明的浅金渐变（此前把 grad_hover 复制成 grad，导致 outlined 按钮
-        //   悬停毫无反馈）。
-        if (outlined) p.grad_hover_count = 4;
       }
       p.fill = p.grad[p.grad_count / 2].color;   // last_fill_ 兜底
       p.fill_hover = p.grad_hover[p.grad_count / 2].color;
@@ -467,17 +527,23 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
       break;
     }
     case SkinId::FrostedGlass: {
-      // ← :258-315：半透明 + backdropFilter（D2D 无此滤镜，保留 alpha 色值）
+      // src: src/utils/button-styles.ts:290-307 primary / error / default 填充与 hover
       p.fill = is_primary ? with_alpha(primary(), 0.25f)
-                       : (light ? Color4f::hex(0x000000, 0.06f)
-                                : Color4f::hex(0xFFFFFF, 0.08f));
-      p.fill_hover = is_primary ? with_alpha(primary(), 0.40f)
-                             : (light ? Color4f::hex(0x000000, 0.12f)
-                                      : Color4f::hex(0xFFFFFF, 0.15f));
+                          : (is_error ? Color4f::hex(0xEF4444, 0.25f)
+                                      : (light ? Color4f::hex(0x000000, 0.06f)
+                                               : Color4f::hex(0xFFFFFF, 0.08f)));
+      p.fill_hover = is_primary
+                         ? with_alpha(primary(), 0.40f)
+                         : (is_error ? Color4f::hex(0xEF4444, 0.40f)
+                                     : (light ? Color4f::hex(0x000000, 0.12f)
+                                              : Color4f::hex(0xFFFFFF, 0.15f)));
       p.fill_pressed = p.fill_hover;
-      p.text = text_primary();
-      p.border = light ? Color4f::hex(0x000000, 0.12f)
-                       : Color4f::hex(0xFFFFFF, 0.12f);
+      // src: src/utils/button-styles.ts:314-319 error 态保留可读红色文字/边框，其余沿用主文色
+      p.text = is_error ? (light ? Color4f::hex(0xB91C1C) : Color4f::hex(0xFCA5A5))
+                        : text_primary();
+      p.border = is_error ? Color4f::hex(0xEF4444, 0.45f)
+                          : (light ? Color4f::hex(0x000000, 0.12f)
+                                   : Color4f::hex(0xFFFFFF, 0.12f));
       p.radius = 8;               // ← :318 borderRadius '8px'（不乘 val1）
       p.border_w = 1.0f;          // ← :317 border: 1px solid rgba(...)
       p.weight = 400;
@@ -562,7 +628,8 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
       p.text = is_primary ? (light ? Color4f::hex(0xffffff) : Color4f::hex(0x000000))
                        : (light ? Color4f::hex(0x000000) : Color4f::hex(0xffffff));
       p.border = light ? Color4f::hex(0x000000) : Color4f::hex(0xffffff);
-      p.radius = 0.0f;        // src: button-styles.ts:719 borderRadius: '0px'
+      // src: src/assets/styles/index.scss:257-269 .MuiButton-root radius = 8*val1
+      p.radius = 8.0f * g;
       p.border_w = 1.0f * v;  // ← :454 calc(1px * --vibrancy-factor)
       p.weight = 700;
       p.translate_active = 1.0f;   // transform: translateY(1px)
@@ -590,8 +657,8 @@ SegmentedPaint ThemeService::segmented_paint() const {
   const float v = vibrancy();    // --vibrancy-factor
   const float g = val1();        // --control-skin-val1
   SegmentedPaint p{};
-  // src: routing-preference-card.tsx:110-114 & theme-settings-card.tsx:194-200
-  p.text = (skin_ == SkinId::Retro3d)
+  // src: src/pages/_layout/components/takeover-mode-card.tsx:46,113 仅 retro-3d Dark 覆盖未选字色
+  p.text = (skin_ == SkinId::Retro3d && !light)
                ? Color4f::hex(0x2C1F03, 0.75f)
                : palette_.secondary_text;
   switch (skin_) {
@@ -707,6 +774,8 @@ InputPaint ThemeService::input_paint() const {
                    : Color4f::hex(0x1A160E, 0.4f);
       p.border = light ? Color4f::hex(0xD4AF37, 0.35f)
                        : Color4f::hex(0xD4AF37, 0.25f);
+      // src: src/utils/button-styles.ts:757-762
+      p.border_hover = Color4f::hex(0xD4AF37, light ? 0.60f : 0.50f);
       p.border_w = 2.0f * d;
       p.border_w_focused = 2.0f * d;
       p.border_focused = light ? Color4f::hex(0xB8860B) : Color4f::hex(0xFFA000);
@@ -731,6 +800,8 @@ InputPaint ThemeService::input_paint() const {
       p.text = light ? Color4f::hex(0x1E293B) : Color4f::hex(0xF1F5F9);
       p.placeholder = with_alpha(p.text, 0.5f);
       p.border = light ? Color4f::hex(0xCBD5E1) : Color4f::hex(0x475569);
+      // src: src/utils/button-styles.ts:792-794
+      p.border_hover = light ? Color4f::hex(0x94A3B8) : Color4f::hex(0x64748B);
       p.border_w = 1.0f;
       p.border_focused = primary();
       p.border_w_focused = 1.5f;
@@ -742,6 +813,8 @@ InputPaint ThemeService::input_paint() const {
       //   inset 0 v 3v rgba(0,0,0, .06v)、focus = 主色 1px
       p.bg = light ? Color4f::hex(0xFFFFFF) : Color4f::hex(0x111827);
       p.border = light ? Color4f::hex(0xD1D5DB) : Color4f::hex(0x4B5563);
+      // src: src/utils/button-styles.ts:819-821
+      p.border_hover = primary();
       p.border_focused = primary();
       p.radius = 6.0f * g;   // ← :811 borderRadius calc(6px * var(--control-skin-val1))
       p.has_inset = true;
@@ -751,13 +824,16 @@ InputPaint ThemeService::input_paint() const {
       break;
 
     case SkinId::FrostedGlass:
-      // :839-866 + index.scss:186-198：半透明底随 depth/vibrancy 变化、focus 主色
-      p.bg = Color4f::hex(light ? 0x000000 : 0xFFFFFF,
-                          std::clamp(0.03f + 0.05f * d + 0.02f * v, 0.02f, 0.40f));
-      p.border = Color4f::hex(light ? 0x000000 : 0xFFFFFF,
-                              std::clamp(0.08f + 0.06f * d, 0.04f, 0.40f));
+      // src: src/utils/button-styles.ts:832-852 & src/pages/_layout/hooks/use-custom-theme.ts:248
+      p.bg = light ? Color4f::hex(0xFFFFFF, 0.55f)
+                   : Color4f::hex(0xFFFFFF, 0.05f);
+      // src: src/utils/button-styles.ts:840-845
+      p.border = light ? Color4f::hex(0xFFFFFF, 0.65f)
+                       : Color4f::hex(0xFFFFFF, 0.10f);
+      p.border_hover = Color4f::hex(0xFFFFFF, 0.25f);
       p.border_focused = primary();
-      p.radius = 8.0f;
+      // src: src/pages/_layout/hooks/use-custom-theme.ts:248 borderRadius 4
+      p.radius = 4.0f;
       break;
 
     case SkinId::Cyberpunk:
@@ -767,6 +843,8 @@ InputPaint ThemeService::input_paint() const {
       p.text = light ? Color4f::hex(0x0F172A) : Color4f::hex(0xFF0055);
       p.placeholder = with_alpha(p.text, 0.5f);
       p.border = light ? Color4f::hex(0xCBD5E1) : Color4f::hex(0xFF0055);
+      // src: src/utils/button-styles.ts:860,874-876
+      p.border_hover = light ? Color4f::hex(0xFF0055) : Color4f::hex(0x00F0FF);
       p.border_focused = Color4f::hex(0xFF0055);
       if (light) {
         p.has_inset = true;
@@ -789,10 +867,12 @@ InputPaint ThemeService::input_paint() const {
       p.text = light ? Color4f::hex(0x000000) : Color4f::hex(0xFFFFFF);
       p.placeholder = with_alpha(p.text, 0.5f);
       p.border = light ? Color4f::hex(0x000000) : Color4f::hex(0xFFFFFF);
+      p.border_hover = p.border;
       p.border_focused = p.border;
       p.border_w = 1.0f * v;
       p.border_w_focused = 2.0f * v;
-      p.radius = 0.0f;  // src: button-styles.ts:908 borderRadius: '0px'
+      // src: src/assets/styles/index.scss:257-269 .MuiOutlinedInput-root radius = 8*val1
+      p.radius = 8.0f * g;
       break;
   }
   return p;
@@ -954,7 +1034,8 @@ SwitchPaint ThemeService::switch_paint() const {
       p.track_h = 14.0f;
       p.track_radius = 7.0f;
       p.off_bg = Color4f::hex(0xD4AF37, (light ? 0.25f : 0.15f) * 0.85f);
-      p.off_border = light ? Color4f::hex(0xB8860B, 0.55f) : Color4f::hex(0x8A6D00, 0.55f);  // src: style-helpers.tsx:261
+      // src: src/components/base/base-switch.tsx:195
+      p.off_border = Color4f::hex(0xD4AF37, light ? 0.30f : 0.18f);
       p.off_bw = 1.0f;
       // inset 0 calc(2d|3d) calc(4d|5d) rgba(0,0,0,.25|.7)
       p.off_inset = true;
@@ -984,13 +1065,16 @@ SwitchPaint ThemeService::switch_paint() const {
       p.thumb_d = 14.0f;
       p.thumb_radius = 7.0f;
       p.off_thumb_grad = true;
-      // 开/关两态小圆球颜色一致，对齐主题设置滑块小圆球设计（完全不透明金球）
+      // src: src/components/base/base-switch.tsx:175-178 off 态淡金半透球
       p.off_thumb_stops[0] = {0.00f, Color4f::hex(light ? 0xFFFDE7 : 0xFFF9C4)};
-      p.off_thumb_stops[1] = {0.45f, Color4f::hex(light ? 0xFFD54F : 0xFFC107)};
-      p.off_thumb_stops[2] = {0.80f, Color4f::hex(0xFFA000)};
-      p.off_thumb_stops[3] = {1.00f, Color4f::hex(light ? 0xB8860B : 0x8A6D00)};
-      p.off_thumb_n = 4;
-      p.off_thumb_border = light ? Color4f::hex(0x8A6D00) : Color4f::hex(0x634E00);
+      p.off_thumb_stops[1] = {0.60f, light ? Color4f::hex(0xD4AF37, 0.30f)
+                                           : Color4f::hex(0x8A6D00, 0.30f)};
+      p.off_thumb_stops[2] = {1.00f, light ? Color4f::hex(0x8A6D00, 0.45f)
+                                           : Color4f::hex(0x634E00, 0.55f)};
+      p.off_thumb_n = 3;
+      // src: src/components/base/base-switch.tsx:175
+      p.off_thumb_border = light ? Color4f::hex(0x8A6D00, 0.40f)
+                                 : Color4f::hex(0x634E00, 0.45f);
       p.off_thumb_bw = 1.0f;
       // :88-98 旋钮内浮雕：inset 0 1d 0 rgba(255,255,255,.7|.5)
       //   + inset 0 -1d|-1.5d 0 rgba(0,0,0,.15|.45)
@@ -1066,7 +1150,8 @@ SwitchPaint ThemeService::switch_paint() const {
       p.on_bg = primary();
       p.on_bw = 0.0f;
       p.thumb_radius = 7.0f * g;   // ← base-switch.tsx:194 calc(7px * var(--control-skin-val1))
-      p.off_thumb = Color4f::hex(0xFFFFFF);
+      // src: src/components/base/base-switch.tsx:276
+      p.off_thumb = light ? Color4f::hex(0xCBD5E1) : Color4f::hex(0x475569);
       p.off_thumb_bw = 0.0f;
       p.on_thumb = Color4f::hex(0xFFFFFF);
       p.on_thumb_bw = 0.0f;
@@ -1084,7 +1169,8 @@ SwitchPaint ThemeService::switch_paint() const {
       p.off_bw = 0.0f;
       p.on_bg = primary();
       p.on_bw = 0.0f;
-      p.off_thumb = Color4f::hex(0xFFFFFF);
+      // src: src/components/base/base-switch.tsx:347
+      p.off_thumb = light ? Color4f::hex(0xD1D5DB) : Color4f::hex(0x9CA3AF);
       p.off_thumb_bw = 0.0f;
       p.on_thumb = Color4f::hex(0xFFFFFF);
       p.on_thumb_bw = 0.0f;
@@ -1117,10 +1203,10 @@ SwitchPaint ThemeService::switch_paint() const {
       p.thumb_d = 12.0f;
       p.thumb_margin = 1.0f;
       p.thumb_radius = 6.0f;
-      p.off_thumb = light ? Color4f::hex(0xFFFFFF, 0.95f)
-                          : Color4f::hex(0xFFFFFF, 0.9f);
-      p.off_thumb_border = light ? with_alpha(primary(), 0.4f)
-                                 : Color4f::hex(0xFFFFFF, 0.3f);
+      // src: src/components/base/base-switch.tsx:432-435
+      p.off_thumb = Color4f::hex(0xFFFFFF, light ? 0.80f : 0.30f);
+      p.off_thumb_border = light ? with_alpha(primary(), 0.30f)
+                                 : Color4f::hex(0xFFFFFF, 0.20f);
       p.off_thumb_bw = 1.0f;
       p.on_thumb = light ? Color4f::hex(0xFFFFFF, 0.95f)
                          : Color4f::hex(0xFFFFFF, 0.9f);
@@ -1134,8 +1220,9 @@ SwitchPaint ThemeService::switch_paint() const {
         p.thumb_shadow_dy = 1.0f;
         p.thumb_shadow_blur = 2.0f;
       }
-      // ★ frosted-glass 皮肤**无** hover 规则（← base-switch.tsx:280-372 内无
-      //   '&:hover .MuiSwitch-thumb'），悬停时保持常态。
+      // src: src/components/base/base-switch.tsx:447-449 frosted-glass hover scale(1.1)
+      p.thumb_hover = true;
+      p.thumb_hover_scale = 1.10f;
       break;
 
     case SkinId::Cyberpunk:
@@ -1161,6 +1248,9 @@ SwitchPaint ThemeService::switch_paint() const {
       p.thumb_glow = true;
       p.thumb_glow_color = Color4f::hex(0xFF0055, 0.85f);
       p.thumb_glow_blur = 4.0f;
+      // src: src/components/base/base-switch.tsx:457,462 on 态常驻青色辉光 6px
+      p.on_thumb_glow_color = Color4f::hex(light ? 0x00B0FF : 0x00F0FF, 0.85f);
+      p.on_thumb_glow_blur = 6.0f;
       p.on_thumb = p.on_border;
       p.on_thumb_bw = 0.0f;
       // ★ 旋钮悬停态（← base-switch.tsx:442-444 `&:hover .MuiSwitch-thumb`）
@@ -1418,7 +1508,8 @@ SliderPaint ThemeService::slider_paint() const {
       p.thumb_radius = 0.0f;
       p.rail = light ? Color4f::hex(0xFFFFFF) : Color4f::hex(0x000000);
       p.rail_border = light ? Color4f::hex(0x000000) : Color4f::hex(0xFFFFFF);
-      p.rail_bw = 1.0f * v;  // src: index.scss:270 --vibrancy-factor
+      // src: src/pages/_layout/utils/style-helpers.tsx:352 fixed 1px border
+      p.rail_bw = 1.0f;
       p.rail_radius = 0.0f;
       p.track = light ? Color4f::hex(0x000000) : Color4f::hex(0xFFFFFF);
       p.track_radius = 0.0f;
@@ -1603,8 +1694,8 @@ CardPaint ThemeService::card_paint(const char* card_type) const {
       break;
 
     case SkinId::Monochrome:
-      // :716-728：radius 0px、边框 1px*val2 纯黑白、无阴影
-      p.radius = 0.0f;
+      // src: src/assets/styles/index.scss:257-269 .MuiPaper-root radius = 8*val1
+      p.radius = 8.0f * g;
       p.border_w = 1.0f * v;
       p.border = light ? Color4f::hex(0x000000) : Color4f::hex(0xFFFFFF);
       p.bg = light ? Color4f::hex(0xFFFFFF) : Color4f::hex(0x000000);

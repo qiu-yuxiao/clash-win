@@ -16,7 +16,9 @@
 
 #include "../canvas_graph.h"
 #include "../container.h"
+#include "../enhanced_traffic_graph.h"
 #include "../label.h"
+#include "../traffic_sampler.h"
 #include "../widget.h"
 #include "connection_data.h"  // now_ms 注入约定
 
@@ -66,7 +68,10 @@ class TrafficPane : public Widget {
   // 变更通知（UI invalidate）
   uint64_t subscribe(std::function<void()> cb);
   void unsubscribe(uint64_t id);
-  void set_now_ms(std::function<int64_t()> f) { now_ms_ = std::move(f); }
+  void set_now_ms(std::function<int64_t()> f) {
+    now_ms_ = std::move(f);
+    custom_clock_ = true;
+  }
 
   void on_arrange(const RectF& area) override;
   void on_paint(IRenderTarget& rt) override;
@@ -76,16 +81,22 @@ class TrafficPane : public Widget {
 
   // 测试观察
   TrafficSeries& series() { return series_; }
+  TrafficDataSampler& sampler() { return sampler_; }
+  const TrafficDataSampler& sampler() const { return sampler_; }
   CanvasGraph* graph() const { return graph_; }
+  EnhancedTrafficGraph* enhanced_graph() const { return enhanced_graph_; }
   const std::wstring& down_text() const { return down_text_; }
   const std::wstring& up_text() const { return up_text_; }
 
  private:
   void relayout();
   void refresh_labels();
+  void push_sampler_to_enhanced(int64_t now_ms);
 
   TrafficSeries series_;
+  TrafficDataSampler sampler_;
   CanvasGraph* graph_ = nullptr;
+  EnhancedTrafficGraph* enhanced_graph_ = nullptr;
   // 指标卡文字段（src: mini-traffic-panel.tsx 每卡 prefix 9px bold +
   //   value 13px bold + unit 8px normal；dl=下载速率 dt=下载总量 ul/ut=上传）
   Label* dl_prefix_ = nullptr; Label* dl_value_ = nullptr; Label* dl_unit_ = nullptr;
@@ -99,9 +110,11 @@ class TrafficPane : public Widget {
   bool mini_ = false;
   bool narrow_ = false;
   bool enabled_ = true;
+  bool custom_clock_ = false;
   int64_t last_sample_ms_ = -1;  // 上一次 1s 采样入窗时刻
   double down_total_ = 0, up_total_ = 0;
   std::wstring down_text_, up_text_;
+  std::string last_lang_;
   std::vector<std::pair<uint64_t, std::function<void()>>> subs_;
   std::function<int64_t()> now_ms_;  // 缺省 GetTickCount64（见 .cpp）
   uint64_t next_id_ = 1;

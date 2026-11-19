@@ -26,8 +26,7 @@
 | [`../移植基本准则.md`](../移植基本准则.md) | **项目最高宪章**：1:1 移植三大铁律、事实源层级、共存互斥「借用与归还」裁决、版本线与允许偏差清单 |
 | [`RELEASE_PROCESS.md`](RELEASE_PROCESS.md) | **标准发版手册**：`scripts/release.ps1` 两步发版法、7 道门禁（GATE 1~7）说明与异常恢复速查 |
 | [`KNOWN_LIMITATIONS.md`](KNOWN_LIMITATIONS.md) | **已知限制常青披露**：无商业 Authenticode 签名说明、`sidecar/` 二进制策略、Direct2D 毛玻璃近似等 |
-| [`pixel-parity-audit.md`](pixel-parity-audit.md) | **像素级 1:1 代码核对台账**：MUI content-box 换算铁律、尺寸/位置/字体四维已修项（P1~P11）与待实证项（V1~V4） |
-| [`antivirus-whitelist.md`](antivirus-whitelist.md) | **安全软件相容说明**：轻量后台驻留特性与 360 等信任区加白操作指南 |
+| [`antivirus-whitelist.md`](antivirus-whitelist.md) | **安全软件相容说明**：轻量后台驻留特性与 360 等白名单操作指南（同步 `轻量模式防误杀指南.txt`） |
 | [`05-sidecar-内核资产.md`](05-sidecar-内核资产.md) | **sidecar 基线台账**：5 个上游 `.exe` 的字节大小、SHA256 基线、`win-mihomo.exe` 溯源与 `verify_sidecar.ps1` 校验规范 |
 
 ---

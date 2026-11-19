@@ -39,6 +39,14 @@ bool is_incomplete_filter_input(const std::string& filter_text);
 // ← utils/node.ts:587-604 isSupportedSubscriptionOrNodeInput：判断是否为单条 HTTP(S) 订阅 URL 或单/多行受支持节点 URI。
 bool is_supported_subscription_or_node_input(std::string_view raw);
 
+// BUG-397（Mini v3.5.4 src/utils/node.ts:606-621）：批量测速入口意图裁决
+enum class BatchCheckTrigger { Bolt, F4, Filter, F1 };
+struct BatchCheckIntent {
+  bool select = false;
+  bool clean_stale = false;
+};
+BatchCheckIntent resolve_batch_check_intent(BatchCheckTrigger trigger);
+
 // ---- 指纹 & 订阅拓扑连坐去重 ----
 struct RawProxyEntry {
   std::string name;

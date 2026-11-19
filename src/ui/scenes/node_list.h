@@ -200,7 +200,8 @@ class NodeList : public Widget {
 
   // 过滤（搜索框；name 子串大小写不敏感）
   void set_filter(const std::string& text);
-  // 对当前过滤后可见的节点子集触发多路测速与择优切换
+  // BUG-397：对当前可见节点子集批量测速（select=false 仅测延迟不切点，select=true 优选切换）
+  void trigger_check_visible(bool select = true);
   void trigger_auto_select_visible();
   // 排序切换（3 态循环：原始序 / 延迟升序 / 名称 locale 升序）
   // src: proxy-head.tsx:126-128 sortType=(sortType+1)%3
@@ -277,7 +278,10 @@ class NodeList : public Widget {
   // BUG-392（proxy-groups.tsx:93-95 activeTestFilterRef/pendingRecheckGroupsRef/busyRetryCountRef）：
   // 在途测速期间过滤词变更登记尾部重测；AUTO_SELECT_BUSY 最多续试 2 次。
   std::string active_test_filter_;
+  bool active_check_select_ = true;
   bool pending_recheck_ = false;
+  bool pending_recheck_select_ = false;
+  bool recheck_next_select_ = true;
   int busy_retry_count_ = 0;
   bool recheck_timer_armed_ = false;
   int sort_type_ = 1;  // src: use-head-state.ts:21 sortType 初值 1（按延迟）

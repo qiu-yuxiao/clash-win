@@ -134,9 +134,13 @@ UT_TEST(i18n_hot_switch_and_listener) {
 UT_TEST(i18n_v330_antivirus_sniffer_and_path_control_13_locales) {
   auto& i = I18n::instance();
   UT_CHECK(i.init(exe_locales_dir(), "zh"));
+  UT_CHECK_EQ(I18n::resolve_language("ja"), "jp");
+  UT_CHECK_EQ(I18n::resolve_language("ja-JP"), "jp");
+  UT_CHECK_EQ(I18n::resolve_language("zh-HK"), "zhtw");
+  UT_CHECK_EQ(I18n::resolve_language("zh-MO"), "zhtw");
+  UT_CHECK_EQ(I18n::resolve_language("zh-Hant"), "zhtw");
   const std::vector<std::string> keys = {
       "layout.components.antivirus.menuLabel",
-      "layout.components.antivirus.title",
       "settings.mini.tunSniffer",
       "settings.mini.tunSnifferAuto",
       "settings.mini.tunSnifferOn",

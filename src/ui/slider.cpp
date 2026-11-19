@@ -78,6 +78,7 @@ bool Slider::on_mouse(const MouseEvent& e) {
         active_thumb_ = t1 < t0 ? 1 : 0;
       }
       update(e.pos.x);
+      key_focused_ = false;
       // ★ 键盘焦点（← MUI Slider 点击后获得焦点，可方向键调节）
       request_focus();
       return true;
@@ -94,12 +95,14 @@ bool Slider::on_mouse(const MouseEvent& e) {
     case MouseEventType::Up: {
       const bool was_dragging = dragging_;
       dragging_ = false;
+      if (was_dragging) invalidate();
       if (was_dragging && enabled() && on_commit) on_commit(value_);
       return true;
     }
     case MouseEventType::Leave:
       has_mouse_ = false;
       thumb_hovered_ = false;
+      key_focused_ = false;
       invalidate();
       return true;
     default:
@@ -220,18 +223,20 @@ void Slider::on_paint(IRenderTarget& rt) {
 
   // ---- 滑块（thumb）----
   // ★ 悬停态（← Mini `.MuiSlider-thumb:hover`）：状态由 update_hover() 维护。
-  // ★ 键盘焦点态（MUI `.Mui-focusVisible` 与 `:hover` 共用同一组样式）
-  const bool hover = thumb_hovered_ ||
-                     (themed_ && sp.thumb_hover && key_focused_);
+  // ★ 键盘焦点态（MUI `.Mui-focusVisible` 与 `:hover` 共用同一组样式；失焦清标记）
+  if (!focused() && key_focused_) key_focused_ = false;
+  const bool retro_active = dragging_ && gold_3d_;
+  const bool hover =
+      !retro_active && (thumb_hovered_ || (themed_ && sp.thumb_hover && key_focused_));
 
   auto paint_thumb = [&](float cx) {
-    // ★ hover 缩放（← `transform: scale(1.2)` / `scale(1.15)`）
-    const float scale = hover ? sp.thumb_hover_scale : 1.0f;
+    // ★ hover / active 缩放（src: pages/_layout/utils/style-helpers.tsx:204,215）
+    const float scale = retro_active ? 0.92f : (hover ? sp.thumb_hover_scale : 1.0f);
     const float sw = tw * scale;
     const float sh = th * scale;
     RectF br{cx - sw / 2, cy - sh / 2, sw, sh};
     const float s_radius = thumb_r * scale;
-    if (themed_) {
+    if (themed_ && !retro_active) {
       // ★ hover 阴影覆盖（← `&:hover` 的 boxShadow 覆盖常态）
       const bool use_hs = hover && sp.thumb_hover_shadow;
       if (use_hs || sp.thumb_shadow)
@@ -250,8 +255,19 @@ void Slider::on_paint(IRenderTarget& rt) {
                   use_hg ? sp.thumb_hover_glow_blur : sp.thumb_glow_blur);
     }
     if (themed_ && sp.thumb_grad) {
-      // retro：radial-gradient(circle at 35% 35%, ...)
-      rt.fill_round_rect_radial(br, s_radius, sp.thumb_stops, sp.thumb_grad_n,
+      // retro：radial-gradient(circle at 35% 35%, ...) + hover brightness(1.15)
+      GradientStop stops[4];
+      const int gn = std::min(sp.thumb_grad_n, 4);
+      for (int i = 0; i < gn; ++i) {
+        stops[i] = sp.thumb_stops[i];
+        if (hover && sp.thumb_hover_brightness != 1.0f) {
+          const float b = sp.thumb_hover_brightness;
+          stops[i].color.r = std::min(1.0f, stops[i].color.r * b);
+          stops[i].color.g = std::min(1.0f, stops[i].color.g * b);
+          stops[i].color.b = std::min(1.0f, stops[i].color.b * b);
+        }
+      }
+      rt.fill_round_rect_radial(br, s_radius, stops, gn,
                                 sp.thumb_grad_cx, sp.thumb_grad_cy,
                                 sw * 0.65f, sh * 0.65f);
     } else {

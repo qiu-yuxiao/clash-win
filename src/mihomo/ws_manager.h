@@ -51,6 +51,10 @@ class WsManager {
 
   // ws_disconnect 语义：立即断开全部底层 WS（有界写超时 BUG-325）；订阅保留、自动重连
   void disconnect_all(std::optional<uint32_t> force_timeout_ms = std::nullopt);
+  // 轻量模式静默：断开 WS 并暂停 worker 自动重连，直至 resume_all()（← lightweight.rs）
+  void pause_all(std::optional<uint32_t> force_timeout_ms = 500u);
+  void resume_all();
+  bool is_paused() const { return paused_.load(std::memory_order_acquire); }
 
   // BUG-347: 内核重启/配置重载（verge://refresh-clash-config）时清零全部通道退避计数，
   // 主动关闭陈旧半死句柄并第 0ms 唤醒重连守护线程。
@@ -81,6 +85,7 @@ class WsManager {
   std::string secret_;
   std::atomic<uint64_t> next_sub_id_{1};
   std::atomic<bool> stopping_{false};
+  std::atomic<bool> paused_{false};
   uint64_t refresh_clash_sub_id_ = 0;
 };
 

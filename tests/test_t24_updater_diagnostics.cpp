@@ -793,7 +793,7 @@ UT_TEST(t24_diag_bundle_zip_creation_and_contents) {
   auto res = DiagnosticBundle::export_diagnostic_bundle();
   UT_CHECK(res.is_ok());
 
-  std::filesystem::path zip_path(res.value());
+  std::filesystem::path zip_path(utf::utf8_to_utf16(res.value()));
   UT_CHECK(std::filesystem::exists(zip_path));
 
   // Inspect the generated zip binary
@@ -806,7 +806,7 @@ UT_TEST(t24_diag_bundle_zip_creation_and_contents) {
   uint32_t sig = *reinterpret_cast<const uint32_t*>(zip_content.data());
   UT_CHECK_EQ(sig, 0x04034b50u);
 
-  // Check required entries in zip table
+  // Check required entries in zip central directory / local headers
   UT_CHECK(zip_content.find("logs/app.log") != std::string::npos);
   UT_CHECK(zip_content.find("logs/sidecar/core.log") != std::string::npos);
   UT_CHECK(zip_content.find("runtime-config.redacted.yaml") != std::string::npos);
@@ -815,11 +815,47 @@ UT_TEST(t24_diag_bundle_zip_creation_and_contents) {
   UT_CHECK(zip_content.find("system-info.txt") != std::string::npos);
   UT_CHECK(zip_content.find("README.txt") != std::string::npos);
 
-  // Assert all raw secrets are completely scrubbed from zip contents!
+  // Decompress Deflate-encoded diagnostic zip using Windows tar.exe and verify contents!
+  std::filesystem::path extract_dir = th.dir / "extracted_diag";
+  std::error_code ec;
+  std::filesystem::create_directories(extract_dir, ec);
+  std::wstring cmd = L"\"C:\\Windows\\System32\\tar.exe\" -xf \"" +
+                     zip_path.wstring() + L"\" -C \"" +
+                     extract_dir.wstring() + L"\"";
+  STARTUPINFOW si{};
+  si.cb = sizeof(si);
+  si.dwFlags = STARTF_USESHOWWINDOW;
+  si.wShowWindow = SW_HIDE;
+  PROCESS_INFORMATION pi{};
+  std::vector<wchar_t> cmd_buf(cmd.begin(), cmd.end());
+  cmd_buf.push_back(L'\0');
+  UT_CHECK(::CreateProcessW(nullptr, cmd_buf.data(), nullptr, nullptr, FALSE,
+                            CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi) != FALSE);
+  ::WaitForSingleObject(pi.hProcess, 10000);
+  DWORD exit_code = 1;
+  ::GetExitCodeProcess(pi.hProcess, &exit_code);
+  ::CloseHandle(pi.hProcess);
+  ::CloseHandle(pi.hThread);
+  UT_CHECK_EQ(exit_code, 0u);
+
+  auto read_text_file = [](const std::filesystem::path& p) {
+    std::ifstream ifs(p, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(ifs)),
+                       std::istreambuf_iterator<char>());
+  };
+  const std::string app_log = read_text_file(extract_dir / "logs" / "app.log");
+  const std::string core_log = read_text_file(extract_dir / "logs" / "sidecar" / "core.log");
+  const std::string rt_cfg = read_text_file(extract_dir / "runtime-config.redacted.yaml");
+  const std::string verge_cfg = read_text_file(extract_dir / "verge.yaml.redacted.yaml");
+  const std::string prof_cfg = read_text_file(extract_dir / "profiles.yaml.redacted.yaml");
+  UT_CHECK(!app_log.empty());
+  UT_CHECK(app_log.find("secret_app_tok") == std::string::npos);
+  UT_CHECK(app_log.find("***REDACTED***") != std::string::npos);
+  UT_CHECK(!core_log.empty());
+  UT_CHECK(core_log.find("secret_core_pwd") == std::string::npos);
+  UT_CHECK(rt_cfg.find("clash_secret_pwd") == std::string::npos);
+  UT_CHECK(verge_cfg.find("verge_secret_val") == std::string::npos);
+  UT_CHECK(prof_cfg.find("prof_secret_val") == std::string::npos);
   UT_CHECK(zip_content.find("secret_app_tok") == std::string::npos);
-  UT_CHECK(zip_content.find("secret_core_pwd") == std::string::npos);
   UT_CHECK(zip_content.find("clash_secret_pwd") == std::string::npos);
-  UT_CHECK(zip_content.find("verge_secret_val") == std::string::npos);
-  UT_CHECK(zip_content.find("prof_secret_val") == std::string::npos);
-  UT_CHECK(zip_content.find("***REDACTED***") != std::string::npos);
 }

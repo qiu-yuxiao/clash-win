@@ -252,7 +252,7 @@ UT_TEST(t22_port_guard_zero_and_boundary_clamping) {
 
   UT_CHECK_EQ(IClashTemp::guard_mixed_port(n), 10801);
   UT_CHECK_EQ(IClashTemp::guard_socks_port(n), 10802);
-  UT_CHECK_EQ(IClashTemp::guard_port(n), 7899);
+  UT_CHECK_EQ(IClashTemp::guard_port(n), 10803);
 
   // Rust as u16 截断行为验证 (65537 -> 1)
   n["mixed-port"] = "65537";

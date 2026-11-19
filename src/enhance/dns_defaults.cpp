@@ -38,8 +38,8 @@ std::string extract_upstream_host(const std::string& raw) {
   if (hash != std::string::npos) s = s.substr(0, hash);
   size_t scheme = s.find("://");
   if (scheme != std::string::npos) s = s.substr(scheme + 3);
-  size_t path = s.find('/');
-  if (path != std::string::npos) s = s.substr(0, path);
+  size_t cut = s.find_first_of("/?");
+  if (cut != std::string::npos) s = s.substr(0, cut);
 
   std::string host;
   if (!s.empty() && s.front() == '[') {
@@ -125,57 +125,6 @@ YAML::Node apply_mandatory_dns_settings(const YAML::Node& config) {
     }
   }
 
-  cfg["dns"] = dns_val;
-  return cfg;
-}
-
-YAML::Node sanitize_foreign_plain_dns_upstreams(const YAML::Node& config) {
-  // ← mod.rs:543-586（v3.1.8 BUG-308）
-  static constexpr const char* kForeignDns[][2] = {
-      {"8.8.8.8", "https://8.8.8.8/dns-query"},
-      {"8.8.4.4", "https://8.8.4.4/dns-query"},
-      {"1.1.1.1", "https://1.1.1.1/dns-query"},
-      {"1.0.0.1", "https://1.0.0.1/dns-query"},
-  };
-
-  YAML::Node cfg = config;
-  const YAML::Node dns_src = static_cast<const YAML::Node&>(cfg)["dns"];
-  if (!dns_src || !dns_src.IsMap()) return cfg;
-  const YAML::Node ns_src = static_cast<const YAML::Node&>(dns_src)["nameserver"];
-  if (!ns_src || !ns_src.IsSequence()) return cfg;
-
-  YAML::Node dns_val = YAML::Clone(dns_src);
-  YAML::Node out(YAML::NodeType::Sequence);
-  bool rewritten = false;
-  for (const auto& entry : ns_src) {
-    if (!entry.IsScalar() || entry.IsNull() || !field::is_string_key(entry)) {
-      out.push_back(YAML::Clone(entry));
-      continue;
-    }
-    const std::string raw = trim_copy(entry.Scalar());
-    // 已是加密上游（带 scheme）原样保留
-    if (raw.find("://") != std::string::npos) {
-      out.push_back(YAML::Clone(entry));
-      continue;
-    }
-    const std::string host = extract_upstream_host(raw);
-    const char* doh = nullptr;
-    for (const auto& pair : kForeignDns) {
-      if (host == pair[0]) {
-        doh = pair[1];
-        break;
-      }
-    }
-    if (doh) {
-      YAML::Node n(doh);
-      n.SetTag("!");
-      out.push_back(n);
-      rewritten = true;
-    } else {
-      out.push_back(YAML::Clone(entry));
-    }
-  }
-  if (rewritten) dns_val["nameserver"] = out;
   cfg["dns"] = dns_val;
   return cfg;
 }

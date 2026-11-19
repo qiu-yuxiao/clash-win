@@ -42,8 +42,9 @@ class ProfileTimer {
   void set_intervals_provider(std::function<
       std::map<std::string, std::pair<uint64_t, int64_t>>()> fn);
 
-  void start();   // 启动调度线程（1s tick）；幂等
-  void stop();    // 停止（退出序列）
+  void start();    // 启动调度线程（1s tick）；幂等
+  void refresh();  // CRUD 后重算定时表并保留在途任务（← timer.rs:refresh）
+  void stop();     // 停止（退出序列）
 
   // 立即触发一次更新（手动更新/测试）；running 中跳过
   bool run_now(const std::string& uid);

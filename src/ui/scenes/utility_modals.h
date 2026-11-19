@@ -15,7 +15,9 @@
 #include "events/event_bus.h"
 #include "ui/context_menu.h"
 #include "ui/overlay_fade.h"
+#include "ui/textfield.h"
 #include "ui/widget.h"
+#include "ui/theme/theme.h"
 #include "ui/i18n_text.h"  // F-D01
 
 namespace clashwin::ui::scene {
@@ -39,9 +41,9 @@ class EditProfileModal : public Widget {
   int interval_mins() const { return interval_mins_; }
   bool is_local() const { return is_local_; }
 
-  void set_name(const std::string& n) { name_ = n; invalidate(); }
-  void set_url(const std::string& u) { url_ = u; invalidate(); }
-  void set_interval_mins(int mins) { interval_mins_ = mins; invalidate(); }
+  void set_name(const std::string& n);
+  void set_url(const std::string& u);
+  void set_interval_mins(int mins);
 
   std::function<void(const std::string& name, const std::string& url, int interval)> on_save;
   std::function<void()> on_dismiss;
@@ -51,7 +53,11 @@ class EditProfileModal : public Widget {
   bool on_mouse(const MouseEvent& e) override;
   bool on_key(const KeyEvent& e) override;
 
-  bool hit_self(PointF local) const override { return open_ && Widget::hit_self(local); }
+  // src: src/utils/popup-styles.ts:173-185 窄窗弹窗锁定左侧 271px
+  bool hit_self(PointF local) const override {
+    return open_ && local.x < std::min(theme::kPopupPaneWidth, bounds().w) &&
+           Widget::hit_self(local);
+  }
   bool a11y_subtree_visible() const override { return open_ && visible() && !a11y_hidden(); }
   bool a11y_is_modal() const override { return open_; }
   A11yRole a11y_default_role() const override { return A11yRole::Dialog; }
@@ -63,14 +69,26 @@ class EditProfileModal : public Widget {
 
   RectF card_rect() const { return card_rect_; }
   RectF save_btn_rect() const { return btn_save_rect_; }
+  TextField* name_field() const { return name_field_; }
+  TextField* url_field() const { return url_field_; }
+  TextField* interval_field() const { return interval_field_; }
 
  private:
+  void trigger_save();
+  void open_field_menu(TextField* tf, PointF anchor);
+
   bool open_ = false;
   OverlayFade fade_;  // ← MUI Dialog 缺省 Fade（enter 225 / leave 195）
   bool is_local_ = false;
+  bool syncing_fields_ = false;
   std::string name_;
   std::string url_;
-  int interval_mins_ = 1440;
+  int interval_mins_ = 1440;  // src: src/pages/_layout/components/layout-dialogs.tsx:131
+
+  TextField* name_field_ = nullptr;
+  TextField* url_field_ = nullptr;
+  TextField* interval_field_ = nullptr;
+  ContextMenu* field_menu_ = nullptr;
 
   RectF card_rect_;
   RectF name_input_rect_;
@@ -118,7 +136,11 @@ class ClientUpdateModal : public Widget {
   bool on_mouse(const MouseEvent& e) override;
   bool on_key(const KeyEvent& e) override;
 
-  bool hit_self(PointF local) const override { return open_ && Widget::hit_self(local); }
+  // src: src/utils/popup-styles.ts:173-185 窄窗弹窗锁定左侧 271px
+  bool hit_self(PointF local) const override {
+    return open_ && local.x < std::min(theme::kPopupPaneWidth, bounds().w) &&
+           Widget::hit_self(local);
+  }
   bool a11y_subtree_visible() const override { return open_ && visible() && !a11y_hidden(); }
   bool a11y_is_modal() const override { return open_; }
   A11yRole a11y_default_role() const override { return A11yRole::Dialog; }
@@ -142,9 +164,11 @@ class ClientUpdateModal : public Widget {
   std::string changelog_;
   std::string download_url_;
   std::string status_ = "idle";
-  int progress_ = 0;
+  int progress_ = 0;  // src: src/pages/_layout/components/layout-dialogs.tsx:361
   std::string status_msg_;
   uint64_t listener_id_ = 0;
+  float changelog_scroll_y_ = 0.0f;  // src: src/pages/_layout/components/layout-dialogs.tsx:343 overflowY auto
+  float changelog_text_h_ = 0.0f;
 
   RectF card_rect_;
   RectF btn_close_x_rect_;
@@ -175,6 +199,9 @@ class CoreUpdateModal : public Widget {
   int progress() const { return progress_; }
   const std::string& status() const { return status_; }
 
+  void set_external_event_driver(bool ext);
+  bool external_event_driver() const { return external_event_driver_; }
+
   // 接收并处理 "core-upgrade-progress" 事件
   void handle_progress_event(const std::string& status, int progress, const std::string& msg);
 
@@ -186,7 +213,11 @@ class CoreUpdateModal : public Widget {
   bool on_mouse(const MouseEvent& e) override;
   bool on_key(const KeyEvent& e) override;
 
-  bool hit_self(PointF local) const override { return open_ && Widget::hit_self(local); }
+  // src: src/utils/popup-styles.ts:173-185 窄窗弹窗锁定左侧 271px
+  bool hit_self(PointF local) const override {
+    return open_ && local.x < std::min(theme::kPopupPaneWidth, bounds().w) &&
+           Widget::hit_self(local);
+  }
   bool a11y_subtree_visible() const override { return open_ && visible() && !a11y_hidden(); }
   bool a11y_is_modal() const override { return open_; }
   A11yRole a11y_default_role() const override { return A11yRole::Dialog; }
@@ -203,11 +234,12 @@ class CoreUpdateModal : public Widget {
   void unsubscribe_events();
 
   bool open_ = false;
+  bool external_event_driver_ = false;
   OverlayFade fade_;  // ← MUI Dialog 缺省 Fade（enter 225 / leave 195）
   bool is_upgrading_ = false;
   std::string current_version_ = "v1.19.27";
   std::string latest_version_ = "v1.19.28";
-  int progress_ = 0;
+  int progress_ = 0;  // src: src/pages/_layout/components/layout-dialogs.tsx:507
   std::string status_ = "idle";
   std::string message_;
   uint64_t listener_id_ = 0;
@@ -266,7 +298,7 @@ class LogViewerModal : public Widget {
   }
 
   bool is_paused() const { return paused_; }
-  void set_paused(bool p) { paused_ = p; invalidate(); }
+  void set_paused(bool p);
 
   bool is_desc() const { return desc_; }
   void set_desc(bool d);
@@ -276,15 +308,21 @@ class LogViewerModal : public Widget {
 
   const std::string& search_query() const { return search_query_; }
   void set_search_query(const std::string& q);
+  TextField* search_field() const { return search_field_; }
 
   std::function<void()> on_dismiss;
+  std::function<void(bool paused)> on_pause_changed;
 
   void on_arrange(const RectF& area) override;
   void on_paint(IRenderTarget& rt) override;
   bool on_mouse(const MouseEvent& e) override;
   bool on_key(const KeyEvent& e) override;
 
-  bool hit_self(PointF local) const override { return open_ && Widget::hit_self(local); }
+  // src: src/utils/popup-styles.ts:173-185 窄窗弹窗锁定左侧 271px
+  bool hit_self(PointF local) const override {
+    return open_ && local.x < std::min(theme::kPopupPaneWidth, bounds().w) &&
+           Widget::hit_self(local);
+  }
   bool a11y_subtree_visible() const override { return open_ && visible() && !a11y_hidden(); }
   bool a11y_is_modal() const override { return open_; }
   A11yRole a11y_default_role() const override { return A11yRole::Dialog; }
@@ -305,6 +343,7 @@ class LogViewerModal : public Widget {
   bool matches_filter(const LogEntry& entry) const;
   float measure_entry_height(const LogEntry& entry, float item_w) const;
   void recompute_total_height();
+  void open_search_menu(PointF anchor);
 
   bool open_ = false;
   OverlayFade fade_;  // ← MUI Dialog 缺省 Fade（enter 225 / leave 195）
@@ -312,6 +351,9 @@ class LogViewerModal : public Widget {
   bool desc_ = false;
   std::string level_filter_ = "all";  // all, debug, info, warn, error
   MenuList* lvl_menu_ = nullptr;      // 级别下拉弹出列表（logs.tsx:179-191）
+  TextField* search_field_ = nullptr;
+  ContextMenu* search_menu_ = nullptr;
+  bool syncing_search_ = false;
   std::string search_query_;
 
   std::deque<LogEntry> logs_;           // 环形截断 1000 条
@@ -321,7 +363,7 @@ class LogViewerModal : public Widget {
   float scroll_y_ = 0.0f;
   float total_content_h_ = 0.0f;
   bool stick_to_bottom_ = true;
-  float line_height_ = 20.0f;
+  float line_height_ = 20.0f;  // src: src/pages/logs.tsx:227
 
   RectF card_rect_;
   RectF btn_close_x_rect_;
@@ -337,95 +379,6 @@ class LogViewerModal : public Widget {
   bool hover_pause_ = false;
   bool hover_order_ = false;
   bool hover_clear_ = false;
-};
-
-// ============================================================================
-// 6. AntivirusWhitelistModal —— 安全软件白名单说明弹窗
-//   src: src/pages/_layout/components/antivirus-whitelist-dialog.tsx
-// ============================================================================
-class AntivirusWhitelistModal : public Widget {
- public:
-  explicit AntivirusWhitelistModal(Widget* parent = nullptr);
-
-  void open();
-  void close();
-  bool is_open() const { return open_; }
-
-  std::function<void()> on_dismiss;
-  // BUG-395 方案一：一键开启「静默启动」；返回当前是否已开启（用于按钮状态）
-  std::function<void()> on_enable_silent_start;
-  std::function<bool()> is_silent_start_enabled;
-  // BUG-395 方案二：复制 whiteinternal.ini 路径 / 追加内容 + 复制成功提示
-  std::function<void(const std::wstring&)> on_copy_text;
-  std::function<void()> on_copied_notice;
-
-  void on_arrange(const RectF& area) override;
-  void on_paint(IRenderTarget& rt) override;
-  bool on_mouse(const MouseEvent& e) override;
-  bool on_key(const KeyEvent& e) override;
-
-  bool hit_self(PointF local) const override {
-    return open_ && Widget::hit_self(local);
-  }
-  bool a11y_subtree_visible() const override {
-    return open_ && visible() && !a11y_hidden();
-  }
-  bool a11y_is_modal() const override { return open_; }
-  A11yRole a11y_default_role() const override { return A11yRole::Dialog; }
-  std::wstring a11y_default_name() const override;
-  size_t a11y_virtual_child_count() const override { return 7u; }
-  A11ySubItem a11y_virtual_child(size_t idx) const override;
-  bool a11y_invoke_virtual_child(size_t idx) override;
-
-  // BUG-395 供测试/UIA 命中新按钮
-  RectF enable_silent_button_rect() const { return btn_enable_silent_rect_; }
-  RectF copy_path_button_rect() const { return btn_copy_path_rect_; }
-  RectF copy_snippet_button_rect() const { return btn_copy_snippet_rect_; }
-  RectF card_rect() const { return card_rect_; }
-  RectF content_rect() const { return content_rect_; }
-  RectF close_button_rect() const { return btn_close_rect_; }
-  float scroll_y() const { return scroll_y_; }
-  void set_scroll_y(float y);
-  float max_scroll() const;
-
- private:
-  struct BlockLayout {
-    std::wstring title;
-    std::wstring body;
-    float y_rel = 0.0f;
-    float title_h = 19.0f;
-    float body_h = 20.0f;
-    float block_h = 0.0f;  // 含卡片内边距/警告/按钮的完整块高
-    int kind = 0;          // 0=原因说明(无卡片) 1=方案一 2=方案二
-  };
-  void rebuild_sections() const;
-
-  bool open_ = false;
-  OverlayFade fade_;  // ← MUI Dialog 缺省 Fade（enter 225 / leave 195）
-
-  RectF card_rect_{};
-  RectF title_rect_{};
-  RectF content_rect_{};
-  RectF actions_rect_{};
-  RectF btn_close_rect_{};
-  // BUG-395 新增按钮命中矩形
-  RectF btn_enable_silent_rect_{};
-  RectF btn_copy_path_rect_{};
-  RectF btn_copy_snippet_rect_{};
-
-  float title_h_ = 21.0f;
-  float total_sections_h_ = 0.0f;
-  float scroll_y_ = 0.0f;
-  mutable std::vector<BlockLayout> sections_;
-
-  bool hover_close_ = false;
-  bool pressed_close_ = false;
-  bool hover_enable_silent_ = false;
-  bool pressed_enable_silent_ = false;
-  bool hover_copy_path_ = false;
-  bool pressed_copy_path_ = false;
-  bool hover_copy_snippet_ = false;
-  bool pressed_copy_snippet_ = false;
 };
 
 // ============================================================================
@@ -451,8 +404,10 @@ class DeleteProfileConfirmModal : public Widget {
   bool on_mouse(const MouseEvent& e) override;
   bool on_key(const KeyEvent& e) override;
 
+  // src: src/utils/popup-styles.ts:173-185 窄窗弹窗锁定左侧 271px
   bool hit_self(PointF local) const override {
-    return open_ && Widget::hit_self(local);
+    return open_ && local.x < std::min(theme::kPopupPaneWidth, bounds().w) &&
+           Widget::hit_self(local);
   }
   bool a11y_subtree_visible() const override {
     return open_ && visible() && !a11y_hidden();

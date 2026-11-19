@@ -79,33 +79,6 @@ tun:
   endpoint-independent-nat: true
   inet6-address:
   - fdfe:dcba:9876::1/126
-rules:
-- DOMAIN-SUFFIX,Google.com,PROXY
-- RULE-SET,gfwlist,PROXY
-- IP-CIDR,8.8.8.8/32,PROXY,no-resolve
-- IP-CIDR,8.8.4.4/32,PROXY,no-resolve
-- IP-CIDR,1.1.1.1/32,PROXY,no-resolve
-- IP-CIDR,1.0.0.1/32,PROXY,no-resolve
-- DOMAIN,dns.google,PROXY
-- IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
-- IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
-- IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
-- IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
-- IP-CIDR,100.64.0.0/10,DIRECT,no-resolve
-- IP-CIDR,169.254.0.0/16,DIRECT,no-resolve
-- IP-CIDR6,::1/128,DIRECT,no-resolve
-- IP-CIDR6,::/128,DIRECT,no-resolve
-- IP-CIDR6,fc00::/7,DIRECT,no-resolve
-- IP-CIDR6,fe80::/10,DIRECT,no-resolve
-- IP-CIDR6,ff00::/8,DIRECT,no-resolve
-- IP-CIDR6,::ffff:127.0.0.0/104,DIRECT,no-resolve
-- IP-CIDR6,::ffff:10.0.0.0/104,DIRECT,no-resolve
-- IP-CIDR6,::ffff:172.16.0.0/108,DIRECT,no-resolve
-- IP-CIDR6,::ffff:192.168.0.0/112,DIRECT,no-resolve
-- IP-CIDR6,::ffff:100.64.0.0/106,DIRECT,no-resolve
-- IP-CIDR6,::ffff:169.254.0.0/112,DIRECT,no-resolve
-- GEOIP,CN,DIRECT
-- MATCH,DIRECT
 external-controller-pipe: \\.\pipe\mini-mihomo-win
 external-controller-cors:
   allow-private-network: true
@@ -496,8 +469,8 @@ proxy-groups:
   - 中转线路1-香港06 (010459)
   - 中转线路1-马来西亚01 (010459)
   url: https://cp.cloudflare.com/generate_204
-  interval: 300
-  lazy: false
+  interval: 1800
+  lazy: true
 rule-providers:
   gfwlist:
     type: http
@@ -506,6 +479,33 @@ rule-providers:
     path: ./ruleset/gfwlist.yaml
     interval: 86400
     proxy: PROXY
+rules:
+- DOMAIN-SUFFIX,Google.com,PROXY
+- RULE-SET,gfwlist,PROXY
+- IP-CIDR,8.8.8.8/32,PROXY,no-resolve
+- IP-CIDR,8.8.4.4/32,PROXY,no-resolve
+- IP-CIDR,1.1.1.1/32,PROXY,no-resolve
+- IP-CIDR,1.0.0.1/32,PROXY,no-resolve
+- DOMAIN,dns.google,PROXY
+- IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+- IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+- IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+- IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+- IP-CIDR,100.64.0.0/10,DIRECT,no-resolve
+- IP-CIDR,169.254.0.0/16,DIRECT,no-resolve
+- IP-CIDR6,::1/128,DIRECT,no-resolve
+- IP-CIDR6,::/128,DIRECT,no-resolve
+- IP-CIDR6,fc00::/7,DIRECT,no-resolve
+- IP-CIDR6,fe80::/10,DIRECT,no-resolve
+- IP-CIDR6,ff00::/8,DIRECT,no-resolve
+- IP-CIDR6,::ffff:127.0.0.0/104,DIRECT,no-resolve
+- IP-CIDR6,::ffff:10.0.0.0/104,DIRECT,no-resolve
+- IP-CIDR6,::ffff:172.16.0.0/108,DIRECT,no-resolve
+- IP-CIDR6,::ffff:192.168.0.0/112,DIRECT,no-resolve
+- IP-CIDR6,::ffff:100.64.0.0/106,DIRECT,no-resolve
+- IP-CIDR6,::ffff:169.254.0.0/112,DIRECT,no-resolve
+- GEOIP,CN,DIRECT
+- MATCH,DIRECT
 dns:
   enable: true
   listen: :53

@@ -54,6 +54,8 @@ class IconW : public Widget {
   bool glow_ = false;
   Color4f glow_color_ = Color4f::hex(0xFF3B30, 0.85f);
   bool font_fallback_ = false;  // true = Segoe MDL2 Assets（旧系统）
+  // MUI IconButton 圆形悬停/按压底圈（// src: @mui/material/IconButton action hover）
+  bool circle_hover = false;
   // 点击支持（T13 快捷条图钉/齿轮；bool hover_/pressed_ 状态）
   std::function<void()> on_click;
   bool hover_ = false, pressed_ = false;

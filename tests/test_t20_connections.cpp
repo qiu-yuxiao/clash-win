@@ -395,7 +395,7 @@ UT_TEST(t20_connection_detail_dialog_fields) {
   item.upload = 2097152.0;        // 2 MB
   item.cur_download = 102400.0;   // 100 KB/s
   item.cur_upload = 51200.0;      // 50 KB/s
-  item.start = "2026-10-28 12:00:00";
+  item.start = "2026-10-28T12:00:00Z";
   item.rule = "DomainSuffix";
   item.rule_payload = "clash.win";
   item.chains = {"ProxyGroup", "HongKong 01", "DIRECT"};
@@ -410,6 +410,17 @@ UT_TEST(t20_connection_detail_dialog_fields) {
   item.metadata.process_path = "C:\\Tools\\clashwin.exe";
 
   ConnectionDetailDialog dialog;
+  // Inject 2026-10-28T12:05:00Z = +300s after start ("5 分钟前")
+  dialog.set_now_ms([] {
+    std::tm t{};
+    t.tm_year = 2026 - 1900;
+    t.tm_mon = 10 - 1;
+    t.tm_mday = 28;
+    t.tm_hour = 12;
+    t.tm_min = 5;
+    t.tm_sec = 0;
+    return static_cast<int64_t>(_mkgmtime(&t)) * 1000;
+  });
   dialog.open(item, false);
   UT_CHECK(dialog.is_open());
 
@@ -455,7 +466,7 @@ UT_TEST(t20_connection_detail_dialog_fields) {
 
   // 10. Time
   UT_CHECK(fields[9].first == L"连接时间");
-  UT_CHECK_EQ(fields[9].second, L"2026-10-28 12:00:00");
+  UT_CHECK_EQ(fields[9].second, L"5 分钟前");
 
   // 11. Source
   UT_CHECK(fields[10].first == L"源地址");
@@ -489,33 +500,67 @@ UT_TEST(t20_connection_detail_dialog_fields) {
 
 // Test 8: SettingsDrawer Two-Column Responsive Split
 // src: _layout.tsx:1403-1438 容器全窗 padding 12 / gap 12；左列 240 / gap 5 / pr 1
-// src: _layout.tsx:1519-1533 右列 ConnectionsPanel flex:1
+// src: _layout.tsx:1519-1533 右列 ConnectionsPanel flex:1；index.scss:125 Original pb=0 / Retro3d pb=4
 UT_TEST(t20_settings_drawer_two_column_responsive_split) {
-  SettingsDrawer drawer;
-  drawer.set_open(true);
+  auto& svc = ThemeService::instance();
+  const auto prev_skin = svc.skin();
+  const auto prev_mode = svc.mode();
 
-  // 1. 窄窗形态 (<= 285px): 单列呈现，ConnectionsPanel 隐藏；D12 居中 (271-231)/2 = 20
-  drawer.layout_tree({0, 0, 271, 680});
-  UT_CHECK_EQ(drawer.panel()->bounds().w, 271.0f);  // 全窗覆盖层
-  UT_CHECK_EQ(drawer.panel()->bounds().h, 680.0f);
-  UT_CHECK_EQ(drawer.profile_card()->bounds().x, 20.0f);  // D12: (271 - 231) / 2 = 20
-  UT_CHECK_EQ(drawer.profile_card()->bounds().w, 231.0f);  // 240 - pr 8 - border 1
-  UT_CHECK(drawer.conn_panel() != nullptr);
-  UT_CHECK(!drawer.conn_panel()->visible());
+  // 子用例 A：Original 皮肤（pb = 0，col_x = 12）
+  {
+    svc.init(SkinId::Original, ThemeMode::Light);
+    SettingsDrawer drawer;
+    drawer.set_open(true);
 
-  // 2. 宽窗形态 (> 285px): 两列并排，左列固定 240px，右列自适应
-  drawer.layout_tree({0, 0, 640, 680});
-  UT_CHECK_EQ(drawer.panel()->bounds().w, 640.0f);
-  UT_CHECK_EQ(drawer.profile_card()->bounds().x, 16.0f);  // 宽窗并排靠左: 边框 4 + padding 12 = 16
-  UT_CHECK_EQ(drawer.profile_card()->bounds().w, 231.0f);
-  UT_CHECK(drawer.conn_panel()->visible());
-  RectF cp_bounds = drawer.conn_panel()->bounds();
-  UT_CHECK_EQ(cp_bounds.x, 264.0f);  // 12 + 240 + 12
-  UT_CHECK_EQ(cp_bounds.w, 364.0f);  // 640 - 264 - 12
-  // area.h + 30(标题栏) + 135(底部流量区) = 845 > 830 → tall 形态，
-  // 抽屉内底部行占 30（_layout.tsx:1593/1654），故可用高 = 680 - 30
-  // 再扣 2*4(边框) + 2*12(padding) = 618。
-  UT_CHECK_EQ(cp_bounds.h, 618.0f);
+    // 1. 窄窗形态 (<= 285px): 单列靠左 (12+0=12)，ConnectionsPanel 隐藏
+    drawer.layout_tree({0, 0, 271, 680});
+    UT_CHECK_EQ(drawer.panel()->bounds().w, 271.0f);
+    UT_CHECK_EQ(drawer.panel()->bounds().h, 680.0f);
+    UT_CHECK_EQ(drawer.profile_card()->bounds().x, 12.0f);
+    UT_CHECK_EQ(drawer.profile_card()->bounds().w, 231.0f);
+    UT_CHECK(drawer.conn_panel() != nullptr);
+    UT_CHECK(!drawer.conn_panel()->visible());
+
+    // 2. 宽窗形态 (> 285px): 两列并排，左列固定 240px，右列自适应
+    drawer.layout_tree({0, 0, 640, 680});
+    UT_CHECK_EQ(drawer.panel()->bounds().w, 640.0f);
+    UT_CHECK_EQ(drawer.profile_card()->bounds().x, 12.0f);
+    UT_CHECK_EQ(drawer.profile_card()->bounds().w, 231.0f);
+    UT_CHECK(drawer.conn_panel()->visible());
+    RectF cp_bounds = drawer.conn_panel()->bounds();
+    UT_CHECK_EQ(cp_bounds.x, 264.0f);  // 12 + 240 + 12
+    UT_CHECK_EQ(cp_bounds.w, 364.0f);  // 640 - 264 - 12
+    UT_CHECK_EQ(cp_bounds.h, 632.0f);  // 680 - 0 - 2*12 - 24
+  }
+
+  // 子用例 B：Retro3d 皮肤（pb = 4，col_x = 16）
+  {
+    svc.init(SkinId::Retro3d, ThemeMode::Light);
+    SettingsDrawer drawer;
+    drawer.set_open(true);
+
+    // 1. 窄窗形态 (<= 285px): 单列靠左 (12+4=16)，ConnectionsPanel 隐藏
+    drawer.layout_tree({0, 0, 271, 680});
+    UT_CHECK_EQ(drawer.panel()->bounds().w, 271.0f);
+    UT_CHECK_EQ(drawer.panel()->bounds().h, 680.0f);
+    UT_CHECK_EQ(drawer.profile_card()->bounds().x, 16.0f);  // padding 12 + border 4 = 16
+    UT_CHECK_EQ(drawer.profile_card()->bounds().w, 231.0f);  // 240 - pr 8 - border 1
+    UT_CHECK(drawer.conn_panel() != nullptr);
+    UT_CHECK(!drawer.conn_panel()->visible());
+
+    // 2. 宽窗形态 (> 285px): 两列并排，左列固定 240px，右列自适应
+    drawer.layout_tree({0, 0, 640, 680});
+    UT_CHECK_EQ(drawer.panel()->bounds().w, 640.0f);
+    UT_CHECK_EQ(drawer.profile_card()->bounds().x, 16.0f);  // 宽窗并排靠左: 边框 4 + padding 12 = 16
+    UT_CHECK_EQ(drawer.profile_card()->bounds().w, 231.0f);
+    UT_CHECK(drawer.conn_panel()->visible());
+    RectF cp_bounds = drawer.conn_panel()->bounds();
+    UT_CHECK_EQ(cp_bounds.x, 268.0f);  // 16 + 240 + 12
+    UT_CHECK_EQ(cp_bounds.w, 356.0f);  // 640 - 268 - 16
+    UT_CHECK_EQ(cp_bounds.h, 624.0f);  // 680 - 2*4 - 2*12 - 24
+  }
+
+  svc.init(prev_skin, prev_mode);
 }
 
 // Test 9: WebSocket Subscription Lifecycle & BUG-306 Synchronous Resize Fix
@@ -547,7 +592,7 @@ UT_TEST(t20_ws_subscription_lifecycle_and_bug306) {
 
 // Test 10: Direct2D Local Coordinates Rule (Zero Double-Offset)
 UT_TEST(t20_d2d_local_coordinates_no_double_offset) {
-  make_offscreen(640, 600, 96);
+  make_offscreen(900, 600, 96);
   auto& svc = ThemeService::instance();
   svc.init(SkinId::ModernFlat, ThemeMode::Light);
 
@@ -565,25 +610,23 @@ UT_TEST(t20_d2d_local_coordinates_no_double_offset) {
   panel.paint_all(rt());
   rt().end_frame();
 
-  // 像素断言：第一行连接的色点位于 panel 局部坐标 {4..12, 106+6..106+14}
-  //   （数据行自 106 起：表头 76+5=81、高 20、下沿 5px double → 106）
-  // 全局绝对坐标应为 x in [250, 258], y in [142, 150]
-  int dot_pixels = 0;
-  for (int y = 142; y < 150; ++y) {
-    for (int x = 250; x < 258; ++x) {
+  // 像素断言：第一行 Chains 文本（Proxy primary_color 蓝字）位于 panel 局部
+  //   {320..394, kRowsY(96)..kRowsY+20(116)} -> 全局 x in [566, 640], y in [126, 146]
+  int chains_pixels = 0;
+  for (int y = 126; y < 146; ++y) {
+    for (int x = 566; x < 640; ++x) {
       Px p = pixel(x, y);
-      // Proxy 色点主色 (含较强 blue 或 primary)
-      if (p.b > 180 && p.r < 100) ++dot_pixels;
+      if (p.b > 180 && p.r < 120) ++chains_pixels;
     }
   }
-  UT_CHECK(dot_pixels > 2);
+  UT_CHECK(chains_pixels > 2);
 
-  // 关键断言：如果发生了双偏移（double offset），色点会被错误偏置到 x ≈ 246 + 250 = 496, y ≈ 30 + 142 = 172
+  // 关键断言：如果发生了双偏移（double offset），会偏置到 x in [812, 886], y in [156, 176]
   int displaced_pixels = 0;
-  for (int y = 168; y < 176; ++y) {
-    for (int x = 492; x < 500; ++x) {
+  for (int y = 156; y < 176; ++y) {
+    for (int x = 812; x < 886; ++x) {
       Px p = pixel(x, y);
-      if (p.b > 180 && p.r < 100) ++displaced_pixels;
+      if (p.b > 180 && p.r < 120) ++displaced_pixels;
     }
   }
   UT_CHECK_EQ(displaced_pixels, 0);  // 绝无双偏移位移

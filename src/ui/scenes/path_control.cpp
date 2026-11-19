@@ -594,6 +594,12 @@ void prioritize_path_control_connections(std::vector<ConnItem>& items) {
     }
   }
 
+  // src: connections-panel.tsx:29-33,69 sortByNewestStart 活跃连接最新时间在前
+  std::stable_sort(live_rows.begin(), live_rows.end(),
+                   [](const ConnItem& a, const ConnItem& b) {
+                     return a.start > b.start;
+                   });
+
   items.clear();
   items.reserve(syn_disc.size() + syn_reject.size() + live_rows.size() +
                 syn_idle.size() + closed_rows.size());

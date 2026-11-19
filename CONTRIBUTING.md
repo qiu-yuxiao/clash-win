@@ -2,11 +2,11 @@
 
 Thank you for your interest in contributing to **Clash Win**! This guide covers the development setup, the 1:1 parity discipline, and the checks a change must pass before it can be merged.
 
-> **Read first**: [`移植基本准则.md`](移植基本准则.md) (the project constitution) in the repository root. It defines the only permitted deviations from Clash Mini (currently synced through **v3.5.0**), the version line, and the submission/evidence rules. Its rules take precedence over this file.
+> **Read first**: [`移植基本准则.md`](移植基本准则.md) (the project constitution) in the repository root. It defines the only permitted deviations from Clash Mini (currently synced through **v3.5.6**), the version line, and the submission/evidence rules. Its rules take precedence over this file.
 
 ## Relationship to Clash Mini
 
-Clash Win is a **Windows-native C++20 / Win32 / Direct2D 1:1 clone** of Clash Mini (initial port anchor `v3.2.2`, continuously synced through `v3.5.0`). The only public differences are the programming language/stack and the display name `Clash Mini` → `Clash Win`. Consequences for contributors:
+Clash Win is a **Windows-native C++20 / Win32 / Direct2D 1:1 clone** of Clash Mini (initial port anchor `v3.2.2`, continuously synced through `v3.5.6`). The only public differences are the programming language/stack and the display name `Clash Mini` → `Clash Win`. Consequences for contributors:
 
 - **Do not invent behavior.** If Mini's source (TS/TSX + Rust) has a behavior, reproduce it — including its nuances — rather than "improving" it on one side.
 - **Do not add features Mini does not have.** If a native implementation requires something Mini lacks (e.g. Win32 window lifecycle, Direct2D rendering compensations), implement semantic equivalence and register the native-form difference with its rationale in `docs/`.
@@ -38,7 +38,7 @@ cmake -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 
 # Run:
-.\build\bin\Release\clashwin.exe
+.\build\bin\Release\clash-win.exe
 ```
 
 ### Sidecar kernels (important)
@@ -67,14 +67,14 @@ Every new or fixed defect **must** come with a regression case, and that case mu
 ### Build the distributables
 
 ```powershell
-# Portable ZIP (layout: clashwin.exe + sidecar\ + resources\ + locales\ + .config\PORTABLE + 用户必读.txt)
+# Portable ZIP (layout: clash-win.exe + sidecar\ + resources\ + locales\ + .config\PORTABLE + 用户必读.txt)
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\portable.ps1 -Version <version>
 
 # NSIS installer (pass -SkipSign for non-elevated / CI builds)
 powershell -NoProfile -ExecutionPolicy Bypass -File installer\build_installer.ps1 -Version <version> -SkipSign
 ```
 
-Both write to `dist/`: `ClashWin_<version>_x64_portable.zip` and `ClashWin_<version>_x64-setup.exe`. Official releases rely on `SHA256SUMS.txt` plus Minisign Ed25519 signatures for in-app updates — see [Known Limitations](docs/KNOWN_LIMITATIONS.md).
+Both write to `dist/`: `Clash.Win_<version>_x64_portable.zip` and `Clash.Win_<version>_x64-setup.exe`. Official releases rely on `SHA256SUMS.txt` plus Minisign Ed25519 signatures for in-app updates — see [Known Limitations](docs/KNOWN_LIMITATIONS.md).
 
 ### Pre-submit checks
 

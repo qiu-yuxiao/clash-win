@@ -188,9 +188,8 @@ bool Lifecycle::entry_lightweight_mode(bool force) {
     tray_->update_lite_mode_menu(true);
   }
 
-  // 不在 UI 线程同步 tick（tick_once 内含 api_alive/node_healthy 网络探测，
-  // 会阻塞消息循环 → AppHangB1）；改为唤醒守护线程，非阻塞。
-  system::CoreMonitor::instance().kick();
+  // 【BUG-402】关窗进轻量模式与代理健康无关，不再回拨监测计时器或额外唤醒体检；
+  // 后台守护线程维持恒定 15s 巡检节奏（冷启动无窗态则由 monitor.cpp is_first_run 独立初始化）。
   return true;
 }
 

@@ -51,9 +51,9 @@ UT_TEST(t03_guard_socks_and_http_port) {
   UT_CHECK_EQ(IClashTemp::guard_socks_port(YAML::Node(YAML::NodeType::Map)), 10802);
   UT_CHECK_EQ(IClashTemp::guard_socks_port(map_with({{"socks-port", "0"}}).mapping()),
               10802);
-  // ← clash.rs:283 形态：http port 兜底（Mini 7899 → Clash Win 错开为 10814）
-  UT_CHECK_EQ(IClashTemp::guard_port(YAML::Node(YAML::NodeType::Map)), 7899);
-  UT_CHECK_EQ(IClashTemp::guard_port(map_with({{"port", "0"}}).mapping()), 7899);
+  // ← clash.rs:283 形态：http port 兜底对齐 kHttpGuardFallback = 10803
+  UT_CHECK_EQ(IClashTemp::guard_port(YAML::Node(YAML::NodeType::Map)), 10803);
+  UT_CHECK_EQ(IClashTemp::guard_port(map_with({{"port", "0"}}).mapping()), 10803);
   UT_CHECK_EQ(IClashTemp::guard_port(map_with({{"port", "10803"}}).mapping()), 10803);
 }
 
@@ -90,7 +90,7 @@ UT_TEST(t03_guard_client_info) {
   auto info = empty.get_client_info();
   UT_CHECK_EQ(info.mixed_port, 10801);
   UT_CHECK_EQ(info.socks_port, 10802);
-  UT_CHECK_EQ(info.port, 7899);
+  UT_CHECK_EQ(info.port, 10803);
   UT_CHECK_EQ(info.server, std::string("127.0.0.1:9098"));
   UT_CHECK(!info.secret.has_value());
   UT_CHECK(!info.ipv6);

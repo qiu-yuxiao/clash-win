@@ -44,7 +44,7 @@ These are registered in [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md); 
 
 ```powershell
 # In the folder containing the downloaded artifacts:
-Get-FileHash .\ClashWin_<version>_x64-setup.exe -Algorithm SHA256
-Get-FileHash .\ClashWin_<version>_x64_portable.zip -Algorithm SHA256
+Get-FileHash .\Clash.Win_<version>_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\Clash.Win_<version>_x64_portable.zip -Algorithm SHA256
 # Compare against the SHA256SUMS.txt attached to the same Release.
 ```

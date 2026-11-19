@@ -21,7 +21,7 @@
 ;   更新模式（由应用内更新器启动，← updater.rs:808-812）：
 ;              ... /UPDATE /ARGS <当前进程参数>
 ;   静默卸载： <安装目录>\uninstall.exe /S [/P] [/UPDATE]
-; Unicode true
+Unicode true
 ManifestDPIAware true
 ManifestDPIAwareness PerMonitorV2
 SetCompressor /SOLID lzma
@@ -48,24 +48,24 @@ ${UnStrStr}
 
 ; ---------- 可覆盖定义（构建脚本传入绝对路径） ----------
 !ifndef VERSION
-  !define VERSION "1.0.3"
+  !define VERSION "1.1.0"
 !endif
 !ifndef STAGEDIR
   !define STAGEDIR "stage"
 !endif
 !ifndef OUTFILE
-  !define OUTFILE "..\..\dist\ClashWin_${VERSION}_x64-setup.exe"
+  !define OUTFILE "..\..\dist\Clash.Win_${VERSION}_x64-setup.exe"
 !endif
 !ifndef ICONFILE
   !define ICONFILE "..\resources\icons\icon.ico"
 !endif
 
 ; ---------- 产品常量 ----------
-!define PRODUCTNAME "ClashWin"
+!define PRODUCTNAME "Clash Win"
 !define MANUFACTURER "Clash Win"
-!define COPYRIGHT "GNU General Public License v3.0 (GPL-3.0-only)"
+!define COPYRIGHT "GNU General Public License v3.0"
 !define BUNDLEID "io.github.clash-win.clash-win"
-!define MAINBINARY "clashwin.exe"
+!define MAINBINARY "clash-win.exe"
 !define SERVICE_NAME "clash_verge_service"
 ; 上游服务二进制 SHA256（sidecar/clash-verge-service.exe，与 Mini resources/ 同一份）。
 ; 总纲 §5.2.2：注册在位且哈希一致 → 共用不夺注册；不一致（上游分叉/损坏）才删注册重装。
@@ -79,8 +79,8 @@ ${UnStrStr}
 !if ! /fileexists "${STAGEDIR}\${MAINBINARY}"
   !error "缺少 ${STAGEDIR}\${MAINBINARY}：请先运行 installer\build_installer.ps1 暂存 Release 产物。"
 !endif
-!if ! /fileexists "${STAGEDIR}\sidecar\win-mihomo.exe"
-  !error "缺少 ${STAGEDIR}\sidecar\win-mihomo.exe：请先运行 installer\build_installer.ps1。"
+!if ! /fileexists "${STAGEDIR}\win-mihomo.exe"
+  !error "缺少 ${STAGEDIR}\win-mihomo.exe：请先运行 installer\build_installer.ps1。"
 !endif
 !if ! /fileexists "${STAGEDIR}\resources\clash-verge-service-install.exe"
   !error "缺少 ${STAGEDIR}\resources\clash-verge-service-install.exe：请先运行 installer\build_installer.ps1。"
@@ -98,7 +98,7 @@ InstallDirRegKey HKLM "${MANUPRODUCTKEY}" ""
 VIProductVersion "${VERSION}.0"
 VIAddVersionKey "ProductName" "${PRODUCTNAME}"
 VIAddVersionKey "CompanyName" "${MANUFACTURER}"
-VIAddVersionKey "FileDescription" "ClashWin - 原生 Windows Clash 客户端"
+VIAddVersionKey "FileDescription" "Clash Win"
 VIAddVersionKey "LegalCopyright" "${COPYRIGHT}"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
@@ -141,7 +141,6 @@ Page custom PageReinstall PageLeaveReinstall
 !define MUI_FINISHPAGE_SHOWREADME_TEXT "$(createDesktop)"
 !define MUI_FINISHPAGE_SHOWREADME_FUNCTION CreateOrUpdateDesktopShortcut
 !define MUI_FINISHPAGE_RUN
-!define MUI_FINISHPAGE_RUN_NOTCHECKED
 !define MUI_FINISHPAGE_RUN_FUNCTION RunMainBinary
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW FinishShow
@@ -163,15 +162,15 @@ Page custom PageReinstall PageLeaveReinstall
 
 ; 语言串（← tauri-bundler tauri-v2.11.2 languages/{SimpChinese,English,Russian}.nsh 逐字；
 ;   {{product_name}} 占位已按显示名豁免替换为 ClashWin）
-LangString appRunning ${LANG_SIMPCHINESE} "ClashWin 正在运行！请关闭后再试。"
-LangString appRunning ${LANG_ENGLISH} "ClashWin is running! Please close it first then try again."
-LangString appRunning ${LANG_RUSSIAN} "ClashWin запущен! Пожалуйста, закройте приложение и попробуйте еще раз."
-LangString appRunningOkKill ${LANG_SIMPCHINESE} "ClashWin 正在运行！$\n点击确定以终止运行。"
-LangString appRunningOkKill ${LANG_ENGLISH} "ClashWin is running!$\nClick OK to kill it"
-LangString appRunningOkKill ${LANG_RUSSIAN} "ClashWin запущен!$\nНажмите OK чтобы закрыть приложение"
-LangString failedToKillApp ${LANG_SIMPCHINESE} "无法终止 ClashWin。请关闭后再试。"
-LangString failedToKillApp ${LANG_ENGLISH} "Failed to kill ClashWin. Please close it first then try again"
-LangString failedToKillApp ${LANG_RUSSIAN} "Не удалось закрыть ClashWin. Пожалуйста, закройте приложение и попробуйте еще раз"
+LangString appRunning ${LANG_SIMPCHINESE} "Clash Win 正在运行！请关闭后再试。"
+LangString appRunning ${LANG_ENGLISH} "Clash Win is running! Please close it first then try again."
+LangString appRunning ${LANG_RUSSIAN} "Clash Win запущен! Пожалуйста, закройте приложение и попробуйте еще раз."
+LangString appRunningOkKill ${LANG_SIMPCHINESE} "Clash Win 正在运行！$\n点击确定以终止运行。"
+LangString appRunningOkKill ${LANG_ENGLISH} "Clash Win is running!$\nClick OK to kill it"
+LangString appRunningOkKill ${LANG_RUSSIAN} "Clash Win запущен!$\nНажмите OK чтобы закрыть приложение"
+LangString failedToKillApp ${LANG_SIMPCHINESE} "无法终止 Clash Win。请关闭后再试。"
+LangString failedToKillApp ${LANG_ENGLISH} "Failed to kill Clash Win. Please close it first then try again"
+LangString failedToKillApp ${LANG_RUSSIAN} "Не удалось закрыть Clash Win. Пожалуйста, закройте приложение и попробуйте еще раз"
 LangString alreadyInstalled ${LANG_SIMPCHINESE} "已安装"
 LangString alreadyInstalled ${LANG_ENGLISH} "Already Installed"
 LangString alreadyInstalled ${LANG_RUSSIAN} "Уже установлено"
@@ -357,7 +356,7 @@ LangString STR_SERVICE_FAIL ${LANG_RUSSIAN} "Не удалось установ�
     ${IUnknown::QueryInterface} $0 '("${IID_IPersistFile}", .r1)'
     ${If} $1 P<> 0
       ${IPersistFile::Load} $1 '("${shortcut}", ${STGM_READ})'
-      System::Alloc 260
+      System::Alloc 1024
       Pop $2
       ${IShellLink::GetPath} $0 '(.r2, 260, 0, ${SLGP_RAWPATH})'
       ${If} $2 == "${target}"
@@ -761,18 +760,59 @@ Section "Install"
   ; 「借用与归还」（总纲 §5.2.2）：不碰 Clash Mini 的自启注册表值——
   ;   旧 BUG-313③ 清洁设计的 4 行 DeleteRegValue 已按 2026-11-10 裁决删除。
 
-  ; 主程序 + 资源 + sidecar + locales（← 模板 :939-956）
+  ; 旧版 v1.0.x (ClashWin / clashwin.exe) 平滑升级迁移清理
+  Delete "$INSTDIR\clashwin.exe"
+  RMDir /r "$INSTDIR\sidecar"
+  ReadRegStr $R0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClashWin" "InstallLocation"
+  ${If} $R0 != ""
+    StrCpy $R1 $R0 1
+    ${If} $R1 == '"'
+      StrCpy $R0 $R0 "" 1
+      StrCpy $R0 $R0 -1
+    ${EndIf}
+    ${If} $R0 != ""
+    ${AndIf} $R0 != "$INSTDIR"
+      Delete "$R0\clashwin.exe"
+      Delete "$R0\win-mihomo.exe"
+      Delete "$R0\uninstall.exe"
+      Delete "$R0\用户必读.txt"
+      RMDir /r "$R0\sidecar"
+      RMDir /r "$R0\resources"
+      RMDir /r "$R0\locales"
+      RMDir "$R0"
+    ${EndIf}
+  ${EndIf}
+  ${If} ${FileExists} "$SMPROGRAMS\ClashWin.lnk"
+    !insertmacro UnpinShortcut "$SMPROGRAMS\ClashWin.lnk"
+    Delete "$SMPROGRAMS\ClashWin.lnk"
+  ${EndIf}
+  ${If} ${FileExists} "$DESKTOP\ClashWin.lnk"
+    !insertmacro UnpinShortcut "$DESKTOP\ClashWin.lnk"
+    Delete "$DESKTOP\ClashWin.lnk"
+  ${EndIf}
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ClashWin"
+  DeleteRegKey HKLM "Software\Clash Win\ClashWin"
+  ReadRegStr $R2 HKCU "Software\Clash Win\ClashWin" "Installer Language"
+  ${If} $R2 != ""
+    ReadRegStr $R3 HKCU "${MANUPRODUCTKEY}" "Installer Language"
+    ${If} $R3 == ""
+      WriteRegStr HKCU "${MANUPRODUCTKEY}" "Installer Language" "$R2"
+    ${EndIf}
+    DeleteRegKey HKCU "Software\Clash Win\ClashWin"
+  ${EndIf}
+
+  ; 主程序 + 内核 + 资源 + locales（← Mini :939-956 安装后扁平布局，不再双份 sidecar/）
   File "${STAGEDIR}\${MAINBINARY}"
-  SetOutPath "$INSTDIR\sidecar"
-  File "${STAGEDIR}\sidecar\*.exe"
+  File "${STAGEDIR}\win-mihomo.exe"
   SetOutPath "$INSTDIR\resources"
   File /r "${STAGEDIR}\resources\*.*"
   SetOutPath "$INSTDIR\locales"
   File /r "${STAGEDIR}\locales\*.*"
   SetOutPath $INSTDIR
 
-  ; 用户必读.txt 复制到安装根（← 模板 :950-951）
+  ; 用户必读.txt 与 轻量模式防误杀指南.txt 复制到安装根（← 模板 :950-951 / BUG-398）
   CopyFiles /SILENT "$INSTDIR\resources\用户必读.txt" "$INSTDIR\用户必读.txt"
+  CopyFiles /SILENT "$INSTDIR\resources\轻量模式防误杀指南.txt" "$INSTDIR\轻量模式防误杀指南.txt"
 
   ; 服务（Mini 模板 :958 StartVergeService 仅重启既有服务；ClashWin 因 B-D34
   ;   应用内服务命令禁用而由安装器承担安装职责——已登记偏差。启动语义对齐：
@@ -792,6 +832,16 @@ Section "Install"
     Delete "$INSTDIR\$OldMainBinaryName"
   ${EndIf}
   WriteRegStr HKLM "${UNINSTKEY}" "MainBinaryName" "${MAINBINARY}"
+
+  ; URL Scheme 注册（clash:// 与 clash-win://，perMachine 写 HKLM\Software\Classes）
+  WriteRegStr HKLM "Software\Classes\clash-win" "" "URL:Clash Win Protocol"
+  WriteRegStr HKLM "Software\Classes\clash-win" "URL Protocol" ""
+  WriteRegStr HKLM "Software\Classes\clash-win\DefaultIcon" "" "$INSTDIR\${MAINBINARY},0"
+  WriteRegStr HKLM "Software\Classes\clash-win\shell\open\command" "" "$\"$INSTDIR\${MAINBINARY}$\" $\"%1$\""
+  WriteRegStr HKLM "Software\Classes\clash" "" "URL:Clash Protocol"
+  WriteRegStr HKLM "Software\Classes\clash" "URL Protocol" ""
+  WriteRegStr HKLM "Software\Classes\clash\DefaultIcon" "" "$INSTDIR\${MAINBINARY},0"
+  WriteRegStr HKLM "Software\Classes\clash\shell\open\command" "" "$\"$INSTDIR\${MAINBINARY}$\" $\"%1$\""
 
   ; 添加/删除程序条目（← 模板 :997-1010）
   WriteRegStr HKLM "${UNINSTKEY}" "DisplayName" "${PRODUCTNAME}"
@@ -940,23 +990,47 @@ Section "Uninstall"
 
   ; 程序文件（← 模板 :1116-1129）
   Delete "$INSTDIR\${MAINBINARY}"
+  Delete "$INSTDIR\win-mihomo.exe"
   Delete "$INSTDIR\用户必读.txt"
+  Delete "$INSTDIR\轻量模式防误杀指南.txt"
   Delete "$INSTDIR\uninstall.exe"
   RMDir /r "$INSTDIR\sidecar"
   RMDir /r "$INSTDIR\resources"
   RMDir /r "$INSTDIR\locales"
   RMDir "$INSTDIR"
 
-  ; 快捷方式（非更新模式；← 模板 :1155-1181：Unpin + IsShortcutTarget 守卫）
+  ; 快捷方式与 URL Scheme（非更新模式；← 模板 :1155-1244）
   ${If} $UpdateMode <> 1
     !insertmacro DeleteAppUserModelId
 
-    Delete "$SMPROGRAMS\${PRODUCTNAME}.lnk"
+    !insertmacro IsShortcutTargetCompat "$SMPROGRAMS\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARY}"
+    Pop $0
+    ${If} $0 = 1
+      !insertmacro UnpinShortcut "$SMPROGRAMS\${PRODUCTNAME}.lnk"
+      Delete "$SMPROGRAMS\${PRODUCTNAME}.lnk"
+    ${EndIf}
     !insertmacro IsShortcutTargetCompat "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARY}"
     Pop $0
     ${If} $0 = 1
       !insertmacro UnpinShortcut "$DESKTOP\${PRODUCTNAME}.lnk"
       Delete "$DESKTOP\${PRODUCTNAME}.lnk"
+    ${EndIf}
+
+    DeleteRegKey HKLM "Software\Classes\clash-win"
+    ReadRegStr $0 HKLM "Software\Classes\clash\shell\open\command" ""
+    ${UnStrStr} $1 $0 "$INSTDIR"
+    ${If} $1 != ""
+      DeleteRegKey HKLM "Software\Classes\clash"
+    ${EndIf}
+    ReadRegStr $0 HKCU "Software\Classes\clash-win\shell\open\command" ""
+    ${UnStrStr} $1 $0 "$INSTDIR"
+    ${If} $1 != ""
+      DeleteRegKey HKCU "Software\Classes\clash-win"
+    ${EndIf}
+    ReadRegStr $0 HKCU "Software\Classes\clash\shell\open\command" ""
+    ${UnStrStr} $1 $0 "$INSTDIR"
+    ${If} $1 != ""
+      DeleteRegKey HKCU "Software\Classes\clash"
     ${EndIf}
   ${EndIf}
 

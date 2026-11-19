@@ -43,7 +43,7 @@ if (-not $Version) {
     if (-not $Version) { throw "未能解析版本号，请传入 -Version <X.Y.Z> 或检查 constants.h" }
 }
 
-$OutFile = Join-Path $DistDir "ClashWin_${Version}_x64-setup.exe"
+$OutFile = Join-Path $DistDir "Clash.Win_${Version}_x64-setup.exe"
 
 function Fail([string]$Message) {
     Write-Host "ERROR: $Message" -ForegroundColor Red
@@ -97,7 +97,7 @@ $SidecarNames = @(
     'enableLoopback.exe'
 )
 
-$mainExe    = Join-Path $BinDir 'clashwin.exe'
+$mainExe    = Join-Path $BinDir 'clash-win.exe'
 $localesDir = Join-Path $BinDir 'locales'
 $resDir     = Join-Path $BinDir 'resources'
 
@@ -107,7 +107,7 @@ foreach ($sc in $SidecarNames) {
     $p = Join-Path $BinDir "sidecar\$sc"
     if (-not (Test-Path -LiteralPath $p)) { $missing += $p }
 }
-foreach ($rf in @('Country.mmdb', 'geosite.dat', 'gfwlist.yaml', 'icons\icon.ico')) {
+foreach ($rf in @('Country.mmdb', 'geosite.dat', 'gfwlist.yaml', 'icons\icon.ico', '用户必读.txt', '轻量模式防误杀指南.txt')) {
     $p = Join-Path $resDir $rf
     if (-not (Test-Path -LiteralPath $p)) { $missing += $p }
 }
@@ -123,25 +123,20 @@ if ($missing.Count -gt 0) {
     Fail ("Missing required artifact(s):`n  " + ($missing -join "`n  "))
 }
 
-# ---------- 2. 干净暂存（仅拷贝白名单 5 个 sidecar，杜绝历史残留混入安装包） ----------
+# ---------- 2. 干净暂存（1:1 对齐 Clash Mini 根平铺内核 + resources 放服务/Loopback，不再塞入多余 sidecar\） ----------
 if (-not $SkipStage) {
     if (Test-Path -LiteralPath $StageDir) {
         Remove-Item -LiteralPath $StageDir -Recurse -Force
     }
     New-Item -ItemType Directory -Path $StageDir | Out-Null
-    Copy-Item -LiteralPath $mainExe -Destination (Join-Path $StageDir 'clashwin.exe') -Force
-
-    $stageSidecar = Join-Path $StageDir 'sidecar'
-    New-Item -ItemType Directory -Path $stageSidecar | Out-Null
-    foreach ($sc in $SidecarNames) {
-        Copy-Item -LiteralPath (Join-Path $BinDir "sidecar\$sc") -Destination (Join-Path $stageSidecar $sc) -Force
-    }
+    Copy-Item -LiteralPath $mainExe -Destination (Join-Path $StageDir 'clash-win.exe') -Force
+    Copy-Item -LiteralPath (Join-Path $BinDir 'sidecar\win-mihomo.exe') -Destination (Join-Path $StageDir 'win-mihomo.exe') -Force
 
     Copy-Item -LiteralPath $resDir -Destination (Join-Path $StageDir 'resources') -Recurse -Force
     Copy-Item -LiteralPath $localesDir -Destination (Join-Path $StageDir 'locales') -Recurse -Force
 
-    # 服务三件套同步放入 resources\（dirs::service_path() 与安装/卸载器均从 <exe>\resources\ 查找）
-    foreach ($name in @('clash-verge-service.exe', 'clash-verge-service-install.exe', 'clash-verge-service-uninstall.exe')) {
+    # 服务三件套 + enableLoopback.exe 统一放入 resources\（与 Mini 完全一致）
+    foreach ($name in @('clash-verge-service.exe', 'clash-verge-service-install.exe', 'clash-verge-service-uninstall.exe', 'enableLoopback.exe')) {
         Copy-Item -LiteralPath (Join-Path $BinDir "sidecar\$name") `
                   -Destination (Join-Path (Join-Path $StageDir 'resources') $name) -Force
     }

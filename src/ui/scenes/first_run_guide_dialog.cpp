@@ -245,18 +245,22 @@ std::string read_clipboard_url() {
 }
 
 std::wstring guide_storage_path() {
-  return util::dirs::app_home_dir() + L"\\clashwin-guide.json";
+  return util::dirs::app_home_dir() + L"\\clash-win-guide.json";
 }
 
 }  // namespace
 
 bool FirstRunGuideDialog::is_first_run_completed() {
   std::ifstream f(guide_storage_path(), std::ios::binary);
+  if (!f) {
+    f.open(util::dirs::app_home_dir() + L"\\clashwin-guide.json", std::ios::binary);
+  }
   if (!f) return false;
   try {
     nlohmann::json j;
     f >> j;
-    return j.value(kStorageKey, false);
+    return j.value(kStorageKey, false) ||
+           j.value("clash-mini-first-run-completed", false);
   } catch (...) {
     return false;
   }
@@ -465,11 +469,13 @@ void FirstRunGuideDialog::submit_import() {
   // 校验非空与链接/节点格式（src: first-run-guide-dialog.tsx:373-381）
   if (target_url.empty()) {
     error_message_ = tr8("layout.components.firstRun.errEmpty");
+    if (bounds().w > 0.0f && bounds().h > 0.0f) on_arrange(bounds());
     invalidate();
     return;
   }
   if (!clashwin::util::is_supported_subscription_or_node_input(target_url)) {
     error_message_ = tr8("layout.components.firstRun.errScheme");
+    if (bounds().w > 0.0f && bounds().h > 0.0f) on_arrange(bounds());
     invalidate();
     return;
   }
@@ -479,6 +485,7 @@ void FirstRunGuideDialog::submit_import() {
 
   is_importing_ = true;
   error_message_.clear();
+  if (bounds().w > 0.0f && bounds().h > 0.0f) on_arrange(bounds());
   invalidate();
 
   auto finish_import = [this](bool success, const std::string& err_msg) {
@@ -523,14 +530,12 @@ void FirstRunGuideDialog::submit_import() {
         if (on_retest_nodes) on_retest_nodes();
       }
     } else {
-      // src: :403 errImport
+      // src: :403-416 errImport
+      (void)err_msg;
       is_importing_ = false;
       if (url_field_) url_field_->set_enabled(true);  // 留在导入步，允许重新编辑
-      if (!err_msg.empty()) {
-        error_message_ = "导入失败: " + err_msg;
-      } else {
-        error_message_ = "订阅导入失败，请检查链接是否有效后重试";
-      }
+      error_message_ = tr8("layout.components.firstRun.errImport");
+      if (bounds().w > 0.0f && bounds().h > 0.0f) on_arrange(bounds());
       invalidate();
     }
   };
@@ -560,6 +565,18 @@ void FirstRunGuideDialog::finish() {
   // src: :301-303 markGuided：三个出口共用完成标记
   set_first_run_completed(true);
   close();
+}
+
+void FirstRunGuideDialog::dismiss_via_close() {
+  // src: src/pages/_layout/components/first-run-guide-dialog.tsx:480-488
+  // 导入步点遮罩/Esc 等同"稍后配置"（标记完成并自动滑开抽屉）；就绪步仅关闭
+  if (is_importing_) return;
+  if (is_ready_step()) {
+    finish();
+  } else {
+    finish();
+    if (on_dismiss_later) on_dismiss_later();
+  }
 }
 
 // 三大特性胶囊排版：flex 1 1 auto + flexWrap:wrap + gap 6（src: :607-644）
@@ -681,7 +698,7 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
       tts.weight = static_cast<int>(Weight::Bold);
       tts.wrap = true;
       const SizeF ts_sz = te->measure_text(
-          L"⭐ " + tr("layout.components.firstRun.starTitle"), tts, card_text_w);
+          tr("layout.components.firstRun.starTitle"), tts, card_text_w);
       if (ts_sz.h > 0) star_title_h_ = std::max(kStarTitleH, ts_sz.h + 2.0f);
 
       TextStyle bts;
@@ -709,10 +726,28 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     if (show_warn) ny += kWarnMt + kWarnH;
     node_h = ny + kCardPad;  // 底部留白
   }
+  // src: :716-729 Step 1 错误文案独立成行（mt: 0.5, fontSize: 12px）
+  const bool has_err = (step_ == FirstRunStep::Input && !error_message_.empty());
+  float err_block_h = 0.0f;
+  if (has_err) {
+    // src: :723-724 mt: 0.5 (4px) + 12px fontSize lineHeight 1.4 = 16.8px
+    float err_text_h = 16.8f;
+    if (ITextEngine* te = text_engine()) {
+      TextStyle ets;
+      ets.size = kBannerFont;
+      ets.weight = static_cast<int>(Weight::Bold);
+      ets.wrap = true;
+      err_text_h = std::max(
+          err_text_h, te->measure_text(L"⚠️ " + utf::utf8_to_utf16(error_message_), ets,
+                                       cw - kTitlePadX * 2.0f).h);
+    }
+    // src: :723 mt: 0.5 (4px)
+    err_block_h = 4.0f + err_text_h;
+  }
   const float ready_cards_h = node_h + kReadyGap + star_h;
   float ch = step_ == FirstRunStep::Input
                  ? kInputStepH + (intro_h_ - kIntroH) + pills_extra +
-                       (has_banner ? banner_h_ + kBannerMb : 0.0f)
+                       (has_banner ? banner_h_ + kBannerMb : 0.0f) + err_block_h
                  : kTitleBlockH + kContentPad + ready_cards_h + kContentPad + kActionsH;
   ch = std::min(ch, area.h - 8.0f);  // 豁免: Mini 无对应物 — 窄高视口防溢出安全留边 4px×2
 
@@ -738,14 +773,14 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     banner_clip_rect_ = {inner_x, pills_y + pills_h_ + kPillMb, inner_w, banner_h_};
     input_rect_ = {inner_x, field_y, inner_w, kFieldH};
     // 订阅链接 TextField：占满输入框宽，右留 26px 给回车图标（src: endAdornment）
-      if (url_field_) {
+    if (url_field_) {
       url_field_->set_visible(open_);
       url_field_->set_bounds({input_rect_.x, field_y, inner_w, kFieldH});
     }
-      // src: :715-729 endAdornment KeyboardReturn 16px（点击即导入）
+    // src: :715-729 endAdornment KeyboardReturn 16px（点击即导入）
     btn_enter_rect_ = {input_rect_.right() - 26.0f, field_y + 12.0f, 16.0f, 16.0f};
 
-    const float paste_y = field_y + kFieldH + kPasteMt;
+    const float paste_y = field_y + kFieldH + err_block_h + kPasteMt;
     btn_paste_rect_ = {cx + (cw - kPasteW) / 2.0f, paste_y, kPasteW, kPasteH};
     const float actions_top = cy + ch - kActionsH;
     btn_submit_rect_ = {inner_x, actions_top + kActionPadY, inner_w, kPrimaryBtnH};
@@ -942,18 +977,21 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
               hover_paste_ ? warning_color() : ThemeService::instance().primary(),
               AlignH::Center);
 
-    // ---- 错误提示 / Enter 提示（src: :735-748 错误行；:781-789 提示行）----
-    // 豁免: 本引擎布局不随错误动态改高，错误与提示共用输入框下方同一行
-    const bool has_error = !error_message_.empty();
-    const std::wstring hint_line =
-        has_error ? L"⚠️ " + utf::utf8_to_utf16(error_message_)
-                  : tr("layout.components.firstRun.enterHint");
-    draw_text(rt, hint_line,
+    // ---- 错误提示 / Enter 提示（src: :716-729 错误行；:759-770 提示行）----
+    if (!error_message_.empty()) {
+      // src: first-run-guide-dialog.tsx:723-724 mt: 0.5 (4px), fontSize: 12px, lineHeight: 1.4 = 16.8px
+      const float err_y = input_rect_.bottom() + 4.0f;
+      // src: :723 mt: 0.5 (4px), fontSize: 12px * 1.4 = 16.8px
+      const float err_h = std::max(16.8f, btn_paste_rect_.y - kPasteMt - err_y);
+      draw_text(rt, L"⚠️ " + utf::utf8_to_utf16(error_message_),
+                {inner_x, err_y, inner_w, err_h},
+                kBannerFont, static_cast<int>(Weight::Bold),
+                ThemeService::instance().palette().error_color,
+                AlignH::Left, AlignV::Top, true);
+    }
+    draw_text(rt, tr("layout.components.firstRun.enterHint"),
               {inner_x, btn_paste_rect_.bottom() + kHintGap, inner_w, kHintH},
-              has_error ? kPasteFont : kHintFont,
-              static_cast<int>(has_error ? Weight::Bold : Weight::Normal),
-              has_error ? ThemeService::instance().palette().error_color
-                        : disabled_text(),
+              kHintFont, static_cast<int>(Weight::Normal), disabled_text(),
               AlignH::Center);
 
     // ---- 动作区（src: :792-828）----
@@ -1036,7 +1074,7 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
                 {nc.x + kCardPad, label_y + kNodeLabelH + kNodeGap,
                  nc.w - kCardPad * 2.0f, kNodeNameH},
                 13.0f, static_cast<int>(Weight::Bold),
-                ThemeService::instance().palette().primary_text, AlignH::Left, AlignV::Center,
+                text_color, AlignH::Left, AlignV::Center,
                 false, true);
     }
 
@@ -1065,8 +1103,8 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
     Brush sb{star_bg};
     rt.round_rect(sc, 8.0f, Pen{star_bd, 1.0f}, &sb);
 
-    // src: :1035-1046 ⭐ 标题
-    draw_text(rt, L"⭐ " + tr("layout.components.firstRun.starTitle"),
+    // src: :1035-1046 标题（locale 文案自身已含 ⭐ 前缀）
+    draw_text(rt, tr("layout.components.firstRun.starTitle"),
               {sc.x + kCardPad, sc.y + kCardPad, sc.w - kCardPad * 2.0f, star_title_h_},
               kStarTitleFont, static_cast<int>(Weight::Bold), star_accent_color(), AlignH::Left, AlignV::Top, true);
     // src: :1048-1057 正文
@@ -1094,7 +1132,7 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
                   card_rect_.w, 1.0f},
                  Brush{divider_color()});
     paint_button(rt, btn_finish_star_rect_, BtnStyle::Primary,
-                 L"⭐ " + tr("layout.components.firstRun.openGithubStar"), 13.0f,
+                 tr("layout.components.firstRun.openGithubStar"), 13.0f,
                  hover_finish_star_, pressed_finish_star_);
     paint_button(rt, btn_finish_rect_, BtnStyle::OutlinedDefault,
                  tr("layout.components.firstRun.finish"), 12.5f,
@@ -1274,7 +1312,7 @@ bool FirstRunGuideDialog::on_mouse(const MouseEvent& e) {
 
     // src: :533-542 点击遮罩：Input→later，Ready→finish
     if (!card_rect_.contains(pt.x, pt.y)) {
-      finish();
+      dismiss_via_close();
       return true;
     }
     return true;
@@ -1290,7 +1328,7 @@ bool FirstRunGuideDialog::on_key(const KeyEvent& e) {
   if (e.type == KeyEventType::Down) {
     // src: :533-542 Esc 走 onClose（导入中忽略）
     if (e.key == VK_ESCAPE || e.key == 27) {
-      if (!is_importing_) finish();
+      dismiss_via_close();
       return true;
     }
     // src: :417-446 Enter 全窗口监听（任意焦点均可导入/完成）

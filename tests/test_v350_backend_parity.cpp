@@ -216,7 +216,7 @@ UT_TEST(v350_enhance_quarantine_and_clear_failures) {
       "- name: Fake-Node\n  type: ss\n  server: 10.0.0.3\n  port: 443\n");
   enhance::MiniAgreementOptions opt;
   YAML::Node out1 = enhance::enforce_mini_agreements(cfg, opt);
-  UT_CHECK_EQ(out1["proxy-groups"][1]["lazy"].Scalar(), "false");
+  UT_CHECK_EQ(out1["proxy-groups"][1]["lazy"].Scalar(), "true");
   // Banner-Leak 被同指纹横幅连坐清除
   UT_CHECK_EQ(out1["proxy-groups"][0]["proxies"].size(), size_t(2));
   auto fakes = util::confirmed_fake_node_names();
@@ -270,7 +270,7 @@ UT_TEST(v350_continuity_first_monitor_pure_logic) {
   UT_CHECK(dead.kind == CM::NodeStatusKind::Dead);
   UT_CHECK(CM::should_proceed_with_self_heal(dead));
 
-  // 2. 被动连接流量分流（Flowing 480s / Stalled 60s / Idle 300s）
+  // 2. 被动连接流量分流（BUG-399：Flowing 1800s / Stalled 60s / Idle 900s）
   std::optional<CM::ActiveTrafficTracker> tracker;
   CM::update_active_traffic_state(
       tracker, "NodeA", {{"c1", 100, 100}}, 1000);
@@ -278,8 +278,8 @@ UT_TEST(v350_continuity_first_monitor_pure_logic) {
       tracker, "NodeA", {{"c1", 150, 300}}, 15000);
   UT_CHECK(s_flow == CM::ActiveTrafficState::Flowing);
   UT_CHECK(!CM::should_allow_https_migration(s_flow));
-  UT_CHECK(!CM::should_probe_active_node(alive, 479, s_flow, false));
-  UT_CHECK(CM::should_probe_active_node(alive, 480, s_flow, false));
+  UT_CHECK(!CM::should_probe_active_node(alive, 1799, s_flow, false));
+  UT_CHECK(CM::should_probe_active_node(alive, 1800, s_flow, false));
 
   auto [s_stall, _cd2] = CM::update_active_traffic_state(
       tracker, "NodeA", {{"c1", 300, 300}}, 30000);
@@ -288,8 +288,8 @@ UT_TEST(v350_continuity_first_monitor_pure_logic) {
   UT_CHECK(CM::should_probe_active_node(alive, 10, s_stall, false));
   UT_CHECK(!CM::should_probe_active_node(alive, 10, s_stall, true));
 
-  UT_CHECK(!CM::should_probe_active_node(alive, 299, CM::ActiveTrafficState::Idle, false));
-  UT_CHECK(CM::should_probe_active_node(alive, 300, CM::ActiveTrafficState::Idle, false));
+  UT_CHECK(!CM::should_probe_active_node(alive, 899, CM::ActiveTrafficState::Idle, false));
+  UT_CHECK(CM::should_probe_active_node(alive, 900, CM::ActiveTrafficState::Idle, false));
 
   // 3. primary_url_distorted UI 显示与 UiActiveSyncState
   const std::vector<std::string> all_nodes = {"HK-1", "HK-2"};
@@ -431,8 +431,15 @@ UT_TEST(v350_custom_routing_backup_roundtrip) {
   };
   const std::string yaml_str =
       serialize_custom_routing_backup(rules, "2026-11-17T00:00:00.000Z");
-  UT_CHECK(yaml_str.find("# Clash Mini Custom Routing Rules Backup") == 0);
+  UT_CHECK(yaml_str.find("# Clash Win Custom Routing Rules Backup") == 0);
   UT_CHECK(yaml_str.find("version: 1") != std::string::npos);
+
+  // Cross-app compatibility: Clash Mini backup header parses identically.
+  auto legacy_parsed = parse_custom_routing_backup(
+      "# Clash Mini Custom Routing Rules Backup\nversion: 1\nprepend-rules:\n"
+      "  - DOMAIN,legacy.com,DIRECT\n");
+  UT_CHECK_EQ(legacy_parsed.size(), size_t(1));
+  UT_CHECK_EQ(legacy_parsed[0], "DOMAIN,legacy.com,DIRECT");
   UT_CHECK(yaml_str.find("exportedAt: 2026-11-17T00:00:00.000Z") !=
                std::string::npos ||
            yaml_str.find("exportedAt: '2026-11-17T00:00:00.000Z'") !=

@@ -14,7 +14,8 @@ namespace clashwin::ui {
 // src: mini-traffic-panel.tsx:102-104/:171-173 —— 成对指标卡在接缝侧内角半径 0。
 inline void draw_card(IRenderTarget& rt, const RectF& r,
                       const theme::CardPaint& cp,
-                      int corner_mask = 0xF) {
+                      int corner_mask = 0xF,
+                      int border_sides_mask = 0xF) {
   // 阴影/发光先铺（D2D 无 box-shadow，用多层外扩近似）
   if (cp.has_shadow)
     draw_soft_shadow(rt, r, cp.radius, cp.shadow_color, cp.shadow_dy,
@@ -26,16 +27,21 @@ inline void draw_card(IRenderTarget& rt, const RectF& r,
                                       cp.grad_angle, corner_mask);
   } else if (cp.bg.a > 0.001f) {
     Brush bg{cp.bg};
-    rt.round_rect(r, cp.radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &bg);
+    rt.round_rect_corners(r, cp.radius, corner_mask,
+                          Pen{Color4f{0, 0, 0, 0}, 0.0f}, &bg, 0);
   }
-  if (cp.border_w > 0.0f) {
-    rt.round_rect(r, cp.radius, Pen{cp.border, cp.border_w}, nullptr);
+  if (cp.border_w > 0.0f && (border_sides_mask & 0xF) != 0) {
+    rt.round_rect_corners(r, cp.radius, corner_mask,
+                          Pen{cp.border, cp.border_w}, nullptr,
+                          border_sides_mask);
   }
   // 底缘 1px 实线（← retro-3d boxShadow 首层 '0 1px 0 0 ${bevelShadowDark}'；
   //   其余 5 套皮肤无此层 → has_bottom_bevel=false，不画）
   if (cp.has_bottom_bevel) {
     Brush bv{cp.bottom_bevel_color};
-    rt.fill_rect({r.x + cp.radius, r.bottom() - 1, r.w - cp.radius * 2, 1}, bv);
+    const float x0 = r.x + ((corner_mask & 8) ? cp.radius : 0.0f);
+    const float x1 = r.right() - ((corner_mask & 4) ? cp.radius : 0.0f);
+    if (x1 > x0) rt.fill_rect({x0, r.bottom() - 1, x1 - x0, 1}, bv);
   }
 }
 

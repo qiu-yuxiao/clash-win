@@ -197,6 +197,18 @@ Result<void> process_flags(uint16_t flags, const IVerge& patch) {
   if (flags & kFSysTrayIcon) {
     events::EventBus::refresh_verge();
   }
+  if ((flags & (kFLogLevel | kFLogFile)) || patch.auto_log_clean.has_value()) {
+    auto cur = config::Config::instance().verge().latest_arc();
+    if (cur) {
+      Logger::instance().configure(
+          cur->app_log_max_size.value_or(config::consts::kAppLogMaxSize),
+          static_cast<size_t>(
+              cur->app_log_max_count.value_or(config::consts::kAppLogMaxCount)),
+          cur->app_log_level.value_or("info"),
+          cur->auto_log_clean.value_or(config::consts::kAutoLogClean),
+          /*run_cleanup=*/patch.auto_log_clean.has_value());
+    }
+  }
   if (flags & kFLogLevel) {
     CWLOG_INFO("patch_verge: LOG_LEVEL flag → " + patch.app_log_level.value_or("?"));
   }

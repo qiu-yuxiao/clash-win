@@ -67,21 +67,21 @@ UT_TEST(t08_field_use_sort) {
   UT_CHECK(got_head[5] == "external-controller");
   UT_CHECK(got_head[6] == "unified-delay");
 
-  // 尾段 DEFAULT_FIELDS（实机对齐 4 项；本输入含 proxies/proxy-groups/rule-providers）
-  UT_CHECK(keys[keys.size() - 3] == "proxies");
-  UT_CHECK(keys[keys.size() - 2] == "proxy-groups");
-  UT_CHECK(keys[keys.size() - 1] == "rule-providers");
+  // 尾段 DEFAULT_FIELDS（field.rs:20 5 项含 rules；本输入含 proxies/proxy-groups/rule-providers/rules）
+  UT_CHECK(keys[keys.size() - 4] == "proxies");
+  UT_CHECK(keys[keys.size() - 3] == "proxy-groups");
+  UT_CHECK(keys[keys.size() - 2] == "rule-providers");
+  UT_CHECK(keys[keys.size() - 1] == "rules");
 
-  // 中间段含 rules（实机对齐）+ 输入插入序
+  // 中间段输入插入序（tun/profile/sniffer）
   std::vector<std::string> middle;
-  for (size_t i = 7; i + 3 < keys.size(); ++i) middle.push_back(keys[i]);
+  for (size_t i = 7; i + 4 < keys.size(); ++i) middle.push_back(keys[i]);
   auto find_in = [](const std::vector<std::string>& v, const std::string& k) {
     for (size_t i = 0; i < v.size(); ++i) {
       if (v[i] == k) return static_cast<int>(i);
     }
     return -1;
   };
-  UT_CHECK(find_in(middle, "rules") >= 0);
   UT_CHECK(find_in(middle, "tun") >= 0);
   UT_CHECK(find_in(middle, "profile") >= 0);
   UT_CHECK(find_in(middle, "sniffer") >= 0);

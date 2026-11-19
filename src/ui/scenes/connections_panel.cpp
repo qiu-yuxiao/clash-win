@@ -86,21 +86,27 @@ void ConnPanelRowWidget::on_paint(IRenderTarget& rt) {
   const auto& vars = theme.vars();
 
   // 1. 斑马纹交替背景（局部坐标 {0,0,w,h}，严禁 bounds().x/y）
+  // src: connection-table.tsx:177 theme.palette.background.paper
   Color4f bg = (row_index_ % 2 == 0)
-                   ? vars.theme_panel_bg
+                   ? pal.background_color
                    : (theme.mode() == theme::ThemeMode::Light
-                          ? Color4f::hex(0xEEF4FF)  // src: connection-table.tsx:152 hover 行 light
-                          : Color4f::hex(0x232B3F));  // src: connection-table.tsx:152 dark
+                          ? Color4f::hex(0xEEF4FF)  // src: connection-table.tsx:179 hover 行 light
+                          : Color4f::hex(0x232B3F));  // src: connection-table.tsx:179 dark
   if (hover_) {
     Color4f prim = theme.primary();
     bg = Color4f(prim.r, prim.g, prim.b, 0.08f);
   }
   rt.fill_rect({0, 0, bounds().w, bounds().h}, Brush{bg});
 
-  // 底边框 1px
-  rt.fill_rect({0, bounds().h - 1, bounds().w, 1}, Brush{vars.divider_color});
+  // src: palettes.cpp:38,50 theme.palette.divider (0.12 alpha)
+  const Color4f row_div =
+      theme.is_light() ? Color4f(0.0f, 0.0f, 0.0f, 0.12f)
+                       : Color4f(1.0f, 1.0f, 1.0f, 0.12f);
 
-  // 2. 4 态路径控制色点 + 状态文字（src: connection-table.tsx:42 STATUS_COLOR_MAP）
+  // 底边框 2px（src: connection-table.tsx:133 borderBottom 2px divider）
+  rt.fill_rect({0, bounds().h - 2.0f, bounds().w, 2.0f}, Brush{row_div});
+
+  // 2. 4 态路径控制状态色（src: connection-table.tsx:42 STATUS_COLOR_MAP）
   Color4f status_color = pal.primary_color;
   switch (item_.control_status) {
     case PathControlStatus::Direct:
@@ -117,65 +123,43 @@ void ConnPanelRowWidget::on_paint(IRenderTarget& rt) {
       status_color = pal.primary_color;
       break;
   }
-  Brush dot_brush{status_color};
-  // src: connection-table.tsx:192-194
-  rt.round_rect({4.0f, 6.0f, 8.0f, 8.0f}, 4.0f, {}, &dot_brush);
 
-  // 3. Host 文本（flex 1，左对齐，省略号，src: connection-table.tsx:393-397 / :471-473）
-  float host_w = bounds().w - 74.0f;
+  // 3. Host 文本（flex 1，左对齐 px: 1.5=12px，fontSize 12px，无额外圆点）
+  // src: connection-table.tsx:117-124,399-409
+  float host_w = std::max(0.0f, bounds().w - 74.0f - 24.0f);
   TextStyle host_ts;
-  host_ts.size = 11.0f;
+  host_ts.size = 12.0f;  // src: connection-table.tsx:119
   host_ts.color = pal.primary_text;
   host_ts.align_v = AlignV::Center;
   host_ts.ellipsis = true;
   rt.draw_text(utf::utf8_to_utf16(row_host_display(item_)),
-               {16.0f, 0, host_w - 20.0f, bounds().h}, host_ts);
+               {12.0f, 0, host_w, bounds().h}, host_ts);
 
-  // 4. Host 与 Chains 间垂直分割线（右侧 74px 处，src: connection-table.tsx:471-473）
-  rt.fill_rect({bounds().w - 74.0f, 0, 1.0f, bounds().h}, Brush{vars.divider_color});
+  // 4. Host 与 Chains 间垂直分割线（右侧 74px 处 2px，src: connection-table.tsx:203）
+  rt.fill_rect({bounds().w - 74.0f, 0, 2.0f, bounds().h}, Brush{row_div});
 
-  // 5. Chains 列（固定 74px 居中，src: connection-table.tsx:415 / :471-473）
+  // 5. Chains 列（固定 74px 居中 px: 0.5=4px，fontSize 12px，无悬停 ✕）
+  // src: connection-table.tsx:119,197-201,415-429
   float chains_x = bounds().w - 74.0f;
-  bool show_close = (!is_closed_ && !item_.is_synthetic && hover_);
-  float chains_w = show_close ? 54.0f : 74.0f;
-
   TextStyle chains_ts;
-  chains_ts.size = 11.0f;
-  chains_ts.weight = 600;  // src: connection-table.tsx:415
+  chains_ts.size = 12.0f;  // src: connection-table.tsx:119
+  chains_ts.weight = 600;  // src: connection-table.tsx:425
   chains_ts.color = status_color;
   chains_ts.align_h = AlignH::Center;
   chains_ts.align_v = AlignV::Center;
   chains_ts.ellipsis = true;
   // src: locales/zh/connections.json:37-40 chainsDirect/Reject/Proxy/Disconnected
   std::wstring cat_text = status_label_for(item_.control_status);
-  rt.draw_text(cat_text, {chains_x, 0, chains_w, bounds().h}, chains_ts);
-
-  // 6. 悬停关闭按钮 ✕ (非合成的活跃连接时在最右侧 18px 呈现)
-  if (show_close) {
-    RectF close_rect{bounds().w - 18.0f, 2.0f, 16.0f, 16.0f};
-    if (close_hover_) {
-      Brush ch_b{Color4f::hex(0xFF3B30, 0.15f)};  // src: _theme.tsx:8 error_color 15%
-      rt.round_rect(close_rect, 3.0f, {}, &ch_b);
-    }
-    TextStyle close_ts;
-    close_ts.size = 10.0f;
-    close_ts.color = close_hover_ ? Color4f::hex(0xFF3B30)  // src: _theme.tsx:8 error_color
-                                  : pal.secondary_text;
-    close_ts.align_h = AlignH::Center;
-    close_ts.align_v = AlignV::Center;
-    rt.draw_text(L"✕", close_rect, close_ts);
-  }
+  rt.draw_text(cat_text, {chains_x + 4.0f, 0, 66.0f, bounds().h}, chains_ts);
 }
 
 bool ConnPanelRowWidget::on_mouse(const MouseEvent& e) {
   PointF pt = e.pos;
-  const bool can_close = !is_closed_ && !item_.is_synthetic;
 
   if (e.type == MouseEventType::Move) {
-    bool ch = (can_close && pt.x >= bounds().w - 20.0f);
-    if (!hover_ || close_hover_ != ch) {
+    if (!hover_) {
       hover_ = true;
-      close_hover_ = ch;
+      close_hover_ = false;
       invalidate();
     }
     return true;
@@ -202,11 +186,7 @@ bool ConnPanelRowWidget::on_mouse(const MouseEvent& e) {
     if (e.buttons & kMouseRight) {
       return true;
     }
-    if (can_close && pt.x >= bounds().w - 20.0f) {
-      if (on_close) on_close(item_);
-    } else {
-      if (on_click) on_click(item_, global_bounds());
-    }
+    if (on_click) on_click(item_, global_bounds());
     return true;
   }
 
@@ -572,17 +552,19 @@ void ConnectionsPanel::refresh_visible() {
 
     std::vector<ConnItem> filtered;
     for (const auto& it : visible_items_) {
-      std::string h = row_host_display(it);
+      // src: pages/_layout/components/connections-panel.tsx:60-67
+      //   仅匹配 host / destinationIP / remoteDestination / process
+      std::string h = it.metadata.host;
       std::string p = it.metadata.process;
-      std::string c = it.chains_formatted();
       std::string dst = it.metadata.destination_ip;
+      std::string rdst = it.metadata.remote_destination;
       for (auto& ch : h) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
       for (auto& ch : p) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-      for (auto& ch : c) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
       for (auto& ch : dst) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+      for (auto& ch : rdst) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
 
       if (h.find(lower_filter) != std::string::npos || p.find(lower_filter) != std::string::npos ||
-          c.find(lower_filter) != std::string::npos || dst.find(lower_filter) != std::string::npos) {
+          dst.find(lower_filter) != std::string::npos || rdst.find(lower_filter) != std::string::npos) {
         filtered.push_back(it);
       }
     }
@@ -637,22 +619,43 @@ void ConnectionsPanel::refresh_visible() {
 }
 
 void ConnectionsPanel::show_context_menu(const ConnItem& item, PointF anchor, RectF row_global) {
+  const auto tokens = theme::ThemeService::instance().popup_tokens();
+  MenuStyle& st = context_menu_->style_;
+  st = MenuStyle{};
+  // src: connection-table.tsx:563 minWidth 200 / popup-styles.ts:279-283
+  st.min_w = 200.0f;
+  st.item_h = 32.0f;
+  st.font_size = 12.5f;
+  st.padding_h = 14.0f;
+  st.pad_v = 8.0f;
+  st.hover_inset = 0.0f;
+  apply_menu_skin(st);
+
   std::vector<MenuItem> items;
   // src: locales/zh/connections.json:42-49 六/七项文案（connection-table.tsx:566-614）
-  items.push_back({tr("connections.components.contextMenu.setDirect"), false, false, L""});
-  items.push_back({tr("connections.components.contextMenu.setProxy"), false, false, L""});
-  items.push_back({tr("connections.components.contextMenu.setReject"), false, false, L""});
+  items.push_back({tr("connections.components.contextMenu.setDirect"), false, false,
+                   L"", false, false, "flashon", tokens.ready_color});
+  items.push_back({tr("connections.components.contextMenu.setProxy"), false, false,
+                   L"", false, false, "public", tokens.accent_primary});
+  items.push_back({tr("connections.components.contextMenu.setReject"), false, false,
+                   L"", false, false, "block", tokens.error_color});
   const bool disc_disabled = (item.is_closed || item.is_synthetic);
-  items.push_back({tr("connections.components.contextMenu.disconnect"), disc_disabled, false, L""});
+  items.push_back({tr("connections.components.contextMenu.disconnect"), disc_disabled,
+                   false, L"", false, false, "linkoff", tokens.error_color});
   const bool has_restore =
       item.managed_rule.has_value() || item.control_status == PathControlStatus::Disconnected;
   if (has_restore) {
-    items.push_back({tr("connections.components.contextMenu.restoreDefault"), false, false, L""});
+    items.push_back({tr("connections.components.contextMenu.restoreDefault"), false,
+                     false, L"", false, false, "restoredefault", tokens.info_color});
   }
-  items.push_back({tr("connections.components.contextMenu.copyAddress"), false, false, L""});
-  items.push_back({tr("connections.components.contextMenu.viewDetail"), false, false, L""});
+  items.push_back({tr("connections.components.contextMenu.copyAddress"), false, false,
+                   L"", false, false, "contentcopy", tokens.secondary_text});
+  items.push_back({tr("connections.components.contextMenu.viewDetail"), false, false,
+                   L"", false, false, "info", tokens.secondary_text});
 
-  context_menu_->open(items, to_local(anchor));
+  // src: src/components/connection/connection-table.tsx:266-267 mouseX + 2, mouseY - 6
+  const PointF local_anchor = to_local(anchor);
+  context_menu_->open(items, {local_anchor.x + 2.0f, local_anchor.y - 6.0f});
   context_menu_->on_select = [this, item, row_global, has_restore](int idx) {
     if (idx == 0) {
       apply_quick_route(item, 0);
@@ -806,20 +809,20 @@ void ConnectionsPanel::on_arrange(const RectF& area) {
   // ★ 纵向节奏（逐条对应 connections-panel.tsx，全部按 CSS 盒模型累加）：
   //   列 gap 0.5=4；第 2/3 子项另带 mt 0.5=4
   //   ① Header 行 0..20（按钮 height:20 撑高，标题 11px/1.57=17.3 更矮）
-  //   ② 搜索行 y=20+4+4=28，高 40（MUI TextField size="small" = 8.5×2 + 输入行 23）
-  //   ③ 表格 y=28+40+4+4=76
-  //   表格内：scroll 容器 border 5px double → 表头 81..101（高 20，content-box）
-  //           + 表头 borderBottom 5px double → 数据行自 106 起
+  //   ② 搜索行 y=28，高 30（src: base-search-box.tsx:28-33 size="small" ~30px）
+  //   ③ 表格 y=28+30+8=66
+  //   表格内：scroll 容器 border 5px double → 表头 71..91（高 20，content-box）
+  //           + 表头 borderBottom 5px double → 数据行自 96 起
   //   src: connections-panel.tsx:110-220 / connection-table.tsx:58-105,450-455
   constexpr float kRowGap = 4.0f;
   constexpr float kHeaderH = 20.0f;
   constexpr float kSearchY = 28.0f;
-  constexpr float kSearchH = 40.0f;
-  constexpr float kTableY = 76.0f;
+  constexpr float kSearchH = 30.0f;  // src: src/components/base/base-search-box.tsx:28-33
+  constexpr float kTableY = kSearchY + kSearchH + 8.0f;   // 66
   constexpr float kFrame = 5.0f;
-  constexpr float kHeadY = kTableY + kFrame;      // 81
-  constexpr float kHeadBorder = 5.0f;             // 表头下方 5px double
-  constexpr float kRowsY = kHeadY + kHeaderH + kHeadBorder;  // 106
+  constexpr float kHeadY = kTableY + kFrame;              // 71
+  constexpr float kHeadBorder = 5.0f;                     // 表头下方 5px double
+  constexpr float kRowsY = kHeadY + kHeaderH + kHeadBorder;  // 96
   (void)kRowGap;
 
   // 1. 顶部 Header 行 (高 20px): Subtitle + 保存路由 + 导入路由
@@ -880,7 +883,8 @@ void ConnectionsPanel::on_arrange(const RectF& area) {
   head_border_h_ = kHeadBorder;
   table_top_ = kTableY;
 
-  // 5. 覆盖层 (详情弹窗占满本面板局部坐标空间)
+  // 5. 覆盖层 (右键菜单与详情弹窗占满本面板局部坐标空间)
+  if (context_menu_) context_menu_->layout_tree({0, 0, area.w, area.h});
   detail_dialog_->layout_tree({0, 0, area.w, area.h});
 }
 
@@ -912,7 +916,8 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   //        非 chains 列 borderRight 2px divider）
   const float hy = head_band_y_;
   const float hh = head_band_h_;
-  Brush th_bg{vars.theme_panel_bg};
+  // src: src/components/connection/connection-table.tsx:98,177 background.paper
+  Brush th_bg{pal.background_color};
   rt.fill_rect({0, hy, bounds().w, hh}, Brush{th_bg});
   // 表头下沿 5px double：两条 1.5px 线（外沿 y+hh，内侧 y+hh+3.5）
   {
@@ -937,8 +942,11 @@ void ConnectionsPanel::on_paint(IRenderTarget& rt) {
   // 列宽：Chains 74 固定（src: connection-table.tsx:192-194），其余 flex 1
   rt.draw_text(host_title, {12.0f, hy, bounds().w - 74.0f - 24.0f, hh}, th_host_ts);
 
-  // 列间 2px divider（src: connection-table.tsx:200-203 非 chains 列 borderRight 2px）
-  rt.fill_rect({bounds().w - 74.0f - 2.0f, hy, 2.0f, hh}, Brush{vars.divider_color});
+  // 列间 2px divider（src: connection-table.tsx:200-203,487 非 chains 列 borderRight 2px）
+  const Color4f hdr_div =
+      theme.is_light() ? Color4f(0.0f, 0.0f, 0.0f, 0.12f)
+                       : Color4f(1.0f, 1.0f, 1.0f, 0.12f);
+  rt.fill_rect({bounds().w - 74.0f - 2.0f, hy, 2.0f, hh}, Brush{hdr_div});
 
   // Chains 表头 (固定 74px 居中, px 0.5=4)
   std::wstring chains_title = tr("connections.components.miniTable.chainsColumn");

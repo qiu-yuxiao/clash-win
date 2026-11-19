@@ -3,6 +3,7 @@
 #include "profile_import_card.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <ctime>
 
@@ -79,10 +80,10 @@ void ProfileRowWidget::bind(const config::PrfItem& item, bool active) {
     // src: profile-import-card.tsx:330-334 L_Direct_Imports → 「节点数: N」，其余 → 「本地文件」
     if (item.uid.value_or("") == "L_Direct_Imports") {
       const std::string desc = item.desc.value_or("");
-      used_ = "节点数: " +
+      used_ = tr8("settings.mini.nodeCount") +
               ((desc.empty() || desc == "本地手动导入的代理节点") ? "0" : desc);
     } else {
-      used_ = "本地文件";
+      used_ = tr8("settings.mini.localFile");
     }
     date_ = fmt_date(static_cast<uint64_t>(item.updated.value_or(0)));
   }
@@ -104,9 +105,14 @@ void ProfileRowWidget::on_paint(IRenderTarget& rt) {
   rt.round_rect({r.x, r.y + 1.0f, r.w, r.h}, 6.0f, Pen{Color4f(0, 0, 0, 0), 0},
                 &row_shadow);
   rt.round_rect(r, 6.0f, Pen{Color4f(0, 0, 0, 0), 0}, &bg);  // radius 6 :227
-  // borderLeft 3px solid primary.main（激活）/transparent（:231-232）
+  // borderLeft 3px solid primary.main（激活）/transparent（:231-232），圆角 6 裁剪
   if (highlighted_) {
-    rt.fill_rect({0.0f, 0.0f, 3.0f, h}, Brush{ThemeService::instance().primary()});
+    Brush accent_b{ThemeService::instance().primary()};
+    rt.push_clip({0.0f, 0.0f, 3.0f, h});  // ← borderLeft 3px src/pages/_layout/components/profile-import-card.tsx:231
+    rt.round_rect(r, 6.0f,  // ← borderRadius 6 src/pages/_layout/components/profile-import-card.tsx:227
+                  Pen{Color4f(0, 0, 0, 0), 0},  // 豁免: 无边框哨兵（出处: 无）
+                  &accent_b);
+    rt.pop_clip();
   }
 
   // 行内 p: '6px 8px'（:225）+ 左边框 3
@@ -146,7 +152,7 @@ void ProfileRowWidget::on_paint(IRenderTarget& rt) {
   name_ts.ellipsis = true;
   const float max_act_left = (type_ == "remote" ? upd_cx - 9.0f : del_cx - 9.0f);
   const float name_w = std::min(w * 0.70f, max_act_left - 4.0f - x0);
-  rt.draw_text(utf::utf8_to_utf16(name_.empty() ? "未命名配置" : name_),
+  rt.draw_text(utf::utf8_to_utf16(name_.empty() ? tr8("settings.mini.unnamedConfig") : name_),
                {x0, 6.0f, name_w, 18.0f}, name_ts);
 
   if (has_line2_) {
@@ -232,7 +238,7 @@ bool ProfileRowWidget::on_mouse(const MouseEvent& e) {
 std::wstring ProfileRowWidget::tooltip_text() const {
   // src: profile-import-card.tsx:260,280,290 动作钮提示优先，其余区域显示完整订阅名
   if (hover_delete_) return tr("shared.actions.delete");
-  if (hover_update_) return tr("shared.actions.update");
+  if (hover_update_) return tr("profiles.components.menu.update");
   if (hover_row_) return clashwin::utf::utf8_to_utf16(name_);
   return {};
 }
@@ -252,7 +258,8 @@ std::optional<RectF> ProfileRowWidget::tooltip_anchor_rect() const {
 }
 
 std::wstring ProfileRowWidget::a11y_default_name() const {
-  std::wstring out = utf::utf8_to_utf16(name_.empty() ? "未命名配置" : name_);
+  std::wstring out = utf::utf8_to_utf16(
+      name_.empty() ? tr8("settings.mini.unnamedConfig") : name_);
   if (has_line2_) {
     if (!used_.empty()) out += L" " + utf::utf8_to_utf16(used_);
     if (!date_.empty()) out += L" " + utf::utf8_to_utf16(date_);
@@ -273,7 +280,7 @@ A11ySubItem ProfileRowWidget::a11y_virtual_child(size_t idx) const {
   const float upd_cx = del_cx - 20.0f;   // src: src/pages/_layout/components/profile-import-card.tsx:275
   const float btn_cy = 15.0f;            // src: src/pages/_layout/components/profile-import-card.tsx:275
   if (type_ == "remote" && idx == 0) {
-    sub.name = tr("shared.actions.update");
+    sub.name = tr("profiles.components.menu.update");
     sub.local_bounds = {upd_cx - 9.0f, btn_cy - 9.0f, 18.0f, 18.0f};
   } else {
     sub.name = tr("shared.actions.delete");
@@ -314,10 +321,29 @@ ProfileImportCard::ProfileImportCard(Widget* parent) : Widget(parent) {
   url_field_->set_i18n_a11y_name("settings.mini.importPlaceholder");
   url_field_->apply_theme();  // ← get3DInputStyle 6 套皮肤查表（:734-927）
   url_field_->style_.size = 13;
-  url_field_->height_ = 48.0f;  // src: profile-import-card.tsx:138-167 根 p8.5×2 + 文本域 31（见 on_arrange）
-  url_field_->multiline_ = true;  // src: profile-import-card.tsx:140 multiline minRows=2
-  // 【保留】MUI OutlinedInput 缺省 radius 4：original/modern 由 apply_theme 给出
-  //   8*d/6*d 更接近源码，此处不再覆盖。
+  // src: profile-import-card.tsx:154-164 multiline minRows=1 maxRows=4
+  url_field_->height_ = 48.0f;
+  // src: profile-import-card.tsx:158-164 OutlinedInput p 8.5 + htmlInput py 4 = 12.5
+  url_field_->set_multiline(true, 1, 4);
+  url_field_->set_multiline_padding_y(12.5f);
+  // src: profile-import-card.tsx:140 horizontal padding 14
+  url_field_->set_padding_x(14.0f);
+  // 保留换行多节点输入的同时，单独按 Enter（无 Shift/Ctrl）即触发提交导入
+  url_field_->on_key_intercept = [this](const KeyEvent& e) {
+    if (!e.shift && !e.ctrl && !e.alt) {
+      if (e.type == KeyEventType::Down && (e.key == VK_RETURN || e.key == 13)) {
+        do_import();
+        return true;
+      }
+      if (e.type == KeyEventType::Char && e.ch == L'\r') {
+        return true;
+      }
+    }
+    return false;
+  };
+  url_field_->on_text_changed = [this](const std::wstring&) {
+    if (on_height_changed) on_height_changed();
+  };
   // 右键：5 项编辑命令菜单（_layout.tsx:1859-1932）
   url_field_->on_submit = [this] { do_import(); };
   url_field_->on_context_menu = [this](PointF anchor) {
@@ -377,10 +403,12 @@ void ProfileImportCard::do_import() {
   if (target_url.empty()) return;
   if (import_btn_ && !import_btn_->enabled()) return;
   if (on_import_async) {
-    if (url_field_) url_field_->set_enabled(false);
+    // src: profile-import-card.tsx:155-186 仅禁用导入按钮并显示标题 spinner，保持输入框可编辑
+    importing_ = true;
     if (import_btn_) import_btn_->set_enabled(false);
+    invalidate();
     on_import_async(target_url, name(), [this](bool ok) {
-      if (url_field_) url_field_->set_enabled(true);
+      importing_ = false;
       if (import_btn_) import_btn_->set_enabled(true);
       if (ok) {
         if (url_field_) url_field_->clear_text();
@@ -463,9 +491,13 @@ const config::PrfItem* ProfileImportCard::find_item(const std::string& uid) cons
 }
 
 float ProfileImportCard::preferred_height() const {
+  // src: profile-import-card.tsx:154-164 按实际宽计算 1–4 行动态高度
+  const float card_w = (bounds().w > 0.0f) ? bounds().w : 231.0f;
+  const float field_w = std::max(40.0f, card_w - 16.0f);
+  const float url_h = url_field_ ? url_field_->preferred_height(field_w) : 48.0f;
   const float list_h =
       std::min(kProfileListMaxH, kProfileRowH * static_cast<float>(profiles_.size()));
-  return kProfileCardChromeH + list_h;
+  return (kProfileCardChromeH - 48.0f) + url_h + list_h;
 }
 
 void ProfileImportCard::on_arrange(const RectF& area) {
@@ -474,17 +506,17 @@ void ProfileImportCard::on_arrange(const RectF& area) {
   const float x = 8.0f;   // p1
   // src: profile-import-card.tsx:113-114 subtitle2 line-height 1.57 × 13px ≈ 20.4，mb 0.75=6（:110）
   title_->layout_tree({x, 8.0f, w - x * 2, 20.4f});
-  // src: profile-import-card.tsx:138-167 multiline small 输入框外框高 48：
-  //   根 p 8.5×2（OutlinedInput.js:111-114 multiline+small）+ 文本域高 31
-  //   （文本域 padding 归零 :167-170，仅 inline pt4/pb4；TextareaAutosize 令
-  //    height = shadow 单行 23 + 补回 padding 8 = 31，TextareaAutosize.js:112-124）
-  url_field_->layout_tree({x, 34.4f, w - x * 2, 48.0f});
-  // 34.4+48+gap4+btn24+mb8（src: profile-import-card.tsx:130-136/:135/:192）
-  const float list_y = 118.4f;
-  // 按钮 px2=16 两侧 + 12px 文本约 72 → 宽 104（源码无固定宽，按内容居中）
-  import_btn_->layout_tree({(w - 104.0f) / 2, 86.4f, 104.0f, 24.0f});
+  // src: profile-import-card.tsx:138-167 multiline 1–4 行动态高度
+  const float field_w = std::max(40.0f, w - x * 2);
+  const float url_h = url_field_ ? url_field_->preferred_height(field_w) : 48.0f;
+  url_field_->layout_tree({x, 34.4f, field_w, url_h});
+  // src: profile-import-card.tsx:175-190 居中自适应宽按钮（px:2=16 两侧 + h:24）
+  const float btn_y = 34.4f + url_h + 4.0f;
+  const float btn_w = std::clamp(import_btn_->on_measure(field_w, 24.0f).w + 8.0f, 72.0f, field_w);
+  import_btn_->layout_tree({(w - btn_w) * 0.5f, btn_y, btn_w, 24.0f});
+  const float list_y = 34.4f + url_h + 36.0f;
   float list_h = std::max(0.0f, area.h - list_y - 8.0f);
-  list_->layout_tree({x, list_y, w - x * 2, list_h});
+  list_->layout_tree({x, list_y, field_w, list_h});
 }
 
 void ProfileImportCard::on_paint(IRenderTarget& rt) {
@@ -503,6 +535,37 @@ void ProfileImportCard::on_paint(IRenderTarget& rt) {
   //     monochrome 纯黑/纯白，都不是 text.primary）。
   title_->style.color =
       title_color_.value_or(card_default().text_color);
+  if (importing_) {
+    // src: profile-import-card.tsx:121-128 gap:1(8px) CircularProgress size={10}
+    float title_w = 104.0f;
+    if (ITextEngine* eng = text_engine(); eng && title_) {
+      title_w = eng->measure_text(title_->text, title_->style, 0).w;
+    }
+    constexpr float kSpinGap = 8.0f;
+    constexpr float kSpinSize = 10.0f;
+    const float sx = std::min(bounds().w - 8.0f - kSpinSize, 8.0f + title_w + kSpinGap);
+    const float sy = 8.0f + (20.4f - kSpinSize) * 0.5f;
+    const float cx = sx + kSpinSize * 0.5f;
+    const float cy = sy + kSpinSize * 0.5f;
+    const double ms = std::chrono::duration<double, std::milli>(
+                          std::chrono::steady_clock::now().time_since_epoch())
+                          .count();
+    const double phase = std::fmod(ms / 1400.0, 1.0);
+    const Color4f spin_col = ThemeService::instance().primary();
+    for (int i = 0; i < 8; ++i) {
+      const double ang = (phase + static_cast<double>(i) / 8.0) * 6.283185307;
+      constexpr float kDot = 1.6f;
+      constexpr float kRad = 3.8f;
+      Color4f ink = spin_col;
+      ink.a = 0.9f * (1.0f - static_cast<float>(i) / 8.0f);
+      Brush db{ink};
+      rt.round_rect({cx + static_cast<float>(std::cos(ang)) * kRad - kDot * 0.5f,
+                     cy + static_cast<float>(std::sin(ang)) * kRad - kDot * 0.5f,
+                     kDot, kDot},
+                    kDot * 0.5f, Pen{ink, 0.0f}, &db);
+    }
+    invalidate();
+  }
 }
 
 }  // namespace clashwin::ui::scene

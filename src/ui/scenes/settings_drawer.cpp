@@ -14,6 +14,7 @@
 #include <sstream>
 
 #include "cmd/command_service.h"
+#include "../button_draw.h"
 #include "../card_draw.h"
 #include "../soft_shadow.h"
 #include "../theme/theme.h"
@@ -90,11 +91,8 @@ Color4f mix_hover(const Color4f& a, const Color4f& b, float k) {
           a.a + (b.a - a.a) * k};
 }
 
-// 关闭钮：primary contained 按钮 + Fluent 图标。作为抽屉最后挂载的子件绘制，
-// 保证压在订阅卡/连接面板之上（此前底图由 SettingsDrawer::on_paint 画，
-// 被子卡覆盖，只剩卡片右侧约 10 DIP 可见可点）。
-// ★ 逐皮肤：Mini `_layout.tsx:1294` 用 get3DButtonStyle(theme,'contained','primary')
-//   （button-styles.ts:17-491，6 套皮肤各自一套），**不是**固定金色。
+// 关闭钮：primary contained 按钮 + Fluent 图标，完整走 draw_button_skin 3D 状态。
+// src: _layout.tsx:1294 get3DButtonStyle(theme,'contained','primary')
 class CloseButton : public IconW {
  public:
   CloseButton() = default;
@@ -107,32 +105,70 @@ class CloseButton : public IconW {
     return IconW::on_mouse(e);
   }
   void on_paint(IRenderTarget& rt) override {
-    RectF r{0, 0, bounds().w, bounds().h};
     // src: _layout.tsx:1294 get3DButtonStyle(theme,'contained','primary')
-    //   retro-3d :28-151 六停金渐变 135°（:39）+ 2px 边框（:84）
-    //   其余 5 套：单色主色 + 各自边框/圆角（:152/:220/:289/:350/:427）
     const auto p = ThemeService::instance().button_paint("primary");
-    if (p.use_grad) {
-      rt.fill_round_rect_gradient_angle(r, p.radius, p.grad, p.grad_count,
-                                        p.grad_angle);
-    } else {
-      Brush b{p.fill};
-      rt.round_rect(r, p.radius, Pen{p.border, p.border_w}, &b);
-    }
-    if (p.border_w > 0.01f && p.border.a > 0.001f)
-      rt.round_rect(r, p.radius, Pen{p.border, p.border_w}, nullptr);
-    // src: button-styles.ts:35 primary contained textColor（retro #2C1F03，
-    //   其余皮肤见各段 color 字段）——图标色随按钮文字色。
+    const float ty = pressed_ ? p.translate_active : (hover_ ? p.translate_hover : 0.0f);
+    RectF r{0.0f, ty, bounds().w, bounds().h};
+    draw_button_skin(rt, r, p, hover_ ? 1.0f : 0.0f, pressed_);
     color_ = p.text;
+    const PointF prev_o = rt.origin();
+    if (ty != 0.0f) rt.set_origin({prev_o.x, prev_o.y + ty});
     IconW::on_paint(rt);
+    if (ty != 0.0f) rt.set_origin(prev_o);
   }
 };
 
-// 底部行皮肤格（← _layout.tsx:1702-1757）：未选中为平面灰格；选中为
-//   get3DButtonStyle(theme, 'contained', 'primary')，随当前皮肤查表。
+// 帮助钮：HelpOutlineRounded 16px SVG/字形居中
+// src: help-menu-button.tsx:122 <HelpOutlineRounded sx={{ fontSize: '16px' }} />
+class HelpIconButton : public Button {
+ public:
+  using Button::Button;
+  void draw_button_text(IRenderTarget& rt, const RectF& r) override {
+    const auto p = ThemeService::instance().button_paint(theme_color_type_, theme_outlined_);
+    // src: help-menu-button.tsx:122 fontSize 16px
+    constexpr float kIconSz = 16.0f;
+    IconW::paint_at(rt, "helpoutline",
+                    {r.x + (r.w - kIconSz) * 0.5f, r.y + (r.h - kIconSz) * 0.5f, kIconSz, kIconSz},
+                    enabled() ? p.text : p.text_disabled);
+  }
+};
+
+// Language 选择器按钮：左对齐文字 + 右侧下拉三角图标
+// src: _layout.tsx:1583-1640 Select paddingLeft 12px / right chevron icon
+class LangSelectButton : public Button {
+ public:
+  using Button::Button;
+  void draw_button_text(IRenderTarget& rt, const RectF& r) override {
+    const auto p = ThemeService::instance().button_paint(theme_color_type_, theme_outlined_);
+    const bool disabled = !enabled();
+    const Color4f ink = disabled ? p.text_disabled : p.text;
+    TextStyle ts = text_style;
+    ts.color = ink;
+    ts.weight = p.weight;
+    ts.align_h = AlignH::Left;
+    ts.align_v = AlignV::Center;
+    // src: _layout.tsx:1583 paddingLeft 10px + right arrow clearance 22px
+    const RectF tr{r.x + 10.0f, r.y, std::max(0.0f, r.w - 26.0f), r.h};
+    if (!disabled && state() != State::Pressed && p.text_shadow.a > 0) {
+      TextStyle ts2 = ts;
+      ts2.color = p.text_shadow;
+      rt.draw_text(text, {tr.x, tr.y + p.text_shadow_dy, tr.w, tr.h}, ts2);
+    }
+    rt.draw_text(text, tr, ts);
+    // src: _layout.tsx:1640 MuiSelect-icon 14px at right 4px
+    constexpr float kChevronSz = 14.0f;
+    IconW::paint_at(rt, "keyboardarrowdown",
+                    {r.right() - 18.0f, r.y + (r.h - kChevronSz) * 0.5f, kChevronSz, kChevronSz},
+                    ink);
+  }
+};
+
+// 底部行皮肤格（← _layout.tsx:1702-1778）：未选中仅 index==0 画左边框防双线；选中走 draw_button_skin
 class SkinCell : public Button {
  public:
-  explicit SkinCell(std::wstring t) : Button(std::move(t)) {}
+  explicit SkinCell(std::wstring t, int idx = 0)
+      : Button(std::move(t)), cell_index(idx) {}
+  int cell_index = 0;
   bool selected = false;
 
  protected:
@@ -141,44 +177,23 @@ class SkinCell : public Button {
     // 悬停进度：按下沿用原语义（直接取悬停底），其余按 0.15s 过渡插值
     const float k = st == State::Pressed ? 1.0f : hover_mix();
     if (!selected) {
-      // src: _layout.tsx:1714-1716 未选中 color '#555555/#aaaaaa'、
-      //   bg '#f3f3f3/#1e1e1e'、border '#d0d0d0/#404040'
-      // src: _layout.tsx:1724-1726 hover bg '#e5e5e5/#2d2d2d'
+      // src: _layout.tsx:1714-1748 未选中 color '#555555/#aaaaaa'、bg '#f3f3f3/#1e1e1e'
       Color4f bg = is_light()
                        ? mix_hover(Color4f::hex(0xF3F3F3), Color4f::hex(0xE5E5E5), k)
                        : mix_hover(Color4f::hex(0x1E1E1E), Color4f::hex(0x2D2D2D), k);
-      Pen border{is_light() ? Color4f::hex(0xD0D0D0) : Color4f::hex(0x404040), 1.0f};
+      const Pen border{is_light() ? Color4f::hex(0xD0D0D0) : Color4f::hex(0x404040), 1.0f};
       Brush fill{bg};
-      rt.round_rect(r, 0.0f, border, &fill);  // src: _layout.tsx:1705-1727 radius 0
+      rt.fill_rect(r, fill);
+      // src: _layout.tsx:1747 borderLeft: index === 0 ? '1px solid' : 'none'
+      if (cell_index == 0) rt.draw_line({r.x + 0.5f, r.y}, {r.x + 0.5f, r.bottom()}, border);
+      rt.draw_line({r.x, r.y + 0.5f}, {r.right(), r.y + 0.5f}, border);
+      rt.draw_line({r.right() - 0.5f, r.y}, {r.right() - 0.5f, r.bottom()}, border);
+      rt.draw_line({r.x, r.bottom() - 0.5f}, {r.right(), r.bottom() - 0.5f}, border);
       return;
     }
-    if (ThemeService::instance().skin() == theme::SkinId::Retro3d) {
-      // src: button-styles.ts:39 selected 135° 六停
-      static const Color4f kNormal[6] = {
-          Color4f::hex(0xFFE082), Color4f::hex(0xFFD54F), Color4f::hex(0xFFC107),
-          Color4f::hex(0xFFB300), Color4f::hex(0xD4AF37), Color4f::hex(0xB8860B)};
-      // src: button-styles.ts:105-106 primary hover 六停
-      static const Color4f kHover[6] = {
-          Color4f::hex(0xFFF59D), Color4f::hex(0xFFE082), Color4f::hex(0xFFD54F),
-          Color4f::hex(0xFFC107), Color4f::hex(0xFFB300), Color4f::hex(0xD4AF37)};
-      GradientStop cs[6];
-      for (int i = 0; i < 6; ++i) {
-        cs[i].offset = i == 0 ? 0.00f : i == 1 ? 0.20f : i == 2 ? 0.45f
-                      : i == 3 ? 0.70f : i == 4 ? 0.85f : 1.00f;
-        cs[i].color = mix_hover(kNormal[i], kHover[i], k);
-      }
-      rt.fill_round_rect_gradient_angle(r, 6.0f, cs, 6, 135.0f);
-      // src: button-styles.ts:36/81-82 border 2px '#8A6D00'(light)/'#634E00'(dark)
-      Pen b{is_light() ? Color4f::hex(0x8A6D00) : Color4f::hex(0x634E00), 2.0f};
-      rt.round_rect(r, 6.0f, b, nullptr);
-      return;
-    }
-    // 其余皮肤：theme.cpp 六皮肤表（get3DButtonStyle primary 离散色）
-    auto p = ThemeService::instance().button_paint("primary");
-    Color4f fill = st == State::Hover ? mix_hover(p.fill, p.fill_hover, k)
-                   : (st == State::Pressed ? p.fill_pressed : p.fill);
-    Brush b{fill};
-    rt.round_rect(r, p.radius, {p.border, p.border_w}, &b);
+    // src: _layout.tsx:1759-1778 get3DButtonStyle(theme, 'contained', 'primary')
+    const auto p = ThemeService::instance().button_paint("primary");
+    draw_button_skin(rt, r, p, k, st == State::Pressed);
   }
 
   void draw_button_text(IRenderTarget& rt, const RectF& r) override {
@@ -335,8 +350,12 @@ void style_input(TextField* f) {
 //   'clash-mini-depth-factor' / 'clash-mini-vibrancy-factor'）。
 SkinPrefs load_skin_prefs() {
   SkinPrefs p;
-  std::wstring path = util::dirs::app_home_dir() + L"\\clashwin-skin.json";
+  std::wstring path = util::dirs::app_home_dir() + L"\\clash-win-skin.json";
   std::ifstream f(path, std::ios::binary);
+  if (!f.is_open()) {
+    std::wstring legacy = util::dirs::app_home_dir() + L"\\clashwin-skin.json";
+    f.open(legacy, std::ios::binary);
+  }
   if (!f.is_open()) return p;
   std::stringstream ss;
   ss << f.rdbuf();
@@ -375,7 +394,7 @@ const char* current_skin_name(theme::SkinId skin) {
 }  // namespace
 
 void save_skin_prefs(const SkinPrefs& p) {
-  std::wstring path = util::dirs::app_home_dir() + L"\\clashwin-skin.json";
+  std::wstring path = util::dirs::app_home_dir() + L"\\clash-win-skin.json";
   nlohmann::json j;
   j["skin"] = p.skin;
   j["theme_mode"] = p.theme_mode;
@@ -499,6 +518,12 @@ void TakeoverCard::on_arrange(const RectF& area) {
   seg_->layout_tree({0, 26.41f, area.w, 26.0f});
 }
 
+// src: src/pages/_layout/components/routing-preference-card.tsx:96 zh/zhtw 13px, 其他语言 11px
+static float routing_font_for_lang() {
+  const std::string& lang = clashwin::i18n::I18n::instance().language();
+  return (lang == "zh" || lang == "zhtw") ? 13.0f : 11.0f;
+}
+
 // ---------- RoutingCard ----------
 // src: routing-preference-card.tsx:53-75（同构：标题 13px bold mb 0.75 + 段 25.2）
 RoutingCard::RoutingCard() : Widget(nullptr) {
@@ -519,6 +544,7 @@ RoutingCard::RoutingCard() : Widget(nullptr) {
                            "settings.mini.gfwlistTooltip",
                            "settings.mini.addUrlTooltip"});
   style_gold_segmented(seg_);
+  seg_->style_.size = routing_font_for_lang();
   seg_->set_a11y_labelled_by(title_);
   add_child(std::move(seg));
   auto hint = std::make_unique<Label>();
@@ -535,6 +561,7 @@ void RoutingCard::on_arrange(const RectF& area) {
   set_bounds(area);
   // src: routing-preference-card.tsx:53-75 标题 20.41、mb 6、段外框 26
   title_->layout_tree({0, 0, area.w, 20.41f});
+  seg_->style_.size = routing_font_for_lang();
   seg_->layout_tree({0, 26.41f, area.w, 26.0f});
 }
 
@@ -614,6 +641,7 @@ BasicCard::BasicCard() : Widget(nullptr) {
   auto pf = std::make_unique<TextField>();
   port_field_ = pf.get();
   style_input(port_field_);
+  port_field_->set_padding_x(4.0f);  // src: src/pages/_layout/components/basic-settings-card.tsx:511
   port_field_->set_text(std::to_wstring(static_cast<uint32_t>(config::consts::kDefaultMixed)));
   port_field_->set_a11y_labelled_by(port_label_);
   add_child(std::move(pf));
@@ -641,6 +669,30 @@ void BasicCard::set_tun_enabled(bool tun) {
   invalidate();
 }
 
+HCURSOR BasicCard::cursor(const PointF& local) const {
+  if (!tun_enabled_ && sniffer_seg_ && sniffer_seg_->bounds().contains(local)) {
+    // src: src/pages/_layout/components/basic-settings-card.tsx:392
+    return LoadCursorW(nullptr, IDC_NO);
+  }
+  return Widget::cursor(local);
+}
+
+bool BasicCard::on_mouse(const MouseEvent& e) {
+  if (!tun_enabled_ && sniffer_seg_ && sniffer_seg_->bounds().contains(e.pos)) {
+    if (e.type == MouseEventType::Down && (e.buttons & kMouseLeft)) {
+      return true;
+    }
+    if (e.type == MouseEventType::Up &&
+        (e.buttons == 0 || (e.buttons & kMouseLeft))) {
+      // src: src/pages/_layout/components/basic-settings-card.tsx:416-420
+      events::NoticeService::instance().push(
+          "warning", tr8("settings.mini.tunSnifferNeedTunTooltip"));
+      return true;
+    }
+  }
+  return Widget::on_mouse(e);
+}
+
 void BasicCard::on_arrange(const RectF& area) {
   set_bounds(area);
   const float pad = kCardPad;                       // p:1
@@ -659,7 +711,7 @@ void BasicCard::on_arrange(const RectF& area) {
   const float sw_scale = 0.85f;
   const float sw_w = sp.track_w * sw_scale;
   const float sw_h = sp.track_h * sw_scale;
-  // ★ 垂直定位（Mini 精确模型，替代旧的"底沿=标签墨迹底沿"近似）：
+  // ★ 垂直定位（Mini 精确模型，替代旧的"底沿=标签墨迹底沿"旧模型）：
   //   gridItemSx `alignItems:'center'` + `py:0.15`（=1.2）→ 行内容盒高 = caption 行盒
   //   13px×1.66=21.58（开关未缩放盒 18×10 更矮，不撑高行）；
   //   `transform: scale(.85)` 配 `transformOrigin:'right center'` 只收缩视觉尺寸，
@@ -842,11 +894,9 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   copyright_->style.size = 11;
   copyright_->style.align_h = AlignH::Center;
   copyright_->style.align_v = AlignV::Center;
+  // src: theme-settings-card.tsx:459-476 text.secondary + 页脚整体 opacity .75 → 复合 alpha .45
   copyright_->style.color =
-      // src: :455 text.secondary + 页脚整体 opacity .75 → 复合 alpha .45
-      (theme::ThemeService::instance().skin() == theme::SkinId::Retro3d && !is_light())
-          ? Color4f::hex(0x2C1F03, 0.75f)
-          : (is_light() ? Color4f::hex(0x3C3C43, 0.45f) : Color4f::hex(0xEBEBF5, 0.45f));
+      is_light() ? Color4f::hex(0x3C3C43, 0.45f) : Color4f::hex(0xEBEBF5, 0.45f);
   // src: locales/zh/settings.json:203 copyright（显示内容按中文包取字面量）
   copyright_->set_i18n_text("settings.components.verge.theme.copyright");
   add_child(std::move(cp));
@@ -855,7 +905,7 @@ ThemeCard::ThemeCard() : Widget(nullptr) {
   email_->style.size = 10;  // src: theme-settings-card.tsx:468 fontSize 10
   email_->style.align_h = AlignH::Center;
   email_->style.align_v = AlignV::Center;
-  // src: :468 color 'primary.main' + 页脚 opacity .75
+  // src: theme-settings-card.tsx:468 color 'primary.main' + 页脚 opacity .75
   Color4f pc = theme::ThemeService::instance().primary();
   pc.a = 0.75f;
   email_->style.color = pc;
@@ -874,7 +924,7 @@ void ThemeCard::on_arrange(const RectF& area) {
   title_->layout_tree(
       {pad, pad, std::max(40.0f, area.w - pad * 2 - seg_w - 8.0f), header_h});
   // src: theme-settings-card.tsx:326-333 ListItem dense + py 0.1=0.8 + px 0.5=4；
-  //   行高 = caption 13px×1.66=21.6 + 1.6 ≈ 23.2
+  //   行高 = caption 13px×1.66=21.6 + 1.6 = 23.2
   const float row1_y = pad + header_h + 4.0f;  // 头行 mb 0.5=4（:153）
   const float row_h = 23.2f;
   const float slider_w = 100.0f;
@@ -905,24 +955,373 @@ void ThemeCard::on_arrange(const RectF& area) {
 }
 
 void ThemeCard::on_paint(IRenderTarget& rt) {
+  // src: src/pages/_layout/components/theme-settings-card.tsx:459-476
+  const float fa = footer_hover_ ? 1.0f : 0.75f;
+  if (copyright_) {
+    copyright_->style.color =
+        is_light() ? Color4f::hex(0x3C3C43, 0.6f * fa)
+                   : Color4f::hex(0xEBEBF5, 0.6f * fa);
+  }
+  if (email_) {
+    Color4f ec = theme::ThemeService::instance().primary();
+    ec.a = fa;
+    email_->style.color = ec;
+  }
   Widget::on_paint(rt);
   if (!copyright_) return;
   // src: theme-settings-card.tsx:460 borderTop 1px dashed divider + :457 pt:1=8
-  //   → 虚线＝页脚盒的顶边框：位于 copyright 行盒上方 9px（1 边框 + 8 内距），
-  //   且只跨卡片内容宽（页脚 Box 是 p:1 卡片的内容子盒，左右各让 8px）
-  //   divider light rgba(0,0,0,.12) / dark rgba(255,255,255,.12)（_theme.tsx:47）
   const float y = copyright_->bounds().y - 9.0f;
   const float x0 = kCardPad, x1 = bounds().w - kCardPad;
-  if (y <= 0 || x1 <= x0) return;
-  Brush dash{(theme::ThemeService::instance().skin() == theme::SkinId::Retro3d &&
-              !theme::ThemeService::instance().is_light())
-                 ? Color4f::hex(0x2C1F03, 0.25f)
-                 : (theme::ThemeService::instance().is_light()
-                 ? Color4f::hex(0x000000, 0.12f)
-                 : Color4f::hex(0xFFFFFF, 0.12f))};
-  for (float x = x0; x + 3.0f < x1; x += 6.0f) {
-    rt.fill_rect({x, y, 3.0f, 1.0f}, dash);
+  if (y > 0.0f && x1 > x0) {
+    // src: pages/_theme.tsx:47 divider light rgba(0,0,0,.12) / dark rgba(255,255,255,.12)
+    Brush dash{divider_color()};
+    for (float x = x0; x + 3.0f < x1; x += 6.0f) {
+      rt.fill_rect({x, y, 3.0f, 1.0f}, dash);
+    }
   }
+  if (email_ && email_hover_ && text_engine()) {
+    const RectF eb = email_->bounds();
+    const float tw =
+        text_engine()->measure_text(email_->text, email_->style, 0.0f).w;
+    const float ux = eb.x + std::max(0.0f, (eb.w - tw) * 0.5f);
+    // src: theme-settings-card.tsx:474 hover textDecoration underline
+    const float uy = eb.y + (eb.h + email_->style.size) * 0.5f + 1.0f;
+    if (tw > 0.0f) {
+      rt.fill_rect({ux, uy, std::min(tw, eb.w), 1.0f},
+                   Brush{email_->style.color});
+    }
+  }
+}
+
+HCURSOR ThemeCard::cursor(const PointF& local) const {
+  if (email_ && email_->bounds().contains(local)) {
+    return LoadCursorW(nullptr, IDC_HAND);
+  }
+  return Widget::cursor(local);
+}
+
+bool ThemeCard::on_mouse(const MouseEvent& e) {
+  const bool in_foot =
+      copyright_ && email_ &&
+      RectF{kCardPad, copyright_->bounds().y - 9.0f,
+            std::max(0.0f, bounds().w - kCardPad * 2.0f),
+            std::max(0.0f, email_->bounds().bottom() -
+                               (copyright_->bounds().y - 9.0f))}
+          .contains(e.pos);
+  const bool in_email = email_ && email_->bounds().contains(e.pos);
+  if (e.type == MouseEventType::Move || e.type == MouseEventType::Enter) {
+    if (in_foot != footer_hover_ || in_email != email_hover_) {
+      footer_hover_ = in_foot;
+      email_hover_ = in_email;
+      invalidate();
+    }
+  } else if (e.type == MouseEventType::Leave) {
+    if (footer_hover_ || email_hover_) {
+      footer_hover_ = false;
+      email_hover_ = false;
+      invalidate();
+    }
+  } else if (e.type == MouseEventType::Down && in_email &&
+             (e.buttons & kMouseLeft)) {
+    return true;
+  } else if (e.type == MouseEventType::Up && in_email &&
+             (e.buttons == 0 || (e.buttons & kMouseLeft))) {
+    // src: src/pages/_layout/components/theme-settings-card.tsx:467-473
+    ShellExecuteW(nullptr, L"open", L"mailto:qiuyuxiao@gmail.com", nullptr,
+                  nullptr, SW_SHOWNORMAL);
+    return true;
+  }
+  return Widget::on_mouse(e);
+}
+
+// ---------- HelpDialog ----------
+// src: src/pages/_layout/components/help-menu-button.tsx:125-273
+namespace {
+constexpr float kHelpTitlePadX = 14.0f;       // src: src/utils/popup-styles.ts:198
+constexpr float kHelpTitlePadY = 10.8f;       // src: src/utils/popup-styles.ts:199
+constexpr float kHelpTitleTextH = 15.5f * 1.35f;  // src: help-menu-button.tsx:140-141
+constexpr float kHelpContentPadX = 10.0f;     // src: help-menu-button.tsx:149 px 1.25
+constexpr float kHelpContentPadY = 8.0f;      // src: help-menu-button.tsx:149 py 1
+constexpr float kHelpItemMinH = 32.0f;        // src: src/utils/popup-styles.ts:280
+constexpr float kHelpItemPadX = 10.0f;        // src: help-menu-button.tsx:76 px 1.25
+constexpr float kHelpItemPadY = 6.4f;         // src: help-menu-button.tsx:77 py 0.8
+constexpr float kHelpSepH = 9.0f;             // src: help-menu-button.tsx:200 my 0.5 + 1px divider
+constexpr float kHelpActionsPadY = 10.8f;     // src: src/utils/popup-styles.ts:240
+}  // namespace
+
+HelpDialog::HelpDialog(Widget* parent) : Widget(parent) {
+  set_z_order(10000);
+}
+
+void HelpDialog::open(const std::vector<MenuItem>& items,
+                      std::function<void(int)> on_sel) {
+  items_ = items;
+  on_select_ = std::move(on_sel);
+  hover_idx_ = -1;
+  hover_close_ = false;
+  pressed_close_ = false;
+  open_ = true;
+  fade_.show();
+  if (bounds().w > 0.0f && bounds().h > 0.0f) {
+    on_arrange(bounds());
+  }
+  invalidate();
+}
+
+void HelpDialog::close() {
+  if (!open_) return;
+  open_ = false;
+  hover_idx_ = -1;
+  hover_close_ = false;
+  pressed_close_ = false;
+  fade_.hide();
+  invalidate();
+}
+
+void HelpDialog::on_arrange(const RectF& area) {
+  set_bounds(area);
+  item_rects_.assign(items_.size(), RectF{});
+  div_ys_.clear();
+
+  // src: src/utils/popup-styles.ts:120-185 窄窗左侧 271px
+  const float cw = std::min(theme::kPopupPaneWidth, area.w);
+  const float cx = 0.0f;
+  const float title_h = kHelpTitlePadY * 2.0f + kHelpTitleTextH + 1.0f;
+  const float list_w = std::max(40.0f, cw - kHelpContentPadX * 2.0f);
+  const float text_w = std::max(20.0f, list_w - kHelpItemPadX * 2.0f);
+
+  float list_h = 0.0f;
+  std::vector<float> item_heights(items_.size(), 0.0f);
+  for (size_t i = 0; i < items_.size(); ++i) {
+    if (items_[i].separator) {
+      item_heights[i] = kHelpSepH;
+    } else {
+      float ih = kHelpItemMinH;
+      if (text_engine()) {
+        TextStyle ts;
+        // src: src/utils/popup-styles.ts:279 fontSize 12.5px
+        ts.size = 12.5f;
+        ts.weight = (i == 0) ? 700 : 500;
+        ts.wrap = true;
+        SizeF sz = text_engine()->measure_text(items_[i].label, ts, text_w);
+        ih = std::max(ih, sz.h + kHelpItemPadY * 2.0f);
+      }
+      item_heights[i] = ih;
+    }
+    list_h += item_heights[i];
+  }
+
+  // src: help-menu-button.tsx:261-267 outlined default py:0.65 fontSize:12.5px
+  const float btn_bw =
+      ThemeService::instance().button_paint("default", true).border_w;
+  const float close_h = 12.5f * 1.75f + 5.2f * 2.0f + btn_bw * 2.0f;
+  const float actions_h = 1.0f + kHelpActionsPadY * 2.0f + close_h;
+  const float content_need = kHelpContentPadY * 2.0f + list_h;
+  const float need = title_h + content_need + actions_h;
+  const float ch = std::min(need, std::max(120.0f, area.h - 8.0f));
+  const float cy = std::max(4.0f, (area.h - ch) * 0.5f);
+
+  card_rect_ = {cx, cy, cw, ch};
+  title_rect_ = {cx, cy, cw, title_h};
+  const float inner_content_h = std::max(0.0f, ch - title_h - actions_h);
+  content_rect_ = {cx, cy + title_h, cw, inner_content_h};
+  btn_close_rect_ = {cx + kHelpTitlePadX,
+                     cy + ch - kHelpActionsPadY - close_h,
+                     std::max(40.0f, cw - kHelpTitlePadX * 2.0f), close_h};
+
+  float iy = content_rect_.y + kHelpContentPadY;
+  for (size_t i = 0; i < items_.size(); ++i) {
+    if (items_[i].separator) {
+      div_ys_.push_back(iy + (kHelpSepH - 1.0f) * 0.5f);
+    } else {
+      item_rects_[i] = {cx + kHelpContentPadX, iy, list_w, item_heights[i]};
+    }
+    iy += item_heights[i];
+  }
+}
+
+void HelpDialog::on_paint(IRenderTarget& rt) {
+  if (fade_.advance()) invalidate();
+  set_opacity(fade_.value());
+  if (fade_.hidden()) return;
+
+  const auto& svc = ThemeService::instance();
+  const auto tokens = svc.popup_tokens();
+
+  // 1. 窄窗 271px backdrop
+  // src: src/utils/popup-styles.ts:145-157
+  const float pane_w = std::min(theme::kPopupPaneWidth, bounds().w);
+  rt.fill_rect({0.0f, 0.0f, pane_w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
+
+  // 2. 弹窗卡片
+  draw_card(rt, card_rect_, svc.popup_card_paint());
+
+  // 3. 标题 + 底边线
+  // src: help-menu-button.tsx:132-147 fontSize 15.5 bold lineHeight 1.35
+  TextStyle title_ts;
+  title_ts.size = 15.5f;
+  title_ts.weight = static_cast<int>(Weight::Bold);
+  title_ts.color = tokens.primary_text;
+  title_ts.align_h = AlignH::Center;
+  title_ts.align_v = AlignV::Center;
+  rt.draw_text(
+      L"❓ " + tr("layout.components.helpMenu.buttonAriaLabel"),
+      {card_rect_.x + kHelpTitlePadX, card_rect_.y + kHelpTitlePadY,
+       std::max(20.0f, card_rect_.w - kHelpTitlePadX * 2.0f), kHelpTitleTextH},
+      title_ts);
+  rt.fill_rect({card_rect_.x, title_rect_.bottom() - 1.0f, card_rect_.w, 1.0f},
+               Brush{tokens.divider_color});
+
+  // 4. 菜单列表项与分隔线
+  MenuStyle mst;
+  apply_menu_skin(mst);
+  const float hover_r = (svc.skin() == theme::SkinId::Cyberpunk ||
+                         svc.skin() == theme::SkinId::Monochrome)
+                            ? 0.0f
+                            : 6.0f;  // src: help-menu-button.tsx:75
+  rt.push_clip(content_rect_);
+  for (float dy : div_ys_) {
+    rt.fill_rect({card_rect_.x + kHelpContentPadX, dy,
+                  std::max(0.0f, card_rect_.w - kHelpContentPadX * 2.0f), 1.0f},
+                 Brush{tokens.divider_color});
+  }
+  for (size_t i = 0; i < items_.size(); ++i) {
+    if (items_[i].separator) continue;
+    const RectF& ir = item_rects_[i];
+    const bool hot = (static_cast<int>(i) == hover_idx_) && !items_[i].disabled;
+    if (hot) {
+      if (mst.hover_glow) {
+        draw_glow(rt, ir, hover_r, mst.hover_glow_color, mst.hover_glow_blur);
+      }
+      Brush hb{mst.hover_bg};
+      rt.round_rect(ir, hover_r, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &hb);
+      if (mst.hover_border_w > 0.01f && mst.hover_border.a > 0.001f) {
+        rt.round_rect(ir, hover_r, Pen{mst.hover_border, mst.hover_border_w},
+                      nullptr);
+      }
+    }
+    TextStyle its;
+    its.size = 12.5f;  // src: src/utils/popup-styles.ts:279
+    its.weight = (i == 0) ? 700 : mst.font_weight;  // src: help-menu-button.tsx:83
+    its.wrap = true;
+    its.align_v = AlignV::Center;
+    if (items_[i].disabled) {
+      its.color = Color4f(mst.disabled_text.r, mst.disabled_text.g,
+                          mst.disabled_text.b, mst.disabled_text.a * 0.55f);
+    } else if (hot && mst.hover_text.a > 0.001f) {
+      its.color = mst.hover_text;
+    } else {
+      its.color = mst.text;
+    }
+    rt.draw_text(items_[i].label,
+                 {ir.x + kHelpItemPadX, ir.y + kHelpItemPadY,
+                  std::max(10.0f, ir.w - kHelpItemPadX * 2.0f),
+                  std::max(10.0f, ir.h - kHelpItemPadY * 2.0f)},
+                 its);
+  }
+  rt.pop_clip();
+
+  // 5. 底部动作区顶线 + outlined default 关闭按钮
+  rt.fill_rect({card_rect_.x, content_rect_.bottom(), card_rect_.w, 1.0f},
+               Brush{tokens.divider_color});
+  const auto bp = svc.button_paint("default", true);
+  draw_button_skin(rt, btn_close_rect_, bp, hover_close_ ? 1.0f : 0.0f,
+                   pressed_close_);
+  TextStyle bts;
+  // src: help-menu-button.tsx:266 fontSize 12.5px
+  bts.size = 12.5f;
+  bts.weight = bp.weight;
+  bts.color = bp.text;
+  bts.align_h = AlignH::Center;
+  bts.align_v = AlignV::Center;
+  rt.draw_text(tr("shared.actions.close"), btn_close_rect_, bts);
+}
+
+bool HelpDialog::on_mouse(const MouseEvent& e) {
+  if (!open_) return false;
+  const float pane_w = std::min(theme::kPopupPaneWidth, bounds().w);
+  if (e.pos.x > pane_w) {
+    if (hover_idx_ != -1 || hover_close_ || pressed_close_) {
+      hover_idx_ = -1;
+      hover_close_ = false;
+      pressed_close_ = false;
+      invalidate();
+    }
+    return false;
+  }
+
+  int hit_idx = -1;
+  if (content_rect_.contains(e.pos)) {
+    for (size_t i = 0; i < items_.size(); ++i) {
+      if (!items_[i].separator && !items_[i].disabled &&
+          item_rects_[i].contains(e.pos)) {
+        hit_idx = static_cast<int>(i);
+        break;
+      }
+    }
+  }
+  const bool hit_close = btn_close_rect_.contains(e.pos);
+
+  if (e.type == MouseEventType::Move || e.type == MouseEventType::Enter) {
+    if (hit_idx != hover_idx_ || hit_close != hover_close_) {
+      hover_idx_ = hit_idx;
+      hover_close_ = hit_close;
+      invalidate();
+    }
+    return true;
+  }
+  if (e.type == MouseEventType::Leave) {
+    hover_idx_ = -1;
+    hover_close_ = false;
+    pressed_close_ = false;
+    invalidate();
+    return true;
+  }
+  if (e.type == MouseEventType::Down && (e.buttons & kMouseLeft)) {
+    if (hit_close) {
+      pressed_close_ = true;
+      invalidate();
+    }
+    return true;
+  }
+  if (e.type == MouseEventType::Up &&
+      (e.buttons == 0 || (e.buttons & kMouseLeft))) {
+    const bool was_pressed = pressed_close_;
+    pressed_close_ = false;
+    if (hit_close && was_pressed) {
+      close();
+      if (on_dismiss) on_dismiss();
+      return true;
+    }
+    if (hit_idx >= 0) {
+      auto cb = on_select_;
+      close();
+      if (cb) cb(hit_idx);
+      return true;
+    }
+    if (!card_rect_.contains(e.pos)) {
+      close();
+      if (on_dismiss) on_dismiss();
+      return true;
+    }
+    invalidate();
+    return true;
+  }
+  return true;
+}
+
+bool HelpDialog::on_key(const KeyEvent& e) {
+  if (!open_) return false;
+  if (e.type == KeyEventType::Down && e.key == VK_ESCAPE) {
+    close();
+    if (on_dismiss) on_dismiss();
+    return true;
+  }
+  return false;
+}
+
+std::wstring HelpDialog::a11y_default_name() const {
+  return tr("layout.components.helpMenu.buttonAriaLabel");
 }
 
 // ---------- SettingsDrawer ----------
@@ -989,7 +1388,7 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
     b->set_visible(false);
   };
 
-  auto lb = std::make_unique<Button>(L"Language");
+  auto lb = std::make_unique<LangSelectButton>(L"Language");
   lang_btn_ = lb.get();
   style_cell(lang_btn_, 11.0f);  // src: _layout.tsx:1586 fontSize 11
   lang_btn_->text_style.weight = 700;  // src: :1587 fontWeight 'bold'
@@ -1002,10 +1401,11 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
 
   auto lm = std::make_unique<ContextMenu>();
   lang_menu_ = lm.get();
-  // src: _layout.tsx:1623 MUI MenuItem 缺省 48；style-helpers.tsx:128-131 13px / px16
-  lang_menu_->style_.item_h = 48.0f;
-  lang_menu_->style_.padding_h = 16.0f;
-  lang_menu_->style_.font_size = 13.0f;
+  // src: src/utils/popup-styles.ts:277-282 MenuItem 32px / px 14 / 12.5px
+  lang_menu_->style_.item_h = 32.0f;
+  lang_menu_->style_.padding_h = 14.0f;
+  lang_menu_->style_.font_size = 12.5f;
+  lang_menu_->style_.hover_inset = 4.0f;
   panel_->add_child(std::move(lm));
 
   // 订阅行右键菜单（_layout.tsx:1806-1856）：挂在面板顶层，锚点用窗口坐标
@@ -1040,7 +1440,7 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
       theme::SkinId::ModernFlat, theme::SkinId::FrostedGlass,
       theme::SkinId::Cyberpunk,  theme::SkinId::Monochrome};
   for (int i = 0; i < 6; ++i) {
-    auto b = std::make_unique<SkinCell>(kSkinNames[i]);
+    auto b = std::make_unique<SkinCell>(kSkinNames[i], i);
     SkinCell* raw = b.get();
     style_cell(raw, 11.0f);
     raw->text_style.weight = static_cast<int>(Weight::Bold);
@@ -1061,17 +1461,17 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
 
   // BUG-354: 帮助与诊断包入口挂抽屉顶层（zIndex 9999，高于订阅卡与右列连接面板；
   //   窗口高 >830 停靠左下 80×24，<=830 停靠右上关闭钮左侧 28×28）
-  auto bh = std::make_unique<Button>(L"?");
+  auto bh = std::make_unique<HelpIconButton>(L"");
   bottom_help_ = bh.get();
-  style_cell(bottom_help_, 16.0f);  // src: src/pages/_layout/components/help-menu-button.tsx:91
+  style_cell(bottom_help_, 16.0f);  // src: src/pages/_layout/components/help-menu-button.tsx:122
   bottom_help_->text_style.weight = static_cast<int>(Weight::Bold);
   bottom_help_->on_click = [this]() { open_help_menu(); };
-  // src: locales/zh/layout.json:40 buttonAriaLabel
+  // src: locales/zh/layout.json:43 buttonAriaLabel
   bottom_help_->set_tooltip_text(tr("layout.components.helpMenu.buttonAriaLabel"));
   bottom_help_->set_i18n_a11y_name("layout.components.helpMenu.buttonAriaLabel");
   bottom_help_->set_a11y_expanded_getter(
-      [this]() { return help_menu_ && help_menu_->is_open(); });
-  bottom_help_->set_z_order(9999);  // src: src/pages/_layout/components/help-menu-button.tsx:86
+      [this]() { return help_dialog_ && help_dialog_->is_open(); });
+  bottom_help_->set_z_order(9999);  // src: src/pages/_layout/components/help-menu-button.tsx:117
   add_child(std::move(bh));
 
   // 关闭 ✕：右上 top3 right8、28×28（_layout.tsx:1284-1297）。
@@ -1090,11 +1490,11 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
   close_btn_->set_visible(false);
   add_child(std::move(close));
 
-  // 帮助菜单挂抽屉最顶层（高于连接面板与右上按钮，支持向上与向下双模式定位）
-  auto hm = std::make_unique<ContextMenu>();
-  help_menu_ = hm.get();
-  hm->set_z_order(10000);  // src: src/pages/_layout/components/help-menu-button.tsx:86
-  add_child(std::move(hm));
+  // 帮助弹窗（271px 左锚定 Modal Dialog）
+  auto hd = std::make_unique<HelpDialog>();
+  help_dialog_ = hd.get();
+  hd->set_z_order(10000);  // src: src/pages/_layout/components/help-menu-button.tsx:117
+  add_child(std::move(hd));
 
   set_open(false);
   // 宿主常驻可见：Stack::on_arrange 会跳过不可见子层，隐藏会丢失布局；
@@ -1130,11 +1530,33 @@ void SettingsDrawer::flush_pending_skin_prefs() {
   last_persisted_vibrancy_ = pending_vibrancy_;
 }
 
+void SettingsDrawer::set_titlebar_hidden(bool hidden) {
+  if (titlebar_hidden_ == hidden) return;
+  titlebar_hidden_ = hidden;
+  if (bounds().w > 0.0f && bounds().h > 0.0f) {
+    layout_tree(bounds());
+    invalidate();
+  }
+}
+
+void SettingsDrawer::detach_modals_to(Widget* host_root) {
+  if (!host_root) return;
+  auto move_modal = [&](Widget* modal) {
+    if (!modal || modal->parent() == host_root) return;
+    std::unique_ptr<Widget> owned;
+    if (modal->parent()) owned = modal->parent()->remove_child(modal);
+    if (owned) host_root->add_child(std::move(owned));
+  };
+  move_modal(edit_profile_modal_);
+  move_modal(delete_confirm_modal_);
+  move_modal(help_dialog_);
+}
+
 void SettingsDrawer::set_open(bool open) {
   if (open_ == open) return;
   if (!open) {
     flush_pending_skin_prefs();
-    if (help_menu_ && help_menu_->is_open()) help_menu_->close();
+    if (help_dialog_ && help_dialog_->is_open()) help_dialog_->close();
     if (lang_menu_ && lang_menu_->is_open()) lang_menu_->close();
     if (delete_confirm_modal_ && delete_confirm_modal_->is_open()) {
       delete_confirm_modal_->close();
@@ -1298,6 +1720,9 @@ void SettingsDrawer::restyle_cards() {
   if (routing_card_) {
     set(routing_card_->title_);
     set(routing_card_->hint_);
+    if (routing_card_->seg_) {
+      routing_card_->seg_->style_.size = routing_font_for_lang();
+    }
     restyle_seg(routing_card_->seg_);
   }
   if (basic_card_) {
@@ -1310,6 +1735,7 @@ void SettingsDrawer::restyle_cards() {
       basic_card_->port_field_->apply_theme();
       basic_card_->port_field_->style_.size = 13;
       basic_card_->port_field_->style_.align_h = AlignH::Center;
+      basic_card_->port_field_->set_padding_x(4.0f);  // src: src/pages/_layout/components/basic-settings-card.tsx:511
       basic_card_->port_field_->caret_color_ =
           basic_card_->port_field_->style_.color;
     }
@@ -1322,25 +1748,15 @@ void SettingsDrawer::restyle_cards() {
     const Color4f num = slider_value_color();
     theme_card_->depth_value_->style.color = num;
     theme_card_->vibrancy_value_->style.color = num;
-    if (theme_card_->copyright_)
-      // src: :471 text.secondary = #3C3C4399 / #EBEBF599，
-      //   父级 opacity .75（:459）→ 复合 alpha .6×.75 = .45（与构造时一致）
+    if (theme_card_->copyright_) {
+      // src: theme-settings-card.tsx:459-476 text.secondary + 页脚整体 opacity .75 → 复合 alpha .45
       theme_card_->copyright_->style.color =
           is_light() ? Color4f::hex(0x3C3C43, 0.45f)
                      : Color4f::hex(0xEBEBF5, 0.45f);
-    if (theme_card_->copyright_) {
-      // src: theme-settings-card.tsx:471 isRetro3DDark ? '#2C1F03' : 'text.secondary' + opacity .75
-      theme_card_->copyright_->style.color =
-          (theme::ThemeService::instance().skin() == theme::SkinId::Retro3d && !is_light())
-              ? Color4f::hex(0x2C1F03, 0.75f)
-              : (is_light() ? Color4f::hex(0x3C3C43, 0.45f)
-                            : Color4f::hex(0xEBEBF5, 0.45f));
     }
     if (theme_card_->email_) {
-      // src: theme-settings-card.tsx:468 color 'primary.main' + 页脚 opacity .75（retro 暗态 #2C1F03）
-      Color4f ec = (theme::ThemeService::instance().skin() == theme::SkinId::Retro3d && !is_light())
-                       ? Color4f::hex(0x2C1F03, 0.75f)
-                       : theme::ThemeService::instance().primary();
+      // src: theme-settings-card.tsx:468 color 'primary.main' + 页脚 opacity .75
+      Color4f ec = theme::ThemeService::instance().primary();
       ec.a = 0.75f;
       theme_card_->email_->style.color = ec;
     }
@@ -1351,8 +1767,10 @@ void SettingsDrawer::restyle_cards() {
       theme_card_->vibrancy_slider_->apply_theme();
     theme_card_->invalidate();
   }
-  // 底部行六格：选中/未选中两态随皮肤与亮暗重刷（← _layout.tsx:1705-1749）
+  // 底部行六格与固定功能按钮：选中/未选中两态随皮肤与亮暗重刷（← _layout.tsx:1705-1749）
   refresh_skin_cells();
+  if (lang_btn_) lang_btn_->invalidate();
+  if (bottom_help_) bottom_help_->invalidate();
   invalidate();
 }
 
@@ -1408,39 +1826,41 @@ void SettingsDrawer::on_arrange(const RectF& area) {
   set_bounds(area);
   mask_->layout_tree({0, 0, area.w, area.h});
   panel_->layout_tree({0, 0, area.w, area.h});
-  if (help_menu_) help_menu_->layout_tree({0, 0, area.w, area.h});
+  if (help_dialog_ && help_dialog_->parent() == this) {
+    help_dialog_->layout_tree({0, 0, area.w, area.h});
+  }
   // 关闭钮 src: _layout.tsx:1284-1297 top 3 right 8
   close_btn_->layout_tree({area.w - kCloseRight - kCloseSize, kCloseTop,
                            kCloseSize, kCloseSize});
-  // 编辑订阅弹窗：全窗遮罩 + 居中卡片（layout-dialogs.tsx:119-137）
-  if (edit_profile_modal_) edit_profile_modal_->layout_tree({0, 0, area.w, area.h});
-  if (delete_confirm_modal_) {
+  // 编辑/确认弹窗：若仍挂在抽屉内部则同宽排布（脱离至 root_ 后由主窗口统一排布）
+  if (edit_profile_modal_ && edit_profile_modal_->parent() == this) {
+    edit_profile_modal_->layout_tree({0, 0, area.w, area.h});
+  }
+  if (delete_confirm_modal_ && delete_confirm_modal_->parent() == this) {
     delete_confirm_modal_->layout_tree({0, 0, area.w, area.h});
   }
 
-  // 左列 src: _layout.tsx:1428-1437（x=padding、y=padding、宽 240、gap 5）
+  // 左列 src: _layout.tsx:1428-1437（x=padding+panelBorder、y=padding+panelBorder、宽 240、gap 5）
   //   @media not all and (max-height:830px) → pb:30px（给底部行让位，_layout.tsx:1429-1432）
-  // src: _layout.tsx:1593/1654 `@media (max-height:830px) { display:none }` 是对
-  //   **窗口视口高度**判定；area.h 已扣掉标题栏 30 与底部流量面板 100/135，
-  //   旧代码直接比 area.h 导致 831~930 的窗口也判为矮、底部行永不显示。
   const float bottom_inset = area.w <= win::kMiniWidthThreshold ? 100.0f : 135.0f;
-  const bool tall = (area.h + 30.0f + bottom_inset) > 830.0f;
+  const float top_h = titlebar_hidden_ ? 0.0f : 30.0f;  // src: _layout.tsx:1420
+  const bool tall = (area.h + top_h + bottom_inset) > 830.0f;
   bottom_row_visible_ = tall && open_;
   const bool side = area.w > win::kMiniWidthThreshold;
-  // 豁免: Mini 无对应物 — 用户明确预先裁决单列模式水平居中设置卡片（出处: 无）
-  const float col_x = side ? (kPad + kPanelBorder) : std::max(kPad, (area.w - kCardW) / 2.0f);
-  const float col_y = kPad + kPanelBorder;
-  const float col_h = area.h - kPanelBorder * 2 - kPad * 2 - (tall ? 30.0f : 0.0f);
+  const float pb = (ThemeService::instance().skin() == theme::SkinId::Original)
+                       ? 0.0f
+                       : kPanelBorder;  // src: index.scss:125
+  const float col_x = kPad + pb;
+  const float col_y = kPad + pb;
+  const float col_h = area.h - pb * 2.0f - kPad * 2.0f - (tall ? 30.0f : 0.0f);
   left_rect_ = {col_x, col_y, kLeftW, col_h};
   float y = col_y;
   // 订阅卡为固定内容高（源码 flexShrink:0 + 列表 maxHeight 110，
   //   profile-import-card.tsx:98,196），不吸收剩余高度
   float profile_h = profile_card_ ? profile_card_->preferred_height() : 124.4f;
   // 【DRAWERFIX】源码左列 flexShrink:0（profile-import-card.tsx:98 /
-  //   theme-settings-card.tsx:139），订阅卡**不压缩**：超出列底时按 Mini 的
+  //   theme-settings-card.tsx:139），订阅卡不压缩：超出列底时按 Mini 的
   //   overflow:hidden 语义裁掉末尾的卡，而不是把订阅卡压扁。
-  //   旧代码把 profile_h 夹到 avail_profile（实测 117 DIP），导致订阅卡下所有
-  //   卡整体上移 ~120px —— 抽屉下半像素行 745/785/820 vs 625/660/697 的根因。
   const float col_bottom = col_y + col_h;
   profile_rect_ = {col_x, y, kCardW, profile_h};
   y += profile_h + kLeftGap;
@@ -1475,9 +1895,9 @@ void SettingsDrawer::on_arrange(const RectF& area) {
   const float row_y = area.h - 24.0f;
   if (bottom_help_) {
     if (tall) {
-      bottom_help_->layout_tree({0.0f, row_y, 80.0f, 24.0f});  // src: src/pages/_layout/components/help-menu-button.tsx:67
+      bottom_help_->layout_tree({0.0f, row_y, 80.0f, 24.0f});  // src: src/pages/_layout/components/help-menu-button.tsx:98
     } else {
-      bottom_help_->layout_tree({area.w - 68.0f, 3.0f, 28.0f, 28.0f});  // src: src/pages/_layout/components/help-menu-button.tsx:82
+      bottom_help_->layout_tree({area.w - 68.0f, 3.0f, 28.0f, 28.0f});  // src: src/pages/_layout/components/help-menu-button.tsx:113
     }
     lang_btn_->layout_tree({80, row_y, 97.5f, 24});
     float sx = 177.5f;
@@ -1491,7 +1911,7 @@ void SettingsDrawer::on_arrange(const RectF& area) {
     lang_btn_->set_visible(show_bottom_row);
     for (auto* b : skin_row_) b->set_visible(show_bottom_row);
     if (!show_bottom_row && lang_menu_ && lang_menu_->is_open()) lang_menu_->close();
-    if (!open_ && help_menu_ && help_menu_->is_open()) help_menu_->close();
+    if (!open_ && help_dialog_ && help_dialog_->is_open()) help_dialog_->close();
   }
 
   // 取证打点：抽屉左列实际几何（pair_02/pair_03 的像素行复核用）
@@ -1503,10 +1923,14 @@ void SettingsDrawer::on_arrange(const RectF& area) {
 
   if (conn_panel_) {
     conn_panel_->set_visible(open_ && side);
-    // src: _layout.tsx:1519-1533 右列 flex:1，占 padding 12 + gap 12 之后
-    if (side)
-      conn_panel_->layout_tree({kPad + kLeftW + kGap, kPad,
-                                area.w - (kPad + kLeftW + kGap) - kPad, col_h});
+    // src: _layout.tsx:1519-1533 右列 flex:1，pb: 24px（底部行存在时给底部留 24px）
+    if (side) {
+      const float conn_x = col_x + kLeftW + kGap;
+      const float conn_w = std::max(0.0f, area.w - conn_x - (kPad + pb));
+      const float conn_h = std::max(
+          0.0f, area.h - pb * 2.0f - kPad * 2.0f - (tall ? 24.0f : 0.0f));
+      conn_panel_->layout_tree({conn_x, col_y, conn_w, conn_h});
+    }
   }
 }
 
@@ -1517,29 +1941,11 @@ bool SettingsDrawer::on_mouse(const MouseEvent& e) {
 }
 
 void SettingsDrawer::open_help_menu() {
-  if (!help_menu_) return;
-  // 外观：与订阅右键菜单完全一致（src: style-helpers.tsx:126-145）
-  MenuStyle st;
-  // src: MUI MenuItem 缺省 min-height 48（help-menu-button.tsx 未覆写高度）
-  //   Divider = 1px + my 8×2 = 17
-  st.item_h = 48;
-  st.sep_h = 17;
-  st.min_w = 220;  // src: src/pages/_layout/components/help-menu-button.tsx:110
-  st.radius = 6;
-  st.font_size = 13.0f;
-  st.pad_v = 4;
-  st.padding_h = 16;  // src: style-helpers.tsx:126-145 MenuItem padding '8px 16px'
-  st.hover_inset = 0;
-  st.border = Color4f(1, 1, 1, 0.12f);
-  st.text = ThemeService::instance().text_primary();
-  st.disabled_text = Color4f(st.text.r, st.text.g, st.text.b, 0.38f);
-  // 6 套皮肤：面板底/边框/圆角 + hover 全部走查表（← apply_menu_skin）
-  apply_menu_skin(st);
-  // 6 项 + 2 分隔线（src: help-menu-button.tsx:114-205；文案同原生菜单）
-  // 版本后缀（src: help-menu-button.tsx:190-205）：
+  if (!help_dialog_) return;
+  // 版本后缀（src: help-menu-button.tsx:246-256）：
   //   软件 = '(v' + appVersion + ')'；内核 = '(' + formatCoreVersion(core) + ')'，
   //   formatCoreVersion 见 style-helpers.tsx:221-225（trim → 去前导 v+ → 'Ver.{clean}'）。
-  //   取不到内核版本时按源码语义省略整段括号（help-menu-button.tsx:204 三元）。
+  //   取不到内核版本时按源码语义省略整段括号（help-menu-button.tsx:255 三元）。
   auto format_core_version = [](std::string s) -> std::string {
     while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.erase(s.begin());
     while (!s.empty() && (s.back() == ' ' || s.back() == '\t')) s.pop_back();
@@ -1564,11 +1970,11 @@ void SettingsDrawer::open_help_menu() {
           ? std::wstring{}
           : L" (" + utf::utf8_to_utf16(format_core_version(core_version)) + L")";
   std::vector<MenuItem> its;
-  // src: src/pages/_layout/components/help-menu-button.tsx:114-205
+  // src: src/pages/_layout/components/help-menu-button.tsx:161-257
   its.push_back({L"⭐ " + tr("layout.components.helpMenu.github"), false, false, L"", false});
   its.push_back({L"💡 " + tr("layout.components.helpMenu.wiki"), false, false, L"", false});
   its.push_back({L"🧭 " + tr("layout.components.helpMenu.firstRunGuide"), false, false, L"", false});
-  its.push_back({L"🛡️ " + tr("layout.components.antivirus.menuLabel"), false, false, L"", false});  // src: src/pages/_layout/components/help-menu-button.tsx:161-169
+  its.push_back({L"🛡️ " + tr("layout.components.antivirus.menuLabel"), false, false, L"", false});
   its.push_back({L"", false, true, L"", false});
   its.push_back({L"📦 " + tr("layout.components.helpMenu.exportDiagnostics"), false, false, L"", false});
   its.push_back({L"", false, true, L"", false});
@@ -1576,8 +1982,8 @@ void SettingsDrawer::open_help_menu() {
                  app_checking_, false, L"", false});
   its.push_back({L"⚙️ " + tr("layout.components.helpMenu.checkCoreUpdate") + core_suffix,
                  core_checking_, false, L"", false});
-  help_menu_->style_ = st;
-  help_menu_->on_select = [this](int idx) {
+  help_dialog_->on_dismiss = [this] { invalidate(); };
+  help_dialog_->open(its, [this](int idx) {
     HelpAction a;
     switch (idx) {
       case 0: a = HelpAction::StarGithub; break;
@@ -1600,28 +2006,18 @@ void SettingsDrawer::open_help_menu() {
       return;
     }
     HelpMenu::execute_action(a, nullptr);
-  };
-  // 高窗（底部行可见）向上弹出；矮窗（右上 28×28 停靠，BUG-354）向下弹出并双向钳制在抽屉边界内
-  RectF rb = bottom_help_ ? bottom_help_->bounds() : RectF{0, 0, 80, 24};
-  if (bottom_row_visible_) {
-    help_menu_->style_.max_h = std::max(120.0f, rb.y - 8.0f);  // src: src/pages/_layout/components/help-menu-button.tsx:110
-    help_menu_->open(its, {rb.x, rb.y - 366.0f - 4.0f});  // src: src/pages/_layout/components/help-menu-button.tsx:161-169
-  } else {
-    const float menu_y = rb.bottom() + 4.0f;  // src: src/pages/_layout/components/help-menu-button.tsx:82
-    help_menu_->style_.max_h = std::max(120.0f, bounds().h - menu_y - 8.0f);  // src: src/pages/_layout/components/help-menu-button.tsx:110
-    help_menu_->open(its, {rb.right() - st.min_w, menu_y});
-  }
+  });
 }
 
 void SettingsDrawer::set_app_update_checking(bool checking) {
   app_checking_ = checking;
-  // F-D05：检查进行中若菜单仍展开，刷新禁用态（Mini disabled={clientCheckLoading}）
-  if (help_menu_ && help_menu_->is_open()) open_help_menu();
+  // F-D05：检查进行中若弹窗仍展开，刷新禁用态（Mini disabled={clientCheckLoading}）
+  if (help_dialog_ && help_dialog_->is_open()) open_help_menu();
 }
 
 void SettingsDrawer::set_core_update_checking(bool checking) {
   core_checking_ = checking;
-  if (help_menu_ && help_menu_->is_open()) open_help_menu();
+  if (help_dialog_ && help_dialog_->is_open()) open_help_menu();
 }
 
 void SettingsDrawer::open_profile_menu(const std::string& uid, PointF anchor) {
@@ -1631,18 +2027,15 @@ void SettingsDrawer::open_profile_menu(const std::string& uid, PointF anchor) {
   const bool local = item->type() == config::PrfType::Local;
   const std::string url = item->url.value_or(std::string());
 
-  // 菜单外观：src: help-menu-button.tsx:96-110（paper theme-panel / minWidth 220 /
-  //   radius 6 / border 1px rgba(255,255,255,.12) / List padding 4px 0）
-  //   + style-helpers.tsx:126-145（13px bold / padding 8px 16px / hover 金渐变）
+  // 菜单外观：src: src/utils/popup-styles.ts:277-282 MenuItem minH 32 / px 14 / 12.5px
   MenuStyle st;
-  // src: MUI MenuItem 缺省 min-height 48；style-helpers.tsx:129 padding '8px 16px'
-  st.item_h = 48;
-  st.padding_h = 16;
-  st.min_w = 220;  // src: help-menu-button.tsx:103 minWidth '220px'
+  st.item_h = 32;
+  st.padding_h = 14;
+  st.min_w = 180;
   st.radius = 6;
-  st.font_size = 13.0f;
+  st.font_size = 12.5f;
   st.pad_v = 4;
-  st.hover_inset = 0;
+  st.hover_inset = 4;
   st.border = Color4f(1, 1, 1, 0.12f);
   st.text = ThemeService::instance().text_primary();
   st.disabled_text = Color4f(st.text.r, st.text.g, st.text.b, 0.38f);
@@ -1701,17 +2094,15 @@ void SettingsDrawer::open_url_menu(PointF anchor) {
   TextField* f = profile_card_->url_field();
   if (!f) return;
 
-  // 外观：src: _layout.tsx:1872-1884（minWidth 160 / radius 6 / border 1px
-  //   rgba(255,255,255,.12) / List padding 4px 0）+ style-helpers.tsx:126-145
+  // 外观：src: src/utils/popup-styles.ts:277-282 MenuItem minH 32 / px 14 / 12.5px
   MenuStyle st;
-  // src: MUI MenuItem 缺省 min-height 48；style-helpers.tsx:129 padding '8px 16px'
-  st.item_h = 48;
-  st.padding_h = 16;
+  st.item_h = 32;
+  st.padding_h = 14;
   st.min_w = 160;  // src: _layout.tsx:1876 minWidth '160px'
   st.radius = 6;
-  st.font_size = 13.0f;
+  st.font_size = 12.5f;
   st.pad_v = 4;
-  st.hover_inset = 0;
+  st.hover_inset = 4;
   st.border = Color4f(1, 1, 1, 0.12f);
   st.text = ThemeService::instance().text_primary();
   st.disabled_text = Color4f(st.text.r, st.text.g, st.text.b, 0.38f);
@@ -1775,6 +2166,13 @@ void SettingsDrawer::open_edit_profile(const std::string& uid) {
 }
 
 void SettingsDrawer::wire_callbacks() {
+  // 订阅卡随输入换行增减高时同步重排抽屉左列
+  profile_card_->on_height_changed = [this] {
+    if (bounds().w > 0.0f && bounds().h > 0.0f) {
+      layout_tree(bounds());
+      invalidate();
+    }
+  };
   // 订阅导入卡（宿主命令链转发）
   profile_card_->on_import = [this](const std::string& url,
                                     const std::string& name) {
@@ -1869,9 +2267,14 @@ void SettingsDrawer::wire_callbacks() {
   // 代理方式三段 → rule_fallback + clash mode
   //（全局代理→global；GFWList→rule；添加网址→rule）
   // ← _layout.tsx:391-424：索引 0=proxy(全局代理)、1=direct(GFWList)、
-  //   2=addurl(添加网址)；三种情况统一 patchClashMode('rule')，第三段再开弹窗
+  //   2=addurl(添加网址)；优先走宿主异步事务回调（失败回滚且不开 add_url_）
   routing_card_->seg_->on_change = [this](int i) {
     static const char* fb[] = {"proxy", "direct", "addurl"};
+    if (i < 0 || i >= 3) return;
+    if (on_routing_change_async) {
+      on_routing_change_async(fb[i], i == 2);
+      return;
+    }
     if (on_patch_verge) on_patch_verge("rule_fallback", fb[i]);
     if (on_patch_clash_mode) on_patch_clash_mode("rule");
     if (i == 2 && on_add_rule) on_add_rule();
@@ -1908,8 +2311,29 @@ void SettingsDrawer::wire_callbacks() {
   // Mixed Port：Enter / 失焦提交（Mini 无保存钮；src: basic-settings-card.tsx:492-516）
   auto commit_port = [this] {
     std::wstring t = basic_card_->port_field_->text();
-    if (t.empty()) return;
-    const int port = _wtoi(t.c_str());
+    while (!t.empty() && (t.front() == L' ' || t.front() == L'\t')) t.erase(t.begin());
+    while (!t.empty() && (t.back() == L' ' || t.back() == L'\t')) t.pop_back();
+    bool digits = !t.empty();
+    int port = 0;
+    for (wchar_t ch : t) {
+      if (ch < L'0' || ch > L'9') {
+        digits = false;
+        break;
+      }
+      if (port <= 65535) port = port * 10 + (ch - L'0');
+    }
+    if (!digits || port < 1 || port > 65535) {
+      // src: src/pages/_layout/hooks/use-minimal-settings.ts:97-100
+      events::NoticeService::instance().push(
+          "error", tr8("settings.mini.invalidPort"));
+      const int fallback =
+          basic_card_->port_current_ > 0
+              ? basic_card_->port_current_
+              : static_cast<int>(config::consts::kDefaultMixed);
+      basic_card_->port_field_->set_text(std::to_wstring(fallback));
+      basic_card_->port_field_->invalidate();
+      return;
+    }
     // src: use-minimal-settings.ts:87-107 handleSavePort：
     //   等价判断 → 占用检查 → 双写（内核 mixed-port + verge verge_mixed_port）；
     //   被占用/失败 → 输入框回滚到当前生效端口（setMixedPortVal(currentPort())）
@@ -1977,11 +2401,17 @@ void SettingsDrawer::wire_callbacks() {
         it.selected = (cur == codes[i]);
         items.push_back(it);
       }
+      // src: src/utils/popup-styles.ts:277-282 MenuItem 32px / px 14 / 12.5px
+      apply_menu_skin(lang_menu_->style_);
+      lang_menu_->style_.item_h = 32.0f;
+      lang_menu_->style_.padding_h = 14.0f;
+      lang_menu_->style_.font_size = 12.5f;
+      lang_menu_->style_.hover_inset = 4.0f;
       // lang_btn_ 与 lang_menu_ 同属 panel_ 坐标系，直接用局部 bounds() 向上锚定，
       //   超出抽屉高度时由 ContextMenu::open 自动钳制高度并滚动到当前选中语言
       RectF lb = lang_btn_->bounds();
       const float max_menu_h = std::max(120.0f, lb.y - 8.0f);
-      const float want_h = std::min(628.0f, max_menu_h);
+      const float want_h = std::min(440.0f, max_menu_h);
       lang_menu_->style_.max_h = want_h;
       lang_menu_->open(items, {lb.x, lb.y - want_h - 4.0f});
     };
@@ -1991,6 +2421,10 @@ void SettingsDrawer::wire_callbacks() {
                                       "es",  "jp", "zhtw"};
       if (i < 0 || i >= 13) return;
       i18n::I18n::instance().set_language(codes[i]);
+      if (routing_card_ && routing_card_->seg_) {
+        routing_card_->seg_->style_.size = routing_font_for_lang();
+        routing_card_->seg_->invalidate();
+      }
       if (on_patch_verge) on_patch_verge("language", std::string(codes[i]));
     };
   }
@@ -2053,9 +2487,11 @@ void SettingsDrawer::on_paint(IRenderTarget& rt) {
   rt.push_clip(area);
   // theme-panel 底 + 4px double 金边
   draw_panel_bg(rt, area);
-  // 左列 borderRight 1px divider（src: _layout.tsx:1436）
-  const float div_x = kPad + kLeftW;
-  rt.fill_rect({div_x, kPad, 1.0f, area.h - kPad * 2}, Brush{divider_color()});
+  // 左列 borderRight 1px divider（仅宽窗双列绘制，src: _layout.tsx:1436）
+  if (bounds().w > win::kMiniWidthThreshold) {
+    rt.fill_rect({left_rect_.x + kLeftW - 1.0f, left_rect_.y, 1.0f, left_rect_.h},
+                 Brush{divider_color()});
+  }
   // 四张渐变卡（顺序与 _layout.tsx:1440-1516 一致）；
   // 订阅卡自绘底（ProfileImportCard::on_paint，避免重复画 bevel）
   if (combo_rect_.y < area.h) draw_card_bg(rt, combo_rect_);

@@ -70,34 +70,26 @@ UT_TEST(t36_d12_drawer_card_centering_boundaries) {
   make_offscreen(300, 700, 96);
   SettingsDrawer drawer;
 
-  // 1a) 窄窗 271 DIP：卡宽 231，(271 - 231) / 2 = 20.0f
+  // 1a) 窄窗 271 DIP：固定左对齐 16.0f (kPad 12 + kPanelBorder 4)
   drawer.layout_tree({0, 0, 271, 680});
-  const float w271_x = (271.0f - 231.0f) / 2.0f;
-  UT_CHECK(near_f(drawer.profile_card()->bounds().x, w271_x));
-  UT_CHECK(near_f(drawer.basic_card()->bounds().x, w271_x));
-  UT_CHECK(near_f(drawer.theme_card()->bounds().x, w271_x));
-  UT_CHECK(near_f(drawer.takeover_card()->bounds().x, w271_x + 8.0f));
-  UT_CHECK(near_f(drawer.routing_card()->bounds().x, w271_x + 8.0f));
-  // 对称性：右边距等于左边距
-  UT_CHECK(near_f(271.0f - drawer.profile_card()->bounds().right(), w271_x));
+  UT_CHECK(near_f(drawer.profile_card()->bounds().x, 16.0f));
+  UT_CHECK(near_f(drawer.basic_card()->bounds().x, 16.0f));
+  UT_CHECK(near_f(drawer.theme_card()->bounds().x, 16.0f));
+  UT_CHECK(near_f(drawer.takeover_card()->bounds().x, 16.0f + 8.0f));
+  UT_CHECK(near_f(drawer.routing_card()->bounds().x, 16.0f + 8.0f));
 
-  // 1b) 窄窗 280 DIP：卡宽 231，(280 - 231) / 2 = 24.5f
+  // 1b) 窄窗 280 DIP 与临界 285 DIP：同为左对齐 16.0f
   drawer.layout_tree({0, 0, 280, 680});
-  const float w280_x = (280.0f - 231.0f) / 2.0f;
-  UT_CHECK(near_f(drawer.profile_card()->bounds().x, w280_x));
-  UT_CHECK(near_f(drawer.basic_card()->bounds().x, w280_x));
-  UT_CHECK(near_f(drawer.theme_card()->bounds().x, w280_x));
-  UT_CHECK(near_f(280.0f - drawer.profile_card()->bounds().right(), w280_x));
+  UT_CHECK(near_f(drawer.profile_card()->bounds().x, 16.0f));
+  UT_CHECK(near_f(drawer.basic_card()->bounds().x, 16.0f));
+  UT_CHECK(near_f(drawer.theme_card()->bounds().x, 16.0f));
 
-  // 1c) 窄窗临界 285 DIP：卡宽 231，(285 - 231) / 2 = 27.0f
   drawer.layout_tree({0, 0, 285, 680});
-  const float w285_x = (285.0f - 231.0f) / 2.0f;
-  UT_CHECK(near_f(drawer.profile_card()->bounds().x, w285_x));
-  UT_CHECK(near_f(drawer.basic_card()->bounds().x, w285_x));
-  UT_CHECK(near_f(drawer.theme_card()->bounds().x, w285_x));
-  UT_CHECK(near_f(285.0f - drawer.profile_card()->bounds().right(), w285_x));
+  UT_CHECK(near_f(drawer.profile_card()->bounds().x, 16.0f));
+  UT_CHECK(near_f(drawer.basic_card()->bounds().x, 16.0f));
+  UT_CHECK(near_f(drawer.theme_card()->bounds().x, 16.0f));
 
-  // 1d) 宽窗临界 286 DIP (> 285.0f)：切为侧边双列模式，固定左边距 16.0f (kPad 12 + kPanelBorder 4)
+  // 1d) 宽窗临界 286 DIP (> 285.0f)：双列左列同样 16.0f (kPad 12 + kPanelBorder 4)
   drawer.layout_tree({0, 0, 286, 680});
   UT_CHECK(near_f(drawer.profile_card()->bounds().x, 16.0f));
   UT_CHECK(near_f(drawer.basic_card()->bounds().x, 16.0f));
@@ -534,14 +526,14 @@ UT_TEST(t36_v012_ui_and_skin_regressions) {
   UT_CHECK(sp_retro.text.r < 0.25f);
   UT_CHECK(near_f(sp_retro.text.a, 0.75f));
 
-  // 9c) Monochrome 皮肤 val2 (Border) 对 card/button/input 生效，radius 为 0
+  // 9c) Monochrome 皮肤 val2 (Border) 对 card/button/input 生效，radius 按 index.scss:257-269 为 8*val1
   svc.init(theme::SkinId::Monochrome, theme::ThemeMode::Dark);
   svc.set_factors(1.5f, 2.0f);
-  UT_CHECK_EQ(svc.card_paint().radius, 0.0f);
+  UT_CHECK_EQ(svc.card_paint().radius, 12.0f);
   UT_CHECK(near_f(svc.card_paint().border_w, 2.0f));
-  UT_CHECK_EQ(svc.button_paint().radius, 0.0f);
+  UT_CHECK_EQ(svc.button_paint().radius, 12.0f);
   UT_CHECK(near_f(svc.button_paint().border_w, 2.0f));
-  UT_CHECK_EQ(svc.input_paint().radius, 0.0f);
+  UT_CHECK_EQ(svc.input_paint().radius, 12.0f);
   UT_CHECK_EQ(svc.segmented_paint().container_radius, 0.0f);
 
   // 9d) FrostedGlass 皮肤 val1 (Opacity) 与 val2 (Blur) 改变面板与卡片透明度及柔和度

@@ -97,7 +97,58 @@ void AddUrlDialog::set_clipboard_reader_for_test(std::function<std::wstring()> f
 }
 
 AddUrlDialog::AddUrlDialog(Widget* parent) : Widget(parent) {
-  set_z_order(960);
+  set_z_order(960);  // 豁免: Mini 无对应物 — 抽屉模态层序（出处: src/pages/_layout/components/add-url-dialog.tsx）
+
+  auto uf = std::make_unique<TextField>(this);
+  url_field_ = uf.get();
+  // src: src/pages/_layout/components/add-url-dialog.tsx:222-233 multiline minRows 4 maxRows 10
+  url_field_->set_multiline(true, 4, 10);
+  url_field_->set_multiline_padding_y(kInputPadY);
+  url_field_->set_padding_x(kInputPadX);
+  url_field_->style_.size = 13.0f;  // src: get3DInputStyle fontSize 13px
+  url_field_->set_placeholder(tr("settings.mini.addUrlPlaceholder"));
+  url_field_->set_i18n_a11y_name("settings.mini.addUrlPlaceholder");
+  url_field_->apply_theme();
+  url_field_->set_visible(false);
+  url_field_->on_submit = [this] { do_submit(); };
+  url_field_->on_key_intercept = [this](const KeyEvent& e) {
+    if (e.type == KeyEventType::Down && (e.key == VK_ESCAPE || e.key == 27)) {
+      close();
+      return true;
+    }
+    if (e.type == KeyEventType::Down && test_clipboard_reader() &&
+        ((e.ctrl && (e.key == 'V' || e.key == 'v')) ||
+         (e.shift && e.key == VK_INSERT))) {
+      const std::string pasted = read_clipboard_utf8_normalized();
+      if (!pasted.empty()) {
+        if (url_field_->can_cut() &&
+            url_field_->selection().size() == url_field_->text().size()) {
+          set_payload(pasted);
+        } else {
+          set_payload(payload_ + pasted);
+        }
+      }
+      return true;
+    }
+    return false;
+  };
+  url_field_->on_context_menu = [this](PointF anchor) { open_context_menu(anchor); };
+  url_field_->on_text_changed = [this](const std::wstring& w) {
+    if (syncing_field_) return;
+    const float old_h = input_rect_.h;
+    payload_ = utf::utf16_to_utf8(w);
+    error_message_.clear();
+    if (bounds().w > 0.0f && bounds().h > 0.0f) {
+      const float inner_w = std::max(60.0f, card_rect_.w - kContentPx * 2);
+      const float new_h = std::max(kRows * kLineH + kInputPadY * 2,
+                                   url_field_->preferred_height(inner_w));
+      if (std::abs(new_h - old_h) > 0.5f) {
+        on_arrange(bounds());
+      }
+    }
+    invalidate();
+  };
+  add_child(std::move(uf));
 }
 
 void AddUrlDialog::open() {
@@ -108,6 +159,16 @@ void AddUrlDialog::open() {
   input_focused_ = true;  // src: add-url-dialog.tsx:220 autoFocus
   all_selected_ = false;
   fade_.show();           // ← MUI Dialog 缺省 Fade（enter 225ms）
+  if (url_field_) {
+    url_field_->apply_theme();
+    url_field_->style_.size = 13.0f;  // src: add-url-dialog.tsx:222
+    syncing_field_ = true;
+    url_field_->set_text(utf::utf8_to_utf16(payload_));
+    syncing_field_ = false;
+    url_field_->set_visible(true);
+    url_field_->request_focus();
+  }
+  if (bounds().w > 0.0f && bounds().h > 0.0f) on_arrange(bounds());
   invalidate();
 }
 
@@ -117,6 +178,14 @@ void AddUrlDialog::close() {
   input_focused_ = false;
   all_selected_ = false;
   payload_.clear();  // src: add-url-dialog.tsx:49-53 handleClose setText('')
+  error_message_.clear();
+  if (url_field_) {
+    syncing_field_ = true;
+    url_field_->set_text(L"");
+    syncing_field_ = false;
+    url_field_->blur();
+    url_field_->set_visible(false);
+  }
   // ← MUI Fade leave 195ms：画面延后消失，交互立刻失效
   fade_.hide();
   if (context_menu_ && context_menu_->is_open()) context_menu_->close();
@@ -127,6 +196,13 @@ void AddUrlDialog::close() {
 void AddUrlDialog::set_payload(const std::string& p) {
   payload_ = p;
   all_selected_ = false;
+  error_message_.clear();
+  if (url_field_) {
+    syncing_field_ = true;
+    url_field_->set_text(utf::utf8_to_utf16(p));
+    syncing_field_ = false;
+  }
+  if (bounds().w > 0.0f && bounds().h > 0.0f) on_arrange(bounds());
   invalidate();
 }
 
@@ -142,23 +218,16 @@ void AddUrlDialog::copy_payload_to_clipboard() {
 
 void AddUrlDialog::open_context_menu(PointF anchor) {
   if (!context_menu_) return;
-  const auto& svc = theme::ThemeService::instance();
-  const auto tokens = svc.popup_tokens();
   MenuStyle st;
-  st.item_h = 40;
+  apply_menu_skin(st);
+  // src: add-url-dialog.tsx:288 minWidth '160px', 菜单行高 32
+  st.item_h = 32;
   st.sep_h = 13;
-  st.min_w = 160;  // src: add-url-dialog.tsx:288 minWidth '160px'
-  st.radius = 6;
+  st.min_w = 160;
   st.font_size = 13.0f;
-  st.pad_v = 4;
-  st.padding_h = 16;
-  st.bg = svc.popup_card_paint().bg;
-  st.border = tokens.divider_color;
-  st.text = tokens.primary_text;
-  st.disabled_text = tokens.disabled_text;
-  st.danger_text = tokens.error_color;
+  st.padding_h = 14;
   const bool has_text = !payload_.empty();
-  const bool has_sel = has_text && all_selected_;
+  const bool has_sel = url_field_ ? url_field_->can_cut() : (has_text && all_selected_);
 
   std::vector<MenuItem> items;
   items.push_back({L"✂️ " + tr("shared.actions.cut"), !has_sel, false, L"", false});
@@ -172,44 +241,56 @@ void AddUrlDialog::open_context_menu(PointF anchor) {
   context_menu_->on_select = [this](int idx) {
     switch (idx) {
       case 0:  // cut
-        if (!payload_.empty()) {
+        if (url_field_) {
+          url_field_->cut();
+        } else if (!payload_.empty()) {
           copy_payload_to_clipboard();
-          payload_.clear();
-          all_selected_ = false;
-          invalidate();
+          set_payload("");
         }
         break;
       case 1:  // copy
-        copy_payload_to_clipboard();
+        if (url_field_) {
+          url_field_->copy();
+        } else {
+          copy_payload_to_clipboard();
+        }
         break;
       case 2: {  // paste
-        std::string pasted = read_clipboard_utf8_normalized();
-        if (!pasted.empty()) {
-          if (all_selected_) {
-            payload_ = pasted;
-            all_selected_ = false;
-          } else {
-            payload_ += pasted;
+        if (test_clipboard_reader()) {
+          const std::string pasted = read_clipboard_utf8_normalized();
+          if (!pasted.empty()) {
+            if (url_field_ && url_field_->can_cut() &&
+                url_field_->selection().size() == url_field_->text().size()) {
+              set_payload(pasted);
+            } else {
+              set_payload(payload_ + pasted);
+            }
           }
-          invalidate();
+        } else if (url_field_) {
+          url_field_->paste();
         }
         break;
       }
       case 3:  // selectAll
-        if (!payload_.empty()) {
+        if (url_field_) {
+          url_field_->select_all();
+        } else if (!payload_.empty()) {
           all_selected_ = true;
           invalidate();
         }
         break;
       case 5:  // clear
-        payload_.clear();
-        all_selected_ = false;
-        invalidate();
+        if (url_field_) {
+          url_field_->clear_text();
+        } else {
+          set_payload("");
+        }
         break;
       default:
         break;
     }
     input_focused_ = true;
+    if (url_field_) url_field_->request_focus();
   };
   PointF local = anchor;
   if (context_menu_->parent()) {
@@ -226,26 +307,37 @@ void AddUrlDialog::do_submit() {
     return;
   }
   // ← add-url-dialog.tsx:54-72：批量解析（换行/逗号/分号），返回新增条数。
-  //   count > 0 → success「已添加 {{count}} 条规则」；count == 0 → info「没有新增规则」；
-  //   异常 → error 原文。此前 Win 只走单条接口，多行输入只加第一条，且无任何提示。
-  const int count = core::quick_routing::add_quick_routing_rules(val);
-  error_message_.clear();
-  if (count > 0) {
-    events::NoticeService::instance().push(
-        "success", tr8("settings.mini.addUrlSuccess", {{"count", std::to_string(count)}}));
-  } else {
-    events::NoticeService::instance().push("info", tr8("settings.mini.addUrlNoChange"));
+  try {
+    const int count = core::quick_routing::add_quick_routing_rules(val);
+    error_message_.clear();
+    if (count > 0) {
+      events::NoticeService::instance().push(
+          "success", tr8("settings.mini.addUrlSuccess", {{"count", std::to_string(count)}}));
+    } else {
+      events::NoticeService::instance().push("info", tr8("settings.mini.addUrlNoChange"));
+    }
+    close();
+  } catch (const std::exception& ex) {
+    // src: add-url-dialog.tsx:68-71 失败弹 error 通知并停留在弹窗内
+    error_message_ = ex.what();
+    events::NoticeService::instance().push("error", error_message_);
+    if (bounds().w > 0.0f && bounds().h > 0.0f) on_arrange(bounds());
+    invalidate();
   }
-  close();
 }
 
 void AddUrlDialog::on_arrange(const RectF& area) {
   set_bounds(area);
   // src: popup-styles.ts:120-185 窄窗弹窗锁定左侧 271px
   const float cw = std::min(theme::kPopupPaneWidth, area.w);
-  const float title_h = kTitlePy * 2 + kTitleLineH;      // 41.85
-  const float input_h = kRows * kLineH + kInputPadY * 2;  // 125
-  const float content_h = 12.0f + input_h + kContentPb;   // 149
+  const float title_h = kTitlePy * 2 + kTitleLineH;  // 41.85
+  const float inner_input_w = std::max(60.0f, cw - kContentPx * 2);
+  const float min_input_h = kRows * kLineH + kInputPadY * 2;  // 125
+  const float input_h = url_field_
+                            ? std::max(min_input_h, url_field_->preferred_height(inner_input_w))
+                            : min_input_h;
+  const float err_h = error_message_.empty() ? 0.0f : 18.0f;  // 豁免: Mini 无对应物 — 内联错误提示高（出处: add-url-dialog.tsx:68-71）
+  const float content_h = 12.0f + input_h + err_h + kContentPb;
   const auto& svc = theme::ThemeService::instance();
   const float kPrimaryBtnH =
       kPrimaryBtnContentH + svc.button_paint("primary", false).border_w * 2.0f;
@@ -258,8 +350,10 @@ void AddUrlDialog::on_arrange(const RectF& area) {
   card_rect_ = {cx, cy, cw, ch};
 
   title_rect_ = {cx, cy, cw, title_h};
-  input_rect_ = {cx + kContentPx, cy + title_h + 12.0f,
-                 std::max(60.0f, cw - kContentPx * 2), input_h};
+  input_rect_ = {cx + kContentPx, cy + title_h + 12.0f, inner_input_w, input_h};
+  if (url_field_) {
+    url_field_->layout_tree(input_rect_);
+  }
 
   // src: popup-styles.ts:230-245 getPopupActionsSx 全宽纵向堆叠（添加在上，取消在下）
   const float btn_w = std::max(60.0f, cw - kActsPx * 2);
@@ -282,79 +376,37 @@ void AddUrlDialog::on_paint(IRenderTarget& rt) {
   // 2. paper：统一走 popup_card_paint()
   draw_card(rt, card_rect_, svc.popup_card_paint());
 
-  // 3. 标题 + 底部分隔线（src: popup-styles.ts:191-212）
+  // 3. 标题 + 底部分隔线（src: add-url-dialog.tsx:206-216 fontSize 15.5px）
   TextStyle title_ts;
-  title_ts.size = kTitleFs;
+  title_ts.size = 15.5f;  // src: add-url-dialog.tsx:206
   title_ts.weight = static_cast<int>(Weight::Bold);
   title_ts.color = tokens.primary_text;
   title_ts.align_h = AlignH::Center;
   title_ts.align_v = AlignV::Center;
-  rt.draw_text(tr("settings.mini.addUrl"),
+  rt.draw_text(L"🌐 " + tr("settings.mini.addUrl"),
                {title_rect_.x + kTitlePx, title_rect_.y, title_rect_.w - kTitlePx * 2,
                 title_rect_.h},
                title_ts);
   rt.fill_rect({card_rect_.x, title_rect_.bottom() - 1.0f, card_rect_.w, 1.0f},
                Brush{tokens.divider_color});
 
-  // 4. TextField multiline（get3DInputStyle）
-  const theme::InputPaint ip = svc.input_paint();
-  Brush input_bg{ip.bg};
-  Pen input_pen{input_focused_ ? ip.border_focused : ip.border,
-                input_focused_ ? ip.border_w_focused : ip.border_w};
-  rt.round_rect(input_rect_, ip.radius, input_pen, &input_bg);
-  {
-    TextStyle ts;
-    ts.size = 13.0f;  // src: get3DInputStyle fontSize 13px
-    ts.color = ip.text;
-    ts.wrap = true;
-    // ★ V6：行盒 23px（InputBase lineHeight 1.4375em @16）。框内 4 行必须与
-    //   P16 的外框几何（4×23+16.5×2=125）同源，否则文字比框紧 5.7px/行。
-    ts.line_h = kLineH;
-    ts.max_lines = static_cast<int>(kRows);
-    std::wstring body = utf::utf8_to_utf16(payload_);
-    if (body.empty()) {
-      TextStyle ph = ts;
-      ph.color.a *= 0.5f;
-      rt.draw_text(tr("settings.mini.addUrlPlaceholder"),
-                   {input_rect_.x + kInputPadX, input_rect_.y + kInputPadY,
-                    input_rect_.w - kInputPadX * 2,
-                    input_rect_.h - kInputPadY * 2},
-                   ph);
-      if (input_focused_) {
-        rt.draw_text(L"|", {input_rect_.x + kInputPadX, input_rect_.y + kInputPadY,
-                            input_rect_.w - kInputPadX * 2,
-                            input_rect_.h - kInputPadY * 2}, ts);
-      }
-    } else {
-      if (all_selected_) {
-        Color4f sel_bg = svc.primary();
-        sel_bg.a = 0.25f;
-        rt.fill_rect({input_rect_.x + kInputPadX, input_rect_.y + kInputPadY,
-                      input_rect_.w - kInputPadX * 2,
-                      input_rect_.h - kInputPadY * 2},
-                     Brush{sel_bg});
-      } else if (input_focused_) {
-        body += L"|";
-      }
-      rt.draw_text(body,
-                   {input_rect_.x + kInputPadX, input_rect_.y + kInputPadY,
-                    input_rect_.w - kInputPadX * 2,
-                    input_rect_.h - kInputPadY * 2},
-                   ts);
-    }
+  // 4. TextField multiline 子控件主题热刷新（get3DInputStyle；字组件随后自绘）
+  if (url_field_) {
+    url_field_->apply_theme();
+    url_field_->style_.size = 13.0f;  // src: add-url-dialog.tsx:222
   }
 
   // 动作区顶部分隔线（src: popup-styles.ts:243）
   rt.fill_rect({card_rect_.x, btn_add_rect_.y - kActsPy, card_rect_.w, 1.0f},
                Brush{tokens.divider_color});
 
-  // 5. 动作按钮：添加 contained primary（上）、取消 outlined default（下）
+  // 5. 动作按钮：添加 contained primary（上 13px）、取消 outlined default（下 12.5px）
   auto paint_btn = [&](const RectF& r, const char* ctype, bool outlined,
-                       bool hover, const std::wstring& label) {
+                       bool hover, const std::wstring& label, float font_size) {
     const auto bp = svc.button_paint(ctype, outlined);
     draw_button_skin(rt, r, bp, hover ? 1.0f : 0.0f, /*pressed=*/false);
     TextStyle ts;
-    ts.size = kBtnFs;
+    ts.size = font_size;  // src: add-url-dialog.tsx:251/263
     ts.weight = bp.weight;
     ts.color = bp.text;
     ts.align_h = AlignH::Center;
@@ -362,18 +414,18 @@ void AddUrlDialog::on_paint(IRenderTarget& rt) {
     rt.draw_text(label, r, ts);
   };
   paint_btn(btn_add_rect_, "primary", /*outlined=*/false, hover_add_,
-            tr("settings.mini.addUrlButton"));
+            tr("settings.mini.addUrlButton"), kBtnFs);
   paint_btn(btn_cancel_rect_, "default", /*outlined=*/true, hover_cancel_,
-            tr("shared.actions.cancel"));
+            tr("shared.actions.cancel"), 12.5f);  // src: add-url-dialog.tsx:263
 
-  // 6. 错误提示（showNotice.error → 对话框内红字，源码为 toast；此处保留内联提示）
+  // 6. 错误提示（showNotice.error → 对话框内红字）
   if (!error_message_.empty()) {
     TextStyle err_ts;
-    err_ts.size = 11.0f;
+    err_ts.size = 11.0f;  // 豁免: Mini 无对应物 — 紧凑错误行字号（出处: add-url-dialog.tsx:68-71）
     err_ts.color = tokens.error_color;
     err_ts.align_v = AlignV::Center;
     rt.draw_text(utf::utf8_to_utf16(error_message_),
-                 {input_rect_.x, input_rect_.bottom() + 1.0f, input_rect_.w, 14.0f},
+                 {input_rect_.x, input_rect_.bottom() + 2.0f, input_rect_.w, 14.0f},
                  err_ts);
   }
 }
@@ -396,6 +448,7 @@ bool AddUrlDialog::on_mouse(const MouseEvent& e) {
   if (e.type == MouseEventType::Down) {
     if ((e.buttons & kMouseRight) && input_rect_.contains(pt.x, pt.y)) {
       input_focused_ = true;
+      if (url_field_) url_field_->request_focus();
       open_context_menu(to_global(pt));
       invalidate();
       return true;
@@ -418,6 +471,7 @@ bool AddUrlDialog::on_mouse(const MouseEvent& e) {
     if (input_rect_.contains(pt.x, pt.y)) {
       input_focused_ = true;
       all_selected_ = false;
+      if (url_field_) url_field_->request_focus();
       invalidate();
       return true;
     }
@@ -440,74 +494,27 @@ bool AddUrlDialog::on_key(const KeyEvent& e) {
       close();
       return true;
     }
-    // src: :230-233 multiline → Enter 插入换行（不提交）
-    if ((e.key == VK_RETURN || e.key == 13) && input_focused_) {
-      if (all_selected_) {
-        payload_.clear();
-        all_selected_ = false;
-      }
-      payload_.push_back('\n');
-      invalidate();
-      return true;
-    }
-    if (e.key == VK_BACK && input_focused_) {
-      if (all_selected_) {
-        payload_.clear();
-        all_selected_ = false;
-        invalidate();
-      } else if (!payload_.empty()) {
-        payload_.pop_back();
-        invalidate();
-      }
-      return true;
-    }
-    if (input_focused_ && e.ctrl && (e.key == 'A' || e.key == 'a')) {
-      all_selected_ = !payload_.empty();
-      invalidate();
-      return true;
-    }
-    if (input_focused_ && e.ctrl && (e.key == 'C' || e.key == 'c')) {
-      copy_payload_to_clipboard();
-      return true;
-    }
-    if (input_focused_ && e.ctrl && (e.key == 'X' || e.key == 'x')) {
-      if (!payload_.empty()) {
-        copy_payload_to_clipboard();
-        payload_.clear();
-        all_selected_ = false;
-        invalidate();
-      }
-      return true;
-    }
-    // src: add-url-dialog.tsx:274-311 支持 Ctrl+V / Shift+Insert 多行粘贴
-    if (input_focused_ &&
-        ((e.ctrl && (e.key == 'V' || e.key == 'v')) ||
-         (e.shift && e.key == VK_INSERT))) {
-      std::string pasted = read_clipboard_utf8_normalized();
-      if (!pasted.empty()) {
-        if (all_selected_) {
-          payload_ = pasted;
-          all_selected_ = false;
-        } else {
-          payload_ += pasted;
+    // src: add-url-dialog.tsx:274-311 测试桩或聚焦态粘贴快捷键兼容
+    if ((e.ctrl && (e.key == 'V' || e.key == 'v')) ||
+        (e.shift && e.key == VK_INSERT)) {
+      if (test_clipboard_reader()) {
+        std::string pasted = read_clipboard_utf8_normalized();
+        if (!pasted.empty()) {
+          if (url_field_ && url_field_->can_cut() &&
+              url_field_->selection().size() == url_field_->text().size()) {
+            set_payload(pasted);
+          } else {
+            set_payload(payload_ + pasted);
+          }
         }
-        invalidate();
+        return true;
       }
-      return true;
-    }
-  } else if (e.type == KeyEventType::Char && input_focused_) {
-    if (e.ctrl) return false;
-    if (e.ch >= 32 && e.ch < 127) {
-      if (all_selected_) {
-        payload_.clear();
-        all_selected_ = false;
-      }
-      payload_.push_back(static_cast<char>(e.ch));
-      invalidate();
-      return true;
     }
   }
 
+  if (url_field_) {
+    return url_field_->on_key(e);
+  }
   return false;
 }
 

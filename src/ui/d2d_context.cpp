@@ -6,14 +6,18 @@
 #include "d2d_context.h"
 
 #include <d2d1.h>
-#include <dwrite.h>
+#include <dwrite_3.h>
 #include <wincodec.h>
 #include <windows.h>
 
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <unordered_map>
 
+#include "util/dirs.h"
 #include "util/log.h"
 #include "ui/theme/theme.h"
 
@@ -91,11 +95,22 @@ bool D2dContext::init() {
     return false;
   }
   inited_ = true;
+  init_custom_fonts();
+  init_skin_fallbacks();
   CWLOG_INFO("D2dContext: D2D/DWrite/WIC 工厂就绪");
   return true;
 }
 
 void D2dContext::shutdown() {
+  for (auto*& fb : skin_fallbacks_) {
+    if (fb) { fb->Release(); fb = nullptr; }
+  }
+  if (outfit_collection_) { outfit_collection_->Release(); outfit_collection_ = nullptr; }
+  outfit_loaded_ = false;
+  if (mem_font_loader_ && dwrite_factory_) {
+    dwrite_factory_->UnregisterFontFileLoader(mem_font_loader_);
+  }
+  if (mem_font_loader_) { mem_font_loader_->Release(); mem_font_loader_ = nullptr; }
   if (d2d_factory_) { d2d_factory_->Release(); d2d_factory_ = nullptr; }
   if (dwrite_factory_) { dwrite_factory_->Release(); dwrite_factory_ = nullptr; }
   if (wic_factory_) { wic_factory_->Release(); wic_factory_ = nullptr; }
@@ -105,6 +120,161 @@ void D2dContext::shutdown() {
 ID2D1Factory* D2dContext::d2d() const { return d2d_factory_; }
 IDWriteFactory* D2dContext::dwrite() const { return dwrite_factory_; }
 IWICImagingFactory* D2dContext::wic() const { return wic_factory_; }
+
+IDWriteFontFallback* D2dContext::skin_fallback(theme::SkinId skin) const {
+  const size_t idx = static_cast<size_t>(skin);
+  if (idx >= skin_fallbacks_.size()) return nullptr;
+  return skin_fallbacks_[idx];
+}
+
+void D2dContext::init_custom_fonts() {
+  if (!dwrite_factory_ || outfit_collection_) return;
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  fs::path fonts_dir = fs::path(util::dirs::exe_dir()) / L"resources" / L"fonts";
+  if (!fs::exists(fonts_dir, ec) || !fs::is_directory(fonts_dir, ec)) {
+    wchar_t* repo_root = nullptr;
+    size_t len = 0;
+    if (_wdupenv_s(&repo_root, &len, L"CLASHWIN_REPO_ROOT") == 0 && repo_root) {
+      fs::path cand = fs::path(repo_root) / L"resources" / L"fonts";
+      std::free(repo_root);
+      if (fs::exists(cand, ec) && fs::is_directory(cand, ec)) fonts_dir = cand;
+    }
+  }
+  if (!fs::exists(fonts_dir, ec) || !fs::is_directory(fonts_dir, ec)) return;
+
+  IDWriteFactory5* f5 = nullptr;
+  if (FAILED(dwrite_factory_->QueryInterface(__uuidof(IDWriteFactory5),
+                                             reinterpret_cast<void**>(&f5))) || !f5) {
+    return;
+  }
+  if (FAILED(f5->CreateInMemoryFontFileLoader(&mem_font_loader_)) || !mem_font_loader_) {
+    f5->Release();
+    return;
+  }
+  if (FAILED(f5->RegisterFontFileLoader(mem_font_loader_))) {
+    mem_font_loader_->Release();
+    mem_font_loader_ = nullptr;
+    f5->Release();
+    return;
+  }
+  IDWriteFontSetBuilder1* builder = nullptr;
+  if (SUCCEEDED(f5->CreateFontSetBuilder(&builder)) && builder) {
+    UINT added = 0;
+    for (const auto& entry : fs::directory_iterator(fonts_dir, ec)) {
+      if (ec || !entry.is_regular_file(ec)) continue;
+      if (entry.path().extension() != L".woff2") continue;
+      std::ifstream ifs(entry.path(), std::ios::binary | std::ios::ate);
+      if (!ifs.is_open()) continue;
+      const auto fsz = ifs.tellg();
+      if (fsz <= 0) continue;
+      std::vector<uint8_t> raw(static_cast<size_t>(fsz));
+      ifs.seekg(0, std::ios::beg);
+      if (!ifs.read(reinterpret_cast<char*>(raw.data()), fsz)) continue;
+
+      IDWriteFontFileStream* unpacked = nullptr;
+      if (FAILED(f5->UnpackFontFile(DWRITE_CONTAINER_TYPE_WOFF2, raw.data(),
+                                    static_cast<UINT32>(raw.size()), &unpacked)) ||
+          !unpacked) {
+        continue;
+      }
+      UINT64 out_sz = 0;
+      if (SUCCEEDED(unpacked->GetFileSize(&out_sz)) && out_sz > 0 &&
+          out_sz <= 32ull * 1024ull * 1024ull) {
+        const void* frag = nullptr;
+        void* frag_ctx = nullptr;
+        if (SUCCEEDED(unpacked->ReadFileFragment(&frag, 0, out_sz, &frag_ctx)) && frag) {
+          std::vector<uint8_t> sfnt(static_cast<const uint8_t*>(frag),
+                                    static_cast<const uint8_t*>(frag) +
+                                        static_cast<size_t>(out_sz));
+          unpacked->ReleaseFileFragment(frag_ctx);
+          IDWriteFontFile* ff = nullptr;
+          if (SUCCEEDED(mem_font_loader_->CreateInMemoryFontFileReference(
+                  f5, sfnt.data(), static_cast<UINT32>(sfnt.size()), nullptr, &ff)) &&
+              ff) {
+            if (SUCCEEDED(builder->AddFontFile(ff))) ++added;
+            ff->Release();
+          }
+        }
+      }
+      unpacked->Release();
+    }
+    if (added > 0) {
+      IDWriteFontSet* fset = nullptr;
+      if (SUCCEEDED(builder->CreateFontSet(&fset)) && fset) {
+        if (SUCCEEDED(f5->CreateFontCollectionFromFontSet(fset, &outfit_collection_)) &&
+            outfit_collection_) {
+          UINT32 idx = 0;
+          BOOL exists = FALSE;
+          outfit_loaded_ =
+              SUCCEEDED(outfit_collection_->FindFamilyName(L"Outfit", &idx, &exists)) &&
+              exists == TRUE;
+        }
+        fset->Release();
+      }
+    }
+    builder->Release();
+  }
+  f5->Release();
+  if (outfit_loaded_) {
+    CWLOG_INFO("D2dContext: 已从 resources/fonts 加载内置 Outfit 字体");
+  }
+}
+
+void D2dContext::init_skin_fallbacks() {
+  if (!dwrite_factory_) return;
+  IDWriteFactory2* f2 = nullptr;
+  if (FAILED(dwrite_factory_->QueryInterface(__uuidof(IDWriteFactory2),
+                                             reinterpret_cast<void**>(&f2))) || !f2) {
+    return;
+  }
+  IDWriteFontFallback* sys_fb = nullptr;
+  if (FAILED(f2->GetSystemFontFallback(&sys_fb)) || !sys_fb) {
+    f2->Release();
+    return;
+  }
+  static const DWRITE_UNICODE_RANGE kCjkRanges[] = {
+      {0x2E80, 0x9FFF},
+      {0xF900, 0xFAFF},
+      {0xFE30, 0xFE4F},
+      {0xFF00, 0xFFEF},
+      {0x20000, 0x2FA1F},
+  };
+  const wchar_t* kRetro3d[] = {L"SimHei", L"Microsoft YaHei"};
+  const wchar_t* kOriginal[] = {L"Microsoft YaHei"};
+  const wchar_t* kModernFlat[] = {L"DengXian", L"Microsoft YaHei"};
+  const wchar_t* kFrosted[] = {L"Microsoft YaHei Light", L"Microsoft YaHei"};
+  const wchar_t* kCyber[] = {L"NSimSun", L"Microsoft YaHei"};
+  const wchar_t* kMono[] = {L"KaiTi", L"SimSun", L"Microsoft YaHei"};
+  struct Spec {
+    theme::SkinId skin;
+    const wchar_t** fams;
+    UINT32 count;
+  };
+  const Spec specs[] = {
+      {theme::SkinId::Retro3d, kRetro3d, 2},
+      {theme::SkinId::Original, kOriginal, 1},
+      {theme::SkinId::ModernFlat, kModernFlat, 2},
+      {theme::SkinId::FrostedGlass, kFrosted, 2},
+      {theme::SkinId::Cyberpunk, kCyber, 2},
+      {theme::SkinId::Monochrome, kMono, 3},
+  };
+  for (const auto& sp : specs) {
+    IDWriteFontFallbackBuilder* fb_builder = nullptr;
+    if (FAILED(f2->CreateFontFallbackBuilder(&fb_builder)) || !fb_builder) continue;
+    // src: src/assets/styles/layout.scss:324-442
+    fb_builder->AddMapping(kCjkRanges, 5, sp.fams, sp.count, nullptr, nullptr, nullptr,
+                           1.0f);
+    fb_builder->AddMappings(sys_fb);
+    IDWriteFontFallback* fb = nullptr;
+    if (SUCCEEDED(fb_builder->CreateFontFallback(&fb)) && fb) {
+      skin_fallbacks_[static_cast<size_t>(sp.skin)] = fb;
+    }
+    fb_builder->Release();
+  }
+  sys_fb->Release();
+  f2->Release();
+}
 
 // ---------- D2dRenderTarget（IRenderTarget 实现） ----------
 D2dRenderTarget::D2dRenderTarget(D2dContext& ctx) : ctx_(ctx) {
@@ -298,21 +468,19 @@ bool font_installed(IDWriteFactory* f, const std::wstring& name) {
   return SUCCEEDED(hr) && exists == TRUE;
 }
 
-// 按候选链择一：首个本机已安装者胜出；全缺则回退 Segoe UI。
-std::wstring resolve_skin_font(IDWriteFactory* f,
-                                const std::vector<std::wstring>& cands) {
+// 按候选链择一：首选检查内置 Outfit，其余查系统字体集合；全缺回退 Segoe UI。
+std::wstring resolve_skin_font(const D2dContext& ctx,
+                               const std::vector<std::wstring>& cands) {
   for (const auto& c : cands) {
-    if (font_installed(f, c)) return c;
+    if (c == L"Outfit" && ctx.has_outfit_font()) return c;
+    if (font_installed(ctx.dwrite(), c)) return c;
   }
   return L"Segoe UI";
 }
 
-// V6：MUI 输入框行盒 = 23px 绝对值（InputBase 根 `lineHeight:'1.4375em'`
-//   在 16px 根字号下结算，见 docs/pixel-parity-audit.md P12）。
-//   Chromium 半行距模型：字面盒（ascent+descent）在行盒内居中，基线随之平移。
-//   DirectWrite 的 UNIFORM 行距按「行顶→基线」的绝对值摆放基线，因此用默认
-//   行距下首行的 baseline/height 反推（只取第 1 行，避免多行高度累加干扰）。
-//   lineGap≠0 的字体上误差为 lineGap/2，属亚像素级。
+// src: node_modules/@mui/material/InputBase/InputBase.js:76-78
+//   MUI 输入框行盒 = 23px 绝对值（`lineHeight:'1.4375em'` 在 16px 根字号下结算）；
+//   多行输入框显式给 line_h = 23，以 Chromium 半行距模型摆基线。
 void apply_line_spacing(IDWriteTextLayout* layout, const TextStyle& ts) {
   if (!layout || ts.line_h <= 0.0f) return;
   UINT32 count = 0;
@@ -327,19 +495,21 @@ void apply_line_spacing(IDWriteTextLayout* layout, const TextStyle& ts) {
 IDWriteTextFormat* D2dRenderTarget::format(const TextStyle& ts) {
   // 【SCALEFIX】1:1 物理像素：scale()=1.0，字号直接用 ts.size（12=12 物理），
   // 不 ×1.5 也不 /1.5；key 含 dpi_ 位仅为防御（现为常量）。
+  auto& theme = theme::ThemeService::instance();
+  const bool follow_skin = ts.font_family.empty();
   uint64_t key = static_cast<uint64_t>(static_cast<uint32_t>(ts.size * 4)) ^
                  (static_cast<uint64_t>(ts.weight) << 32) ^
                  (static_cast<uint64_t>(ts.italic) << 40) ^
-                 (static_cast<uint64_t>(static_cast<uint32_t>(dpi_)) << 48);
+                 (static_cast<uint64_t>(static_cast<uint32_t>(dpi_)) << 48) ^
+                 (static_cast<uint64_t>(follow_skin ? static_cast<int>(theme.skin()) + 1 : 0) << 56);
   // ★ §2.7 字体解析：font_family 为空 → 跟随当前皮肤
   //   （← Mini layout.scss:319 --control-font-family 全局生效）
   std::wstring family = ts.font_family;
-  if (family.empty()) {
-    auto& theme = theme::ThemeService::instance();
+  if (follow_skin) {
     family = theme.ui_font();
     if (family.empty()) {
-      // 首次解析：按候选链择一（本机字体存在性检测需 DirectWrite）
-      family = resolve_skin_font(ctx_.dwrite(),
+      // 首次解析：按候选链择一（优先内置 Outfit + 系统字体检测）
+      family = resolve_skin_font(ctx_,
                                  theme::skin_font_candidates(theme.skin()));
       theme.set_ui_font(family);
     }
@@ -354,12 +524,26 @@ IDWriteTextFormat* D2dRenderTarget::format(const TextStyle& ts) {
   auto it = formats_.find(key);
   if (it != formats_.end()) return it->second;
 
+  IDWriteFontCollection* coll =
+      (family == L"Outfit" && ctx_.outfit_collection())
+          ? static_cast<IDWriteFontCollection*>(ctx_.outfit_collection())
+          : nullptr;
   IDWriteTextFormat* f = nullptr;
   HRESULT hr = ctx_.dwrite()->CreateTextFormat(
-      family.c_str(), nullptr,
+      family.c_str(), coll,
       static_cast<DWRITE_FONT_WEIGHT>(ts.weight), DWRITE_FONT_STYLE_NORMAL,
       DWRITE_FONT_STRETCH_NORMAL, ts.size, L"", &f);
   if (FAILED(hr)) return nullptr;
+  if (follow_skin) {
+    if (IDWriteFontFallback* fb = ctx_.skin_fallback(theme.skin())) {
+      IDWriteTextFormat1* fmt1 = nullptr;
+      if (SUCCEEDED(f->QueryInterface(__uuidof(IDWriteTextFormat1),
+                                      reinterpret_cast<void**>(&fmt1))) && fmt1) {
+        fmt1->SetFontFallback(fb);
+        fmt1->Release();
+      }
+    }
+  }
   formats_.emplace(key, f);
   return f;
 }
@@ -379,6 +563,11 @@ SizeF D2dRenderTarget::measure_text(const std::wstring& text,
   h ^= static_cast<uint64_t>(static_cast<uint32_t>(ts.line_h * 4)) << 20;
   // 【FONTSIZE-FIX】测量结果随 dpi 变化（format 字号含 /scale），key 必须含 dpi
   h ^= static_cast<uint64_t>(static_cast<uint32_t>(dpi_)) << 56;
+  if (ts.font_family.empty()) {
+    h ^= static_cast<uint64_t>(static_cast<int>(theme::ThemeService::instance().skin()) + 1) << 33;
+  } else {
+    for (wchar_t ch : ts.font_family) { h ^= ch; h *= 1099511628211ull; }
+  }
   auto it = measure_cache_.find(h);
   if (it != measure_cache_.end()) return it->second;
 
@@ -605,6 +794,202 @@ void D2dRenderTarget::draw_line(const PointF& a, const PointF& b, const Pen& p) 
   if (br)
     active_rt_->DrawLine(D2D1::Point2F(a.x, a.y), D2D1::Point2F(b.x, b.y), br,
                          p.width);
+}
+
+void D2dRenderTarget::draw_dashed_line(const PointF& a, const PointF& b,
+                                       const Pen& p, float dash_len,
+                                       float gap_len) {
+  if (!active_rt_ || p.width <= 0.0f) return;
+  ID2D1SolidColorBrush* br = brush(p.color);
+  if (!br) return;
+  const float dashes[2] = {
+      dash_len > 0.0f ? dash_len / p.width : 4.0f,
+      gap_len > 0.0f ? gap_len / p.width : 4.0f,
+  };
+  ID2D1StrokeStyle* style = nullptr;
+  HRESULT hr = ctx_.d2d()->CreateStrokeStyle(
+      D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT,
+                                  D2D1_CAP_STYLE_FLAT, D2D1_LINE_JOIN_MITER,
+                                  10.0f, D2D1_DASH_STYLE_CUSTOM, 0.0f),
+      dashes, 2, &style);
+  active_rt_->DrawLine(D2D1::Point2F(a.x, a.y), D2D1::Point2F(b.x, b.y), br,
+                       p.width, SUCCEEDED(hr) ? style : nullptr);
+  if (style) style->Release();
+}
+
+void D2dRenderTarget::fill_polygon_vertical_gradient(
+    const PointF* pts, int count, float top_y, float bottom_y,
+    const Color4f& top_color, const Color4f& bottom_color) {
+  if (!active_rt_ || !pts || count < 3) return;
+  D2D1_GRADIENT_STOP gs[2]{};
+  gs[0].position = 0.0f;
+  gs[0].color = D2D1::ColorF(top_color.r, top_color.g, top_color.b, top_color.a);
+  gs[1].position = 1.0f;
+  gs[1].color = D2D1::ColorF(bottom_color.r, bottom_color.g, bottom_color.b,
+                             bottom_color.a);
+  ID2D1GradientStopCollection* coll = nullptr;
+  if (FAILED(active_rt_->CreateGradientStopCollection(gs, 2, &coll)) || !coll)
+    return;
+  ID2D1LinearGradientBrush* br = nullptr;
+  const float y1 = bottom_y > top_y + 0.5f ? bottom_y : top_y + 1.0f;
+  HRESULT hr = active_rt_->CreateLinearGradientBrush(
+      D2D1::LinearGradientBrushProperties(D2D1::Point2F(0.0f, top_y),
+                                          D2D1::Point2F(0.0f, y1)),
+      coll, &br);
+  coll->Release();
+  if (FAILED(hr) || !br) return;
+
+  ID2D1PathGeometry* path = nullptr;
+  ID2D1GeometrySink* sink = nullptr;
+  if (SUCCEEDED(ctx_.d2d()->CreatePathGeometry(&path)) && path &&
+      SUCCEEDED(path->Open(&sink)) && sink) {
+    sink->BeginFigure(D2D1::Point2F(pts[0].x, pts[0].y), D2D1_FIGURE_BEGIN_FILLED);
+    for (int i = 1; i < count; ++i) {
+      sink->AddLine(D2D1::Point2F(pts[i].x, pts[i].y));
+    }
+    sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+    sink->Close();
+    sink->Release();
+    active_rt_->FillGeometry(path, br);
+    path->Release();
+  }
+  br->Release();
+}
+
+void D2dRenderTarget::round_rect_corners(const RectF& r, float radius,
+                                         int corner_mask, const Pen& p,
+                                         const Brush* fill,
+                                         int border_sides_mask) {
+  if (!active_rt_ || r.w <= 0.0f || r.h <= 0.0f) return;
+  const int sides = border_sides_mask & 0xF;
+  if ((corner_mask & 0xF) == 0xF && sides == 0xF) {
+    round_rect(r, radius, p, fill);
+    return;
+  }
+  auto minf = [](float a, float b) { return a < b ? a : b; };
+  const float max_r = minf(r.w * 0.5f, r.h * 0.5f);
+  const float rad = radius > 0.0f ? minf(radius, max_r) : 0.0f;
+  const float rtl = (corner_mask & 1) ? rad : 0.0f;
+  const float rtr = (corner_mask & 2) ? rad : 0.0f;
+  const float rbr = (corner_mask & 4) ? rad : 0.0f;
+  const float rbl = (corner_mask & 8) ? rad : 0.0f;
+  const float x0 = r.x, y0 = r.y, x1 = r.right(), y1 = r.bottom();
+
+  auto add_arc = [](ID2D1GeometrySink* s, D2D1_POINT_2F pt, float cr) {
+    D2D1_ARC_SEGMENT seg{};
+    seg.point = pt;
+    seg.size = {cr, cr};
+    seg.rotationAngle = 0.0f;
+    seg.sweepDirection = D2D1_SWEEP_DIRECTION_CLOCKWISE;
+    seg.arcSize = D2D1_ARC_SIZE_SMALL;
+    s->AddArc(seg);
+  };
+
+  if (fill) {
+    ID2D1SolidColorBrush* br = brush(fill->color);
+    ID2D1PathGeometry* path = nullptr;
+    ID2D1GeometrySink* sink = nullptr;
+    if (br && SUCCEEDED(ctx_.d2d()->CreatePathGeometry(&path)) && path &&
+        SUCCEEDED(path->Open(&sink)) && sink) {
+      sink->BeginFigure(D2D1::Point2F(x0 + rtl, y0), D2D1_FIGURE_BEGIN_FILLED);
+      sink->AddLine(D2D1::Point2F(x1 - rtr, y0));
+      if (rtr > 0.0f) add_arc(sink, D2D1::Point2F(x1, y0 + rtr), rtr);
+      sink->AddLine(D2D1::Point2F(x1, y1 - rbr));
+      if (rbr > 0.0f) add_arc(sink, D2D1::Point2F(x1 - rbr, y1), rbr);
+      sink->AddLine(D2D1::Point2F(x0 + rbl, y1));
+      if (rbl > 0.0f) add_arc(sink, D2D1::Point2F(x0, y1 - rbl), rbl);
+      sink->AddLine(D2D1::Point2F(x0, y0 + rtl));
+      if (rtl > 0.0f) add_arc(sink, D2D1::Point2F(x0 + rtl, y0), rtl);
+      sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+      sink->Close();
+      sink->Release();
+      active_rt_->FillGeometry(path, br);
+      path->Release();
+    } else if (path) {
+      path->Release();
+    }
+  }
+
+  if (p.width > 0.0f && sides != 0) {
+    ID2D1SolidColorBrush* br = brush(p.color);
+    ID2D1PathGeometry* path = nullptr;
+    ID2D1GeometrySink* sink = nullptr;
+    if (br && SUCCEEDED(ctx_.d2d()->CreatePathGeometry(&path)) && path &&
+        SUCCEEDED(path->Open(&sink)) && sink) {
+      if (sides == 0xF) {
+        sink->BeginFigure(D2D1::Point2F(x0 + rtl, y0), D2D1_FIGURE_BEGIN_HOLLOW);
+        sink->AddLine(D2D1::Point2F(x1 - rtr, y0));
+        if (rtr > 0.0f) add_arc(sink, D2D1::Point2F(x1, y0 + rtr), rtr);
+        sink->AddLine(D2D1::Point2F(x1, y1 - rbr));
+        if (rbr > 0.0f) add_arc(sink, D2D1::Point2F(x1 - rbr, y1), rbr);
+        sink->AddLine(D2D1::Point2F(x0 + rbl, y1));
+        if (rbl > 0.0f) add_arc(sink, D2D1::Point2F(x0, y1 - rbl), rbl);
+        sink->AddLine(D2D1::Point2F(x0, y0 + rtl));
+        if (rtl > 0.0f) add_arc(sink, D2D1::Point2F(x0 + rtl, y0), rtl);
+        sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+      } else {
+        bool in_fig = false;
+        if (sides & 1) {
+          sink->BeginFigure(D2D1::Point2F(x0 + rtl, y0), D2D1_FIGURE_BEGIN_HOLLOW);
+          in_fig = true;
+          sink->AddLine(D2D1::Point2F(x1 - rtr, y0));
+          if ((sides & 2) && rtr > 0.0f)
+            add_arc(sink, D2D1::Point2F(x1, y0 + rtr), rtr);
+          if (!(sides & 2)) {
+            sink->EndFigure(D2D1_FIGURE_END_OPEN);
+            in_fig = false;
+          }
+        }
+        if (sides & 2) {
+          if (!in_fig) {
+            sink->BeginFigure(D2D1::Point2F(x1, y0 + rtr),
+                              D2D1_FIGURE_BEGIN_HOLLOW);
+            in_fig = true;
+          }
+          sink->AddLine(D2D1::Point2F(x1, y1 - rbr));
+          if ((sides & 4) && rbr > 0.0f)
+            add_arc(sink, D2D1::Point2F(x1 - rbr, y1), rbr);
+          if (!(sides & 4)) {
+            sink->EndFigure(D2D1_FIGURE_END_OPEN);
+            in_fig = false;
+          }
+        }
+        if (sides & 4) {
+          if (!in_fig) {
+            sink->BeginFigure(D2D1::Point2F(x1 - rbr, y1),
+                              D2D1_FIGURE_BEGIN_HOLLOW);
+            in_fig = true;
+          }
+          sink->AddLine(D2D1::Point2F(x0 + rbl, y1));
+          if ((sides & 8) && rbl > 0.0f)
+            add_arc(sink, D2D1::Point2F(x0, y1 - rbl), rbl);
+          if (!(sides & 8)) {
+            sink->EndFigure(D2D1_FIGURE_END_OPEN);
+            in_fig = false;
+          }
+        }
+        if (sides & 8) {
+          if (!in_fig) {
+            sink->BeginFigure(D2D1::Point2F(x0, y1 - rbl),
+                              D2D1_FIGURE_BEGIN_HOLLOW);
+            in_fig = true;
+          }
+          sink->AddLine(D2D1::Point2F(x0, y0 + rtl));
+          if ((sides & 1) && rtl > 0.0f)
+            add_arc(sink, D2D1::Point2F(x0 + rtl, y0), rtl);
+          sink->EndFigure(D2D1_FIGURE_END_OPEN);
+          in_fig = false;
+        }
+        if (in_fig) sink->EndFigure(D2D1_FIGURE_END_OPEN);
+      }
+      sink->Close();
+      sink->Release();
+      active_rt_->DrawGeometry(path, br, p.width);
+      path->Release();
+    } else if (path) {
+      path->Release();
+    }
+  }
 }
 
 // F-D11：MUI SVG path 扁平化后的多环填充（偶奇）。每环一个 FILLED+CLOSED

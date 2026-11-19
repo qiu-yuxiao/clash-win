@@ -40,6 +40,7 @@
 #include "../dropdown.h"
 #include "../icon_w.h"
 #include "../label.h"
+#include "../overlay_fade.h"
 #include "../scroll_list.h"
 #include "../segmented.h"
 #include "../slider.h"
@@ -117,6 +118,8 @@ class BasicCard : public Widget {
  public:
   BasicCard();
   void on_arrange(const RectF& area) override;
+  HCURSOR cursor(const PointF& local) const override;
+  bool on_mouse(const MouseEvent& e) override;
   SwitchW* sw_auto_launch_ = nullptr;
   SwitchW* sw_allow_lan_ = nullptr;
   SwitchW* sw_silent_start_ = nullptr;
@@ -141,6 +144,8 @@ class ThemeCard : public Widget {
   ThemeCard();
   void on_arrange(const RectF& area) override;
   void on_paint(IRenderTarget& rt) override;  // 页脚上方 dashed 分隔线
+  HCURSOR cursor(const PointF& local) const override;
+  bool on_mouse(const MouseEvent& e) override;
   std::vector<Button*> skin_buttons_;  // Mini 无（隐藏保留）
   Label* title_ = nullptr;             // 13px bold（theme-settings-card.tsx:156-167）
   Segmented* mode_seg_ = nullptr;      // 系统/浅色/深色
@@ -154,6 +159,54 @@ class ThemeCard : public Widget {
   Label* vibrancy_label_ = nullptr;
   Label* copyright_ = nullptr;         // 11px text.secondary
   Label* email_ = nullptr;             // 10px primary.main
+  bool footer_hover_ = false;
+  bool email_hover_ = false;
+};
+
+// ---------- 帮助弹窗（271px 左锚定 Modal Dialog） ----------
+// src: src/pages/_layout/components/help-menu-button.tsx:125-273
+class HelpDialog : public Widget {
+ public:
+  explicit HelpDialog(Widget* parent = nullptr);
+
+  void open(const std::vector<MenuItem>& items, std::function<void(int)> on_sel);
+  void close();
+  bool is_open() const { return open_; }
+
+  RectF card_rect() const { return card_rect_; }
+  RectF menu_rect() const { return card_rect_; }
+  RectF close_btn_rect() const { return btn_close_rect_; }
+
+  std::function<void()> on_dismiss;
+
+  void on_arrange(const RectF& area) override;
+  void on_paint(IRenderTarget& rt) override;
+  bool on_mouse(const MouseEvent& e) override;
+  bool on_key(const KeyEvent& e) override;
+
+  bool hit_self(PointF local) const override {
+    return open_ && local.x < std::min(theme::kPopupPaneWidth, bounds().w) &&
+           Widget::hit_self(local);
+  }
+  bool a11y_subtree_visible() const override { return open_ && visible() && !a11y_hidden(); }
+  bool a11y_is_modal() const override { return open_; }
+  A11yRole a11y_default_role() const override { return A11yRole::Dialog; }
+  std::wstring a11y_default_name() const override;
+
+ private:
+  bool open_ = false;
+  OverlayFade fade_;
+  std::vector<MenuItem> items_;
+  std::function<void(int)> on_select_;
+  std::vector<RectF> item_rects_;
+  std::vector<float> div_ys_;
+  RectF card_rect_{};
+  RectF title_rect_{};
+  RectF content_rect_{};
+  RectF btn_close_rect_{};
+  int hover_idx_ = -1;
+  bool hover_close_ = false;
+  bool pressed_close_ = false;
 };
 
 // ---------- 抽屉容器 ----------
@@ -164,6 +217,9 @@ class SettingsDrawer : public Stack {
 
   void set_open(bool open);  // 面板显隐（无遮罩，源码为条件渲染）
   bool is_open() const { return open_; }
+  void set_titlebar_hidden(bool hidden);
+  bool titlebar_hidden() const { return titlebar_hidden_; }
+  void detach_modals_to(Widget* host_root);
   bool bottom_row_visible_ = false;
 
   // 卡访问（测试/接线）
@@ -178,6 +234,8 @@ class SettingsDrawer : public Stack {
   // 宿主回调（命令链）
   std::function<void(const std::string& patch_key, const nlohmann::json& v)>
       on_patch_verge;
+  std::function<void(const std::string& fb, bool open_add_url_after)>
+      on_routing_change_async;
   // 流量接管模式切换（← _layout.tsx:1042-1114 handleTakeoverModeChange）：
   //   宿主负责 isTunModeAvailable 判定 / 试装 service / patchVerge / Notice；
   //   返回 false → 分段不回弹不改态（quick_bar.cpp:635-642 门）+ 宿主已 push 错误。
@@ -249,15 +307,16 @@ class SettingsDrawer : public Stack {
   Button* bottom_help_ = nullptr;
   Button* lang_btn_ = nullptr;
   ContextMenu* lang_menu_ = nullptr;  // 语言下拉（13 项）
-  ContextMenu* help_menu_ = nullptr;  // 帮助菜单（自绘，替代原生 HMENU）
+  HelpDialog* help_dialog_ = nullptr;  // 帮助与工具 Modal Dialog
   bool app_checking_ = false;   // F-D05：app 更新检查进行中
   bool core_checking_ = false;  // F-D05：内核更新检查进行中
-  ContextMenu* help_menu() const { return help_menu_; }
+  HelpDialog* help_menu() const { return help_dialog_; }
 
   // F-D05：检查更新进行中禁用对应菜单项（对齐 Mini
   //   help-menu-button.tsx:192,200 disabled={clientCheckLoading/coreCheckLoading}）
   void set_app_update_checking(bool checking);
   void set_core_update_checking(bool checking);
+  EditProfileModal* edit_profile_modal() const { return edit_profile_modal_; }
   DeleteProfileConfirmModal* delete_confirm_modal() const {
     return delete_confirm_modal_;
   }
@@ -298,6 +357,7 @@ class SettingsDrawer : public Stack {
   EditProfileModal* edit_profile_modal_ = nullptr;  // 编辑订阅（layout-dialogs.tsx:119-245）
   DeleteProfileConfirmModal* delete_confirm_modal_ = nullptr;  // BUG-390 删除二次确认
   bool open_ = false;
+  bool titlebar_hidden_ = false;
   bool skip_port_blur_save_ = false;
   bool close_btn_pressed_ = false;
   bool skin_prefs_dirty_ = false;

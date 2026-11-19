@@ -105,13 +105,9 @@ void MainScene::on_arrange(const RectF& area) {
 }
 
 void MainScene::on_paint(IRenderTarget& rt) {
-  // 占位底色：tauri 背景色口径（← dt.background_color，T13 场景填充后替换）
-  // 【T17-fix】on_paint 局部坐标约定：画 {0,0,w,h}（画 bounds() 会在
-  //   scene 不从 y=0 起时双重偏移——root 改 Column 流式后 scene y=30 暴露）
-  // src: _layout.tsx:1773 「background: 'inherit'」→ 继承 .layout 的 --theme-bg
-  //   （assets/styles/layout.scss:8 background: var(--theme-bg) !important）
-  rt.fill_rect({0, 0, bounds().w, bounds().h},
-               Brush{theme::ThemeService::instance().vars().theme_bg});
+  // src: pages/_layout.tsx:1293 .layout-content 透明承接 .layout theme_bg 与 .layout::before 极光
+  // 底色由 MainWindow::paint_window 先铺 theme_bg + 极光，本层不铺不透明底色避免遮挡极光
+  (void)rt;
 }
 
 }  // namespace clashwin::ui::win

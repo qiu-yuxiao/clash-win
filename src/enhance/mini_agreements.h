@@ -1,7 +1,7 @@
 #pragma once
 // ← ClashVerge src-tauri/src/enhance/mod.rs::enforce_mini_agreements 全量移植
 // ① dummy/无效 server 节点过滤（不入组，节点定义保留）→ ② 注入 PROXY(select)
-// + PROXY__METRICS(url-test, interval 300) → ③ gfwlist rule-provider →
+// + PROXY__METRICS(url-test, interval 1800, lazy true) + 远端 provider health-check lazy:true → ③ gfwlist rule-provider →
 // ④ 规则链（prepend + RULE-SET,gfwlist + 私网 DIRECT 全套
 // + append + GEOIP,CN / MATCH 方向随 rule_fallback；DNS PROXY 规则由 sanitize_dns_upstreams 统一注入）。
 #include <string>

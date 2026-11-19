@@ -51,7 +51,6 @@ class TextField : public Widget {
   // 台账 1029 调用点清单（只在这些点开，通用控件不全局开）：
   //   - node_list.cpp 节点搜索（← proxy-head.tsx:149 BaseSearchBox）
   //   - connections_panel.cpp 连接面板搜索（← connections-panel.tsx:182）
-  //   - connections_view.cpp 连接页搜索（同一 connections-panel 搜索语义）
   //   - profile_import_card URL / 设置端口等普通 TextField 不传 onClear → 保持关
   void set_clear_button(bool on, std::wstring tooltip = tr("shared.placeholders.resetInput"));
   bool clear_button() const { return clear_button_; }
@@ -106,6 +105,21 @@ class TextField : public Widget {
   // 调用点：各处创建 TextField 后统一调用，替代手写 bg_/border_ 字面量。
   void apply_theme();
 
+  // src: pages/_layout/components/profile-import-card.tsx:140,164
+  //   & add-url-dialog.tsx:222 minRows/maxRows 多行自适应高度与滚轮
+  void set_multiline(bool multi, int min_rows = 1, int max_rows = 4);
+  void set_multiline_padding_y(float py) {
+    multiline_pad_y_ = py;
+    invalidate();
+  }
+  void set_padding_x(float px) {
+    pad_x_ = px;
+    invalidate();
+  }
+  int min_rows() const { return min_rows_; }
+  int max_rows() const { return max_rows_; }
+  float preferred_height(float width) const;
+
   SizeF on_measure(float max_w, float max_h) override;
   bool on_mouse(const MouseEvent& e) override;
   bool on_key(const KeyEvent& e) override;
@@ -115,6 +129,7 @@ class TextField : public Widget {
   TextStyle style_;
   Color4f bg_ = Color4f::hex(0xFFFFFF);  // src: MUI background.paper #fff
   Color4f border_ = Color4f::hex(0x000000, 0.23f);  // src: MUI OutlinedInput 23%
+  Color4f border_hover_{0, 0, 0, 0};
   Color4f border_focused_ = Color4f::hex(0x007AFF);  // ← 聚焦主色缺省（主题注入前）
   // src: index.scss:28-31 ::selection { color: var(--selection-color);
   //      background-color: var(--primary-main); } → 不透明主色底（非 25% alpha）
@@ -147,6 +162,7 @@ class TextField : public Widget {
   void erase_selection();
   bool has_selection() const;
   int hit_index(float x);  // x → 光标 index（前缀宽测量）
+  int hit_index_xy(float x, float y);
   void clamp_scroll();
   // 光标 index 的像素 x（局部，含 scroll 偏移）
   float cursor_x(int index);
@@ -159,6 +175,12 @@ class TextField : public Widget {
   int cursor_ = 0;
   int anchor_ = 0;
   float scroll_x_ = 0;
+  float scroll_y_ = 0;
+  float multiline_pad_y_ = 4.0f;  // ← profile-import-card.tsx:160-161 py:4px
+  float pad_x_ = 8.0f;            // ← MUI OutlinedInput horizontal padding
+  int min_rows_ = 1;
+  int max_rows_ = 4;
+  bool hover_ = false;
   bool clear_button_ = false;
   bool clear_hover_ = false;
   bool enter_hover_ = false;

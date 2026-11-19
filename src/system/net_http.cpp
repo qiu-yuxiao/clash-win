@@ -1198,6 +1198,8 @@ Result<void> http_download_file(
 
   std::string current_url = url;
   int redirects = 0;
+  bool first_leg = true;
+  std::optional<std::string> auth_header;
   for (;;) {
     if (cancel_signaled(opts.cancel_event)) {
       WinHttpCloseHandle(session);
@@ -1216,6 +1218,12 @@ Result<void> http_download_file(
         return Result<void>::err(sv.error());
       }
     }
+    if (first_leg && (!parts.username.empty() || !parts.password.empty())) {
+      std::string user = util::percent_decode(parts.username);
+      std::string pass = util::percent_decode(parts.password);
+      auth_header = "Basic " + util::encode_base64(user + ":" + pass);
+    }
+    first_leg = false;
     const bool is_https = parts.scheme == "https";
 
     HINTERNET connect = WinHttpConnect(session,
@@ -1254,24 +1262,72 @@ Result<void> http_download_file(
     const int connect_ms = static_cast<int>(std::min<uint64_t>(timeout_s, 10) * 1000);
     WinHttpSetTimeouts(request, connect_ms, connect_ms, total_ms, total_ms);
 
+    WinHttpReqContext req_ctx{};
+    req_ctx.accept_invalid_certs = is_https && opts.accept_invalid_certs;
+    req_ctx.ssrf_guard_direct =
+        !proxy && (opts.ssrf_guard || opts.ssrf_connect_only_for_test);
+    req_ctx.request_slot = &request;
+
+    const bool use_status_cb =
+        req_ctx.accept_invalid_certs || req_ctx.ssrf_guard_direct;
+    DWORD_PTR cb_ctx = 0;
+    if (use_status_cb) {
+      cb_ctx = reinterpret_cast<DWORD_PTR>(&req_ctx);
+      WinHttpSetOption(request, WINHTTP_OPTION_CONTEXT_VALUE, &cb_ctx,
+                       sizeof(cb_ctx));
+      WinHttpSetStatusCallback(
+          request, winhttp_status_callback,
+          WINHTTP_CALLBACK_STATUS_CONNECTING_TO_SERVER |
+              WINHTTP_CALLBACK_STATUS_CONNECTED_TO_SERVER |
+              WINHTTP_CALLBACK_STATUS_SENDING_REQUEST,
+          0);
+    }
+
+    auto close_dl_handles = [&]() {
+      if (request) {
+        if (use_status_cb) {
+          WinHttpSetStatusCallback(request, nullptr, 0, 0);
+        }
+        WinHttpCloseHandle(request);
+        request = nullptr;
+      }
+      if (connect) {
+        WinHttpCloseHandle(connect);
+        connect = nullptr;
+      }
+    };
+
     std::string req_headers = "User-Agent: " + ua + "\r\n";
+    if (auth_header) req_headers += "Authorization: " + *auth_header + "\r\n";
     std::wstring headers_w = utf8_to_utf16(req_headers);
-    if (!WinHttpSendRequest(request, headers_w.c_str(),
-                            static_cast<DWORD>(headers_w.size()),
-                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
-        !WinHttpReceiveResponse(request, nullptr)) {
+    const BOOL sent = WinHttpSendRequest(request, headers_w.c_str(),
+                                         static_cast<DWORD>(headers_w.size()),
+                                         WINHTTP_NO_REQUEST_DATA, 0, 0, cb_ctx);
+    if (req_ctx.ssrf_blocked) {
+      close_dl_handles();
+      WinHttpCloseHandle(session);
+      return Result<void>::err(Error{
+          40,
+          "cannot fetch subscription from private/loopback IP (DNS rebinding blocked)"});
+    }
+    if (!sent || !WinHttpReceiveResponse(request, nullptr)) {
+      if (req_ctx.ssrf_blocked) {
+        close_dl_handles();
+        WinHttpCloseHandle(session);
+        return Result<void>::err(Error{
+            40,
+            "cannot fetch subscription from private/loopback IP (DNS rebinding blocked)"});
+      }
       Error e{33, "Request failed: " + last_error_msg("WinHttpSendRequest",
                                                       GetLastError())};
-      WinHttpCloseHandle(request);
-      WinHttpCloseHandle(connect);
+      close_dl_handles();
       WinHttpCloseHandle(session);
       return Result<void>::err(std::move(e));
     }
 
     auto hr = receive_headers(request);
     if (!hr.is_ok()) {
-      WinHttpCloseHandle(request);
-      WinHttpCloseHandle(connect);
+      close_dl_handles();
       WinHttpCloseHandle(session);
       return Result<void>::err(hr.error());
     }
@@ -1279,16 +1335,26 @@ Result<void> http_download_file(
     if ((raw.status == 301 || raw.status == 302 || raw.status == 303 ||
          raw.status == 307 || raw.status == 308) &&
         !raw.locations.empty() && redirects < opts.max_redirects) {
-      current_url = absolutize(parts, raw.locations.front());
+      std::string next = absolutize(parts, raw.locations.front());
+      auto np = parse_http_url(next);
+      if (!np.is_ok()) {
+        close_dl_handles();
+        WinHttpCloseHandle(session);
+        return Result<void>::err(Error{34, "invalid redirect location"});
+      }
+      if (np.value().host != parts.host ||
+          np.value().effective_port() != parts.effective_port() ||
+          np.value().scheme != parts.scheme) {
+        auth_header.reset();
+      }
+      current_url = next;
       ++redirects;
-      WinHttpCloseHandle(request);
-      WinHttpCloseHandle(connect);
+      close_dl_handles();
       continue;
     }
     if (raw.status < 200 || raw.status > 299) {
       std::string msg = "HTTP status error: " + std::to_string(raw.status);
-      WinHttpCloseHandle(request);
-      WinHttpCloseHandle(connect);
+      close_dl_handles();
       WinHttpCloseHandle(session);
       return Result<void>::err(Error{33, msg});
     }
@@ -1304,11 +1370,15 @@ Result<void> http_download_file(
         break;
       }
     }
+    if (opts.max_response_bytes > 0 && total > opts.max_response_bytes) {
+      close_dl_handles();
+      WinHttpCloseHandle(session);
+      return Result<void>::err(Error{36, "response too large"});
+    }
 
     std::ofstream out(dest_path, std::ios::binary | std::ios::trunc);
     if (!out.is_open()) {
-      WinHttpCloseHandle(request);
-      WinHttpCloseHandle(connect);
+      close_dl_handles();
       WinHttpCloseHandle(session);
       return Result<void>::err(Error{31, "failed to open destination file"});
     }
@@ -1318,16 +1388,14 @@ Result<void> http_download_file(
     for (;;) {
       if (cancel_signaled(opts.cancel_event)) {
         out.close();
-        WinHttpCloseHandle(request);
-        WinHttpCloseHandle(connect);
+        close_dl_handles();
         WinHttpCloseHandle(session);
         return Result<void>::err(Error{39, "request cancelled"});
       }
       DWORD avail = 0;
       if (!WinHttpQueryDataAvailable(request, &avail)) {
         out.close();
-        WinHttpCloseHandle(request);
-        WinHttpCloseHandle(connect);
+        close_dl_handles();
         WinHttpCloseHandle(session);
         return Result<void>::err(Error{35, "Stream read error: " +
                                            last_error_msg("WinHttpQueryDataAvailable",
@@ -1338,19 +1406,23 @@ Result<void> http_download_file(
       DWORD got = 0;
       if (!WinHttpReadData(request, buf.data(), avail, &got)) {
         out.close();
-        WinHttpCloseHandle(request);
-        WinHttpCloseHandle(connect);
+        close_dl_handles();
         WinHttpCloseHandle(session);
         return Result<void>::err(Error{35, "Stream read error: " +
                                            last_error_msg("WinHttpReadData",
                                                           GetLastError())});
       }
-      if (got > 0) out.write(buf.data(), got);
       downloaded += got;
+      if (opts.max_response_bytes > 0 && downloaded > opts.max_response_bytes) {
+        out.close();
+        close_dl_handles();
+        WinHttpCloseHandle(session);
+        return Result<void>::err(Error{36, "response exceeded max size"});
+      }
+      if (got > 0) out.write(buf.data(), got);
       if (out.bad()) {
         out.close();
-        WinHttpCloseHandle(request);
-        WinHttpCloseHandle(connect);
+        close_dl_handles();
         WinHttpCloseHandle(session);
         return Result<void>::err(Error{31, "failed to write download chunk"});
       }
@@ -1358,8 +1430,7 @@ Result<void> http_download_file(
     }
     out.close();
 
-    WinHttpCloseHandle(request);
-    WinHttpCloseHandle(connect);
+    close_dl_handles();
     WinHttpCloseHandle(session);
     return Result<void>::ok();
   }

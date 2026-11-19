@@ -211,8 +211,10 @@ UT_TEST(v350_ui_node_data_fake_filter_bug387_and_pretest_ttl) {
   UT_CHECK(nd.load());
   UT_CHECK_EQ(nd.row_delay("hk-good"), 88);
 
-  // 超 10 分钟陈旧历史不回落 -> 判死 0
+  // BUG-399: 45 分钟窗口内(11m) 仍有效，超 45 分钟陈旧历史不回落 -> 判死 0
   clock_ms = make_utc_epoch_ms(2026, 11, 16, 12, 12, 0);
+  UT_CHECK_EQ(nd.row_delay("hk-good"), 88);
+  clock_ms = make_utc_epoch_ms(2026, 11, 16, 12, 47, 0);
   UT_CHECK_EQ(nd.row_delay("hk-good"), 0);
 
   // 2) -2 前置时间戳保留与复用指标 TTL 钳制（from_probe=false）

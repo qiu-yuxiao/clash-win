@@ -2,6 +2,10 @@
 
 #include <windows.h>
 #include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <ctime>
 
 #include "ui/button_draw.h"
 #include "ui/card_draw.h"
@@ -10,6 +14,7 @@
 #include "util/parse_traffic.h"
 #include "util/utf.h"
 #include "ui/i18n_text.h"  // F-D01
+#include "i18n/i18n.h"
 #include "core/connection_stale.h"  // BUG-396
 
 namespace clashwin::ui::scene {
@@ -32,7 +37,115 @@ std::wstring upper_ascii_w(const std::wstring& s) {
   }
   return out;
 }
+
+bool parse_timestamp_epoch_ms(const std::string& raw, int64_t* out_ms) {
+  if (!out_ms || raw.size() < 19) return false;
+  int yr = 0, mo = 0, dy = 0, hr = 0, mn = 0, sc = 0;
+  char sep = 0;
+  int consumed = 0;
+  if (std::sscanf(raw.c_str(), "%d-%d-%d%c%d:%d:%d%n",
+                  &yr, &mo, &dy, &sep, &hr, &mn, &sc, &consumed) < 7) {
+    return false;
+  }
+  if (sep != 'T' && sep != 't' && sep != ' ') return false;
+  std::tm tm_val{};
+  tm_val.tm_year = yr - 1900;
+  tm_val.tm_mon = mo - 1;
+  tm_val.tm_mday = dy;
+  tm_val.tm_hour = hr;
+  tm_val.tm_min = mn;
+  tm_val.tm_sec = sc;
+  tm_val.tm_isdst = -1;
+
+  std::string rest = raw.substr(static_cast<size_t>(consumed));
+  // Skip fractional seconds like .123456
+  if (!rest.empty() && rest[0] == '.') {
+    size_t i = 1;
+    while (i < rest.size() && rest[i] >= '0' && rest[i] <= '9') ++i;
+    rest = rest.substr(i);
+  }
+  if (!rest.empty() && (rest[0] == 'Z' || rest[0] == 'z')) {
+    tm_val.tm_isdst = 0;
+    const std::time_t t = _mkgmtime(&tm_val);
+    if (t == static_cast<std::time_t>(-1)) return false;
+    *out_ms = static_cast<int64_t>(t) * 1000;
+    return true;
+  }
+  if (!rest.empty() && (rest[0] == '+' || rest[0] == '-')) {
+    const int sign = (rest[0] == '-') ? -1 : 1;
+    int oh = 0, om = 0;
+    if (std::sscanf(rest.c_str() + 1, "%d:%d", &oh, &om) == 2 ||
+        std::sscanf(rest.c_str() + 1, "%2d%2d", &oh, &om) >= 1) {
+      tm_val.tm_isdst = 0;
+      const std::time_t t = _mkgmtime(&tm_val);
+      if (t == static_cast<std::time_t>(-1)) return false;
+      const int64_t offset_sec = static_cast<int64_t>(sign) * (oh * 3600 + om * 60);
+      *out_ms = (static_cast<int64_t>(t) - offset_sec) * 1000;
+      return true;
+    }
+  }
+  const std::time_t t = std::mktime(&tm_val);
+  if (t == static_cast<std::time_t>(-1)) return false;
+  *out_ms = static_cast<int64_t>(t) * 1000;
+  return true;
+}
+
+std::wstring format_dayjs_from_now(const std::string& raw, int64_t now_epoch_ms) {
+  if (raw.empty()) return L"--";
+  int64_t start_ms = 0;
+  if (!parse_timestamp_epoch_ms(raw, &start_ms)) {
+    return utf::utf8_to_utf16(raw);
+  }
+  const double diff_ms = static_cast<double>(now_epoch_ms - start_ms);
+  const bool is_future = diff_ms < 0.0;
+  const double sec = std::abs(diff_ms) / 1000.0;
+  const double mins = std::round(sec / 60.0);
+  const double hrs = std::round(sec / 3600.0);
+  const double days = std::round(sec / 86400.0);
+  const double mons = std::round(days / 30.436875);
+  const double yrs = std::round(days / 365.25);
+
+  const std::string lang = i18n::I18n::instance().language();
+  const bool zh = (lang.rfind("zh", 0) == 0);
+  std::wstring body;
+  if (sec < 45.0) {
+    body = zh ? L"几秒" : L"a few seconds";
+  } else if (sec < 90.0) {
+    body = zh ? L"1 分钟" : L"a minute";
+  } else if (mins < 45.0) {
+    body = std::to_wstring(static_cast<long long>(mins)) +
+           (zh ? L" 分钟" : L" minutes");
+  } else if (mins < 90.0) {
+    body = zh ? L"1 小时" : L"an hour";
+  } else if (hrs < 22.0) {
+    body = std::to_wstring(static_cast<long long>(hrs)) +
+           (zh ? L" 小时" : L" hours");
+  } else if (hrs < 36.0) {
+    body = zh ? L"1 天" : L"a day";
+  } else if (days < 26.0) {
+    body = std::to_wstring(static_cast<long long>(days)) +
+           (zh ? L" 天" : L" days");
+  } else if (days < 46.0) {
+    body = zh ? L"1 个月" : L"a month";
+  } else if (mons < 11.0) {
+    body = std::to_wstring(static_cast<long long>(std::max(1.0, mons))) +
+           (zh ? L" 个月" : L" months");
+  } else if (mons < 18.0) {
+    body = zh ? L"1 年" : L"a year";
+  } else {
+    body = std::to_wstring(static_cast<long long>(std::max(1.0, yrs))) +
+           (zh ? L" 年" : L" years");
+  }
+  if (zh) return is_future ? (body + L"内") : (body + L"前");
+  return is_future ? (L"in " + body) : (body + L" ago");
+}
 }  // namespace
+
+int64_t ConnectionDetailDialog::default_now_epoch_ms() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::system_clock::now().time_since_epoch())
+      .count();
+}
 
 ConnectionDetailDialog::ConnectionDetailDialog(Widget* parent) : Widget(parent) {
   set_z_order(950);
@@ -42,6 +155,7 @@ void ConnectionDetailDialog::open(const ConnItem& item, bool closed, const RectF
   item_ = item;
   closed_ = closed;
   anchor_global_ = anchor_global;
+  scroll_y_ = 0.0f;
   open_ = true;
   if (bounds().w > 0 && bounds().h > 0) place_card();
   invalidate();
@@ -136,9 +250,11 @@ std::vector<std::pair<std::wstring, std::wstring>> ConnectionDetailDialog::field
   // 8. process → 进程
   res.emplace_back(tr("connections.components.fields.process"), utf::utf8_to_utf16(item_.process_formatted()));
 
-  // 9. time → 连接时间
-  res.emplace_back(tr("connections.components.fields.time"),
-                   utf::utf8_to_utf16(item_.start.empty() ? std::string("--") : item_.start));
+  // 9. time → 连接时间（// src: components/connection/connection-detail.tsx:178 dayjs.fromNow）
+  res.emplace_back(
+      tr("connections.components.fields.time"),
+      format_dayjs_from_now(item_.start,
+                            now_ms_ ? now_ms_() : default_now_epoch_ms()));
 
   // 10. source → 源地址
   std::string src = item_.metadata.source_ip.empty()
@@ -186,25 +302,43 @@ void ConnectionDetailDialog::place_card() {
   const RectF area = bounds();
   const float kMargin = 16.0f;  // src: MUI Popper marginThreshold 默认 16
   // src: connection-detail.tsx:56-62 纸面 maxWidth 520 / maxHeight 480 / p 2(16)；
-  // 内容 = 字段行（根 Box fontSize 12 / body1 行高 1.4 / gap 0.75）+ 底部关闭区
+  // 内容 = 字段行（根 Box fontSize 12 / body1 行高 1.4 / gap 0.75，长字段折行 + 滚动）+ 底部关闭区
   constexpr float kPad = kDetailPad;
   constexpr float kRowH = kDetailRowH;
   constexpr float kGap = kDetailGap;
-  const float rows = static_cast<float>(fields().size());
+  const auto f_list = fields();
   const bool can_close_conn = !closed_ && !item_.is_synthetic;
   // 关闭区 ← :196-199：mt 1(8) + pt 1.25(10) + borderTop 1px，内含 size="small" 按钮
   // （MUI Button small：padding '4px 10px' / lineHeight 1.75 / 字号沿用 13px）
   const auto err_paint = theme::ThemeService::instance().button_paint("error");
   const float btn_h = 13.0f * 1.75f + kDetailBtnPadY * 2.0f + err_paint.border_w * 2.0f;
   const float close_sec_h = can_close_conn ? (8.0f + 10.0f + 1.0f + btn_h) : 0.0f;
-  // 此前这里把「查看详情」标题与分隔线计入高度（36/34 的魔法数），Mini 的 Popover
-  // 里两者都不存在（:207-247 只有字段行 + 关闭区）。
-  float content_h = kPad * 2.0f + rows * kRowH + std::max(0.0f, rows - 1.0f) * kGap;
-  if (can_close_conn) content_h += kGap + close_sec_h;
 
   float cw = std::min(area.w - 2 * kMargin, 520.0f);
-  float ch = std::min(area.h - 2 * kMargin, std::min(480.0f, content_h));
   if (cw < 180.0f) cw = area.w;
+  const float value_w =
+      std::max(20.0f, cw - kPad * 2.0f - kDetailLabelW - 8.0f);
+
+  TextStyle wrap_ts;
+  wrap_ts.size = 12.0f;  // src: components/connection/connection-detail.tsx:207
+  wrap_ts.wrap = true;
+  ITextEngine* eng = text_engine();
+  float rows_total_h = 0.0f;
+  for (size_t i = 0; i < f_list.size(); ++i) {
+    float rh = kRowH;
+    if (eng && !f_list[i].second.empty()) {
+      const float mh = eng->measure_text(f_list[i].second, wrap_ts, value_w).h;
+      if (mh > rh) rh = mh;
+    }
+    rows_total_h += rh;
+    if (i + 1 < f_list.size()) rows_total_h += kGap;
+  }
+  content_h_ = rows_total_h;
+
+  float total_h = kPad * 2.0f + rows_total_h;
+  if (can_close_conn) total_h += kGap + close_sec_h;
+
+  float ch = std::min(area.h - 2 * kMargin, std::min(480.0f, total_h));
   if (ch < 200.0f) ch = area.h;
 
   float x = 0.0f;
@@ -239,16 +373,24 @@ void ConnectionDetailDialog::place_card() {
   // 关闭连接按钮：右对齐（← :196 textAlign: right），宽 = 文字 + px 10×2（small 按钮）
   float btn_w = 0.0f;
   const std::wstring btn_label = tr("connections.components.actions.closeConnection");
-  if (ITextEngine* e = text_engine()) {
+  if (eng) {
     TextStyle ts;
     ts.size = 13.0f;
     ts.weight = err_paint.weight;
-    btn_w = e->measure_text(btn_label, ts, 0).w;
+    btn_w = eng->measure_text(btn_label, ts, 0).w;
   }
   btn_w = std::min(btn_w + kDetailBtnPadX * 2.0f, std::max(40.0f, cw - kPad * 2.0f));
   const float btn_y = y + ch - kPad - btn_h;
   btn_close_conn_rect_ = {x + cw - kPad - btn_w, btn_y, btn_w, btn_h};
   btn_dismiss_rect_ = {0, 0, 0, 0};  // Mini 无独立关闭按钮（点外部关闭）
+
+  const float rows_top = card_rect_.y + kPad;
+  const float rows_bottom =
+      can_close_conn ? (btn_close_conn_rect_.y - 11.0f - kGap)
+                     : (card_rect_.bottom() - kPad);
+  viewport_h_ = std::max(0.0f, rows_bottom - rows_top);
+  const float max_scroll = std::max(0.0f, content_h_ - viewport_h_);
+  scroll_y_ = std::clamp(scroll_y_, 0.0f, max_scroll);
 }
 
 void ConnectionDetailDialog::on_paint(IRenderTarget& rt) {
@@ -271,10 +413,8 @@ void ConnectionDetailDialog::on_paint(IRenderTarget& rt) {
   ::clashwin::ui::draw_card(rt, card_rect_, card_paint);
 
   // 3. 字段行（← connection-detail.tsx:207-247：Popover 里没有标题、没有分隔线，
-  //    p 2 之后直接就是字段列表）
+  //    p 2 之后直接就是字段列表，长文本 wordBreak: break-all + overflowY: auto）
   auto f_list = fields();
-  float row_y = card_rect_.y + kDetailPad;
-  const float row_h = kDetailRowH;
   const float label_x = card_rect_.x + kDetailPad;
   const float value_x = label_x + kDetailLabelW + 8.0f;  // ← :211 gap: 1(8)
   const float value_w = std::max(20.0f, card_rect_.w - kDetailPad * 2.0f -
@@ -283,35 +423,52 @@ void ConnectionDetailDialog::on_paint(IRenderTarget& rt) {
   label_ts.size = 12.0f;  // src: :157 fontSize 12
   label_ts.weight = static_cast<int>(Weight::Bold);  // src: :212 <b>
   label_ts.color = tokens.secondary_text;  // src: :159
-  label_ts.align_v = AlignV::Center;
+  label_ts.align_v = AlignV::Top;
 
   TextStyle val_ts;
   val_ts.size = 12.0f;  // src: :157
   val_ts.color = tokens.primary_text;  // src: :231
-  val_ts.align_v = AlignV::Center;
-  val_ts.ellipsis = true;
+  val_ts.align_v = AlignV::Top;
+  val_ts.wrap = true;  // src: connection-detail.tsx:221 wordBreak: 'break-all'
 
   const bool stale_warning = is_stale_proxy_node();
   const bool can_close_conn = !closed_ && !item_.is_synthetic;
+  const float rows_top = card_rect_.y + kDetailPad;
   const float rows_bottom =
-      can_close_conn ? btn_close_conn_rect_.y - 11.0f  // ← :198 pt 1.25(10) + borderTop 1px
-                     : card_rect_.bottom() - kDetailPad;
+      can_close_conn ? (btn_close_conn_rect_.y - 11.0f - kDetailGap)
+                     : (card_rect_.bottom() - kDetailPad);
+  const float clip_h = std::max(0.0f, rows_bottom - rows_top);
+  viewport_h_ = clip_h;
+
+  rt.push_clip({card_rect_.x + 1.0f, rows_top, card_rect_.w - 2.0f, clip_h});
+  float row_y = rows_top - scroll_y_;
+  float total_measured = 0.0f;
   size_t row_idx = 0;
+  ITextEngine* eng = text_engine();
   for (const auto& [lbl, val] : f_list) {
-    if (row_y + row_h > rows_bottom) break;
-    // label minWidth 100 + gap 1(=8px) → value 起点 = label 起点 + 108
-    // src: connection-detail.tsx:211-212
-    rt.draw_text(lbl + L":", {label_x, row_y, kDetailLabelW, row_h}, label_ts);
-    // BUG-396（connection-detail.tsx:219-224）：旧节点连接值用 warning 色 + 600 字重
-    TextStyle row_val_ts = val_ts;
-    if (row_idx == 1 && stale_warning) {
-      row_val_ts.color = tokens.warning_color;
-      row_val_ts.weight = 600;
+    float rh = kDetailRowH;
+    if (eng && !val.empty()) {
+      const float mh = eng->measure_text(val, val_ts, value_w).h;
+      if (mh > rh) rh = mh;
     }
-    rt.draw_text(val, {value_x, row_y, value_w, row_h}, row_val_ts);
-    row_y += row_h + kDetailGap;
+    if (row_y + rh >= rows_top && row_y <= rows_bottom) {
+      // label minWidth 100 + gap 1(=8px) → value 起点 = label 起点 + 108
+      // src: connection-detail.tsx:211-212
+      rt.draw_text(lbl + L":", {label_x, row_y, kDetailLabelW, kDetailRowH}, label_ts);
+      // BUG-396（connection-detail.tsx:219-224）：旧节点连接值用 warning 色 + 600 字重
+      TextStyle row_val_ts = val_ts;
+      if (row_idx == 1 && stale_warning) {
+        row_val_ts.color = tokens.warning_color;
+        row_val_ts.weight = 600;
+      }
+      rt.draw_text(val, {value_x, row_y, value_w, rh}, row_val_ts);
+    }
+    row_y += rh + kDetailGap;
+    total_measured += rh + (row_idx + 1 < f_list.size() ? kDetailGap : 0.0f);
     ++row_idx;
   }
+  content_h_ = total_measured;
+  rt.pop_clip();
 
   // 4. 关闭区：上边框 + 右对齐按钮（← connection-detail.tsx:196-245）
   if (can_close_conn) {
@@ -338,6 +495,17 @@ bool ConnectionDetailDialog::on_mouse(const MouseEvent& e) {
   if (!open_) return false;
 
   PointF pt = e.pos;
+
+  if (e.type == MouseEventType::Wheel) {
+    if (!card_rect_.contains(pt.x, pt.y)) return false;
+    const float max_s = std::max(0.0f, content_h_ - viewport_h_);
+    if (max_s <= 0.0f) return true;
+    // src: components/connection/connection-detail.tsx:62 overflowY auto 36px/tick
+    const float ticks = static_cast<float>(e.wheel_delta) / 120.0f;
+    scroll_y_ = std::clamp(scroll_y_ - ticks * 36.0f, 0.0f, max_s);
+    invalidate();
+    return true;
+  }
 
   if (e.type == MouseEventType::Move) {
     const bool can_close_conn = !closed_ && !item_.is_synthetic;

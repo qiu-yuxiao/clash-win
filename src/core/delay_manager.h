@@ -40,6 +40,12 @@ struct DelayProbeHooks {
   std::function<std::optional<std::map<std::string, uint32_t>>(
       const std::string& metrics_group)>
       group_probe;
+  // BUG-401：扩展测量组拨测钩子，显式携带 expected_nodes / allow_coalesce / allow_single_target_skip
+  std::function<std::optional<std::map<std::string, uint32_t>>(
+      const std::string& metrics_group,
+      const std::vector<std::string>& expected_nodes, bool allow_coalesce,
+      bool allow_single_target_skip)>
+      group_probe_ex;
   // backend-delay-results 批量注入（payload {group, results, fromProbe} 组装+发布）
   std::function<void(const std::string& group,
                      const std::vector<std::pair<std::string, uint32_t>>& results,
@@ -55,7 +61,7 @@ class DelayManager {
   void set_hooks(DelayProbeHooks hooks);
   DelayProbeHooks& hooks() { return hooks_; }
 
-  // 群组测速（← trigger_backend_auto_select_inner 测量段，BUG-344）：
+  // 群组测速（← trigger_backend_auto_select_inner 测量段，BUG-344 / BUG-401）：
   // 1. 子集（len > 1）且新鲜缓存（<30s）可用 → FreshMetricsCache（fromProbe=false）
   // 2. 否则测量组群测（单调用）；若未返回有效数据 → NotExecuted（不回退陈旧 history、不伪造 0ms）
   // 3. 实时拨测返回数据 → LiveProbe（未测得节点 = 0 Timeout，fromProbe=true）
@@ -68,7 +74,8 @@ class DelayManager {
       const std::string& group, const std::vector<std::string>& nodes,
       bool allow_cache_reuse,
       std::optional<std::vector<std::pair<std::string, uint32_t>>> cached =
-          std::nullopt);
+          std::nullopt,
+      bool is_frontend_subset = false);
 
   // 单点测速（显式探活，禁用缓存复用 ← monitor.rs「单点测速语义必须真实探测」）
   // 测量组未返回数据 → injected=false, source=NotExecuted（严禁伪造 Timeout）

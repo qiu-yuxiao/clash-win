@@ -5,7 +5,6 @@
 #include "test_util.h"
 
 #include "ui/scenes/connection_data.h"
-#include "ui/scenes/connections_view.h"
 #include "ui/scenes/traffic_pane.h"
 #include "ui/theme/theme.h"
 #include "util/parse_traffic.h"
@@ -316,69 +315,6 @@ UT_TEST(t14_conn_throttle_merge) {
   clock += 400;                        // 过窗
   cd.consume_json(snapshot_msg(2, 2, {"a", "b", "c"}));
   UT_CHECK_EQ(fired, 2);
-}
-
-UT_TEST(t14_conn_view_rows_and_callbacks) {
-  make_offscreen(271, 200, 96);
-  auto& svc = ThemeService::instance();
-  svc.init(SkinId::ModernFlat, ThemeMode::Light);
-  ConnectionData cd(0);
-  cd.set_now_ms([] { return 0; });
-  cd.consume_json(snapshot_msg(3, 0, {"alpha.io", "beta.net"}));
-
-  ConnectionsView view;
-  view.bind(&cd);
-  view.layout_tree({0, 0, 271, 200});
-  UT_CHECK_EQ(view.visible_count(), 2u);
-
-  // 过滤
-  view.set_filter("beta");
-  UT_CHECK_EQ(view.visible_count(), 1u);
-  view.set_filter("");
-  UT_CHECK_EQ(view.visible_count(), 2u);
-
-  // 行点击/关闭回调
-  std::string clicked, closed_id;
-  view.on_row_click = [&](const std::string& id) { clicked = id; };
-  view.close_connection = [&](const std::string& id) {
-    closed_id = id;
-    return true;
-  };
-  // 构造行 widget 触发回调（ScrollList factory 语义）
-  ConnRow row;
-  row.id = "alpha.io";
-  row.host = "alpha.io:443";
-  row.chains_cat = "Proxy";
-  ConnRowWidget w;
-  w.bind(row);
-  w.on_click = [&] { if (view.on_row_click) view.on_row_click("alpha.io"); };
-  w.on_close = [&] { if (view.close_connection) view.close_connection("alpha.io"); };
-  w.layout_tree({0, 0, 271, kConnRowH});
-  MouseEvent up{MouseEventType::Up, {100, 10}};
-  route_mouse_event(&w, up);
-  UT_CHECK(clicked == "alpha.io");
-  clear_input_state();
-  // 关闭按钮（右侧 18px 热区）
-  MouseEvent mv2{MouseEventType::Move, {265, 10}};
-  route_mouse_event(&w, mv2);
-  MouseEvent up2{MouseEventType::Up, {265, 10}};
-  route_mouse_event(&w, up2);
-  UT_CHECK(closed_id == "alpha.io");
-
-  // 像素：色点 + host 文本
-  rt().begin_frame();
-  rt().clear({1, 1, 1, 1});
-  w.on_paint(rt());
-  rt().end_frame();
-  // Proxy 色点 = primary #007AFF（x 4-12）
-  Px dot = pixel(8, 10);
-  UT_CHECK(dot.b > 200 && dot.r < 80);
-  // host 文本有深色像素
-  int dark = 0;
-  for (int y = 2; y < 18; ++y)
-    for (int x = 16; x < 140; ++x)
-      if (pixel(x, y).r < 120) ++dark;
-  UT_CHECK(dark > 2);
 }
 
 UT_TEST(t14_conn_view_sort_by_traffic) {

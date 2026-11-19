@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -282,6 +283,9 @@ std::string DiagnosticBundle::collect_system_info() {
   {
     const std::wstring appdata = get_env_w(L"APPDATA");
     const std::vector<std::filesystem::path> candidates = {
+        L"C:\\Program Files (x86)\\360\\360Safe\\netmon\\useroptm2.ini",
+        L"C:\\Program Files (x86)\\360\\360Safe\\netmon\\useroptm_game2.ini",
+        L"C:\\Program Files (x86)\\360\\360Safe\\netmon\\whiteinternal.ini",
         std::filesystem::path(appdata) / L"360Safe" / L"Safelive" / L"useroptm2.ini",
         L"C:\\ProgramData\\360safe\\Safelive\\useroptm2.ini",
         std::filesystem::path(appdata) / L"360sd" / L"useroptm2.ini",
@@ -304,7 +308,7 @@ std::string DiagnosticBundle::collect_system_info() {
       if (std::filesystem::is_directory(dump_dir, ec)) {
         for (const auto& e : std::filesystem::directory_iterator(dump_dir, ec)) {
           if (ec) break;
-          std::string fn = to_lower(e.path().filename().string());
+          std::string fn = to_lower(utf16_to_utf8(e.path().filename().wstring()));
           if (fn.find("clashwin") != std::string::npos ||
               fn.find("clash-win") != std::string::npos ||
               fn.find("win-mihomo") != std::string::npos) {
@@ -389,6 +393,9 @@ std::string DiagnosticBundle::collect_wer_and_av_report() {
   ss << "[2] 360 信任区只读检测\n";
   const std::wstring appdata = get_env_w(L"APPDATA");
   const std::vector<std::filesystem::path> ini_paths = {
+      L"C:\\Program Files (x86)\\360\\360Safe\\netmon\\useroptm2.ini",
+      L"C:\\Program Files (x86)\\360\\360Safe\\netmon\\useroptm_game2.ini",
+      L"C:\\Program Files (x86)\\360\\360Safe\\netmon\\whiteinternal.ini",
       std::filesystem::path(appdata) / L"360Safe" / L"Safelive" / L"useroptm2.ini",
       L"C:\\ProgramData\\360safe\\Safelive\\useroptm2.ini",
       std::filesystem::path(appdata) / L"360sd" / L"useroptm2.ini",
@@ -407,6 +414,7 @@ std::string DiagnosticBundle::collect_wer_and_av_report() {
       std::string low = to_lower(raw);
       hit = (low.find("clashwin") != std::string::npos ||
              low.find("clash-win") != std::string::npos ||
+             low.find("clash win_0") != std::string::npos ||
              low.find("clashwin-guard") != std::string::npos ||
              low.find("win-mihomo") != std::string::npos);
     }
@@ -428,13 +436,13 @@ std::string DiagnosticBundle::collect_wer_and_av_report() {
     if (std::filesystem::is_directory(dump_dir, ec)) {
       for (const auto& e : std::filesystem::directory_iterator(dump_dir, ec)) {
         if (ec) break;
-        std::string fn = to_lower(e.path().filename().string());
+        std::string fn = to_lower(utf16_to_utf8(e.path().filename().wstring()));
         if (fn.find("clashwin") != std::string::npos ||
             fn.find("clash-win") != std::string::npos ||
             fn.find("win-mihomo") != std::string::npos) {
           any_dump = true;
           auto sz = e.file_size(ec);
-          ss << "  - " << e.path().filename().string() << " (" << sz << " bytes)\n";
+          ss << "  - " << utf16_to_utf8(e.path().filename().wstring()) << " (" << sz << " bytes)\n";
         }
       }
     }
@@ -543,9 +551,164 @@ Result<void> DiagnosticBundle::write_zip_file(const std::wstring& zip_path,
     return Result<void>::err(make_err("failed to open output zip file"));
   }
 
+  // RFC1951 Fixed Huffman Deflate (BFINAL=1, BTYPE=01 + LZ77)
+  auto deflate_fixed = [](const std::string& src) -> std::string {
+    if (src.empty()) return {};
+    struct BitWriter {
+      std::string buf;
+      uint32_t bitbuf = 0;
+      int bitcnt = 0;
+      void write_bits(uint32_t val, int n) {
+        bitbuf |= (val & ((1u << n) - 1u)) << bitcnt;
+        bitcnt += n;
+        while (bitcnt >= 8) {
+          buf.push_back(static_cast<char>(bitbuf & 0xFFu));
+          bitbuf >>= 8;
+          bitcnt -= 8;
+        }
+      }
+      void write_huff(uint32_t code_msb, int n) {
+        uint32_t rev = 0;
+        for (int i = 0; i < n; ++i) {
+          rev = (rev << 1) | ((code_msb >> i) & 1u);
+        }
+        write_bits(rev, n);
+      }
+      void flush() {
+        if (bitcnt > 0) {
+          buf.push_back(static_cast<char>(bitbuf & 0xFFu));
+          bitbuf = 0;
+          bitcnt = 0;
+        }
+      }
+    };
+
+    auto write_lit = [](BitWriter& bw, uint32_t sym) {
+      if (sym <= 143) {
+        bw.write_huff(0x30u + sym, 8);
+      } else if (sym <= 255) {
+        bw.write_huff(0x190u + (sym - 144u), 9);
+      } else if (sym <= 279) {
+        bw.write_huff(sym - 256u, 7);
+      } else {
+        bw.write_huff(0xC0u + (sym - 280u), 8);
+      }
+    };
+
+    static constexpr uint16_t kLenBase[29] = {
+        3,  4,  5,  6,  7,  8,  9,  10, 11, 13, 15, 17, 19, 23, 27,
+        31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258};
+    static constexpr uint8_t kLenExtra[29] = {
+        0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2,
+        2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0};
+    static constexpr uint16_t kDistBase[30] = {
+        1,    2,    3,    4,    5,    7,    9,    13,   17,   25,
+        33,   49,   65,   97,   129,  193,  257,  385,  513,  769,
+        1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577};
+    static constexpr uint8_t kDistExtra[30] = {
+        0, 0, 0, 0, 1, 1, 2,  2,  3,  3,  4,  4,  5,  5,  6,
+        6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13};
+
+    BitWriter bw;
+    bw.buf.reserve(src.size() / 2 + 16);
+    bw.write_bits(1u, 1);  // BFINAL = 1
+    bw.write_bits(1u, 2);  // BTYPE  = 01 (Fixed Huffman)
+
+    const uint8_t* data = reinterpret_cast<const uint8_t*>(src.data());
+    const size_t n = src.size();
+    constexpr size_t kWindowMask = 32767u;
+    constexpr size_t kHashSize = 32768u;
+    std::vector<int32_t> head(kHashSize, -1);
+    std::vector<int32_t> prev(kHashSize, -1);
+
+    auto hash3 = [](const uint8_t* p) -> uint32_t {
+      return ((static_cast<uint32_t>(p[0]) << 10) ^
+              (static_cast<uint32_t>(p[1]) << 5) ^
+              static_cast<uint32_t>(p[2])) & 0x7FFFu;
+    };
+
+    size_t pos = 0;
+    while (pos < n) {
+      size_t best_len = 0;
+      size_t best_dist = 0;
+      if (pos + 3 <= n) {
+        const uint32_t h = hash3(data + pos);
+        int32_t cand = head[h];
+        int chain = 32;
+        while (cand >= 0 && chain-- > 0) {
+          const size_t cpos = static_cast<size_t>(cand);
+          if (pos <= cpos || pos - cpos > 32768u) break;
+          const size_t max_len = std::min<size_t>(258u, n - pos);
+          if (best_len < max_len &&
+              data[cpos + best_len] == data[pos + best_len]) {
+            size_t len = 0;
+            while (len < max_len && data[cpos + len] == data[pos + len]) {
+              ++len;
+            }
+            if (len >= 3 && len > best_len) {
+              best_len = len;
+              best_dist = pos - cpos;
+              if (best_len == 258u) break;
+            }
+          }
+          cand = prev[cpos & kWindowMask];
+        }
+        prev[pos & kWindowMask] = head[h];
+        head[h] = static_cast<int32_t>(pos);
+      }
+
+      if (best_len >= 3) {
+        int lidx = 28;
+        for (int i = 0; i < 29; ++i) {
+          if (best_len >= kLenBase[i] &&
+              (i == 28 || best_len < kLenBase[i + 1])) {
+            lidx = i;
+            break;
+          }
+        }
+        write_lit(bw, static_cast<uint32_t>(257 + lidx));
+        if (kLenExtra[lidx] > 0) {
+          bw.write_bits(static_cast<uint32_t>(best_len - kLenBase[lidx]),
+                        kLenExtra[lidx]);
+        }
+        int didx = 29;
+        for (int i = 0; i < 30; ++i) {
+          if (best_dist >= kDistBase[i] &&
+              (i == 29 || best_dist < kDistBase[i + 1])) {
+            didx = i;
+            break;
+          }
+        }
+        bw.write_huff(static_cast<uint32_t>(didx), 5);
+        if (kDistExtra[didx] > 0) {
+          bw.write_bits(static_cast<uint32_t>(best_dist - kDistBase[didx]),
+                        kDistExtra[didx]);
+        }
+
+        const size_t step_end = std::min(pos + best_len, n);
+        for (size_t k = pos + 1; k < step_end; ++k) {
+          if (k + 3 <= n) {
+            const uint32_t h = hash3(data + k);
+            prev[k & kWindowMask] = head[h];
+            head[h] = static_cast<int32_t>(k);
+          }
+        }
+        pos += best_len;
+      } else {
+        write_lit(bw, data[pos]);
+        ++pos;
+      }
+    }
+
+    write_lit(bw, 256u);  // End of block
+    bw.flush();
+    return bw.buf;
+  };
+
   struct CentralEntryInfo {
     std::string name;
     uint32_t crc = 0;
+    uint16_t method = 0;
     uint32_t comp_size = 0;
     uint32_t uncomp_size = 0;
     uint32_t local_header_offset = 0;
@@ -557,14 +720,25 @@ Result<void> DiagnosticBundle::write_zip_file(const std::wstring& zip_path,
   for (const auto& entry : entries) {
     uint32_t offset = static_cast<uint32_t>(out.tellp());
     uint32_t crc = compute_crc32(entry.content.data(), entry.content.size());
-    uint32_t size = static_cast<uint32_t>(entry.content.size());
+    uint32_t uncomp_size = static_cast<uint32_t>(entry.content.size());
     uint16_t name_len = static_cast<uint16_t>(entry.rel_path.size());
+
+    std::string compressed;
+    uint16_t method = 0;  // STORE fallback when empty or incompressible
+    const std::string* payload = &entry.content;
+    if (!entry.content.empty()) {
+      compressed = deflate_fixed(entry.content);
+      if (!compressed.empty() && compressed.size() < entry.content.size()) {
+        method = 8;  // DEFLATE
+        payload = &compressed;
+      }
+    }
+    uint32_t comp_size = static_cast<uint32_t>(payload->size());
 
     // Local file header: 30 bytes
     uint32_t sig = 0x04034b50;
     uint16_t ver = 20;
     uint16_t flags = 0x0800;  // UTF-8
-    uint16_t method = 0;       // STORE
     uint16_t mod_time = 0;
     uint16_t mod_date = 0;
     uint16_t extra_len = 0;
@@ -576,16 +750,16 @@ Result<void> DiagnosticBundle::write_zip_file(const std::wstring& zip_path,
     out.write(reinterpret_cast<const char*>(&mod_time), 2);
     out.write(reinterpret_cast<const char*>(&mod_date), 2);
     out.write(reinterpret_cast<const char*>(&crc), 4);
-    out.write(reinterpret_cast<const char*>(&size), 4);
-    out.write(reinterpret_cast<const char*>(&size), 4);
+    out.write(reinterpret_cast<const char*>(&comp_size), 4);
+    out.write(reinterpret_cast<const char*>(&uncomp_size), 4);
     out.write(reinterpret_cast<const char*>(&name_len), 2);
     out.write(reinterpret_cast<const char*>(&extra_len), 2);
     out.write(entry.rel_path.data(), name_len);
-    if (!entry.content.empty()) {
-      out.write(entry.content.data(), size);
+    if (!payload->empty()) {
+      out.write(payload->data(), comp_size);
     }
 
-    cd_entries.push_back({entry.rel_path, crc, size, size, offset});
+    cd_entries.push_back({entry.rel_path, crc, method, comp_size, uncomp_size, offset});
   }
 
   uint32_t cd_offset = static_cast<uint32_t>(out.tellp());
@@ -596,7 +770,6 @@ Result<void> DiagnosticBundle::write_zip_file(const std::wstring& zip_path,
     uint16_t ver_made = 20;
     uint16_t ver_need = 20;
     uint16_t flags = 0x0800;
-    uint16_t method = 0;
     uint16_t mod_time = 0;
     uint16_t mod_date = 0;
     uint16_t name_len = static_cast<uint16_t>(cd.name.size());
@@ -610,7 +783,7 @@ Result<void> DiagnosticBundle::write_zip_file(const std::wstring& zip_path,
     out.write(reinterpret_cast<const char*>(&ver_made), 2);
     out.write(reinterpret_cast<const char*>(&ver_need), 2);
     out.write(reinterpret_cast<const char*>(&flags), 2);
-    out.write(reinterpret_cast<const char*>(&method), 2);
+    out.write(reinterpret_cast<const char*>(&cd.method), 2);
     out.write(reinterpret_cast<const char*>(&mod_time), 2);
     out.write(reinterpret_cast<const char*>(&mod_date), 2);
     out.write(reinterpret_cast<const char*>(&cd.crc), 4);
@@ -697,16 +870,42 @@ Result<std::string> DiagnosticBundle::export_diagnostic_bundle() {
     for (const auto& item : collected) {
       if (count >= kMaxDiagnosticLogFiles) break;
 
-      std::ifstream lf(item.path, std::ios::binary);
+      std::ifstream lf(item.path, std::ios::binary | std::ios::ate);
       if (lf.is_open()) {
-        std::string raw((std::istreambuf_iterator<char>(lf)), std::istreambuf_iterator<char>());
+        const auto pos_end = lf.tellg();
+        const size_t total_size =
+            pos_end > std::ifstream::pos_type(0) ? static_cast<size_t>(pos_end) : 0;
+        std::string tail_text;
+        if (total_size > kMaxLogFileReadBytes) {
+          lf.seekg(static_cast<std::streamoff>(total_size - kMaxLogFileReadBytes),
+                   std::ios::beg);
+          std::string chunk(kMaxLogFileReadBytes, '\0');
+          lf.read(chunk.data(), static_cast<std::streamsize>(kMaxLogFileReadBytes));
+          chunk.resize(static_cast<size_t>(lf.gcount()));
+          const size_t nl = chunk.find('\n');
+          const size_t valid_start = (nl != std::string::npos) ? (nl + 1) : 0;
+          std::string valid_tail = chunk.substr(valid_start);
+          const double total_mb = static_cast<double>(total_size) / (1024.0 * 1024.0);
+          const double kept_mb = static_cast<double>(valid_tail.size()) / (1024.0 * 1024.0);
+          char notice[256];
+          sprintf_s(notice,
+                    "[... 日志文件较大（总计 %.2f MB），诊断包已自动截取最新 %.2f MB 内容 ...]\n",
+                    total_mb, kept_mb);
+          tail_text = std::string(notice) + valid_tail;
+        } else {
+          lf.seekg(0, std::ios::beg);
+          tail_text.resize(total_size);
+          if (total_size > 0) {
+            lf.read(tail_text.data(), static_cast<std::streamsize>(total_size));
+            tail_text.resize(static_cast<size_t>(lf.gcount()));
+          }
+        }
         lf.close();
 
-        std::string truncated = tail_truncate_log(raw, kMaxLogFileReadBytes);
-        std::string redacted = redact_log_text(truncated);
+        std::string redacted = redact_log_text(tail_text);
 
         auto rel = std::filesystem::relative(item.path, logs_dir, ec);
-        std::string rel_str = rel.string();
+        std::string rel_str = utf16_to_utf8(rel.wstring());
         std::replace(rel_str.begin(), rel_str.end(), '\\', '/');
 
         entries.push_back({"logs/" + rel_str, redacted});
@@ -723,7 +922,7 @@ Result<std::string> DiagnosticBundle::export_diagnostic_bundle() {
   };
 
   for (const auto& [path, out_name] : cfgs) {
-    std::ifstream f(path);
+    std::ifstream f(path, std::ios::binary);
     if (f.is_open()) {
       std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
       f.close();
@@ -743,7 +942,7 @@ Result<std::string> DiagnosticBundle::export_diagnostic_bundle() {
     return Result<std::string>::err(write_res.error());
   }
 
-  return Result<std::string>::ok(zip_path.string());
+  return Result<std::string>::ok(utf16_to_utf8(zip_path.wstring()));
 }
 
 }  // namespace clashwin::system

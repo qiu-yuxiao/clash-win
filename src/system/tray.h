@@ -18,6 +18,11 @@ inline constexpr uint64_t kTRAY_CLICK_DEBOUNCE_MS = 300;
 inline constexpr UINT kAppTrayMsg = WM_APP + 2;
 inline constexpr UINT kTrayIconId = 1001;
 
+// 内嵌到 clashwin.rc 的托盘图标资源 ID（按当前 SM_CXSMICON 精确选帧）
+inline constexpr int kTrayIconResDefault = 2;
+inline constexpr int kTrayIconResSys = 3;
+inline constexpr int kTrayIconResTun = 4;
+
 inline constexpr int kMenuLiteModeId = 1001;
 inline constexpr int kMenuExitId = 1002;
 
@@ -41,6 +46,11 @@ class ITrayBackend {
   virtual bool add_icon(HWND hwnd, UINT uID, UINT uCallbackMsg, HICON icon, const std::wstring& tip) = 0;
   virtual bool modify_icon(HWND hwnd, UINT uID, HICON icon, const std::wstring& tip) = 0;
   virtual bool delete_icon(HWND hwnd, UINT uID) = 0;
+  virtual bool show_balloon(HWND /*hwnd*/, UINT /*uID*/,
+                            const std::wstring& /*title*/,
+                            const std::wstring& /*body*/) {
+    return false;
+  }
   virtual void show_menu(HWND hwnd, POINT pt, bool in_lite_mode, std::function<void(int cmd_id)> on_cmd) = 0;
 };
 
@@ -50,6 +60,8 @@ class Win32TrayBackend : public ITrayBackend {
   bool add_icon(HWND hwnd, UINT uID, UINT uCallbackMsg, HICON icon, const std::wstring& tip) override;
   bool modify_icon(HWND hwnd, UINT uID, HICON icon, const std::wstring& tip) override;
   bool delete_icon(HWND hwnd, UINT uID) override;
+  bool show_balloon(HWND hwnd, UINT uID, const std::wstring& title,
+                    const std::wstring& body) override;
   void show_menu(HWND hwnd, POINT pt, bool in_lite_mode, std::function<void(int cmd_id)> on_cmd) override;
 };
 
@@ -58,7 +70,7 @@ class Tray {
   explicit Tray(std::unique_ptr<ITrayBackend> backend = nullptr);
   ~Tray();
 
-  bool init(HWND hwnd);
+  bool init(HWND hwnd, TrayIconState initial_state = TrayIconState::Default);
   void destroy();
 
   void update_icon(bool tun, bool sysproxy);
@@ -78,6 +90,10 @@ class Tray {
   void set_on_left_click(std::function<void()> cb) { on_left_click_ = std::move(cb); }
   void set_on_toggle_lite_mode(std::function<void()> cb) { on_toggle_lite_mode_ = std::move(cb); }
   void set_on_exit(std::function<void()> cb) { on_exit_ = std::move(cb); }
+  void set_is_exiting_check(std::function<bool()> cb) { is_exiting_check_ = std::move(cb); }
+
+  // 静默后台运行气泡提示（NIF_INFO，2s 防抖；← tray/mod.rs:216-285）
+  bool notify_silent_running(const std::string& lang = "", int64_t now_ms = -1);
 
   void set_backend(std::unique_ptr<ITrayBackend> backend) { backend_ = std::move(backend); }
   ITrayBackend* backend() const { return backend_.get(); }
@@ -95,11 +111,13 @@ class Tray {
   bool lite_mode_checked_ = false;
   bool icon_added_ = false;
   int64_t last_click_ms_ = 0;
+  int64_t last_silent_balloon_ms_ = 0;
   std::wstring tooltip_ = L"Clash Win";
 
   std::function<void()> on_left_click_;
   std::function<void()> on_toggle_lite_mode_;
   std::function<void()> on_exit_;
+  std::function<bool()> is_exiting_check_;
 
   HICON h_icon_default_ = nullptr;
   HICON h_icon_sys_ = nullptr;

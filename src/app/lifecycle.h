@@ -1,7 +1,7 @@
 #pragma once
 // Lifecycle（T19/T23）：应用生命周期、轻量模式与7步优雅退出管理
 // - 原子状态：Normal (0), InLightweight (1), PreparingExit (2), CleaningAsync (3), Exited (4)
-// - entry_lightweight_mode: 校验配置/force、隐藏窗口、释放 D2D、断开 WS、静音 EventBus、更新托盘、唤醒 CoreMonitor
+// - entry_lightweight_mode: 校验配置/force、隐藏窗口、释放 D2D、断开 WS、静音 EventBus、更新托盘（BUG-402 不再唤醒 CoreMonitor）
 // - exit_lightweight_mode: 恢复 EventBus、重建 D2D、显示激活窗口、重连 WS、更新托盘、唤醒 CoreMonitor
 // - 7步退出 quit():
 //   Step 1: on_prepare_exit 回调 + 停止 monitors (CoreMonitor, SysproxyGuard)

@@ -124,6 +124,8 @@ struct SegmentedPaint {
 // 与聚焦外发光（retro 0 0 8v 金、cyber 0 0 0 3px 粉）全部在此表达。
 struct InputPaint {
   Color4f bg, border, border_focused;
+  // src: src/utils/button-styles.ts:757-876 hover 边框色（a=0 表示沿用 border）
+  Color4f border_hover{0, 0, 0, 0};
   float border_w = 1;            // 已含 depth/vibrancy
   float border_w_focused = 1;    // 已含 depth/vibrancy
   float radius = 4;              // 已含 val1
@@ -261,6 +263,9 @@ struct SliderPaint {
   bool thumb_glow = false;
   Color4f thumb_glow_color;
   float thumb_glow_blur = 0;
+  // src: src/components/base/base-switch.tsx:462 on 态常驻辉光（cyberpunk cyan）
+  Color4f on_thumb_glow_color{0, 0, 0, 0};
+  float on_thumb_glow_blur = 0;
   // ★ thumb 内凹高光（← style-helpers.tsx:285/288 `inset 0 calc(1px*d) 0 rgba(255,255,255,.8|.4)`）
   //   retro-3d 滑块旋钮顶部的内高光 —— 缺了旋钮会显得扁平（无实体感）
   bool thumb_inset_hi = false;
@@ -372,6 +377,9 @@ struct SwitchPaint {
   bool thumb_glow = false;
   Color4f thumb_glow_color;
   float thumb_glow_blur = 0;
+  // src: src/components/base/base-switch.tsx:462 on 态常驻辉光（cyberpunk cyan）
+  Color4f on_thumb_glow_color{0, 0, 0, 0};
+  float on_thumb_glow_blur = 0;
 
   // ★ 旋钮悬停态（← base-switch.tsx 各皮肤 '&:hover .MuiSwitch-thumb'）
   //   retro-3d(:114)      scale(1.2) + brightness(1.15)
@@ -549,6 +557,7 @@ class ThemeService {
   void set_skin(SkinId skin);
   void set_mode(ThemeMode mode);
   void set_primary_override(const std::string& css_hex);
+  void set_allow_os_accent(bool allow);
 
   uint64_t subscribe(std::function<void()> cb);
   void unsubscribe(uint64_t id);
@@ -561,6 +570,7 @@ class ThemeService {
   SkinId skin_ = kDefaultSkin;
   ThemeMode mode_ = ThemeMode::Light;
   std::string primary_override_;
+  bool allow_os_accent_ = false;
   float depth_ = 0.3f;     // ← val1 缺省（depth-factor）
   float vibrancy_ = 1.0f;  // ← val2 缺省（vibrancy-factor）
   Palette palette_{};

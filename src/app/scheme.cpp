@@ -1,4 +1,6 @@
 #include "app/scheme.h"
+#include <windows.h>
+#include <cstdlib>
 #include "cmd/command_service.h"
 #include "config/config.h"
 #include "config/profiles.h"
@@ -202,6 +204,68 @@ Result<void> resolve_scheme(std::string_view link) {
   }
 
   return Result<void>::ok();
+}
+
+void init_scheme() {
+  // 单测环境隔离（CLASHWIN_HOME_OVERRIDE 设置时不写入真实 HKCU 注册表）
+  wchar_t* ov = nullptr;
+  size_t ov_len = 0;
+  if (_wdupenv_s(&ov, &ov_len, L"CLASHWIN_HOME_OVERRIDE") == 0 && ov) {
+    const bool skip = ov[0] != L'\0';
+    std::free(ov);
+    if (skip) return;
+  }
+
+  wchar_t exe_buf[MAX_PATH] = {};
+  DWORD len = GetModuleFileNameW(nullptr, exe_buf, MAX_PATH);
+  if (len == 0 || len >= MAX_PATH) return;
+  std::wstring exe_path(exe_buf, len);
+  std::wstring command = L"\"" + exe_path + L"\" \"%1\"";
+
+  auto register_one = [&](const wchar_t* scheme_name, const wchar_t* desc) {
+    std::wstring base = std::wstring(L"Software\\Classes\\") + scheme_name;
+    HKEY hk = nullptr;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, base.c_str(), 0, nullptr,
+                        REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr, &hk,
+                        nullptr) != ERROR_SUCCESS) {
+      return;
+    }
+    const DWORD desc_bytes =
+        static_cast<DWORD>((wcslen(desc) + 1) * sizeof(wchar_t));
+    RegSetValueExW(hk, nullptr, 0, REG_SZ,
+                   reinterpret_cast<const BYTE*>(desc), desc_bytes);
+    const wchar_t* empty = L"";
+    RegSetValueExW(hk, L"URL Protocol", 0, REG_SZ,
+                   reinterpret_cast<const BYTE*>(empty), sizeof(wchar_t));
+    RegCloseKey(hk);
+
+    HKEY hk_icon = nullptr;
+    std::wstring icon_key = base + L"\\DefaultIcon";
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, icon_key.c_str(), 0, nullptr,
+                        REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr, &hk_icon,
+                        nullptr) == ERROR_SUCCESS) {
+      std::wstring icon_val = exe_path + L",0";
+      RegSetValueExW(hk_icon, nullptr, 0, REG_SZ,
+                     reinterpret_cast<const BYTE*>(icon_val.c_str()),
+                     static_cast<DWORD>((icon_val.size() + 1) * sizeof(wchar_t)));
+      RegCloseKey(hk_icon);
+    }
+
+    HKEY hk_cmd = nullptr;
+    std::wstring cmd_key = base + L"\\shell\\open\\command";
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, cmd_key.c_str(), 0, nullptr,
+                        REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr, &hk_cmd,
+                        nullptr) == ERROR_SUCCESS) {
+      RegSetValueExW(hk_cmd, nullptr, 0, REG_SZ,
+                     reinterpret_cast<const BYTE*>(command.c_str()),
+                     static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t)));
+      RegCloseKey(hk_cmd);
+    }
+  };
+
+  // ← src-tauri/src/utils/init.rs:295-315：同时注册 clash-win:// 与 clash://
+  register_one(L"clash-win", L"URL:Clash Win Protocol");
+  register_one(L"clash", L"URL:Clash Protocol");
 }
 
 }  // namespace clashwin::app

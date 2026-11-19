@@ -77,6 +77,34 @@ void ProfileTimer::start() {
   CWLOG_INFO("ProfileTimer: 启动（缺省 1440min；过期项即补跑）");
 }
 
+void ProfileTimer::refresh() {
+  std::lock_guard lk(mutex_);
+  if (!intervals_fn_) return;
+  auto m = intervals_fn_();
+  for (auto it = tasks_.begin(); it != tasks_.end();) {
+    if (!it->second.running && m.find(it->first) == m.end()) {
+      it = tasks_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  for (const auto& [uid, iv] : m) {
+    if (iv.first == 0) continue;
+    auto it = tasks_.find(uid);
+    if (it != tasks_.end()) {
+      it->second.interval_minutes = iv.first;
+      if (!it->second.running) {
+        it->second.next_run_ms = iv.second;
+      }
+    } else {
+      TaskState st;
+      st.interval_minutes = iv.first;
+      st.next_run_ms = iv.second;
+      tasks_[uid] = st;
+    }
+  }
+}
+
 void ProfileTimer::stop() {
   stop_.store(true);
   if (worker_.joinable()) worker_.join();

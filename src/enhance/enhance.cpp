@@ -6,6 +6,7 @@
 #include <fstream>
 #include <map>
 #include <sstream>
+#include <unordered_set>
 
 #include "config/config.h"
 #include "config/prfitem.h"
@@ -217,6 +218,57 @@ YAML::Node merge_default_config(const YAML::Node& config,
   return cfg;
 }
 
+// ← config.rs:291-356 sanitize_tunnels_proxy：清理指向不存在代理/组的 tunnel.proxy
+void sanitize_tunnels_proxy(YAML::Node& config) {
+  if (!config || !config.IsMap()) return;
+  const YAML::Node tunnels_const =
+      static_cast<const YAML::Node&>(config)["tunnels"];
+  if (!tunnels_const || !tunnels_const.IsSequence()) return;
+  bool needs_validation = false;
+  for (const auto& item : tunnels_const) {
+    if (!item.IsMap()) continue;
+    const YAML::Node px = item["proxy"];
+    if (px && px.IsScalar()) {
+      const std::string name = px.Scalar();
+      if (name != "DIRECT" && name != "REJECT") {
+        needs_validation = true;
+        break;
+      }
+    }
+  }
+  if (!needs_validation) return;
+
+  std::unordered_set<std::string> valid;
+  valid.insert("DIRECT");
+  valid.insert("REJECT");
+  auto collect = [&valid, &config](const char* key) {
+    const YAML::Node seq = static_cast<const YAML::Node&>(config)[key];
+    if (!seq || !seq.IsSequence()) return;
+    for (const auto& item : seq) {
+      if (!item.IsMap()) continue;
+      const YAML::Node n = item["name"];
+      if (n && n.IsScalar() && !n.Scalar().empty()) {
+        valid.insert(n.Scalar());
+      }
+    }
+  };
+  collect("proxies");
+  collect("proxy-groups");
+
+  YAML::Node tunnels = config["tunnels"];
+  for (std::size_t i = 0; i < tunnels.size(); ++i) {
+    YAML::Node t = tunnels[i];
+    if (!t.IsMap()) continue;
+    const YAML::Node px = t["proxy"];
+    if (!px || !px.IsScalar()) continue;
+    const std::string& p = px.Scalar();
+    if (p == "DIRECT" || p == "REJECT") continue;
+    if (valid.find(p) == valid.end()) {
+      t.remove("proxy");
+    }
+  }
+}
+
 }  // namespace
 
 EnhanceOutput enhance_core(const EnhanceInput& input) {
@@ -273,11 +325,12 @@ EnhanceOutput enhance_core(const EnhanceInput& input) {
   ma.rule_fallback = verge.rule_fallback.empty() ? "direct" : verge.rule_fallback;
   config = enforce_mini_agreements(config, ma);
 
-  // ⑧ use_tun_with_sniffer → ⑨ use_sort → ⑩ apply_mandatory_dns_settings → ⑪ DNS 上游治理
+  // ⑧ use_tun_with_sniffer → ⑨ use_sort → ⑩ apply_mandatory_dns_settings → ⑪ DNS 上游治理 + tunnels 代理清洗
   config = use_tun_with_sniffer(config, verge.enable_tun, verge.enable_tun_sniffer);
   config = field::use_sort(config);
   config = apply_mandatory_dns_settings(config);
   config = sanitize_dns_upstreams(config);
+  sanitize_tunnels_proxy(config);
 
   EnhanceOutput out;
   out.config = std::move(config);
@@ -353,9 +406,13 @@ Result<EnhanceOutput> run_enhance_full_from_config() {
       input.profile.proxies_item =
           load_item(cur->option ? cur->option->proxies : std::nullopt, "Proxies",
                     ChainItem::Kind::Proxies);
-      input.profile.global_merge =
-          chain_item_load(config::prfitem::profiles_dir(), "Merge", "merge",
-                          "Merge.yaml");
+      const config::PrfItem* gm = profiles.get_item("Merge");
+      const std::string gm_type =
+          (gm && gm->itype && !gm->itype->empty()) ? *gm->itype : "merge";
+      const std::string gm_file =
+          (gm && gm->file && !gm->file->empty()) ? *gm->file : "Merge.yaml";
+      input.profile.global_merge = chain_item_load(
+          config::prfitem::profiles_dir(), "Merge", gm_type, gm_file);
     }
   }
 

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 
+#include "icon_w.h"
 #include "soft_shadow.h"
 #include "theme/theme.h"
 
@@ -105,7 +106,9 @@ SizeF MenuList::on_measure(float max_w, float max_h) {
   if (ITextEngine* e = text_engine()) {
     for (const auto& it : items) {
       SizeF s = e->measure_text(it.label + L"  " + it.shortcut, ts, 0);
-      w = std::max(w, s.w + padding_h * 2);
+      // src: connection-table.tsx:567 fontSize 18 + popup-styles.ts:283 gap 1.25(10)
+      const float icon_reserve = it.icon.empty() ? 0.0f : 28.0f;
+      w = std::max(w, s.w + padding_h * 2 + icon_reserve);
     }
   }
   float h = content_height();
@@ -188,12 +191,12 @@ void MenuList::on_paint(IRenderTarget& rt) {
   for (int i = 0; i < static_cast<int>(items.size()); ++i) {
     const MenuItem& it = items[static_cast<size_t>(i)];
     if (it.separator) {
-      // src: _layout.tsx:1832 Divider my4px / rgba(255,255,255,.12)（全宽）
+      // src: src/utils/popup-styles.ts:364-367 Divider my 4px & borderColor tokens.dividerColor
+      const Color4f div_c = border_.a > 0.001f ? border_ : Color4f::hex(0x000000, 0.12f);
       const RectF line = gradient_panel_
                              ? RectF{0, y + (sep_height_ - 1.0f) / 2, r.w, 1}
                              : RectF{8, y + (sep_height_ - 1.0f) / 2, r.w - 16, 1};
-      rt.fill_rect(line, Brush{gradient_panel_ ? border_
-                                               : Color4f::hex(0x000000, 0.10f)});
+      rt.fill_rect(line, Brush{div_c});
       y += sep_height_;
       continue;
     }
@@ -203,7 +206,7 @@ void MenuList::on_paint(IRenderTarget& rt) {
     }
     const RectF item_rect{hover_inset_, y, r.w - hover_inset_ * 2, item_height};
     const bool hot = (i == hover_index) && !it.disabled;
-    // src: MUI MenuItem.selected → bg action.selected（语言菜单当前项）
+    // src: src/utils/popup-styles.ts:300-337 选中底色
     if (it.selected && !it.disabled)
       rt.fill_rect(item_rect, Brush{selected_bg_});
     if (hot) {
@@ -228,13 +231,36 @@ void MenuList::on_paint(IRenderTarget& rt) {
     ts.color = it.disabled ? disabled_text_
                            : (it.danger ? danger_text_
                                         : (it.selected ? selected_text_ : text_));
-    if (hot && hover_text_.a > 0.001f) ts.color = hover_text_;  // ← :141 等各皮肤
+    if (hot && hover_text_.a > 0.001f) {
+      // src: src/utils/popup-styles.ts:298,333 danger 悬停保持/加深错误红（除 solid 高饱和底）
+      if (!it.danger || hover_bg_.a >= 0.5f) {
+        ts.color = hover_text_;
+      }
+    }
     ts.align_v = AlignV::Center;
     ts.ellipsis = true;
+    // src: connection-table.tsx:567 fontSize 18 + popup-styles.ts:283 gap 1.25(10)
+    float text_x = padding_h;
+    if (!it.icon.empty()) {
+      Color4f ic_col = (it.icon_color.a > 0.001f) ? it.icon_color : ts.color;
+      if (it.disabled) ic_col.a *= 0.55f;
+      if (hot && hover_text_.a > 0.001f && (!it.danger || hover_bg_.a >= 0.5f)) {
+        ic_col = hover_text_;
+      }
+      constexpr float kIconSz = 18.0f;  // src: connection-table.tsx:567
+      constexpr float kIconGap = 10.0f;  // src: popup-styles.ts:283
+      IconW::paint_at(
+          rt, it.icon,
+          {padding_h, y + (item_height - kIconSz) * 0.5f, kIconSz, kIconSz},
+          ic_col);
+      text_x += kIconSz + kIconGap;
+    }
     // 仅在确有快捷键时才为右侧留 56（否则无快捷键的项会被无谓截断）
     const float shortcut_reserve = it.shortcut.empty() ? 0.0f : 56.0f;
-    rt.draw_text(it.label, {padding_h, y, r.w - padding_h * 2 - shortcut_reserve,
-                            item_height}, ts);
+    rt.draw_text(it.label, {text_x, y,
+                            std::max(0.0f, r.w - text_x - padding_h - shortcut_reserve),
+                            item_height},
+                 ts);
     if (!it.shortcut.empty()) {
       ts.color = shortcut_text_;
       ts.align_h = AlignH::Right;
@@ -258,9 +284,9 @@ void MenuList::on_paint(IRenderTarget& rt) {
   }
   rt.pop_clip();
 
-  {
+  if (panel_border_w_ > 0.01f) {
     const Color4f bc = panel_border_.a > 0.001f ? panel_border_ : border_;
-    rt.round_rect(r, radius_, Pen{bc, panel_border_w_}, nullptr);
+    if (bc.a > 0.001f) rt.round_rect(r, radius_, Pen{bc, panel_border_w_}, nullptr);
   }
 }
 
@@ -292,7 +318,7 @@ void ContextMenu::open(const std::vector<MenuItem>& items, PointF anchor) {
   ml->hover_glow_color_ = style_.hover_glow_color;
   ml->hover_glow_blur_ = style_.hover_glow_blur;
   ml->panel_grad_on_ = style_.panel_grad_on;
-  for (int i = 0; i < 3; ++i) ml->panel_stops_[i] = style_.panel_stops[i];
+  for (int i = 0; i < 4; ++i) ml->panel_stops_[i] = style_.panel_stops[i];
   ml->panel_n_ = style_.panel_n;
   ml->panel_angle_ = style_.panel_angle;
   ml->panel_bg_ = style_.panel_bg;
@@ -308,7 +334,7 @@ void ContextMenu::open(const std::vector<MenuItem>& items, PointF anchor) {
   ml->danger_text_ = style_.danger_text;
   ml->selected_bg_ = style_.selected_bg;
   ml->selected_text_ = style_.selected_text;
-  for (int i = 0; i < 3; ++i) ml->panel_grad_[i] = style_.grad[i];
+  for (int i = 0; i < 4; ++i) ml->panel_grad_[i] = style_.grad[i];
   ml->on_select = [this](int idx) {
     if (on_select) on_select(idx);  // 先回调（menu_ 在回调期间仍存活）
     close();                        // 后关闭（避免在 MenuList::on_mouse 内释放自身）
@@ -369,29 +395,33 @@ void ContextMenu::on_paint(IRenderTarget& rt) {
 
 
 // ---------- 按皮肤填写菜单外观 ----------
-// 面板：index.scss:109-114 让 .MuiMenu-paper 复用 .theme-panel 规则，
-//   因此面板底/边框/圆角直接取 ThemeService::panel_paint()。
-// hover：style-helpers.tsx:109-198 getMenuItemHoverStyle 六套皮肤逐条落地。
+// src: src/utils/popup-styles.ts:90-117 getPopupCardStyle & :266-346 getPopupMenuItemStyle
 void apply_menu_skin(MenuStyle& st) {
   using theme::ThemeService;
   auto& svc = ThemeService::instance();
   const bool light = svc.is_light();
-  const auto pp = svc.panel_paint();
+  const auto card = svc.popup_card_paint();
+  const auto tokens = svc.popup_tokens();
 
-  // —— 面板 ——
-  // 【关键】index.scss:109-115：`.MuiMenu-paper.theme-panel` 被强制为
-  //   `background: rgb(var(--theme-panel-base-rgb))` + opacity 1 + 无毛玻璃，
-  //   即菜单底永远是「纯色面板基色」，不吃各皮肤的渐变/半透明底
-  //   （只有 4px double 描边与圆角仍按皮肤走）。
-  st.panel_grad_on = false;
-  st.panel_bg = svc.vars().theme_panel_bg;
-  if (pp.border != theme::PanelPaint::BorderKind::None) {
-    st.panel_border = pp.border_color;
-    st.panel_border_w = 1.34f;  // 与节点区容器同一 DPI 补偿
+  // src: src/utils/popup-styles.ts:349-360 菜单容器统一复用 getPopupCardStyle(theme)
+  st.panel_grad_on = card.grad_bg && card.grad_count >= 2;
+  st.panel_n = std::min(card.grad_count, 4);
+  for (int i = 0; i < st.panel_n; ++i) {
+    st.panel_stops[i] = card.grad[i];
   }
-  st.radius = pp.radius > 0.0f ? pp.radius : 6.0f;
+  st.panel_angle = card.grad_angle;
+  st.panel_bg = card.bg;
+  st.panel_border = card.border;
+  st.panel_border_w = card.border_w;
+  st.radius = card.radius;
+  st.gradient_panel = true;
 
-  // —— hover（默认清零，避免沿用旧的金渐变）——
+  st.text = tokens.primary_text;
+  st.disabled_text = tokens.disabled_text;
+  st.danger_text = tokens.error_color;
+  st.selected_text = tokens.primary_text;
+  st.border = tokens.divider_color;
+
   st.hover_grad = false;
   st.hover_n = 0;
   st.hover_text = Color4f{0, 0, 0, 0};
@@ -399,58 +429,54 @@ void apply_menu_skin(MenuStyle& st) {
   st.hover_border_w = 0;
   st.hover_glow = false;
   st.hover_bg = Color4f{0, 0, 0, 0};
+  // src: src/utils/popup-styles.ts:277 MUI MenuItem radius
+  st.hover_radius = 4.0f;
   st.gold_hover = false;
 
   switch (svc.skin()) {
     case theme::SkinId::Retro3d:
-      // :136-143 135° #FFE082/#FFD54F 35%/#FFB300 70%/#B8860B + 文字 #2C1F03
-      st.hover_grad = true;
-      st.hover_stops[0] = {0.00f, Color4f::hex(0xFFE082)};
-      st.hover_stops[1] = {0.35f, Color4f::hex(0xFFD54F)};
-      st.hover_stops[2] = {0.70f, Color4f::hex(0xFFB300)};
-      st.hover_stops[3] = {1.00f, Color4f::hex(0xB8860B)};
-      st.hover_n = 4;
-      st.hover_angle = 135.0f;
-      st.hover_text = Color4f::hex(0x2C1F03);
-      st.font_weight = static_cast<int>(Weight::Bold);
-      break;
-    case theme::SkinId::Original:
-      // :144-153 rgba(91,92,157,.08) + 文字 --primary-main
-      st.hover_bg = Color4f::hex(0x5B5C9D, 0.08f);
-      st.hover_text = svc.primary();
-      st.font_weight = 500;
-      break;
-    case theme::SkinId::ModernFlat: {
-      // :154-163 alpha(primary,.1) + 文字 primary
-      const Color4f c = svc.primary();
-      st.hover_bg = Color4f{c.r, c.g, c.b, 0.10f};
-      st.hover_text = c;
-      st.font_weight = static_cast<int>(Weight::Bold);
-      break;
-    }
-    case theme::SkinId::FrostedGlass:
-      // :164-173 rgba(255,255,255,.12) + 文字 primary
-      st.hover_bg = Color4f::hex(0xFFFFFF, 0.12f);
-      st.hover_text = svc.primary();
-      st.font_weight = static_cast<int>(Weight::Normal);
+      // src: src/utils/popup-styles.ts:293-303 retro-3d 金卡半透明 hover + #1F1500
+      st.selected_bg = light ? Color4f::hex(0xB8860B, 0.28f)
+                             : Color4f::hex(0x2C1F03, 0.22f);
+      st.hover_bg = light ? Color4f::hex(0xB8860B, 0.22f)
+                          : Color4f::hex(0x2C1F03, 0.16f);
+      st.hover_text = Color4f::hex(0x1F1500);
+      st.font_weight = 600;
       break;
     case theme::SkinId::Cyberpunk:
-      // :175-188 #39ff14 底 + 黑字 + 同色描边 + 0 0 8px 同色发光
+      // src: src/utils/popup-styles.ts:304-316 neon #39ff14 hover & #00F0FF selected
+      st.selected_bg = Color4f::hex(0x00F0FF, 0.18f);
       st.hover_bg = Color4f::hex(0x39FF14);
       st.hover_text = Color4f::hex(0x000000);
       st.hover_border = Color4f::hex(0x39FF14);
       st.hover_border_w = 1.0f;
+      st.hover_radius = 0.0f;
       st.hover_glow = true;
       st.hover_glow_color = Color4f::hex(0x39FF14, 0.75f);
       st.hover_glow_blur = 8.0f;
-      st.font_weight = static_cast<int>(Weight::Bold);
+      st.font_weight = 700;
       break;
     case theme::SkinId::Monochrome:
-      // :189-197 黑白对调
+      // src: src/utils/popup-styles.ts:317-327 黑白反色 hover & 0.12/0.18 selected
+      st.selected_bg = light ? Color4f::hex(0x000000, 0.12f)
+                             : Color4f::hex(0xFFFFFF, 0.18f);
       st.hover_bg = light ? Color4f::hex(0x000000) : Color4f::hex(0xFFFFFF);
       st.hover_text = light ? Color4f::hex(0xFFFFFF) : Color4f::hex(0x000000);
+      st.hover_radius = 0.0f;
       st.font_weight = static_cast<int>(Weight::Normal);
       break;
+    case theme::SkinId::Original:
+    case theme::SkinId::ModernFlat:
+    case theme::SkinId::FrostedGlass:
+    default: {
+      // src: src/utils/popup-styles.ts:328-339 alpha(primary, .10|.18) hover & .14|.22 selected
+      const Color4f c = svc.primary();
+      st.selected_bg = Color4f{c.r, c.g, c.b, light ? 0.14f : 0.22f};
+      st.hover_bg = Color4f{c.r, c.g, c.b, light ? 0.10f : 0.18f};
+      st.hover_text = c;
+      st.font_weight = 500;
+      break;
+    }
   }
 }
 

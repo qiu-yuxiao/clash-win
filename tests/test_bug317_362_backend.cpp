@@ -877,20 +877,21 @@ UT_TEST(bug331_334_335_lifecycle_service_quit_timer_raii_and_dummy_restore) {
 UT_TEST(bug317_345_parallel_tcp53_race_and_dns_budget) {
   using core::CoreMonitor;
 
-  // (A) timeout_secs=1 强制抬升至 2s 总预算；TCP:53 竞速封顶 600ms，留给 DNS >= 1400ms
+  // (A) timeout_secs=1 强制抬升至 2s 总预算；BUG-403 首选单路 223.5.5.5:53 (250ms)，
+  //     失败再并发竞速 119.29.29.29 / 1.1.1.1 (600ms)，留给 DNS >= 1150ms
   {
     int64_t clock = 0;
-    int captured_race_ms = 0;
     int captured_dns_ms = 0;
-    size_t captured_ip_count = 0;
+    std::vector<std::pair<std::vector<std::string>, int>> tcp_calls;
     CoreMonitor::PhysicalNetProbeOps ops;
     ops.now_ms = [&] { return clock; };
     ops.tcp_race_connect = [&](const std::vector<const char*>& ips,
                                uint16_t port, int timeout_ms) {
       UT_CHECK_EQ(port, 53);
-      captured_ip_count = ips.size();
-      captured_race_ms = timeout_ms;
-      clock += timeout_ms;  // 模拟 3 路 53 端口被防火墙静默丢包耗尽竞速窗口
+      std::vector<std::string> copy;
+      for (const char* ip : ips) copy.emplace_back(ip);
+      tcp_calls.emplace_back(std::move(copy), timeout_ms);
+      clock += timeout_ms;  // 模拟出站 53 端口被防火墙静默丢包耗尽本段窗口
       return false;
     };
     ops.dns_lookup = [&](const std::string& host, uint16_t port, int rem_ms) {
@@ -902,9 +903,15 @@ UT_TEST(bug317_345_parallel_tcp53_race_and_dns_budget) {
 
     UT_CHECK(CoreMonitor::probe_physical_network_with(
         /*timeout_secs=*/1, "https://cp.cloudflare.com/generate_204", ops));
-    UT_CHECK_EQ(captured_ip_count, 3u);
-    UT_CHECK_EQ(captured_race_ms, 600);
-    UT_CHECK(captured_dns_ms >= 1400);
+    UT_CHECK_EQ(tcp_calls.size(), 2u);
+    UT_CHECK_EQ(tcp_calls[0].first.size(), 1u);
+    UT_CHECK_EQ(tcp_calls[0].first[0], std::string("223.5.5.5"));
+    UT_CHECK_EQ(tcp_calls[0].second, 250);
+    UT_CHECK_EQ(tcp_calls[1].first.size(), 2u);
+    UT_CHECK_EQ(tcp_calls[1].first[0], std::string("119.29.29.29"));
+    UT_CHECK_EQ(tcp_calls[1].first[1], std::string("1.1.1.1"));
+    UT_CHECK_EQ(tcp_calls[1].second, 600);
+    UT_CHECK(captured_dns_ms >= 1150);
   }
 
   // (B) 真实本地回环非阻塞 select() 多路竞速：1 路监听成功立即胜出，关闭端口立即失败

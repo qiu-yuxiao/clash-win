@@ -31,6 +31,7 @@ struct RectF {
   bool contains(float px, float py) const {
     return px >= x && px < right() && py >= y && py < bottom();
   }
+  bool contains(const PointF& pt) const { return contains(pt.x, pt.y); }
   bool contains(const RectF& o) const {
     return o.x >= x && o.right() <= right() && o.y >= y && o.bottom() <= bottom();
   }
@@ -85,8 +86,8 @@ struct TextStyle {
   int max_lines = 0;               // 0 = 不限；配合 wrap 生效
   // 行盒高（逻辑 px）。0 = 用 DirectWrite 字体默认行距（≈1.33×size）。
   // ★ MUI 输入框根 `lineHeight:'1.4375em'` 在 16px 根字号下结算为 23px 绝对值
-  //   （docs/pixel-parity-audit.md P12），多行输入框必须显式给 23，行距才与 Mini
-  //   逐行对齐（V6）。取值时按 Chromium 半行距模型摆基线：
+  //   （src: node_modules/@mui/material/InputBase/InputBase.js:76-78），多行输入框必须显式给 23，行距才与 Mini
+  //   逐行对齐。取值时按 Chromium 半行距模型摆基线：
   //   基线 = 行顶 + (行盒 − 字面盒)/2 + ascent。
   float line_h = 0;
 };
@@ -113,6 +114,16 @@ class IRenderTarget {
   virtual void fill_rect(const RectF& r, const Brush& b) = 0;
   virtual void round_rect(const RectF& r, float radius, const Pen& p,
                           const Brush* fill) = 0;
+  // 分角圆角 + 分边描边（corner_mask: bit0=TL,bit1=TR,bit2=BR,bit3=BL；
+  // border_sides_mask: bit0=Top,bit1=Right,bit2=Bottom,bit3=Left）。
+  // src: mini-traffic-panel.tsx:102-104/:171-173 成对卡内角 0 且衔接边无边框
+  virtual void round_rect_corners(const RectF& r, float radius, int corner_mask,
+                                  const Pen& p, const Brush* fill,
+                                  int border_sides_mask = 0xF) {
+    (void)corner_mask;
+    (void)border_sides_mask;
+    round_rect(r, radius, p, fill);
+  }
   // 水平线性渐变圆角填充（← Mini 流量卡；stops 按 offset 升序）
   virtual void fill_round_rect_gradient(const RectF& r, float radius,
                                         const GradientStop* stops,
@@ -143,6 +154,25 @@ class IRenderTarget {
     fill_round_rect_gradient(r, radius, stops, count);
   }
   virtual void draw_line(const PointF& a, const PointF& b, const Pen& p) = 0;
+  // 虚线绘制（src: enhanced-canvas-traffic-graph.tsx hover 十字准线 setLineDash([4,4])）
+  virtual void draw_dashed_line(const PointF& a, const PointF& b, const Pen& p,
+                                float dash_len, float gap_len) {
+    (void)dash_len;
+    (void)gap_len;
+    draw_line(a, b, p);
+  }
+  // 多边形垂直线性渐变填充（src: enhanced-canvas-traffic-graph.tsx createLinearGradient）
+  virtual void fill_polygon_vertical_gradient(const PointF* pts, int count,
+                                              float top_y, float bottom_y,
+                                              const Color4f& top_color,
+                                              const Color4f& bottom_color) {
+    if (!pts || count < 3) return;
+    std::vector<std::vector<PointF>> loops(1, std::vector<PointF>(pts, pts + count));
+    fill_path(loops, Brush{top_color});
+    (void)top_y;
+    (void)bottom_y;
+    (void)bottom_color;
+  }
   // 折线（SVG path 扁平化后用；默认逐段 draw_line，实现可覆盖为几何 stroke）
   virtual void draw_polyline(const PointF* pts, int count, const Pen& p) {
     if (!pts || count < 2) return;

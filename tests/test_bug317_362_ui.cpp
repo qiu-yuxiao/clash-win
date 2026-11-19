@@ -426,7 +426,7 @@ UT_TEST(bug354_settings_drawer_help_button_visible_below_830_and_downward_menu) 
   UT_CHECK(near_f(drawer.bottom_help_->bounds().h, 28.0f));
 
   // 2) 宽矮窗 640x620（视口总高 620+30+135=785 <= 830，右列挂载 ConnectionsPanel）：
-  //    点击帮助按钮向下弹出菜单且不被右列盖住
+  //    点击帮助按钮弹出 271px 左锚定 HelpDialog Modal 且不被右列盖住
   drawer.layout_tree({0, 0, 640, 620});
   UT_CHECK(drawer.bottom_help_->visible());
   const RectF hb = drawer.bottom_help_->global_bounds();
@@ -434,8 +434,9 @@ UT_TEST(bug354_settings_drawer_help_button_visible_below_830_and_downward_menu) 
   UT_CHECK(drawer.help_menu() != nullptr);
   UT_CHECK(drawer.help_menu()->is_open());
   const RectF mb = drawer.help_menu()->menu_rect();
-  UT_CHECK(mb.y >= hb.bottom() - 1.0f);
-  UT_CHECK(mb.right() <= 640.0f);
+  UT_CHECK(near_f(mb.x, 0.0f));
+  UT_CHECK(near_f(mb.w, 271.0f));
+  UT_CHECK(mb.y >= 4.0f);
   UT_CHECK(mb.bottom() <= 620.0f);
   Widget* top_hit = drawer.hit_test({mb.x + 20.0f, mb.y + 16.0f});
   UT_CHECK(top_hit != nullptr && top_hit != drawer.conn_panel());

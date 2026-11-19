@@ -99,21 +99,90 @@ void ScrollList::on_arrange(const RectF& area) {
   }
 }
 
+RectF ScrollList::thumb_rect() const {
+  if (!show_scrollbar_ || bounds().h <= 0.0f || item_height_ <= 0.0f) return {};
+  const float m = max_scroll();
+  if (m <= 0.0f) return {};
+  const float vh = bounds().h;
+  const float content = item_count_ * item_height_;
+  const float thumb_h = (std::min)(vh, (std::max)(vh * vh / content, 20.0f));
+  const float thumb_y = (offset_ / m) * (vh - thumb_h);
+  return {bounds().w - scrollbar_w_ - 1.0f, thumb_y, scrollbar_w_, thumb_h};
+}
+
+void ScrollList::relayout_materialized() {
+  sync_children(bounds().h);
+  const float sb_w = show_scrollbar_ ? scrollbar_w_ : 0.0f;
+  for (auto& [idx, w] : rows_) {
+    const float y = idx * item_height_ - offset_;
+    w->layout_tree({0, y, bounds().w - sb_w, item_height_});
+  }
+}
+
 bool ScrollList::on_mouse(const MouseEvent& e) {
   if (e.type == MouseEventType::Wheel) {
     if (!enabled()) return true;
     // Windows：向下滚 delta 为负 → offset 应增大（与 utility_modals 口径一致）
     float lines = -static_cast<float>(e.wheel_delta) / 120.0f * 3.0f;
     set_scroll_offset(offset_ + lines * item_height_);
-    sync_children(bounds().h);
-    // 行位置随 offset 更新
-    float sb_w = show_scrollbar_ ? scrollbar_w_ : 0.0f;
-    for (auto& [idx, w] : rows_) {
-      float y = idx * item_height_ - offset_;
-      w->layout_tree({0, y, bounds().w - sb_w, item_height_});
-    }
+    relayout_materialized();
     return true;
   }
+
+  const float m = max_scroll();
+  const RectF tr = thumb_rect();
+  const float track_left = bounds().w - scrollbar_w_ - 4.0f;
+  const bool in_track =
+      show_scrollbar_ && m > 0.0f && e.pos.x >= track_left && e.pos.x <= bounds().w;
+
+  if (e.type == MouseEventType::Down && (e.buttons & kMouseLeft) && in_track) {
+    if (!enabled()) return true;
+    if (tr.w > 0.0f && e.pos.y >= tr.y && e.pos.y <= tr.bottom()) {
+      dragging_thumb_ = true;
+      drag_offset_y_ = e.pos.y - tr.y;
+    } else if (bounds().h > tr.h && m > 0.0f) {
+      const float target_y = e.pos.y - tr.h * 0.5f;
+      const float frac = (std::max)(0.0f, (std::min)(1.0f, target_y / (bounds().h - tr.h)));
+      set_scroll_offset(frac * m);
+      relayout_materialized();
+    }
+    invalidate();
+    return true;
+  }
+
+  if (e.type == MouseEventType::Move) {
+    if (dragging_thumb_ && m > 0.0f && bounds().h > tr.h) {
+      const float top = e.pos.y - drag_offset_y_;
+      const float frac = (std::max)(0.0f, (std::min)(1.0f, top / (bounds().h - tr.h)));
+      set_scroll_offset(frac * m);
+      relayout_materialized();
+      return true;
+    }
+    const bool hot = in_track && tr.w > 0.0f && e.pos.y >= tr.y && e.pos.y <= tr.bottom();
+    if (hot != thumb_hover_) {
+      thumb_hover_ = hot;
+      invalidate();
+    }
+    return in_track;
+  }
+
+  if (e.type == MouseEventType::Up) {
+    if (dragging_thumb_) {
+      dragging_thumb_ = false;
+      invalidate();
+      return true;
+    }
+    return false;
+  }
+
+  if (e.type == MouseEventType::Leave) {
+    bool dirty = thumb_hover_ || dragging_thumb_;
+    thumb_hover_ = false;
+    dragging_thumb_ = false;
+    if (dirty) invalidate();
+    return false;
+  }
+
   return false;
 }
 
@@ -122,18 +191,18 @@ void ScrollList::on_paint(IRenderTarget& rt) {
   rt.push_clip({0, 0, bounds().w, bounds().h});
   // 行子项绘制（paint 只处理直接子——rows_ 非常规 children，手动递归）
   for (auto& [idx, w] : rows_) w->paint(rt, g);
-  // 滚动条（比例 thumb）
+  // 滚动条（比例 thumb + hover/drag 加深）
   if (show_scrollbar_) {
-    float m = max_scroll();
-    if (m > 0 && bounds().h > 0) {
-      float vh = bounds().h;
-      float content = item_count_ * item_height_;
-      float thumb_h = std::max(vh * vh / content, 20.0f);
-      float thumb_y = (offset_ / m) * (vh - thumb_h);
-      Brush sb{themed_ ? theme::ThemeService::instance().vars().scrollbar_thumb
-                       : scrollbar_};
-      rt.round_rect({bounds().w - scrollbar_w_ - 1, thumb_y, scrollbar_w_,
-                     thumb_h}, scrollbar_w_ / 2, {}, &sb);
+    const RectF tr = thumb_rect();
+    if (tr.w > 0.0f && tr.h > 0.0f) {
+      Color4f col =
+          themed_ ? theme::ThemeService::instance().vars().scrollbar_thumb
+                  : scrollbar_;
+      if (dragging_thumb_ || thumb_hover_) {
+        col.a = (std::min)(1.0f, col.a * 1.45f);
+      }
+      Brush sb{col};
+      rt.round_rect(tr, scrollbar_w_ / 2.0f, {}, &sb);
     }
   }
   rt.pop_clip();
@@ -143,6 +212,10 @@ Widget* ScrollList::hit_test(PointF global) {
   if (!visible() || !enabled()) return nullptr;
   RectF g = global_bounds();
   if (!g.contains(global.x, global.y)) return nullptr;
+  if (show_scrollbar_ && max_scroll() > 0.0f &&
+      global.x >= g.right() - scrollbar_w_ - 4.0f) {
+    return this;
+  }
   for (auto& [idx, w] : rows_) {
     if (w) {
       if (Widget* hit = w->hit_test(global)) return hit;

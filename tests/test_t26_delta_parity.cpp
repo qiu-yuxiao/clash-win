@@ -114,46 +114,6 @@ UT_TEST(t26_tun_toggle_restart_flags) {
   UT_CHECK((f & cmd::kFLaunch) != 0);
 }
 
-// ================= BUG-308 =================
-UT_TEST(t26_dns_foreign_plain_upstream_to_doh) {
-  YAML::Node cfg = YAML::Load(R"(
-dns:
-  nameserver:
-    - 8.8.8.8
-    - 8.8.4.4:53
-    - 1.1.1.1
-    - 1.0.0.1
-    - tls://8.8.8.8
-    - 114.114.114.114
-    - https://doh.pub/dns-query
-  default-nameserver:
-    - 8.8.8.8
-    - 223.5.5.5
-)");
-
-  YAML::Node out = enhance::sanitize_foreign_plain_dns_upstreams(cfg);
-  auto ns = scalar_seq(out["dns"]["nameserver"]);
-  UT_CHECK_EQ(ns.size(), 7u);
-  UT_CHECK_EQ(ns[0], "https://8.8.8.8/dns-query");
-  UT_CHECK_EQ(ns[1], "https://8.8.4.4/dns-query");
-  UT_CHECK_EQ(ns[2], "https://1.1.1.1/dns-query");
-  UT_CHECK_EQ(ns[3], "https://1.0.0.1/dns-query");
-  // 已加密上游与境内明文上游原样保留
-  UT_CHECK_EQ(ns[4], "tls://8.8.8.8");
-  UT_CHECK_EQ(ns[5], "114.114.114.114");
-  UT_CHECK_EQ(ns[6], "https://doh.pub/dns-query");
-
-  // default-nameserver 按协议必须保持明文，绝不改写
-  auto dns_default = scalar_seq(out["dns"]["default-nameserver"]);
-  UT_CHECK_EQ(dns_default.size(), 2u);
-  UT_CHECK_EQ(dns_default[0], "8.8.8.8");
-
-  // 无 dns / 无 nameserver 时安全直通
-  YAML::Node plain = YAML::Load("mixed-port: 7890\n");
-  YAML::Node pass = enhance::sanitize_foreign_plain_dns_upstreams(plain);
-  UT_CHECK_EQ(pass["mixed-port"].as<int>(), 7890);
-}
-
 // ================= 流水线集成（调用顺序） =================
 UT_TEST(t26_enhance_pipeline_applies_delta_parity) {
   enhance::EnhanceInput in;

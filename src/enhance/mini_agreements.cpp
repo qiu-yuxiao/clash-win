@@ -31,8 +31,8 @@ std::string extract_upstream_host(const std::string& raw) {
   if (hash != std::string::npos) s = s.substr(0, hash);
   size_t scheme = s.find("://");
   if (scheme != std::string::npos) s = s.substr(scheme + 3);
-  size_t slash = s.find('/');
-  if (slash != std::string::npos) s = s.substr(0, slash);
+  size_t cut = s.find_first_of("/?");
+  if (cut != std::string::npos) s = s.substr(0, cut);
 
   std::string host;
   if (!s.empty() && s[0] == '[') {
@@ -115,7 +115,21 @@ YAML::Node enforce_mini_agreements(const YAML::Node& config,
   }
   std::vector<std::string> proxy_names = std::move(topology.names);
 
-  // 2. 收集 proxy-providers 名单
+  // 2. 收敛远端 proxy-providers.*.health-check 为 lazy: true（BUG-399），
+  //    并收集 proxy-providers 名单
+  {
+    YAML::Node providers = cfg["proxy-providers"];
+    if (providers && providers.IsMap()) {
+      for (auto it = providers.begin(); it != providers.end(); ++it) {
+        if (it->second && it->second.IsMap()) {
+          YAML::Node hc = it->second["health-check"];
+          if (hc && hc.IsMap()) {
+            hc["lazy"] = YAML::Node(true);
+          }
+        }
+      }
+    }
+  }
   std::vector<std::string> provider_names;
   {
     const YAML::Node providers =
@@ -172,15 +186,15 @@ YAML::Node enforce_mini_agreements(const YAML::Node& config,
   // 3. 控制组 PROXY(select) —— 用户/app 控制，选择持久不被内核翻回
   YAML::Node single_group = build_group("PROXY", "select");
 
-  // 3b. 测量组 PROXY__METRICS(url-test, interval 300) —— 节点延迟唯一权威来源
+  // 3b. 测量组 PROXY__METRICS(url-test, interval 1800, lazy true) —— 节点延迟唯一权威来源（BUG-399）
   YAML::Node metrics_group = build_group("PROXY__METRICS", "url-test");
   {
     YAML::Node n(opt.test_url);
     n.SetTag("!");
     metrics_group["url"] = n;
   }
-  metrics_group["interval"] = YAML::Node("300");
-  metrics_group["lazy"] = YAML::Node(false);
+  metrics_group["interval"] = YAML::Node("1800");
+  metrics_group["lazy"] = YAML::Node(true);
 
   YAML::Node groups(YAML::NodeType::Sequence);
   groups.push_back(single_group);

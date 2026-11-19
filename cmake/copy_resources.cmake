@@ -1,4 +1,4 @@
-# 构建后把 sidecar/（5 个 exe）与 resources/ 干净同步到目标输出目录（先删旧目录防改名残留堆积）
+# 构建后把 sidecar/、resources/ 与 Clash Mini 对等运行布局同步到目标输出目录
 function(add_clashwin_copy_resources TARGET)
   add_custom_command(TARGET ${TARGET} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:${TARGET}>/sidecar"
@@ -7,7 +7,28 @@ function(add_clashwin_copy_resources TARGET)
     COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:${TARGET}>/resources"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/resources" "$<TARGET_FILE_DIR:${TARGET}>/resources"
-    COMMENT "同步 sidecar/ resources/ 到输出目录"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/sidecar/win-mihomo.exe"
+            "$<TARGET_FILE_DIR:${TARGET}>/win-mihomo.exe"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/sidecar/clash-verge-service.exe"
+            "$<TARGET_FILE_DIR:${TARGET}>/resources/clash-verge-service.exe"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/sidecar/clash-verge-service-install.exe"
+            "$<TARGET_FILE_DIR:${TARGET}>/resources/clash-verge-service-install.exe"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/sidecar/clash-verge-service-uninstall.exe"
+            "$<TARGET_FILE_DIR:${TARGET}>/resources/clash-verge-service-uninstall.exe"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/sidecar/enableLoopback.exe"
+            "$<TARGET_FILE_DIR:${TARGET}>/resources/enableLoopback.exe"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/用户必读.txt"
+            "$<TARGET_FILE_DIR:${TARGET}>/用户必读.txt"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/轻量模式防误杀指南.txt"
+            "$<TARGET_FILE_DIR:${TARGET}>/轻量模式防误杀指南.txt"
+    COMMENT "同步 sidecar/ resources/ 及内核服务布局到输出目录"
   )
 endfunction()
 

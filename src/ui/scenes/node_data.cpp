@@ -280,6 +280,11 @@ bool NodeData::test_group() {
 //   ← Mini proxy-groups.tsx:230-275 handleCheckAll
 //   视觉占位：先置 -2（testing）触发流光动画，再委托后端统一引擎
 bool NodeData::test_and_select(const std::vector<std::string>& nodes) {
+  return test_batch(nodes, /*select=*/true, /*clean_stale=*/true);
+}
+
+bool NodeData::test_batch(const std::vector<std::string>& nodes, bool select,
+                          bool clean_stale) {
   const std::unordered_set<std::string> confirmed_fake =
       hooks_.fetch_confirmed_fake ? hooks_.fetch_confirmed_fake()
                                   : std::unordered_set<std::string>{};
@@ -318,25 +323,28 @@ bool NodeData::test_and_select(const std::vector<std::string>& nodes) {
   const DelaySnapshotMap internal_snaps = snapshot_delays(non_pending);
   if (!non_pending.empty()) set_delays_batch(non_pending, -2);  // src: src/services/delay.ts:456
   last_batch_summary_ = BatchTestSummary{};
-  if (!hooks_.test_and_select) {
+  if (!hooks_.test_batch && !hooks_.test_and_select) {
     restore_delays_for_still_pending(internal_snaps);
     return false;
   }
-  std::string fastest = hooks_.test_and_select(call_nodes);
-  bool ok = !fastest.empty();
+  const bool used_batch_hook = static_cast<bool>(hooks_.test_batch);
+  std::string fastest = used_batch_hook
+                            ? hooks_.test_batch(call_nodes, select, clean_stale)
+                            : hooks_.test_and_select(call_nodes);
+  bool ok = select && !fastest.empty();
   if (hooks_.last_batch_summary) {
     last_batch_summary_ = hooks_.last_batch_summary();
   } else {
     last_batch_summary_.executed = true;
     last_batch_summary_.selected = ok;
-    last_batch_summary_.selected_node = fastest;
+    last_batch_summary_.selected_node = ok ? fastest : std::string();
     last_batch_summary_.selected_delay_ms = ok ? row_delay(fastest) : -1;
   }
   auto anchor = self_;
   if (ok) {
-    CWLOG_INFO("NodeData::test_and_select: 群测最优节点 = " + fastest +
-               "，执行切换");
-    UiPostbox::instance().post([anchor, fastest, internal_snaps] {
+    CWLOG_INFO("NodeData::test_batch: 群测最优节点 = " + fastest +
+               "，同步 UI 选中状态");
+    UiPostbox::instance().post([anchor, fastest, internal_snaps, used_batch_hook] {
       if (!anchor) return;
       NodeData* self = nullptr;
       {
@@ -345,7 +353,14 @@ bool NodeData::test_and_select(const std::vector<std::string>& nodes) {
       }
       if (self) {
         self->restore_delays_for_still_pending(internal_snaps);
-        self->select(fastest);
+        if (used_batch_hook) {
+          // 生产路径：AutoSelect::trigger 已完成内核 PUT + profiles.selected 落盘，禁止二次 select()
+          self->now_ = fastest;
+          self->notify();
+        } else {
+          // 兼容仅注入 test_and_select 的历史单测桩
+          self->select(fastest);
+        }
       }
     });
   } else {
@@ -372,17 +387,105 @@ bool NodeData::test_and_select(const std::vector<std::string>& nodes) {
 }
 
 namespace {
-// RFC3339 → epoch ms（无时区按 UTC，等价 JS Date.parse 的 Z 分支）
+int parse_2digits(const std::string& s, size_t pos, int* out) {
+  if (pos + 2 > s.size() || !std::isdigit(static_cast<unsigned char>(s[pos])) ||
+      !std::isdigit(static_cast<unsigned char>(s[pos + 1]))) {
+    return -1;
+  }
+  *out = (s[pos] - '0') * 10 + (s[pos + 1] - '0');
+  return 0;
+}
+
+// RFC3339 → epoch ms（支持可选小数秒及 Z / +HH:MM / -HH:MM，无时区按 UTC）
 bool parse_iso_time_ms(const std::string& s, int64_t* out) {
   if (s.size() < 19) return false;
   std::tm tm{};
   std::istringstream iss(s.substr(0, 19));
   iss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%S");
   if (iss.fail()) return false;
-  *out = static_cast<int64_t>(_mkgmtime(&tm)) * 1000;
+  int64_t sec = static_cast<int64_t>(_mkgmtime(&tm));
+  if (sec < 0) return false;
+
+  size_t pos = 19;
+  int ms = 0;
+  if (pos < s.size() && s[pos] == '.') {
+    ++pos;
+    int frac_digits = 0;
+    int scale = 100;
+    while (pos < s.size() && std::isdigit(static_cast<unsigned char>(s[pos]))) {
+      if (frac_digits < 3) {
+        ms += (s[pos] - '0') * scale;
+        scale /= 10;
+      }
+      ++frac_digits;
+      ++pos;
+    }
+  }
+
+  int64_t tz_offset_sec = 0;
+  if (pos < s.size()) {
+    if (s[pos] == 'Z' || s[pos] == 'z') {
+      tz_offset_sec = 0;
+    } else if (s[pos] == '+' || s[pos] == '-') {
+      const int sign = (s[pos] == '+') ? 1 : -1;
+      ++pos;
+      int hh = 0;
+      int mm = 0;
+      if (parse_2digits(s, pos, &hh) != 0) return false;
+      pos += 2;
+      if (pos < s.size() && s[pos] == ':') ++pos;
+      if (parse_2digits(s, pos, &mm) != 0) return false;
+      if (hh > 23 || mm > 59) return false;
+      tz_offset_sec = sign * (static_cast<int64_t>(hh) * 3600 +
+                              static_cast<int64_t>(mm) * 60);
+    }
+  }
+  *out = (sec - tz_offset_sec) * 1000 + ms;
   return true;
 }
 }  // namespace
+
+  // BUG-402: 判断当前活跃节点历史是否新鲜有效（alive==true, [30,5000), age<=45min）
+bool is_proxy_history_fresh_and_valid(
+    bool alive, const std::vector<mihomo::DelayHistory>& history,
+    int64_t now_epoch_ms) {
+  if (!alive || history.empty()) return false;
+  const auto& last = history.back();
+  if (last.delay < static_cast<uint32_t>(kNodeDelayMinMs) ||
+      last.delay >= static_cast<uint32_t>(kNodeDelayMaxMs)) {
+    return false;
+  }
+  int64_t rec_ms = 0;
+  if (!parse_iso_time_ms(last.time, &rec_ms)) return false;
+  return now_epoch_ms - rec_ms <= kHistoryFallbackMaxAgeMs;
+}
+
+bool NodeData::has_fresh_active_exit_latency(
+    const std::vector<std::string>& names) const {
+  if (names.empty() || now_.empty() || clashwin::util::is_dummy_node(now_)) {
+    return false;
+  }
+  if (std::find(names.begin(), names.end(), now_) == names.end()) {
+    return false;
+  }
+  const int64_t now = hooks_.now_ms ? hooks_.now_ms() : 0;
+  auto it = delay_cache_.find(now_);
+  if (it != delay_cache_.end() &&
+      (now - it->second.updated_at_ms <= it->second.ttl_ms) &&
+      it->second.delay >= kNodeDelayMinMs &&
+      it->second.delay < kNodeDelayMaxMs) {
+    return true;
+  }
+  auto h = proxy_history_.find(now_);
+  if (h == proxy_history_.end() || !h->second.alive ||
+      h->second.delay < kNodeDelayMinMs || h->second.delay >= kNodeDelayMaxMs) {
+    return false;
+  }
+  std::vector<mihomo::DelayHistory> hist;
+  hist.push_back(mihomo::DelayHistory{
+      h->second.time, static_cast<uint16_t>(h->second.delay)});
+  return is_proxy_history_fresh_and_valid(true, hist, current_epoch_ms(now));
+}
 
 int NodeData::row_delay(const std::string& name) const {
   int64_t now = hooks_.now_ms ? hooks_.now_ms() : 0;
@@ -415,12 +518,28 @@ int NodeData::row_delay(const std::string& name) const {
     if (h->second.delay >= 0) {
       int64_t rec = 0;
       if (parse_iso_time_ms(h->second.time, &rec)) {
-        if (now - rec > kHistoryFallbackMaxAgeMs) return 0;
+        if (current_epoch_ms(now) - rec > kHistoryFallbackMaxAgeMs) return 0;
       }
       return h->second.delay;
     }
   }
   return -1;
+}
+
+size_t NodeData::clean_expired_delays() {
+  const int64_t now = hooks_.now_ms ? hooks_.now_ms() : 0;
+  size_t removed = 0;
+  for (auto it = delay_cache_.begin(); it != delay_cache_.end();) {
+    if (it->second.delay != -2 &&
+        (now - it->second.updated_at_ms > it->second.ttl_ms)) {
+      it = delay_cache_.erase(it);
+      ++removed;
+    } else {
+      ++it;
+    }
+  }
+  if (removed > 0) notify();
+  return removed;
 }
 
 uint64_t NodeData::subscribe(std::function<void()> cb) {
@@ -503,12 +622,11 @@ DataHooks NodeData::production_hooks(const std::string& group) {
     }
     return out;
   };
-  // ★ §5.2/§5.6「所见即所选」：可见子集 → 测速 + 择优切换
-  //   ← Mini proxy-groups.tsx:230-275 handleCheckAll
-  //     triggerAutoSelect(currentUid, visibleNames, 0, true)
-  //   → cmd trigger_auto_select（cmd_profile.cpp:585）→ AutoSelect::trigger
+  // ★ §5.2/§5.6「所见即所选」：可见子集 → 测速 + 按 select/clean_stale 意图择优切换（BUG-397）
+  //   ← Mini proxy-groups.tsx:252-330 handleCheckAll(groupName, { select })
   auto batch_sum = std::make_shared<BatchTestSummary>();
-  h.test_and_select = [batch_sum](const std::vector<std::string>& nodes) -> std::string {
+  h.test_batch = [batch_sum](const std::vector<std::string>& nodes, bool select,
+                             bool clean_stale) -> std::string {
     *batch_sum = BatchTestSummary{};
     std::string uid;
     try {
@@ -516,22 +634,22 @@ DataHooks NodeData::production_hooks(const std::string& group) {
       if (latest && latest->current) uid = *latest->current;
     } catch (...) {}
     if (uid.empty()) return "";
-    // sort_type=0（head state）；select=true（择优切换）
-    // nodes 为空 → 全量（与自动优选同语义）
     auto outcome = core::AutoSelect::instance().trigger(
         uid, nodes.empty() ? std::nullopt
                             : std::optional<std::vector<std::string>>(nodes),
-        /*sort_type=*/0, /*select=*/true);
+        /*sort_type=*/0, select);
     batch_sum->busy = outcome.busy;
     batch_sum->executed = !outcome.busy && !outcome.display.empty();
-    batch_sum->selected = outcome.selected && !outcome.selected_node.empty();
+    batch_sum->selected = select && outcome.selected && !outcome.selected_node.empty();
     if (batch_sum->selected) {
-      // BUG-396（proxy-groups.tsx:325-330 第5参 true）：F4/过滤词可见子集
-      // 属于前台用户显式切点，择优切换成功后精准清理旧节点存量连接。
-      auto mc = cmd::mihomo();
-      if (mc.is_ok() && mc.value()) {
-        (void)core::close_stale_proxy_connections(*mc.value(),
-                                                  outcome.selected_node);
+      if (clean_stale) {
+        // BUG-396 / BUG-397：仅触发切点的优选/过滤入口精准清理旧节点存量连接；
+        // ⚡ 与 F4 传 select=false/clean_stale=false 时绝不断开任何存量连接。
+        auto mc = cmd::mihomo();
+        if (mc.is_ok() && mc.value()) {
+          (void)core::close_stale_proxy_connections(*mc.value(),
+                                                    outcome.selected_node);
+        }
       }
       batch_sum->selected_node = outcome.selected_node;
       for (const auto& [nm, ms] : outcome.display) {
@@ -542,11 +660,13 @@ DataHooks NodeData::production_hooks(const std::string& group) {
       }
     }
     if (outcome.busy) {
-      CWLOG_WARN("test_and_select: AUTO_SELECT_BUSY（互斥占用，本次不执行）");
+      CWLOG_WARN("test_batch: AUTO_SELECT_BUSY（互斥占用，本次不执行）");
       return "";
     }
-    // 结果经 backend-delay-results 事件回灌缓存（AutoSelect 内部已发）
     return batch_sum->selected ? batch_sum->selected_node : "";
+  };
+  h.test_and_select = [fn = h.test_batch](const std::vector<std::string>& nodes) -> std::string {
+    return fn(nodes, true, true);
   };
   h.last_batch_summary = [batch_sum] { return *batch_sum; };
   return h;

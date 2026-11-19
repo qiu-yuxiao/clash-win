@@ -46,8 +46,8 @@
    - 将 `<X.Y.Z>` 同步到 `constants.h`、`src/clashwin.rc`、`installer/clashwin.nsi`；
    - 校验 `CHANGELOG.md` 含非空的 `## v<X.Y.Z>` 章节；
    - 执行 `scripts/release_preflight.ps1 -Version <X.Y.Z>`（**GATE 1~7 全量门禁**）；
-   - 顺序编译 Release 版 `clashwin.exe` 与 `clashwin_test.exe`，并调用 `scripts/run_tests.ps1` 跑完隔离全量单元测试（要求 `0 failed, 0 assertion failures`）；
-   - 本地实际打包 `dist\ClashWin_<X.Y.Z>_x64_portable.zip` 与 `dist\ClashWin_<X.Y.Z>_x64-setup.exe`（`-SkipSign`），并交叉核验编译产物、安装包 stage 目录、便携包 ZIP 三处 `clashwin.exe` 与 `win-mihomo.exe` 的 SHA256 完全一致。
+   - 顺序编译 Release 版 `clash-win.exe` 与 `clashwin_test.exe`，并调用 `scripts/run_tests.ps1` 跑完隔离全量单元测试（要求 `0 failed, 0 assertion failures`）；
+   - 本地实际打包 `dist\Clash.Win_<X.Y.Z>_x64_portable.zip` 与 `dist\Clash.Win_<X.Y.Z>_x64-setup.exe`（`-SkipSign`），并交叉核验编译产物、安装包 stage 目录、便携包 ZIP 三处 `clash-win.exe` 与 `win-mihomo.exe` 的 SHA256 完全一致。
 
 > **判定标准**：终端末尾打印绿色的 `=== Clash Win v<X.Y.Z> 本地预演全部通过 ===`。若任何一步报错，直接在本地修复后重跑第一步，无需耗费 18 分钟等待远程 CI。
 
@@ -88,7 +88,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\release_preflight.ps
 
 | 门禁 | 校验项 | 防御的历史故障 |
 | :--- | :--- | :--- |
-| **GATE 1** | `constants.h` (`kAppVersion`) == `src/clashwin.rc`（4 处版本字段）== `installer/clashwin.nsi` (`!define VERSION`) == `-Version` | 防止漏改 `.rc` 导致发布的 `clashwin.exe` 右键属性停留在旧版本，或正则写坏版本号。 |
+| **GATE 1** | `constants.h` (`kAppVersion`) == `src/clashwin.rc`（4 处版本字段）== `installer/clashwin.nsi` (`!define VERSION`) == `-Version` | 防止漏改 `.rc` 导致发布的 `clash-win.exe` 右键属性停留在旧版本，或正则写坏版本号。 |
 | **GATE 2** | `updater/app-update.json` 合法 JSON、无 `clash-mini` 残留、版本号 `<=` 目标版本、URL 指向 `qiu-yuxiao/clash-win` | 防止误合入 Mini 更新源或损坏 JSON；允许保留上一已发布版本的有效清单。 |
 | **GATE 3** | `CHANGELOG.md` 含非空 `## v<X.Y.Z>` 且无 `TODO`/`TBD`；`docs/KNOWN_LIMITATIONS.md` 存在且被 Issue 模板正确引用 | 防止空发版说明、未完成的占位符上线、或 Issue 模板出现 404 死链。 |
 | **GATE 4** | `tests/test_*.cpp` 100% 在 `CMakeLists.txt` 注册；`test_t35_release_readiness.cpp` 无硬编码死版本；内核进程名常量一致 | 防止新增测试文件漏注册静默跳过，或 `t35` 写死旧版本号卡死 CI。 |

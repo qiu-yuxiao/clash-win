@@ -378,13 +378,6 @@ UT_TEST(t25_help_menu_action_dispatch) {
   UT_CHECK_EQ(dispatched[5], ui::HelpAction::CheckCoreUpdate);
   UT_CHECK_EQ(dispatched[6], ui::HelpAction::AntivirusGuide);
 
-  // Menu handle verification
-  HMENU menu = ui::HelpMenu::create_menu_handle();
-  UT_CHECK(menu != nullptr);
-  int item_count = GetMenuItemCount(menu);
-  UT_CHECK(item_count >= 9);  // 9+ actions/separators
-  DestroyMenu(menu);
-
   ui::HelpMenu::set_action_handler_for_testing(nullptr);
 }
 

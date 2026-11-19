@@ -81,8 +81,8 @@ UT_TEST(t17_left_column_layout_pixels) {
   drawer.set_open(true);
   // 卡宽 = 240 - pr 8 - borderRight 1 = 231（src: _layout.tsx:1428-1436）
   UT_CHECK(near_f(drawer.profile_card()->bounds().w, 231));
-  // D12: 窄窗单列居中对齐：(271 - 231) / 2 = 20；y 仍为 12+4=16
-  UT_CHECK(near_f(drawer.profile_card()->bounds().x, 20));
+  // 窄窗同样左对齐 12 + 4 = 16（src: _layout.tsx:1420）
+  UT_CHECK(near_f(drawer.profile_card()->bounds().x, 16));
   UT_CHECK(near_f(drawer.profile_card()->bounds().y, 16));
   rt().begin_frame();
   rt().clear({1, 1, 1, 1});
@@ -92,10 +92,10 @@ UT_TEST(t17_left_column_layout_pixels) {
   // 取卡外顶部 padding 区（y=6），避开卡内控件（日志钮 primary 蓝）
   Px panel = pixel(135, 6);
   UT_CHECK(panel.r > 240 && panel.b < 240);
-  // 左列 borderRight 1px divider（x = 12 + 240 = 252）：比相邻面板更暗
-  Px div = pixel(252, 600);
-  Px near_px = pixel(246, 600);  // 注意：windows.h 把 near 定义为空宏
-  UT_CHECK(div.r < near_px.r - 8);
+  // 单列窄窗不绘制右列分隔竖线（仅 >285 宽窗绘制 borderRight）
+  Px no_div = pixel(255, 600);
+  Px near_px = pixel(250, 600);
+  UT_CHECK(std::abs(static_cast<int>(no_div.r) - static_cast<int>(near_px.r)) <= 4);
 }
 
 UT_TEST(t17_takeover_routing_callbacks) {

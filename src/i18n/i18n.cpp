@@ -57,8 +57,17 @@ std::string I18n::resolve_language(const std::string& raw) {
 
   if (normalized.empty()) return kFallback;
 
-  if (normalized == "zh-tw") return "zhtw";
-  if (normalized == "zh-cn") return "zh";
+  if (normalized == "zh-tw" || normalized == "zh-hk" ||
+      normalized == "zh-mo" || normalized.rfind("zh-hant", 0) == 0) {
+    return "zhtw";
+  }
+  if (normalized == "zh-cn" || normalized == "zh-sg" ||
+      normalized.rfind("zh-hans", 0) == 0) {
+    return "zh";
+  }
+  if (normalized == "ja" || normalized.rfind("ja-", 0) == 0) {
+    return "jp";
+  }
 
   const auto& supported = supported_languages();
   if (std::find(supported.begin(), supported.end(), normalized) !=

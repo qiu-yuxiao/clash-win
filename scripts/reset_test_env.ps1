@@ -29,19 +29,20 @@ $backupDir = "$configDir.bak-$stamp"
 Write-Host '=== Clash Win 测试环境重置 ===' -ForegroundColor Cyan
 
 # ---------- 1) 停止进程 ----------
-$procs = Get-Process clashwin -ErrorAction SilentlyContinue
+$procs = Get-Process -Name 'clash-win','clashwin' -ErrorAction SilentlyContinue
 if ($procs) {
   foreach ($p in $procs) {
-    Write-Host "停止 clashwin.exe pid=$($p.Id)"
+    Write-Host "停止 $($p.ProcessName).exe pid=$($p.Id)"
     Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
   }
   Start-Sleep -Milliseconds 800
 } else {
-  Write-Host 'clashwin.exe 未运行'
+  Write-Host 'clash-win.exe 未运行'
 }
 
 # 本产品目录下的内核进程（只认安装目录/构建目录，避免误杀 Clash Mini 的内核）
-$instDirs = @('C:\Program Files\ClashWin',
+$instDirs = @('C:\Program Files\Clash Win',
+              'C:\Program Files\ClashWin',
               (Join-Path $PSScriptRoot '..\build\bin\Release'))
 $resolved = @()
 foreach ($d in $instDirs) {
@@ -117,7 +118,8 @@ foreach ($root in $portableRoots) {
       $stateNames = @(
         'profiles', 'profiles.yaml', 'verge.yaml', 'clash.yaml', 'clash-win.yaml',
         'clash-win-check.yaml', 'config.yaml', 'window_state.json',
-        'clashwin-skin.json', 'last_non_large_size.json', 'logs', 'diagnostics',
+        'clash-win-skin.json', 'clash-win-guide.json', 'clashwin-skin.json',
+        'last_non_large_size.json', 'logs', 'diagnostics',
         'proxy_head_state.json', 'unlock_cache.json', 'runtime.yaml'
       )
       foreach ($n in $stateNames) {
@@ -138,7 +140,7 @@ foreach ($root in $portableRoots) {
 # ---------- 4) 校验 ----------
 $ok = $true
 if (Test-Path $configDir) { Write-Host '校验失败：配置目录仍存在' -ForegroundColor Red; $ok = $false }
-if (Get-Process clashwin -ErrorAction SilentlyContinue) { Write-Host '校验失败：clashwin 仍在运行' -ForegroundColor Red; $ok = $false }
+if (Get-Process -Name 'clash-win','clashwin' -ErrorAction SilentlyContinue) { Write-Host '校验失败：clash-win 仍在运行' -ForegroundColor Red; $ok = $false }
 $pe = (Get-ItemProperty -Path $inetKey -Name ProxyEnable -ErrorAction SilentlyContinue).ProxyEnable
 if ($pe -ne 0) { Write-Host "校验失败：ProxyEnable=$pe" -ForegroundColor Red; $ok = $false }
 

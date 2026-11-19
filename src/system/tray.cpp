@@ -42,6 +42,21 @@ bool Win32TrayBackend::delete_icon(HWND hwnd, UINT uID) {
   return Shell_NotifyIconW(NIM_DELETE, &nid) == TRUE;
 }
 
+bool Win32TrayBackend::show_balloon(HWND hwnd, UINT uID,
+                                    const std::wstring& title,
+                                    const std::wstring& body) {
+  NOTIFYICONDATAW nid{};
+  nid.cbSize = sizeof(nid);
+  nid.hWnd = hwnd;
+  nid.uID = uID;
+  nid.uFlags = NIF_INFO;
+  nid.dwInfoFlags = NIIF_NONE | NIIF_NOSOUND;
+  nid.uTimeout = 3000;
+  wcsncpy_s(nid.szInfoTitle, title.c_str(), _TRUNCATE);
+  wcsncpy_s(nid.szInfo, body.c_str(), _TRUNCATE);
+  return Shell_NotifyIconW(NIM_MODIFY, &nid) == TRUE;
+}
+
 void Win32TrayBackend::show_menu(HWND hwnd, POINT pt, bool in_lite_mode, std::function<void(int cmd_id)> on_cmd) {
   HMENU hMenu = CreatePopupMenu();
   if (!hMenu) return;
@@ -90,24 +105,30 @@ void Tray::load_icons() {
   size_t pos = exe_dir.find_last_of(L"\\/");
   if (pos != std::wstring::npos) exe_dir.resize(pos);
 
+  HINSTANCE hInst = GetModuleHandleW(nullptr);
   const int cx_sm = GetSystemMetrics(SM_CXSMICON);
   const int cy_sm = GetSystemMetrics(SM_CYSMICON);
-  auto load_one = [&](const std::wstring& rel_path) -> HICON {
+  const int w = cx_sm > 0 ? cx_sm : 16;
+  const int h = cy_sm > 0 ? cy_sm : 16;
+  auto load_one = [&](int res_id, const std::wstring& rel_path) -> HICON {
+    // 1. 优先从编译期嵌入 .rc 的多尺寸 ico 中按 SM_CXSMICON 精确取帧（← Mini include_bytes!）
+    HICON hi = static_cast<HICON>(
+        LoadImageW(hInst, MAKEINTRESOURCEW(res_id), IMAGE_ICON, w, h, LR_DEFAULTCOLOR));
+    if (hi) return hi;
+    // 2. 兜底：无 .rc 的单测二进制回退到磁盘文件加载
     std::wstring full = exe_dir + L"\\" + rel_path;
-    HICON h = static_cast<HICON>(
-        LoadImageW(nullptr, full.c_str(), IMAGE_ICON,
-                   cx_sm > 0 ? cx_sm : 16, cy_sm > 0 ? cy_sm : 16,
-                   LR_LOADFROMFILE));
-    if (!h) {
-      h = static_cast<HICON>(
+    hi = static_cast<HICON>(
+        LoadImageW(nullptr, full.c_str(), IMAGE_ICON, w, h, LR_LOADFROMFILE));
+    if (!hi) {
+      hi = static_cast<HICON>(
           LoadImageW(nullptr, full.c_str(), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE));
     }
-    return h;
+    return hi;
   };
 
-  h_icon_default_ = load_one(L"resources\\icons\\tray-icon.ico");
-  h_icon_sys_     = load_one(L"resources\\icons\\tray-icon-sys.ico");
-  h_icon_tun_     = load_one(L"resources\\icons\\tray-icon-tun.ico");
+  h_icon_default_ = load_one(kTrayIconResDefault, L"resources\\icons\\tray-icon.ico");
+  h_icon_sys_     = load_one(kTrayIconResSys, L"resources\\icons\\tray-icon-sys.ico");
+  h_icon_tun_     = load_one(kTrayIconResTun, L"resources\\icons\\tray-icon-tun.ico");
 
   if (!h_icon_default_) h_icon_default_ = LoadIconW(nullptr, IDI_APPLICATION);
   if (!h_icon_sys_) h_icon_sys_ = h_icon_default_;
@@ -126,8 +147,9 @@ HICON Tray::get_icon_for_state(TrayIconState state) {
   }
 }
 
-bool Tray::init(HWND hwnd) {
+bool Tray::init(HWND hwnd, TrayIconState initial_state) {
   hwnd_ = hwnd;
+  current_state_ = initial_state;
   load_icons();
   if (backend_) {
     HICON icon = get_icon_for_state(current_state_);
@@ -173,8 +195,36 @@ bool Tray::check_click_debounce(int64_t now_ms) {
   return true;
 }
 
+bool Tray::notify_silent_running(const std::string& lang, int64_t now_ms) {
+  if (now_ms < 0) {
+    now_ms = static_cast<int64_t>(GetTickCount64());
+  }
+  if (last_silent_balloon_ms_ != 0 && now_ms - last_silent_balloon_ms_ < 2000) {
+    return false;
+  }
+  last_silent_balloon_ms_ = now_ms;
+  if (!icon_added_ || !backend_ || !hwnd_) return false;
+
+  std::wstring title;
+  std::wstring body;
+  if (lang == "zhtw" || lang == "zh-TW" || lang == "zh-HK") {
+    title = L"Clash Win \u5df2\u5728\u80cc\u666f\u975c\u9ed8\u57f7\u884c";
+    body = L"\u70ba\u9632\u5b89\u5168\u8edf\u9ad4\u8aa4\u6bba\u672a\u5f48\u51fa\u4e3b\u8996\u7a97\uff1b\u5982\u9700\u958b\u555f\u4ecb\u9762\uff0c\u8acb\u5de6\u9375\u9ede\u64ca\u53f3\u4e0b\u89d2\u7cfb\u7d71\u5323\u5716\u793a\u3002";
+  } else if (lang.empty() || lang == "zh" || lang == "zh-CN") {
+    title = L"Clash Win \u5df2\u5728\u540e\u53f0\u9759\u9ed8\u8fd0\u884c";
+    body = L"\u4e3a\u9632\u5b89\u5168\u8f6f\u4ef6\u8bef\u6740\u672a\u5f39\u51fa\u4e3b\u7a97\u53e3\uff1b\u5982\u9700\u6253\u5f00\u754c\u9762\uff0c\u8bf7\u5de6\u952e\u70b9\u51fb\u53f3\u4e0b\u89d2\u6258\u76d8\u56fe\u6807\u3002";
+  } else {
+    title = L"Clash Win is running silently in tray";
+    body = L"Main window stays hidden to prevent false-positive cleanup. Left-click the tray icon to open.";
+  }
+  return backend_->show_balloon(hwnd_, kTrayIconId, title, body);
+}
+
 void Tray::handle_tray_message(WPARAM /*wParam*/, LPARAM lParam) {
-  if (lParam == WM_LBUTTONUP) {
+  if (is_exiting_check_ && is_exiting_check_()) {
+    return;
+  }
+  if (lParam == WM_LBUTTONDOWN) {
     if (check_click_debounce()) {
       if (on_left_click_) on_left_click_();
     }
@@ -183,6 +233,7 @@ void Tray::handle_tray_message(WPARAM /*wParam*/, LPARAM lParam) {
     GetCursorPos(&pt);
     if (backend_) {
       backend_->show_menu(hwnd_, pt, lite_mode_checked_, [this](int cmd) {
+        if (is_exiting_check_ && is_exiting_check_()) return;
         if (cmd == kMenuLiteModeId) {
           if (check_click_debounce()) {
             if (on_toggle_lite_mode_) on_toggle_lite_mode_();

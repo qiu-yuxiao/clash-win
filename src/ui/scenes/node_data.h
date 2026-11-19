@@ -26,8 +26,13 @@ inline constexpr int kNodeDelayMaxMs = 5000;     // src: src/services/delay.ts:1
 inline constexpr int64_t kDelayCacheTtlMs = 30 * 60 * 1000;  // src: src/services/delay.ts:12
 // BUG-344: 后台复用缓存指标的最大前端保鲜期（30s），防止即将过期旧缓存被续命为 30min
 inline constexpr int64_t kReusedMetricsMaxTtlMs = 30 * 1000;  // src: src/services/delay.ts:15
-// src: src/services/delay.ts:22 HISTORY_FALLBACK_MAX_AGE_MS = 10 * 60 * 1000
-inline constexpr int64_t kHistoryFallbackMaxAgeMs = 10 * 60 * 1000;  // src: src/services/delay.ts:22
+// BUG-399: src: src/services/delay.ts:27 HISTORY_FALLBACK_MAX_AGE_MS = 45 * 60 * 1000 (strictly > PASSIVE_TRAFFIC_MAX_SKIP_SECS 1800s)
+inline constexpr int64_t kHistoryFallbackMaxAgeMs = 45 * 60 * 1000;  // src: src/services/delay.ts:27
+
+// BUG-402: src: src/pages/_layout/utils/profile-coordination.ts:161-182
+bool is_proxy_history_fresh_and_valid(
+    bool alive, const std::vector<mihomo::DelayHistory>& history,
+    int64_t now_epoch_ms);
 
 // ← formatDelayColor 五档（250/400/5000 分界，BUG-304）
 enum class DelayTier { Unknown, Success, Mid, Slow, Timeout };
@@ -73,6 +78,10 @@ struct DataHooks {
   //   nodes 为空 → 全量（与 F1 自动优选同语义）
   //   返回择优选中的节点名（空表示未选中/繁忙）
   std::function<std::string(const std::vector<std::string>& nodes)> test_and_select;
+  // BUG-397（src/components/proxy/proxy-groups.tsx:252-330）：带 select / clean_stale 意图显式参数的批量测速钩子
+  std::function<std::string(const std::vector<std::string>& nodes, bool select,
+                            bool clean_stale)>
+      test_batch;
   std::function<BatchTestSummary()> last_batch_summary;
   std::function<std::unordered_set<std::string>()> fetch_confirmed_fake;
   std::function<int64_t()> now_ms;  // 时钟注入（TTL/测试确定性）
@@ -170,10 +179,12 @@ class NodeData {
   // 触发组测速
   bool test_group();
 
-  // ★ §5.2/§5.6「所见即所选」：批量测速可见子集 + 择优切换
-  //   ← Mini proxy-groups.tsx:230-275 handleCheckAll
-  //   nodes 非空 → 仅在子集内测速与择优；nodes 空 → 全量
+  // ★ §5.2/§5.6「所见即所选」：批量测速可见子集（BUG-397 区分 select 与 clean_stale）
+  //   ← Mini proxy-groups.tsx:230-330 handleCheckAll / handleAutoSelect
+  //   nodes 非空 → 仅在子集内测速；nodes 空 → 全量
   //   返回 false = 未执行（测速未执行 ≠ Timeout）
+  bool test_batch(const std::vector<std::string>& nodes, bool select = true,
+                  bool clean_stale = true);
   bool test_and_select(const std::vector<std::string>& nodes);
 
   // ---- 读取 ----
@@ -183,10 +194,14 @@ class NodeData {
   const std::string& group() const { return group_; }
   // 行延迟（TTL 30min 惰性判过期 → -1 Unknown；-2 testing 原样透传）
   int row_delay(const std::string& name) const;
+  // 5min 周期清理已过期延迟缓存（保留 -2 testing）（← src/services/delay.ts:100-112）
+  size_t clean_expired_delays();
   std::string last_select_error() const {
     return hooks_.last_select_error ? hooks_.last_select_error() : std::string();
   }
   BatchTestSummary last_batch_summary() const { return last_batch_summary_; }
+  // BUG-402: src: src/pages/_layout/utils/profile-coordination.ts:183-204
+  bool has_fresh_active_exit_latency(const std::vector<std::string>& names) const;
 
   // 变更通知（UI invalidate / 局部刷新回调）
   uint64_t subscribe(std::function<void()> cb);

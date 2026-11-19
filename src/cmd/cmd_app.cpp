@@ -25,6 +25,61 @@ namespace fs = std::filesystem;
 
 namespace clashwin::cmd {
 
+namespace {
+constexpr wchar_t kAntivirusGuideFilename[] =
+    L"\u8f7b\u91cf\u6a21\u5f0f\u9632\u8bef\u6740\u6307\u5357.txt";
+
+void push_unique_candidate(std::vector<std::wstring>& out,
+                           const fs::path& candidate) {
+  std::wstring w = candidate.lexically_normal().wstring();
+  for (const auto& existing : out) {
+    if (_wcsicmp(existing.c_str(), w.c_str()) == 0) return;
+  }
+  out.push_back(std::move(w));
+}
+}  // namespace
+
+std::vector<std::wstring> collect_antivirus_guide_candidates(
+    const std::wstring& exe_dir, const std::wstring& resources_dir,
+    const std::wstring& dev_workspace_dir) {
+  std::vector<std::wstring> candidates;
+  if (!exe_dir.empty()) {
+    const fs::path ed(exe_dir);
+    push_unique_candidate(candidates, ed / kAntivirusGuideFilename);
+    push_unique_candidate(candidates,
+                          ed / L"resources" / kAntivirusGuideFilename);
+  }
+  if (!resources_dir.empty()) {
+    push_unique_candidate(candidates,
+                          fs::path(resources_dir) / kAntivirusGuideFilename);
+  }
+  if (!dev_workspace_dir.empty()) {
+    push_unique_candidate(
+        candidates, fs::path(dev_workspace_dir) / kAntivirusGuideFilename);
+  }
+  return candidates;
+}
+
+std::optional<std::wstring> select_existing_guide_path(
+    const std::vector<std::wstring>& candidates) {
+  std::error_code ec;
+  for (const auto& c : candidates) {
+    if (fs::is_regular_file(fs::path(c), ec)) return c;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::wstring> resolve_antivirus_guide_path() {
+  const std::wstring ed = util::dirs::exe_dir();
+  const std::wstring rd = util::dirs::app_resources_dir();
+  std::wstring dev_root;
+#ifdef CLASHWIN_REPO_ROOT
+  dev_root = utf::utf8_to_utf16(CLASHWIN_REPO_ROOT);
+#endif
+  return select_existing_guide_path(
+      collect_antivirus_guide_candidates(ed, rd, dev_root));
+}
+
 void install_cmd_app(CommandService& svc) {
   // ---- app_is_admin（← utils/sysinfo.rs，等价 IsUserAnAdmin）----
   svc.register_command(
@@ -174,6 +229,31 @@ void install_cmd_app(CommandService& svc) {
          return CmdResult::ok(Json{{"path", utf::utf16_to_utf8(res.value())}});
        },
        consts::kTimeoutHeavy});
+
+  // BUG-398：直接用系统默认文本查看器打开随包附带的《轻量模式防误杀指南.txt》
+  svc.register_command(
+      "open_antivirus_guide",
+      {[](const Json&) -> CmdResult {
+         auto guide_path = resolve_antivirus_guide_path();
+         if (!guide_path) {
+           return CmdResult::err(
+               {errs::kIo,
+                "未找到《轻量模式防误杀指南.txt》，请检查安装目录是否完整"});
+         }
+         wchar_t override_buf[4]{};
+         if (GetEnvironmentVariableW(L"CLASHWIN_HOME_OVERRIDE", override_buf, 4) > 0) {
+           return CmdResult::ok(Json{{"path", utf::utf16_to_utf8(*guide_path)}});
+         }
+         const auto rc = reinterpret_cast<INT_PTR>(ShellExecuteW(
+             nullptr, L"open", guide_path->c_str(), nullptr, nullptr, SW_SHOWNORMAL));
+         if (rc <= 32) {
+           return CmdResult::err(
+               {errs::kIo, "ShellExecuteW open_antivirus_guide failed (" +
+                               std::to_string(rc) + ")"});
+         }
+         return CmdResult::ok(Json::object());
+       },
+       consts::kTimeoutProbe});
 }
 
 }  // namespace clashwin::cmd

@@ -24,4 +24,7 @@ Result<DeepLinkInfo> parse_deep_link(std::string_view link);
 // 解析并执行导入订阅链路
 Result<void> resolve_scheme(std::string_view link);
 
+// 注册当前可执行文件的 HKCU URL Scheme（clash:// 与 clash-win://），单测重定向环境下跳过
+void init_scheme();
+
 }  // namespace clashwin::app

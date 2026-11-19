@@ -34,7 +34,7 @@ inline constexpr int64_t kReadyPollIntervalMs = 1500;
 
 class FirstRunGuideDialog : public Widget {
  public:
-  static constexpr const char* kStorageKey = "clash-mini-first-run-completed";
+  static constexpr const char* kStorageKey = "clash-win-first-run-completed";
 
   static bool is_first_run_completed();
   static void set_first_run_completed(bool completed);
@@ -102,6 +102,7 @@ class FirstRunGuideDialog : public Widget {
 
   void submit_import();
   void finish();
+  void dismiss_via_close();
 
   void on_arrange(const RectF& area) override;
   void on_paint(IRenderTarget& rt) override;

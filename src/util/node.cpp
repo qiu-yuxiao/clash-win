@@ -127,14 +127,25 @@ std::vector<std::string> split_keep_empty(std::string_view s, char delim) {
 }
 
 std::vector<std::string> split_ascii_whitespace(std::string_view s) {
+  std::string normalized(s);
+  const std::string fw_space = "\xE3\x80\x80";  // 全角空格 U+3000
+  size_t pos = 0;
+  while ((pos = normalized.find(fw_space, pos)) != std::string::npos) {
+    normalized.replace(pos, fw_space.size(), " ");
+    pos += 1;
+  }
   std::vector<std::string> parts;
   size_t i = 0;
-  while (i < s.size()) {
-    while (i < s.size() && is_ascii_ws(static_cast<unsigned char>(s[i]))) ++i;
-    if (i >= s.size()) break;
+  while (i < normalized.size()) {
+    while (i < normalized.size() &&
+           is_ascii_ws(static_cast<unsigned char>(normalized[i])))
+      ++i;
+    if (i >= normalized.size()) break;
     size_t j = i;
-    while (j < s.size() && !is_ascii_ws(static_cast<unsigned char>(s[j]))) ++j;
-    parts.emplace_back(s.substr(i, j - i));
+    while (j < normalized.size() &&
+           !is_ascii_ws(static_cast<unsigned char>(normalized[j])))
+      ++j;
+    parts.emplace_back(normalized.substr(i, j - i));
     i = j;
   }
   return parts;
@@ -1397,6 +1408,12 @@ bool is_supported_subscription_or_node_input(std::string_view raw) {
     if (!ok) return false;
   }
   return true;
+}
+
+BatchCheckIntent resolve_batch_check_intent(BatchCheckTrigger trigger) {
+  const bool should_switch =
+      trigger == BatchCheckTrigger::Filter || trigger == BatchCheckTrigger::F1;
+  return BatchCheckIntent{should_switch, should_switch};
 }
 
 }  // namespace clashwin::util

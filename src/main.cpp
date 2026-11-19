@@ -5,7 +5,7 @@
 #include <shobjidl.h>
 
 int APIENTRY wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
-  SetCurrentProcessExplicitAppUserModelID(L"io.github.clashwin.clashwin");
+  SetCurrentProcessExplicitAppUserModelID(L"io.github.clash-win.clash-win");
   clashwin::App app;
   if (!app.init()) return 1;  // 单实例失败或装配失败即退出
   int ret = app.run();

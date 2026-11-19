@@ -10,9 +10,9 @@ const char* const kHandleFields[] = {
     "unified-delay",
 };
 
-// 实机对齐（见头文件注释）：不含 rules
+// ← field.rs:20 DEFAULT_FIELDS（5 项含 rules）
 const char* const kDefaultFields[] = {
-    "proxies", "proxy-providers", "proxy-groups", "rule-providers",
+    "proxies", "proxy-providers", "proxy-groups", "rule-providers", "rules",
 };
 
 namespace {

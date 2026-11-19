@@ -1,6 +1,7 @@
 #include "ui/help_menu.h"
 
 #include <shellapi.h>
+#include <filesystem>
 #include <mutex>
 #include <thread>
 
@@ -62,7 +63,14 @@ void HelpMenu::execute_action(HelpAction action, HWND hwnd) {
       events::EventBus::instance().publish("ui:open_guide", "");
       break;
     case HelpAction::AntivirusGuide:
-      events::EventBus::instance().publish("ui:open_antivirus_guide", "");
+      run_command_async("open_antivirus_guide", [] {
+        auto res =
+            cmd::CommandService::instance().invoke("open_antivirus_guide", {});
+        if (!res.is_ok()) {
+          CWLOG_WARN("open_antivirus_guide failed: " + res.error().message);
+          events::NoticeService::instance().push("error", res.error().message);
+        }
+      });
       break;
     case HelpAction::ExportDiagnostics: {
       // ← help-menu-button.tsx:156-180：常驻 info「正在生成诊断包」→ success「已导出：{{path}}」
@@ -83,7 +91,14 @@ void HelpMenu::execute_action(HelpAction action, HWND hwnd) {
           events::NoticeService::instance().push(
               "success",
               tr8("layout.components.helpMenu.diagnosticsExported", {{"path", p}}));
-          (void)cmd::CommandService::instance().invoke("show_in_folder", {{"path", p}});
+          auto sf = cmd::CommandService::instance().invoke("show_in_folder", {{"path", p}});
+          if (!sf.is_ok()) {
+            const std::filesystem::path parent =
+                std::filesystem::path(utf::utf8_to_utf16(p)).parent_path();
+            if (!parent.empty()) {
+              ShellExecuteW(nullptr, L"open", parent.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            }
+          }
           return;
         }
         events::NoticeService::instance().hide(wait_id);
@@ -102,43 +117,6 @@ void HelpMenu::execute_action(HelpAction action, HWND hwnd) {
         if (!res.is_ok()) CWLOG_WARN("check_core_update failed: " + res.error().message);
       });
       break;
-  }
-}
-
-HMENU HelpMenu::create_menu_handle() {
-  HMENU menu = CreatePopupMenu();
-  if (!menu) return nullptr;
-
-  // src: src/pages/_layout/components/help-menu-button.tsx:114-205 7 项 + 2 分隔线；文案 locales/zh/layout.json:32-39
-  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::StarGithub),
-              (L"⭐ " + tr("layout.components.helpMenu.github")).c_str());
-  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::OpenWiki),
-              (L"💡 " + tr("layout.components.helpMenu.wiki")).c_str());
-  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::ReviewGuide),
-              (L"🧭 " + tr("layout.components.helpMenu.firstRunGuide")).c_str());
-  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::AntivirusGuide),
-              (L"🛡️ " + tr("layout.components.antivirus.menuLabel")).c_str());
-  AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::ExportDiagnostics),
-              (L"📦 " + tr("layout.components.helpMenu.exportDiagnostics")).c_str());
-  AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::CheckAppUpdate),
-              (L"🚀 " + tr("layout.components.helpMenu.checkAppUpdate")).c_str());
-  AppendMenuW(menu, MF_STRING, static_cast<UINT_PTR>(HelpAction::CheckCoreUpdate),
-              (L"⚙️ " + tr("layout.components.helpMenu.checkCoreUpdate")).c_str());
-
-  return menu;
-}
-
-void HelpMenu::show_popup(HWND hwnd, POINT pt) {
-  HMENU menu = create_menu_handle();
-  if (!menu) return;
-
-  int cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, pt.x, pt.y, 0, hwnd, nullptr);
-  DestroyMenu(menu);
-
-  if (cmd > 0) {
-    execute_action(static_cast<HelpAction>(cmd), hwnd);
   }
 }
 

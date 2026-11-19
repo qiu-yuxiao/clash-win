@@ -14,6 +14,8 @@
 #include "core/auto_select.h"
 #include "core/autostart.h"
 #include "core/core_manager.h"
+#include "clashwin/core/core_updater.h"
+#include "util/str_utils.h"
 #include "core/delay_manager.h"
 #include "core/timer.h"
 #include "events/event_bus.h"
@@ -42,6 +44,8 @@
 #include <atomic>
 #include <format>
 #include <ctime>
+#include <cwctype>
+#include <filesystem>
 #include <sstream>
 #include <iomanip>
 
@@ -67,6 +71,67 @@ system::Sysopt::VergeView make_startup_sysproxy_view(uint16_t pac_port) {
     }
   }
   return system::make_verge_view(*verge, clash_port, pac_port);
+}
+
+// ← utils/init.rs:316-395 startup_script（仅支持 .ps1 / .bat / .sh，30s 超时强杀防句柄泄漏）
+void run_startup_script_async() {
+  wchar_t override_buf[4]{};
+  if (GetEnvironmentVariableW(L"CLASHWIN_HOME_OVERRIDE", override_buf, 4) > 0) {
+    return;
+  }
+  std::string script_path;
+  try {
+    auto v = config::Config::instance().verge().latest_arc();
+    if (v && v->startup_script) script_path = *v->startup_script;
+  } catch (...) {
+  }
+  if (script_path.empty()) return;
+
+  std::thread([script_path]() {
+    std::filesystem::path sp(utf::utf8_to_utf16(script_path));
+    std::error_code ec;
+    if (!std::filesystem::exists(sp, ec)) {
+      CWLOG_WARN("startup_script: script not found: " + script_path);
+      return;
+    }
+    auto ext = sp.extension().wstring();
+    for (auto& ch : ext) ch = static_cast<wchar_t>(towlower(ch));
+    std::wstring cmdline;
+    if (ext == L".ps1") {
+      cmdline = L"powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"" +
+                sp.wstring() + L"\"";
+    } else if (ext == L".bat") {
+      cmdline = L"cmd.exe /c \"" + sp.wstring() + L"\"";
+    } else if (ext == L".sh") {
+      cmdline = L"bash \"" + sp.wstring() + L"\"";
+    } else {
+      CWLOG_WARN("startup_script: unsupported extension: " + script_path);
+      return;
+    }
+    std::wstring work_dir = sp.parent_path().wstring();
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessW(nullptr, cmdline.data(), nullptr, nullptr, FALSE,
+                        CREATE_NO_WINDOW, nullptr,
+                        work_dir.empty() ? nullptr : work_dir.c_str(), &si,
+                        &pi)) {
+      CWLOG_WARN("startup_script: CreateProcessW failed: " + script_path);
+      return;
+    }
+    CloseHandle(pi.hThread);
+    const DWORD wait_rc = WaitForSingleObject(pi.hProcess, 30000);
+    if (wait_rc == WAIT_TIMEOUT) {
+      TerminateProcess(pi.hProcess, 1);
+      CWLOG_ERROR("startup_script: timed out after 30s, terminated: " +
+                  script_path);
+    } else {
+      CWLOG_INFO("startup_script: finished: " + script_path);
+    }
+    CloseHandle(pi.hProcess);
+  }).detach();
 }
 }  // namespace
 
@@ -165,6 +230,8 @@ bool App::init() {
   // T25: 预置离线资源包释放（Country.mmdb, geosite.dat, ruleset/gfwlist.yaml）
   (void)system::init_resources(util::dirs::app_home_dir(),
                                util::dirs::app_resources_dir());
+  // ← utils/init.rs:295-315：注册 HKCU URL Scheme（含便携版）
+  app::init_scheme();
 
   // T23: 注册控制台信号与操作系统会话终止处理器
   system::SignalHandler::instance().install([](system::SignalType sig) {
@@ -196,6 +263,15 @@ bool App::init() {
     LocalFree(argv);
   }
   auto verge = config::Config::instance().verge().latest_arc();
+  if (verge) {
+    Logger::instance().configure(
+        verge->app_log_max_size.value_or(config::consts::kAppLogMaxSize),
+        static_cast<size_t>(
+            verge->app_log_max_count.value_or(config::consts::kAppLogMaxCount)),
+        verge->app_log_level.value_or("info"),
+        verge->auto_log_clean.value_or(config::consts::kAutoLogClean),
+        /*run_cleanup=*/true);
+  }
   bool is_silent_start = verge ? verge->enable_silent_start.value_or(false) : false;
   // BUG-395（Mini v3.5.2 lightweight.rs:has_real_profile_items /
   //   should_enter_silent_tray_on_launch）：只要开启静默启动且已存在至少一条
@@ -209,10 +285,7 @@ bool App::init() {
     }
     return false;
   };
-  // has_silent_arg 区分开机自启(--silent)与手动冷启动：Mini v3.5.2 对后者额外弹
-  // NIF_INFO 托盘气泡（notify_silent_running）；Win 当前统一静默驻留不弹窗，
-  // 气泡提示属后续增量（见对齐遗留）。保留该标志供该增量接线。
-  (void)has_silent_arg;
+  // has_silent_arg 区分开机自启(--silent)与手动冷启动：后者额外弹 NIF_INFO 托盘气泡（← tray/mod.rs:216）
   bool should_silent = is_silent_start && has_real_profile_items();
 
   // F-D01 ← MF:services/preload.ts:62-97 preloadLanguage / MF:main.tsx:105-110
@@ -221,13 +294,13 @@ bool App::init() {
   //   Win 无 localStorage；verge.language 的出厂模板值即 system_language()
   //   （verge.cpp:31-48），等价覆盖后两级；下拉切换经 on_patch_verge 持久化。
   //   必须在 MainWindow::create（build_widget_tree）之前，否则首屏取不到译文。
+  const std::string resolved_lang =
+      (verge && verge->language && !verge->language->empty())
+          ? *verge->language
+          : config::verge::system_language();
   {
-    const std::string lang =
-        (verge && verge->language && !verge->language->empty())
-            ? *verge->language
-            : config::verge::system_language();
     if (!i18n::I18n::instance().init(
-            util::dirs::exe_dir() + L"\\locales", lang)) {
+            util::dirs::exe_dir() + L"\\locales", resolved_lang)) {
       CWLOG_WARN("App::init：locales 未完整加载，缺失 key 将显示 key 原文");
     }
   }
@@ -241,11 +314,12 @@ bool App::init() {
 
   // T12：主题服务初始化（缺省 retro-3d/light；皮肤/亮暗切换 T17 接 verge）
   ui::theme::ThemeService::instance().init();
+  ui::theme::ThemeService::instance().set_allow_os_accent(true);
 
   // T09：装配命令注册表（必须在任何 invoke 之前——抽屉/定时器/托盘命令链依赖）
   cmd::CommandService::instance().install_all();
 
-  // T15：订阅定时更新（默认 1440min/过期补跑/失败 2min 重试/切换互斥）
+  // T15：订阅定时更新（仅调度显式启用 allow_auto_update 且 update_interval > 0 的订阅，← timer.rs:151-160）
   {
     auto& timer = core::ProfileTimer::instance();
     timer.set_intervals_provider([] {
@@ -253,10 +327,12 @@ bool App::init() {
       auto latest = config::Config::instance().profiles().latest_arc();
       if (latest && latest->items) {
         for (const auto& it : *latest->items) {
-          if (!it.uid) continue;
-          uint64_t interval = 1440;
-          if (it.option && it.option->update_interval)
-            interval = *it.option->update_interval;
+          if (!it.uid || !it.option ||
+              !it.option->allow_auto_update.value_or(false)) {
+            continue;
+          }
+          const uint64_t interval = it.option->update_interval.value_or(0);
+          if (interval == 0) continue;
           int64_t next =
               it.updated ? *it.updated * 1000 +
                                 static_cast<int64_t>(interval) * 60000
@@ -288,35 +364,38 @@ bool App::init() {
     return false;
   }
 
-  // T19：系统托盘与生命周期管理装配
+  // T19：系统托盘与生命周期管理装配（提前读取配置直接以目标图标 NIM_ADD，← tray/mod.rs:62-73）
+  bool tun_enabled = verge ? verge->enable_tun_mode.value_or(false) : false;
+  bool sys_enabled = verge ? verge->enable_system_proxy.value_or(false) : false;
   tray_ = std::make_unique<system::Tray>();
-  tray_->init(main_window_->hwnd());
+  tray_->init(main_window_->hwnd(),
+              system::calculate_state(tun_enabled, sys_enabled));
+  tray_->set_is_exiting_check([] { return app::Lifecycle::instance().is_exiting(); });
   main_window_->set_tray(tray_.get());
   app::Lifecycle::instance().set_window(main_window_);
   app::Lifecycle::instance().set_tray(tray_.get());
 
   tray_->set_on_left_click([this] {
+    if (app::Lifecycle::instance().is_exiting()) return;
     if (main_window_ && main_window_->should_tray_click_hide(
             app::Lifecycle::instance().is_in_lightweight_mode())) {
-      main_window_->close_to_lightweight();
+      // 前台左键收起仅隐藏窗口，不进入轻量模式（← tray/mod.rs:253）
+      main_window_->hide();
     } else {
       app::Lifecycle::instance().exit_lightweight_mode();
     }
   });
   tray_->set_on_toggle_lite_mode([] {
+    if (app::Lifecycle::instance().is_exiting()) return;
     if (app::Lifecycle::instance().is_in_lightweight_mode()) {
       app::Lifecycle::instance().exit_lightweight_mode();
     } else {
-      app::Lifecycle::instance().entry_lightweight_mode(true);
+      app::Lifecycle::instance().entry_lightweight_mode(false);
     }
   });
   tray_->set_on_exit([] {
     app::Lifecycle::instance().quit();
   });
-
-  bool tun_enabled = verge ? verge->enable_tun_mode.value_or(false) : false;
-  bool sys_enabled = verge ? verge->enable_system_proxy.value_or(false) : false;
-  tray_->update_icon(tun_enabled, sys_enabled);
 
   events::EventBus::instance().subscribe(
       events::names::kRefreshVerge,
@@ -331,6 +410,9 @@ bool App::init() {
 
   if (should_silent) {
     app::Lifecycle::instance().entry_lightweight_mode(true);
+    if (!has_silent_arg && tray_) {
+      tray_->notify_silent_running(resolved_lang);
+    }
   }
 
   // T22：开机自启对账与历史计划任务清理
@@ -386,7 +468,11 @@ bool App::init() {
     };
     mh.network_online = [net_probe] {
       const int64_t now = static_cast<int64_t>(GetTickCount64());
-      return net_probe->check(now, [] {
+      return net_probe->check(now, [now, net_probe] {
+        if (net_probe->was_online() &&
+            core::CoreMonitor::is_recent_flowing_traffic_active(now)) {
+          return true;
+        }
         std::string test_url = "https://cp.cloudflare.com/generate_204";
         try {
           const auto verge = config::Config::instance().verge().latest_arc();
@@ -400,7 +486,6 @@ bool App::init() {
       });
     };
     struct MonitorRuntimeState {
-      std::mutex probe_mu;
       std::optional<core::CoreMonitor::ActiveTrafficTracker> traffic_tracker;
       std::optional<core::CoreMonitor::UiActiveSyncState> ui_sync;
       core::CoreMonitor::ActiveTrafficState last_traffic =
@@ -454,14 +539,16 @@ bool App::init() {
           return;
         }
       }
-      if (!core::CoreMonitor::is_physical_network_online(
+      if (!core::CoreMonitor::is_recent_flowing_traffic_active(now_ms) &&
+          !core::CoreMonitor::is_physical_network_online(
               2, "https://cp.cloudflare.com/generate_204")) {
         return;
       }
       auto& client = cmd::mihomo_unchecked();
       std::map<std::string, uint32_t> delays;
       {
-        std::lock_guard<std::mutex> lock(mstate->probe_mu);
+        std::lock_guard<std::mutex> lock(
+            core::CoreMonitor::metrics_probe_mutex());
         auto r1 = client.delay_group(
             "PROXY__METRICS", core::CoreMonitor::kVerifyHttpsUrlPrimary,
             core::kNodeDelayMaxMs, 5000);
@@ -527,16 +614,39 @@ bool App::init() {
       if (grp.is_err() || !grp.value().now) return std::string();
       return *grp.value().now;
     };
-    mh.periodic_https_verify = [run_https_verify_pass]() {
-      auto grp = cmd::mihomo_unchecked().get_group_by_name("PROXY");
+    mh.periodic_https_verify = [run_https_verify_pass, parse_proxy_delay_age,
+                                read_current_filter_text]() {
+      auto& client = cmd::mihomo_unchecked();
+      auto grp = client.get_group_by_name("PROXY");
       if (grp.is_err() || !grp.value().all) return;
+      auto proxies = client.get_proxies();
+      if (proxies.is_err()) return;
       std::vector<std::string> members;
       for (const auto& n : *grp.value().all) {
         if (!util::is_dummy_node(n) && !util::is_confirmed_fake_node(n)) {
           members.push_back(n);
         }
       }
-      run_https_verify_pass(members, "后台定期验真");
+      const std::string filter_text = util::trim(read_current_filter_text());
+      auto is_fake = [](const std::string& n) {
+        return util::is_confirmed_fake_node(n);
+      };
+      auto is_alive = [&proxies, &parse_proxy_delay_age](const std::string& n) {
+        auto it = proxies.value().proxies.find(n);
+        if (it == proxies.value().proxies.end()) return false;
+        auto [d, age] = parse_proxy_delay_age(it->second);
+        auto st =
+            core::CoreMonitor::classify_node_status(it->second.alive, d, age);
+        return st.kind == core::CoreMonitor::NodeStatusKind::Alive;
+      };
+      auto is_verified = [](const std::string& n) {
+        return util::is_verified_true_node(n);
+      };
+      if (core::CoreMonitor::should_run_periodic_https_verify_with(
+              members, grp.value().now, filter_text, is_fake, is_alive,
+              is_verified)) {
+        run_https_verify_pass(members, "后台定期验真");
+      }
     };
     mh.persisted_exit_usable = [read_current_filter_text]() -> bool {
       auto grp = cmd::mihomo_unchecked().get_group_by_name("PROXY");
@@ -585,15 +695,45 @@ bool App::init() {
       auto st = core::CoreMonitor::classify_node_status(px.value().alive, delay, age);
       return core::CoreMonitor::should_keep_alive_on_api_recovery(true, st);
     };
-    mh.is_dummy_active = [mstate, parse_proxy_delay_age, read_current_filter_text,
-                          run_https_verify_pass]() -> bool {
+    mh.restore_selected_nodes = [read_current_filter_text](const std::string& uid) {
+      auto latest = config::Config::instance().profiles().latest_arc();
+      if (!latest) return;
+      const config::PrfItem* it = latest->get_item(uid);
+      if (!it || !it->selected) return;
+      for (const auto& sel : *it->selected) {
+        if (!sel.name || *sel.name != "PROXY" || !sel.now || sel.now->empty()) {
+          continue;
+        }
+        const std::string& node = *sel.now;
+        const std::string filter = util::trim(read_current_filter_text());
+        if (util::is_dummy_node(node) || util::is_confirmed_fake_node(node) ||
+            !util::match_node_filter(node, filter)) {
+          CWLOG_WARN("restore_profile_selected_nodes: skip untrusted/out-of-filter node " +
+                     node);
+          return;
+        }
+        CWLOG_INFO("restore_profile_selected_nodes: PROXY -> " + node);
+        (void)cmd::mihomo_unchecked().select_node_for_group("PROXY", node);
+        return;
+      }
+    };
+    mh.is_dummy_active = []() -> bool {
+      auto grp = cmd::mihomo_unchecked().get_group_by_name("PROXY");
+      if (grp.is_err() || !grp.value().now || grp.value().now->empty())
+        return false;
+      const std::string& active = *grp.value().now;
+      return util::is_dummy_node(active) || util::is_confirmed_fake_node(active);
+    };
+    mh.should_migrate_untrusted = [mstate, parse_proxy_delay_age,
+                                   read_current_filter_text,
+                                   run_https_verify_pass]() -> bool {
       auto& client = cmd::mihomo_unchecked();
       auto grp = client.get_group_by_name("PROXY");
       if (grp.is_err() || !grp.value().now || grp.value().now->empty())
         return false;
       const std::string& active = *grp.value().now;
       if (util::is_dummy_node(active) || util::is_confirmed_fake_node(active)) {
-        return true;
+        return false;
       }
       if (!core::CoreMonitor::should_allow_https_migration(mstate->last_traffic) ||
           util::is_verified_true_node(active)) {
@@ -732,14 +872,17 @@ bool App::init() {
       bool distorted = false;
       bool link_ok = false;
       {
-        std::lock_guard<std::mutex> lock(mstate->probe_mu);
+        std::lock_guard<std::mutex> lock(
+            core::CoreMonitor::metrics_probe_mutex());
         auto r = client.delay_group("PROXY__METRICS", main_url,
                                     core::kNodeDelayMaxMs, 5000);
         if (r.is_ok()) {
           probed_delays = std::move(r.value());
           link_ok = true;
-          if (core::CoreMonitor::should_recheck_with_fallback(
-                  probed_delays, {active})) {
+          const bool allow_single_target_skip =
+              (core::CoreMonitor::instance().node_fail_count() == 0);
+          if (core::CoreMonitor::should_recheck_primary_with_fallback(
+                  probed_delays, {active}, allow_single_target_skip)) {
             auto rfb = client.delay_group("PROXY__METRICS", fallback_url,
                                           core::kNodeDelayMaxMs, 5000);
             if (rfb.is_ok()) {
@@ -759,6 +902,12 @@ bool App::init() {
             distorted = true;
             link_ok = true;
           }
+        }
+        if (link_ok && !distorted && !probed_delays.empty()) {
+          core::CoreMonitor::record_metrics_probe(
+              static_cast<int64_t>(GetTickCount64()), probed_delays, false);
+        } else {
+          core::CoreMonitor::invalidate_metrics_probe();
         }
       }
 
@@ -780,16 +929,21 @@ bool App::init() {
       auto display = core::CoreMonitor::build_probe_ui_display(
           all_members, probed_delays, distorted);
       if (!display.empty() && !events::EventBus::instance().lightweight_filter()) {
-        events::EventBus::backend_delay_results("PROXY", display, true);
-        events::EventBus::refresh_proxies();
-        std::optional<std::string> active_hist_time;
-        if (auto post_px = client.get_proxy_by_name(active);
-            post_px.is_ok() && !post_px.value().history.empty()) {
-          active_hist_time = post_px.value().history.back().time;
+        const bool already_reported =
+            !probed_delays.empty() &&
+            core::CoreMonitor::mark_metrics_probe_reported_if_unreported();
+        if (!already_reported || probed_delays.empty()) {
+          events::EventBus::backend_delay_results("PROXY", display, true);
+          events::EventBus::refresh_proxies();
+          std::optional<std::string> active_hist_time;
+          if (auto post_px = client.get_proxy_by_name(active);
+              post_px.is_ok() && !post_px.value().history.empty()) {
+            active_hist_time = post_px.value().history.back().time;
+          }
+          mstate->ui_sync = core::CoreMonitor::compute_next_ui_active_sync(
+              active, display, active_hist_time,
+              mstate->ui_sync ? &(*mstate->ui_sync) : nullptr);
         }
-        mstate->ui_sync = core::CoreMonitor::compute_next_ui_active_sync(
-            active, display, active_hist_time,
-            mstate->ui_sync ? &(*mstate->ui_sync) : nullptr);
       }
       return !distorted;
     };
@@ -833,6 +987,10 @@ bool App::init() {
     mh.now_ms = [] { return static_cast<int64_t>(GetTickCount64()); };
     monitor.set_hooks(std::move(mh));
 
+    core::CoreUpdater::instance().set_is_exiting_check([] {
+      return app::Lifecycle::instance().is_exiting();
+    });
+
     // ← clash.rs::start_core（启动收敛）：主动重生成运行时配置并拉起内核。
     //   此前这里只装配 CoreMonitor hooks，从不主动 start_core，只能等守护
     //   空转重试。一旦内核没在跑（首次启动/上次异常退出），clash-win.yaml
@@ -847,6 +1005,7 @@ bool App::init() {
     }
 
     monitor.start();
+    run_startup_script_async();
   }
 
   CWLOG_INFO("App::init 完成：主窗口就绪");

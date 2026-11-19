@@ -27,8 +27,6 @@ enum class HelpAction {
 class HelpMenu {
  public:
   static void execute_action(HelpAction action, HWND hwnd = nullptr);
-  static HMENU create_menu_handle();
-  static void show_popup(HWND hwnd, POINT pt);
 
   using ActionHandler = std::function<void(HelpAction, HWND)>;
   static void set_action_handler_for_testing(ActionHandler handler);

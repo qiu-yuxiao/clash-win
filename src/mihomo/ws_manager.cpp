@@ -320,6 +320,25 @@ void WsManager::disconnect_all(std::optional<uint32_t> force_timeout_ms) {
   for (auto& s : sockets) s->close(force_timeout_ms);
 }
 
+void WsManager::pause_all(std::optional<uint32_t> force_timeout_ms) {
+  paused_.store(true, std::memory_order_release);
+  disconnect_all(force_timeout_ms);
+}
+
+void WsManager::resume_all() {
+  paused_.store(false, std::memory_order_release);
+  if (stopping_.load(std::memory_order_acquire)) return;
+  std::lock_guard<std::mutex> lk(mu_);
+  for (auto& [key, ch] : channels_) {
+    {
+      std::lock_guard<std::mutex> lk2(ch->mu);
+      ch->reconnect_attempt = 0;
+      ++ch->wake_epoch;
+    }
+    ch->cv.notify_all();
+  }
+}
+
 void WsManager::flush_reconnect_backoff() {
   if (stopping_.load(std::memory_order_acquire)) return;
   std::vector<std::shared_ptr<PipeWebSocket>> stale_sockets;
@@ -398,7 +417,18 @@ void WsManager::worker_loop(Channel* ch, WsManager* self, std::string ws_path) {
     uint64_t epoch_before_wait = 0;
     {
       std::unique_lock<std::mutex> lk(ch->mu);
-      if (ch->subs.empty()) {
+      if (self->paused_.load(std::memory_order_acquire)) {
+        was_connected = false;
+        if (ch->ws) {
+          idle = std::move(ch->ws);
+        } else {
+          ch->cv.wait_for(lk, std::chrono::milliseconds(kIdlePollMs), [&] {
+            return !ch->running.load(std::memory_order_acquire) ||
+                   self->stopping_.load(std::memory_order_acquire) ||
+                   !self->paused_.load(std::memory_order_acquire);
+          });
+        }
+      } else if (ch->subs.empty()) {
         was_connected = false;
         if (ch->ws) {
           // 订阅归零兜底；close 会 join 读线程，必须放到锁外执行防死锁

@@ -34,6 +34,7 @@ inline constexpr int kProfileChangedThrottleMs = 800;  // app-data-provider.tsx:
 // ← notice-service.ts DEFAULT_DURATIONS / MAX_NOTICES
 inline constexpr int kNoticeSuccessMs = 3000;
 inline constexpr int kNoticeInfoMs = 5000;
+inline constexpr int kNoticeWarningMs = 6000;
 inline constexpr int kNoticeErrorMs = 8000;
 inline constexpr size_t kNoticeMaxCount = 50;
 

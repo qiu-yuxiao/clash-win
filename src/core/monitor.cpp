@@ -120,6 +120,9 @@ bool dns_lookup_with_timeout_ms(const std::string& host, uint16_t port,
   return false;
 }
 
+std::mutex g_flowing_mu;
+int64_t g_last_flowing_traffic_ms = -1;
+
 }  // namespace
 
 bool CoreMonitor::tcp_race_connect_ipv4(const std::vector<const char*>& ips,
@@ -272,6 +275,7 @@ void CoreMonitor::reset_runtime_loop_state() {
   last_heal_ms_.store(0);
   last_tick_ms_.store(0);
   last_https_verify_ms_.store(-1);
+  reset_flowing_traffic_state();
   manual_switch_epoch_.store(0, std::memory_order_release);
   last_node_change_ms_.store(0);
   has_node_change_.store(false);
@@ -317,11 +321,14 @@ void CoreMonitor::start() {
                 if (hooks_.api_alive && hooks_.api_alive()) break;
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
               }
-              // 若无窗口可见（托盘启动），执行一次 Continuity-First 初始化探测/选点
+              // 若无窗口可见（托盘启动），先按过滤边界恢复 persisted selected，再执行 Continuity-First 探测/选点
               if (hooks_.is_headless && hooks_.is_headless()) {
                 std::string uid =
                     hooks_.current_uid ? hooks_.current_uid() : "";
                 if (!uid.empty()) {
+                  if (hooks_.restore_selected_nodes) {
+                    hooks_.restore_selected_nodes(uid);
+                  }
                   const bool keep_persisted =
                       hooks_.persisted_exit_usable &&
                       hooks_.persisted_exit_usable();
@@ -791,6 +798,22 @@ CoreMonitor::Action CoreMonitor::tick_once() {
     }
   }
 
+  // ★ ShouldMigrate：Alive 但真 HTTPS 验真失败 → 切往已验真节点（在失真复核之后且受 20s 宽限期约束）
+  if (h.should_migrate_untrusted && h.should_migrate_untrusted()) {
+    absorb_pending_manual_switch(now_fn());
+    if (in_switch_grace()) {
+      CWLOG_INFO("CoreMonitor: 活跃节点 HTTPS 验真迁移处于 20s 切换宽限期内，暂缓切点");
+      return Action::Idle;
+    }
+    CWLOG_WARN("CoreMonitor: 活跃节点真 HTTPS 验真失败，触发不可信迁移 (ShouldMigrate)");
+    node_fail_count_.store(0);
+    std::string uid = h.current_uid ? h.current_uid() : std::string();
+    if (!uid.empty()) {
+      return heal(uid, SelfHealOrigin::NodeMigration, observed_active);
+    }
+    return Action::Idle;
+  }
+
   // 4. 节点健康：连续 2 次判死 → 自愈（ConfirmedDead）
   bool node_ok = h.node_healthy ? h.node_healthy() : true;
   if (!node_ok) {
@@ -917,8 +940,9 @@ std::pair<std::string, uint16_t> CoreMonitor::resolve_probe_target(
 bool CoreMonitor::probe_physical_network_with(uint64_t timeout_secs,
                                               const std::string& test_url,
                                               const PhysicalNetProbeOps& ops) {
-  // BUG-317 / BUG-345：总预算保底 >= 2s；优先 3 路 TCP:53 并发竞速（上限 600ms），
-  // 为局域网封禁 53 端口时的 DNS 解析兜底保留 >= 1400ms 充裕预算。
+  // BUG-317 / BUG-345 / BUG-403：总预算保底 >= 2s；
+  // 首选单路 223.5.5.5:53 (250ms)，失败再并发竞速 119.29.29.29 / 1.1.1.1 (600ms)；
+  // 为局域网封禁 53 端口时的 DNS 解析兜底保留 >= 1150ms 充裕预算。
   const int64_t budget_ms = static_cast<int64_t>(
       std::max<uint64_t>(timeout_secs, kMinProbeBudgetSecs) * 1000);
   auto now_fn = [&]() -> int64_t {
@@ -929,24 +953,32 @@ bool CoreMonitor::probe_physical_network_with(uint64_t timeout_secs,
     return budget_ms - (now_fn() - start_ms);
   };
 
-  static constexpr const char* kPublicDnsIps[] = {
-      "223.5.5.5",
-      "119.29.29.29",
-      "1.1.1.1",
-  };
   if (ops.tcp_race_connect) {
-    const int64_t rem = remaining_ms();
-    if (rem <= 0) return false;
+    const int64_t rem1 = remaining_ms();
+    if (rem1 <= 0) return false;
+    const int primary_ms =
+        static_cast<int>(std::min<int64_t>(rem1, kPrimaryNetProbeTimeoutMs));
+    if (ops.tcp_race_connect({"223.5.5.5"}, 53, primary_ms)) {
+      return true;
+    }
+    const int64_t rem2 = remaining_ms();
+    if (rem2 <= 0) return false;
     const int race_ms =
-        static_cast<int>(std::min<int64_t>(rem, kTcp53RaceTimeoutMs));
-    const std::vector<const char*> ips(std::begin(kPublicDnsIps),
-                                       std::end(kPublicDnsIps));
-    if (ops.tcp_race_connect(ips, 53, race_ms)) {
+        static_cast<int>(std::min<int64_t>(rem2, kTcp53RaceTimeoutMs));
+    if (ops.tcp_race_connect({"119.29.29.29", "1.1.1.1"}, 53, race_ms)) {
       return true;
     }
   } else if (ops.tcp_connect) {
+    const int64_t rem1 = remaining_ms();
+    if (rem1 <= 0) return false;
+    const int primary_ms =
+        static_cast<int>(std::min<int64_t>(rem1, kPrimaryNetProbeTimeoutMs));
+    if (ops.tcp_connect("223.5.5.5", 53, primary_ms)) {
+      return true;
+    }
     const int64_t per_ip_cap = std::max<int64_t>(250, budget_ms / 4);
-    for (const char* ip : kPublicDnsIps) {
+    static constexpr const char* kBackupDnsIps[] = {"119.29.29.29", "1.1.1.1"};
+    for (const char* ip : kBackupDnsIps) {
       const int64_t rem = remaining_ms();
       if (rem <= 0) return false;
       const int step_ms = static_cast<int>(std::min<int64_t>(rem, per_ip_cap));
@@ -973,6 +1005,32 @@ bool CoreMonitor::is_physical_network_online(uint64_t timeout_secs,
   return probe_physical_network_with(timeout_secs, test_url, ops);
 }
 
+bool CoreMonitor::has_recent_flowing_traffic(
+    std::optional<int64_t> elapsed_secs) {
+  return elapsed_secs.has_value() && *elapsed_secs >= 0 &&
+         *elapsed_secs < kOnlineCheckFlowingSkipSecs;
+}
+
+void CoreMonitor::record_flowing_traffic_at(int64_t now_ms) {
+  std::lock_guard<std::mutex> lock(g_flowing_mu);
+  g_last_flowing_traffic_ms = now_ms;
+}
+
+bool CoreMonitor::is_recent_flowing_traffic_active(int64_t now_ms) {
+  int64_t recorded = -1;
+  {
+    std::lock_guard<std::mutex> lock(g_flowing_mu);
+    recorded = g_last_flowing_traffic_ms;
+  }
+  if (recorded < 0 || now_ms < recorded) return false;
+  return has_recent_flowing_traffic((now_ms - recorded) / 1000);
+}
+
+void CoreMonitor::reset_flowing_traffic_state() {
+  std::lock_guard<std::mutex> lock(g_flowing_mu);
+  g_last_flowing_traffic_ms = -1;
+}
+
 bool CoreMonitor::ThrottledNetProbe::check(
     int64_t now_ms, const std::function<bool()>& probe_fn) {
   {
@@ -993,6 +1051,11 @@ bool CoreMonitor::ThrottledNetProbe::check(
     last_check_ms_ = now_ms;
   }
   return online;
+}
+
+bool CoreMonitor::ThrottledNetProbe::was_online() const {
+  std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(mu_));
+  return was_online_;
 }
 
 void CoreMonitor::ThrottledNetProbe::reset() {
@@ -1017,6 +1080,10 @@ bool CoreMonitor::wait_for_clash_ready(const ReadyHooks& h) {
   if (!poll(h.api_alive, 30000)) return false;
   if (!poll(h.group_ready, 20000)) return false;
   if (!poll(h.network_online, 15000)) return false;
+  // 阶段 4：等待 DNS 解析链就绪（最多 15s；超时仅告警仍放行由下游兜底，← monitor.rs:1100-1138）
+  if (h.dns_ready && !poll(h.dns_ready, 15000)) {
+    CWLOG_WARN("CoreMonitor: 阶段 4 超时：DNS 解析链未就绪，放行测速（由下游兜底）");
+  }
   return true;
 }
 
@@ -1113,6 +1180,9 @@ CoreMonitor::update_active_traffic_state(
       tracker.active_node, active_node, tracker.conn_bytes, current_conns);
   tracker.active_node = active_node;
   tracker.conn_bytes = std::move(next_map);
+  if (state == ActiveTrafficState::Flowing) {
+    record_flowing_traffic_at(now_ms);
+  }
   return {state, stall_cooldown_active};
 }
 
@@ -1138,6 +1208,42 @@ bool CoreMonitor::should_allow_https_migration(ActiveTrafficState traffic) {
   return traffic != ActiveTrafficState::Flowing;
 }
 
+bool CoreMonitor::should_run_periodic_https_verify_with(
+    const std::vector<std::string>& members,
+    const std::optional<std::string>& active_node,
+    const std::string& filter_text,
+    const std::function<bool(const std::string&)>& is_fake_node,
+    const std::function<bool(const std::string&)>& is_alive,
+    const std::function<bool(const std::string&)>& is_verified) {
+  const std::string trimmed_filter = util::trim(filter_text);
+  bool has_alive_unverified = false;
+  size_t verified_alive_standbys = 0;
+
+  for (const auto& name : members) {
+    if (util::is_dummy_node(name) || (is_fake_node && is_fake_node(name)) ||
+        !util::match_node_filter(name, trimmed_filter)) {
+      continue;
+    }
+    if (!is_alive || !is_alive(name)) continue;
+    if (is_verified && is_verified(name)) {
+      if (!active_node || *active_node != name) {
+        ++verified_alive_standbys;
+      }
+    } else {
+      has_alive_unverified = true;
+    }
+  }
+
+  if (!has_alive_unverified) return false;
+  const bool active_verified =
+      active_node.has_value() && is_verified && is_verified(*active_node);
+  if (active_verified &&
+      verified_alive_standbys >= kPeriodicHttpsVerifySufficientStandbys) {
+    return false;
+  }
+  return true;
+}
+
 bool CoreMonitor::should_recheck_with_fallback(
     const std::map<std::string, uint32_t>& primary_delays,
     const std::vector<std::string>& expected_nodes) {
@@ -1158,6 +1264,45 @@ bool CoreMonitor::should_recheck_with_fallback(
     }
   }
   return true;
+}
+
+bool CoreMonitor::should_recheck_primary_with_fallback_with(
+    const std::map<std::string, uint32_t>& primary_delays,
+    const std::vector<std::string>& expected_nodes,
+    bool allow_single_target_skip,
+    const std::function<bool(const std::string&)>& is_fake_node) {
+  if (!should_recheck_with_fallback(primary_delays, expected_nodes)) {
+    return false;
+  }
+  auto valid = [](uint32_t d) {
+    return d >= kNodeDelayMinMs && d < kNodeDelayMaxMs;
+  };
+  auto eq_ci = [](const std::string& a, const char* b) {
+    return _stricmp(a.c_str(), b) == 0;
+  };
+  if (allow_single_target_skip && expected_nodes.size() == 1) {
+    size_t healthy_real_peers = 0;
+    for (const auto& [name, d] : primary_delays) {
+      if (!eq_ci(name, "DIRECT") && !eq_ci(name, "REJECT") &&
+          !util::is_dummy_node(name) &&
+          !(is_fake_node && is_fake_node(name)) && valid(d)) {
+        ++healthy_real_peers;
+      }
+    }
+    if (healthy_real_peers >= kSingleTargetSkipFallbackMinHealthyPeers) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool CoreMonitor::should_recheck_primary_with_fallback(
+    const std::map<std::string, uint32_t>& primary_delays,
+    const std::vector<std::string>& expected_nodes,
+    bool allow_single_target_skip) {
+  return should_recheck_primary_with_fallback_with(
+      primary_delays, expected_nodes, allow_single_target_skip,
+      [](const std::string& n) { return util::is_confirmed_fake_node(n); });
 }
 
 std::map<std::string, uint32_t> CoreMonitor::merge_probe_delays(
@@ -1316,6 +1461,76 @@ bool CoreMonitor::is_https_verify_backoff_active(
     std::optional<int64_t> elapsed_secs) {
   return elapsed_secs.has_value() &&
          *elapsed_secs < kHttpsVerifyAllFailedBackoffSecs;
+}
+
+namespace {
+struct MetricsProbeState {
+  std::mutex state_mu;
+  int64_t completed_at_ms = -1;
+  std::map<std::string, uint32_t> delays;
+  bool reported_live_to_ui = false;
+};
+
+MetricsProbeState& shared_metrics_probe_state() {
+  static MetricsProbeState s;
+  return s;
+}
+}  // namespace
+
+std::mutex& CoreMonitor::metrics_probe_mutex() {
+  static std::mutex m;
+  return m;
+}
+
+std::optional<std::map<std::string, uint32_t>>
+CoreMonitor::try_reuse_metrics_probe(
+    int64_t now_ms, int64_t max_age_ms,
+    const std::vector<std::string>& expected_nodes, bool check_fallback) {
+  auto& st = shared_metrics_probe_state();
+  std::lock_guard<std::mutex> lock(st.state_mu);
+  if (st.completed_at_ms < 0 || st.delays.empty() || now_ms < st.completed_at_ms ||
+      (now_ms - st.completed_at_ms) >= max_age_ms) {
+    return std::nullopt;
+  }
+  if (check_fallback &&
+      should_recheck_with_fallback(st.delays, expected_nodes)) {
+    return std::nullopt;
+  }
+  return st.delays;
+}
+
+void CoreMonitor::record_metrics_probe(int64_t now_ms,
+                                       std::map<std::string, uint32_t> delays,
+                                       bool reported_live_to_ui) {
+  auto& st = shared_metrics_probe_state();
+  std::lock_guard<std::mutex> lock(st.state_mu);
+  if (delays.empty()) {
+    st.completed_at_ms = -1;
+    st.delays.clear();
+    st.reported_live_to_ui = false;
+    return;
+  }
+  st.completed_at_ms = now_ms;
+  st.delays = std::move(delays);
+  st.reported_live_to_ui = reported_live_to_ui;
+}
+
+void CoreMonitor::invalidate_metrics_probe() {
+  auto& st = shared_metrics_probe_state();
+  std::lock_guard<std::mutex> lock(st.state_mu);
+  st.completed_at_ms = -1;
+  st.delays.clear();
+  st.reported_live_to_ui = false;
+}
+
+bool CoreMonitor::mark_metrics_probe_reported_if_unreported() {
+  auto& st = shared_metrics_probe_state();
+  std::lock_guard<std::mutex> lock(st.state_mu);
+  if (st.completed_at_ms < 0 || st.delays.empty() || st.reported_live_to_ui) {
+    return true;
+  }
+  st.reported_live_to_ui = true;
+  return false;
 }
 
 }  // namespace clashwin::core

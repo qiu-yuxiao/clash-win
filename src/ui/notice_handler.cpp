@@ -276,12 +276,23 @@ void uninstall_notice_handler() {
   g_sub_id = 0;
 }
 
-// 用户裁决（2026-11-18）：删除 11 处 Win 自编操作结果提示 + 30 个 Win 独有 locale key，
-// 严格收敛到 Mini v3.5.3。仅保留 Mini 自身已有的提示（settings.mini.* 与原文错误透传）。
+// 严格对照 Clash Mini v3.5.6 上游真实存在的操作结果提示（_layout.tsx / basic-settings-card.tsx / use-minimal-settings.ts）
 std::string resolve_verge_patch_success_key(const std::string& k,
                                             const nlohmann::json& v) {
-  if (k == "rule_fallback" && v.is_string() && v.get<std::string>() == "proxy") {
-    return "layout.notices.switchedToGlobalProxy";  // Mini 已有
+  if (k == "rule_fallback" && v.is_string()) {
+    const std::string s = v.get<std::string>();
+    if (s == "proxy") return "layout.notices.switchedToGlobalProxy";  // _layout.tsx:419
+    if (s == "direct") return "layout.notices.switchedToGfwlist";     // _layout.tsx:422
+    if (s == "addurl") return "layout.notices.switchedToAddUrl";      // _layout.tsx:424
+  }
+  if ((k == "enable_silent_start" || k == "clash_allow_lan" ||
+       k == "clash_ipv6") &&
+      v.is_boolean()) {
+    return v.get<bool>() ? "settings.mini.settingEnabled"
+                         : "settings.mini.settingDisabled";  // basic-settings-card.tsx:266,301,341
+  }
+  if (k == "enable_tun_sniffer") {
+    return "settings.mini.tunSnifferUpdated";  // basic-settings-card.tsx:408
   }
   return {};
 }

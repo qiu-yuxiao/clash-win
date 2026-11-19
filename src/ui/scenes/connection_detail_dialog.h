@@ -51,6 +51,10 @@ class ConnectionDetailDialog : public Widget {
   bool on_mouse(const MouseEvent& e) override;
   bool on_key(const KeyEvent& e) override;
 
+  // 测试注入当前 UTC epoch 毫秒（默认走 system_clock::now）
+  void set_now_ms(std::function<int64_t()> fn) { now_ms_ = std::move(fn); }
+  static int64_t default_now_epoch_ms();
+
   bool hit_self(PointF local) const override {
     return open_ && Widget::hit_self(local);
   }
@@ -75,6 +79,10 @@ class ConnectionDetailDialog : public Widget {
   RectF btn_dismiss_rect_;
   bool hover_close_conn_ = false;
   bool hover_dismiss_ = false;
+  float scroll_y_ = 0.0f;
+  float content_h_ = 0.0f;
+  float viewport_h_ = 0.0f;
+  std::function<int64_t()> now_ms_;
 };
 
 }  // namespace clashwin::ui::scene

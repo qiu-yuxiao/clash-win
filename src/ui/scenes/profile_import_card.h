@@ -125,8 +125,10 @@ class ProfileImportCard : public Widget {
   ScrollList* list() const { return list_; }
   ProfileRowWidget* row_at(int i) const;
 
-  // 源码卡高为固定内容高（flexShrink:0），列表 maxHeight 110（:194-201）
+  // src: profile-import-card.tsx:98 列表 maxHeight 110 + 1–4 行输入动态自增
   float preferred_height() const;
+  bool is_importing() const { return importing_; }
+  std::function<void()> on_height_changed;
 
   void on_paint(IRenderTarget& rt) override;
   void on_arrange(const RectF& area) override;
@@ -144,6 +146,7 @@ class ProfileImportCard : public Widget {
   Label* title_ = nullptr;
   ScrollList* list_ = nullptr;
   std::optional<Color4f> title_color_;
+  bool importing_ = false;
 
   std::vector<config::PrfItem> profiles_;
   std::string current_uid_;

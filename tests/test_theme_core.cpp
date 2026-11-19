@@ -146,7 +146,7 @@ UT_TEST(t12_button_paint_table_all_skins) {
   auto mop = ThemeService::instance().button_paint("primary");
   expect_rgb(mop.fill, 0x000000, "monochrome primary bg #000000");
   expect_rgb(mop.text, 0xffffff, "monochrome primary text #ffffff");
-  UT_CHECK_EQ(mo.radius, 0.0f);
+  UT_CHECK_EQ(mo.radius, 8.0f);  // src: index.scss:257-269 --border-radius calc(8px * val1)
 
   ThemeService::instance().init(SkinId::Retro3d, ThemeMode::Light);
   auto r = ThemeService::instance().button_paint("default");

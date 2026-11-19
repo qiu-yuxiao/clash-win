@@ -18,6 +18,8 @@
 
 #include "ui/scenes/node_data.h"
 #include "ui/scenes/node_list.h"
+#include "ui/ui_postbox.h"
+#include "util/node.h"
 
 using namespace clashwin::ui;
 using namespace clashwin::ui::scene;
@@ -31,9 +33,11 @@ struct MockState {
   std::map<std::string, std::string> types = {{"n1", "VMESS"},
                                               {"n2", "HYSTERIA2"},
                                               {"n3", "ANYTLS"}};
-  // ★ 记录 test_and_select 收到的子集
+  // ★ 记录 test_batch / test_and_select 收到的子集与意图
   std::vector<std::string> last_subset;
   int test_and_select_calls = 0;
+  bool last_select = false;
+  bool last_clean_stale = false;
   bool test_and_select_ok = true;
   int64_t clock_ms = 1000;
 };
@@ -60,10 +64,14 @@ NodeData make_data(MockState& st) {
   };
   h.select_node = [](const std::string&) { return true; };
   h.test_group = [](const std::string&) { return true; };
-  h.test_and_select = [&st](const std::vector<std::string>& nodes) -> std::string {
+  h.test_batch = [&st](const std::vector<std::string>& nodes, bool select,
+                       bool clean_stale) -> std::string {
     ++st.test_and_select_calls;
     st.last_subset = nodes;
-    return st.test_and_select_ok ? (nodes.empty() ? "n1" : nodes[0]) : "";
+    st.last_select = select;
+    st.last_clean_stale = clean_stale;
+    return (st.test_and_select_ok && select) ? (nodes.empty() ? "n1" : nodes[0])
+                                             : "";
   };
   h.now_ms = [&st] { return st.clock_ms; };
   return NodeData(std::move(h));
@@ -71,7 +79,21 @@ NodeData make_data(MockState& st) {
 
 }  // namespace
 
-// 1) 闪电按钮必须把「可见子集」传给后端，而不是全组
+// 0) BUG-397 批量测速意图裁决：Bolt/F4 仅测延迟，Filter/F1 才选点+清旧连接
+UT_TEST(t28_bug397_batch_check_intent_matrix) {
+  using clashwin::util::BatchCheckTrigger;
+  using clashwin::util::resolve_batch_check_intent;
+  auto b = resolve_batch_check_intent(BatchCheckTrigger::Bolt);
+  UT_CHECK(!b.select && !b.clean_stale);
+  auto f4 = resolve_batch_check_intent(BatchCheckTrigger::F4);
+  UT_CHECK(!f4.select && !f4.clean_stale);
+  auto fl = resolve_batch_check_intent(BatchCheckTrigger::Filter);
+  UT_CHECK(fl.select && fl.clean_stale);
+  auto f1 = resolve_batch_check_intent(BatchCheckTrigger::F1);
+  UT_CHECK(f1.select && f1.clean_stale);
+}
+
+// 1) 闪电按钮必须把「可见子集」传给后端，而不是全组（BUG-397：且 select=false, clean_stale=false）
 //    ← 走真实点击路径（NodeList::bolt_button()->on_click）
 UT_TEST(t28_bolt_passes_visible_subset) {
   MockState st;
@@ -94,6 +116,8 @@ UT_TEST(t28_bolt_passes_visible_subset) {
   }
 
   UT_CHECK_EQ(st.test_and_select_calls, 1);
+  UT_CHECK(!st.last_select);
+  UT_CHECK(!st.last_clean_stale);
   UT_CHECK_EQ(st.last_subset.size(), 3u);
   UT_CHECK(st.last_subset[0] == "n1");
   UT_CHECK(st.last_subset[1] == "n2");
@@ -116,13 +140,28 @@ UT_TEST(t28_bolt_subset_respects_filter) {
   UT_CHECK(bolt != nullptr);
   if (!bolt) return;
   bolt->on_click();
-  for (int i = 0; i < 100 && st.test_and_select_calls == 0; ++i) {
+  for (int i = 0; i < 100 && (st.test_and_select_calls == 0 || list.is_testing()); ++i) {
+    UiPostbox::pump();
     ::Sleep(10);
   }
+  UiPostbox::pump();
 
   UT_CHECK_EQ(st.test_and_select_calls, 1);
+  UT_CHECK(!st.last_select);
+  UT_CHECK(!st.last_clean_stale);
   UT_CHECK_EQ(st.last_subset.size(), 1u);
   UT_CHECK(st.last_subset[0] == "n2");
+
+  // 对比 Filter 选点通道（select=true, clean_stale=true）
+  list.trigger_check_visible(true);
+  for (int i = 0; i < 100 && (st.test_and_select_calls == 1 || list.is_testing()); ++i) {
+    UiPostbox::pump();
+    ::Sleep(10);
+  }
+  UiPostbox::pump();
+  UT_CHECK_EQ(st.test_and_select_calls, 2);
+  UT_CHECK(st.last_select);
+  UT_CHECK(st.last_clean_stale);
 }
 
 // 1c) 空子集 → 传全量（与自动优选同语义）

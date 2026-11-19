@@ -226,8 +226,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $zip   = "dist\ClashWin_$($env:VERSION)_x64_portable.zip"
-          $setup = "dist\ClashWin_$($env:VERSION)_x64-setup.exe"
+          $zip   = "dist\Clash.Win_$($env:VERSION)_x64_portable.zip"
+          $setup = "dist\Clash.Win_$($env:VERSION)_x64-setup.exe"
           foreach ($f in @($zip, $setup)) {
             if (-not (Test-Path -LiteralPath $f)) { throw "Missing artifact: $f" }
           }
@@ -236,21 +236,21 @@ jobs:
           try {
             $names = $z.Entries | ForEach-Object { $_.FullName.Replace('\', '/') }
           } finally { $z.Dispose() }
-          foreach ($n in @('clashwin.exe', '.config/PORTABLE', 'sidecar/win-mihomo.exe', '用户必读.txt')) {
+          foreach ($n in @('clash-win.exe', '.config/PORTABLE', 'win-mihomo.exe', 'resources/clash-verge-service.exe', 'resources/enableLoopback.exe', '用户必读.txt', '轻量模式防误杀指南.txt')) {
             if ($names -notcontains $n) { throw "portable.zip missing entry: $n" }
           }
           $zipSidecarEntries = @($names | Where-Object { $_ -like 'sidecar/*' -and -not $_.EndsWith('/') })
-          if ($zipSidecarEntries.Count -ne 5) {
-            throw "portable.zip sidecar/ contains unexpected files (count=$($zipSidecarEntries.Count)): $($zipSidecarEntries -join ', ')"
+          if ($zipSidecarEntries.Count -ne 0) {
+            throw "portable.zip should not contain sidecar/ directory (found $($zipSidecarEntries.Count)): $($zipSidecarEntries -join ', ')"
           }
 
-          $buildExeSha = (Get-FileHash -LiteralPath 'build\bin\Release\clashwin.exe' -Algorithm SHA256).Hash
-          $stageExeSha = (Get-FileHash -LiteralPath 'installer\stage\clashwin.exe' -Algorithm SHA256).Hash
+          $buildExeSha = (Get-FileHash -LiteralPath 'build\bin\Release\clash-win.exe' -Algorithm SHA256).Hash
+          $stageExeSha = (Get-FileHash -LiteralPath 'installer\stage\clash-win.exe' -Algorithm SHA256).Hash
           if ($buildExeSha -ne $stageExeSha) {
-            throw "build clashwin.exe ($buildExeSha) != stage clashwin.exe ($stageExeSha)"
+            throw "build clash-win.exe ($buildExeSha) != stage clash-win.exe ($stageExeSha)"
           }
 
-          $wmStage = Join-Path $Pwd.Path 'installer\stage\sidecar\win-mihomo.exe'
+          $wmStage = Join-Path $Pwd.Path 'installer\stage\win-mihomo.exe'
           if (-not (Test-Path -LiteralPath $wmStage)) {
             throw "打包源缺失 win-mihomo.exe: $wmStage"
           }
@@ -279,8 +279,8 @@ jobs:
         with:
           name: clashwin-${{ needs.validate.outputs.version }}-x64
           path: |
-            dist/ClashWin_${{ needs.validate.outputs.version }}_x64_portable.zip
-            dist/ClashWin_${{ needs.validate.outputs.version }}_x64-setup.exe
+            dist/Clash.Win_${{ needs.validate.outputs.version }}_x64_portable.zip
+            dist/Clash.Win_${{ needs.validate.outputs.version }}_x64-setup.exe
             dist/SHA256SUMS.txt
             dist/SIGNATURE_STATUS.txt
           if-no-files-found: error
@@ -310,14 +310,14 @@ jobs:
           MINISIGN_PRIVATE_KEY: ${{ secrets.MINISIGN_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          SETUP="dist/ClashWin_${VERSION}_x64-setup.exe"
-          ZIP="dist/ClashWin_${VERSION}_x64_portable.zip"
+          SETUP="dist/Clash.Win_${VERSION}_x64-setup.exe"
+          ZIP="dist/Clash.Win_${VERSION}_x64_portable.zip"
           for f in "$SETUP" "$ZIP" "dist/SHA256SUMS.txt"; do
             [ -s "$f" ] || { echo "::error::missing/empty asset: $f"; exit 1; }
           done
 
           SHA="$(sha256sum "$SETUP" | awk '{print $1}')"
-          URL="https://github.com/${REPO}/releases/download/v${VERSION}/ClashWin_${VERSION}_x64-setup.exe"
+          URL="https://github.com/${REPO}/releases/download/v${VERSION}/Clash.Win_${VERSION}_x64-setup.exe"
           SIG=""
           if [ -n "${MINISIGN_PRIVATE_KEY:-}" ]; then
             KEYDIR="$(mktemp -d)"
@@ -385,8 +385,8 @@ jobs:
           full_notes = (
               f"{body_main}\n\n---\n\n"
               f"## 下载地址 / Downloads\n\n"
-              f"- [Windows x64 安装版 (`ClashWin_{ver}_x64-setup.exe`)](https://github.com/{repo}/releases/download/v{ver}/ClashWin_{ver}_x64-setup.exe)\n"
-              f"- [Windows x64 便携版 (`ClashWin_{ver}_x64_portable.zip`)](https://github.com/{repo}/releases/download/v{ver}/ClashWin_{ver}_x64_portable.zip)\n\n"
+              f"- [Windows x64 安装版 (`Clash.Win_{ver}_x64-setup.exe`)](https://github.com/{repo}/releases/download/v{ver}/Clash.Win_{ver}_x64-setup.exe)\n"
+              f"- [Windows x64 便携版 (`Clash.Win_{ver}_x64_portable.zip`)](https://github.com/{repo}/releases/download/v{ver}/Clash.Win_{ver}_x64_portable.zip)\n\n"
               f"## 校验与已知限制 / Checksums & Known Limitations\n\n"
               f"随本 Release 提供 `SHA256SUMS.txt`。\n\n"
               f"{sign_note}\n"

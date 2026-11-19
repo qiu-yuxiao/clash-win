@@ -244,11 +244,13 @@ bool SingletonClient::notify_or_exit(uint16_t port, int argc, wchar_t* argv[], b
     if (!argv[i]) continue;
     std::wstring arg_w = argv[i];
     std::string arg = utf::utf16_to_utf8(arg_w);
+    std::string lower_arg = util::to_lower(arg);
     if (arg == "--silent") {
       has_silent = true;
-    } else if (arg.starts_with("clash:") || arg.starts_with("clash://") ||
-               arg.starts_with("clash-verge:") || arg.starts_with("clash-verge://") ||
-               arg.starts_with("clash-mini:") || arg.starts_with("clash-mini://")) {
+    } else if (lower_arg.starts_with("clash:") || lower_arg.starts_with("clash://") ||
+               lower_arg.starts_with("clash-verge:") || lower_arg.starts_with("clash-verge://") ||
+               lower_arg.starts_with("clash-mini:") || lower_arg.starts_with("clash-mini://") ||
+               lower_arg.starts_with("clash-win:") || lower_arg.starts_with("clash-win://")) {
       scheme_url = arg;
     }
   }

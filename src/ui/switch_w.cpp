@@ -228,14 +228,17 @@ void SwitchW::on_paint(IRenderTarget& rt) {
 
   // ★ hover 辉光（CSS box-shadow 外发光位于 thumb 背景之下，先于 thumb 绘制）
   const bool use_hg = hover && sp.thumb_hover_glow;
-  if (use_hg || sp.thumb_glow) {
+  const bool use_on_rest_glow = !use_hg && on_side && sp.on_thumb_glow_color.a > 0.001f;
+  if (use_hg || use_on_rest_glow || sp.thumb_glow) {
     Color4f g = use_hg ? (on_side && sp.on_thumb_hover_glow_color.a > 0.001f
                               ? sp.on_thumb_hover_glow_color
                               : sp.thumb_hover_glow_color)
-                       : sp.thumb_glow_color;
+                       : (use_on_rest_glow ? sp.on_thumb_glow_color : sp.thumb_glow_color);
+    const float blur = use_hg
+                           ? sp.thumb_hover_glow_blur
+                           : (use_on_rest_glow ? sp.on_thumb_glow_blur : sp.thumb_glow_blur);
     g.a *= dis;
-    draw_glow(rt, tr, t_radius, g,
-              (use_hg ? sp.thumb_hover_glow_blur : sp.thumb_glow_blur) * scale);
+    draw_glow(rt, tr, t_radius, g, blur * scale);
   }
   const GradientStop* gs = on_side ? sp.on_thumb_stops : sp.off_thumb_stops;
   const int gn = on_side ? sp.on_thumb_n : sp.off_thumb_n;

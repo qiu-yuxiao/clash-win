@@ -557,14 +557,15 @@ UT_TEST(t21_d2d_local_coordinates_no_double_offset) {
   // 若坐标被二次偏移，采样行将落在卡渐变内，gold_border_pixels 归零。
 }
 
-// ← src/components/layout/notice-manager.tsx:157-216（通知条容器与条目几何）
+// ← src/components/layout/notice-manager.tsx:108-231（271px 固定左上堆叠容器与条目几何）
 UT_TEST(t21_snackbar_alert_layout_and_close) {
   using clashwin::events::NoticeItem;
   using clashwin::events::NoticeService;
 
   SnackbarW bar;
-  bar.set_position("top-right");  // verge 缺省（verge.rs:353）
-  bar.set_bounds({0, 0, 271, 600});  // 271 逻辑宽（Mini 缺省窗口）
+  bar.set_position("top-left");
+  bar.set_top_offset(30.0f);
+  bar.set_bounds({0, 0, 271, 600});
 
   // 无通知 → 无条目
   bar.set_items({});
@@ -572,47 +573,53 @@ UT_TEST(t21_snackbar_alert_layout_and_close) {
   UT_CHECK_EQ(bar.visible_count(), 0u);
   UT_CHECK_EQ(bar.item_rects().size(), 0u);
 
-  // 两条通知：竖向 gap 10、右对齐 20、宽 = min(360, 271-40)
+  // 两条通知：左起 px=6、y=topOffset+4、gap=4、宽=min(271, winW)-12
   std::vector<NoticeItem> items;
   items.push_back({1, "success", 3000, "copied"});
-  items.push_back({2, "error", 8000, "import failed"});
+  items.push_back({2, "warning", 6000, "check config"});
   bar.set_items(items);
   bar.layout_items();
   UT_CHECK_EQ(bar.item_rects().size(), 2u);
   const RectF r0 = bar.item_rects()[0];
   const RectF r1 = bar.item_rects()[1];
-  UT_CHECK_EQ(r0.w, 231.0f);              // 271 - 2*20（< maxWidth 360）
-  UT_CHECK_EQ(r0.h, 48.0f);               // MUI Alert filled 单行
-  UT_CHECK_EQ(r0.x, 271.0f - 20.0f - 231.0f);
-  UT_CHECK_EQ(r0.y, 20.0f);
-  UT_CHECK_EQ(r1.y, 20.0f + 48.0f + 10.0f);  // gap 10
+  UT_CHECK_EQ(r0.w, 259.0f);  // 271 - 2*6
+  UT_CHECK_EQ(r0.h, 32.0f);   // py 4*2 + 24px 单行Alert
+  UT_CHECK_EQ(r0.x, 6.0f);
+  UT_CHECK_EQ(r0.y, 34.0f);   // top_offset 30 + pt 4
+  UT_CHECK_EQ(r1.y, 34.0f + 32.0f + 4.0f);  // gap 4
 
-  // 宽窗时封顶 360
+  // 宽窗时仍封顶 271px 容器宽（内容宽 259px）
   bar.set_bounds({0, 0, 600, 900});
   bar.layout_items();
-  UT_CHECK_EQ(bar.item_rects()[0].w, 360.0f);
+  UT_CHECK_EQ(bar.item_rects()[0].w, 259.0f);
+  UT_CHECK_EQ(bar.item_rects()[0].x, 6.0f);
 
-  // bottom-left 锚点：贴左下，向上堆叠
-  bar.set_position("bottom-left");
-  bar.set_bounds({0, 0, 600, 900});
+  // 隐去标题栏时 topOffset=0 → y=4
+  bar.set_top_offset(0.0f);
   bar.layout_items();
-  const RectF b0 = bar.item_rects()[0];
-  const RectF b1 = bar.item_rects()[1];
-  UT_CHECK_EQ(b0.x, 20.0f);
-  UT_CHECK_EQ(b1.y, 900.0f - 20.0f - 48.0f);  // 最新一条贴底
-  UT_CHECK_EQ(b0.y, b1.y - 48.0f - 10.0f);
+  UT_CHECK_EQ(bar.item_rects()[0].y, 4.0f);
 
-  // 非法位置回落 top-right（← resolvePosition）
+  // warning 缺省时长 6000ms（notice-service.ts:47）
+  for (const auto& stale : NoticeService::instance().snapshot())
+    NoticeService::instance().hide(stale.id);
+  const uint64_t warn_id = NoticeService::instance().push("warning", "warn msg");
+  auto wsnap = NoticeService::instance().snapshot();
+  UT_CHECK_EQ(wsnap.size(), size_t(1));
+  UT_CHECK_EQ(wsnap[0].id, warn_id);
+  UT_CHECK_EQ(wsnap[0].duration_ms, 6000);
+  NoticeService::instance().hide(warn_id);
+
+  // 非法位置回落 top-left
   bar.set_position("middle");
-  UT_CHECK(bar.position() == "top-right");
+  UT_CHECK(bar.position() == "top-left");
 
-  // 关闭按钮：点右上角命中区 → 从 NoticeService 移除（:205 handleClose）
-  // 先清空同进程其它用例可能残留的通知，保证计数口径确定
+  // 关闭按钮：点右上角命中区 → 从 NoticeService 移除（:219 handleClose）
   for (const auto& stale : NoticeService::instance().snapshot())
     NoticeService::instance().hide(stale.id);
   NoticeService::instance().push("success", "k1", 3000);
   NoticeService::instance().push("error", "k2", 8000);
-  bar.set_position("top-right");
+  bar.set_position("top-left");
+  bar.set_top_offset(30.0f);
   bar.set_bounds({0, 0, 600, 900});
   bar.attach(NoticeService::instance());
   bar.layout_items();
@@ -621,7 +628,7 @@ UT_TEST(t21_snackbar_alert_layout_and_close) {
   const uint64_t first_id = bar.items()[0].id;
   MouseEvent up;
   up.type = MouseEventType::Up;
-  up.pos = {first.x + first.w - 8.0f - 15.0f, first.y + 10.0f + 15.0f};
+  up.pos = {first.x + first.w - 6.0f - 12.0f, first.y + 4.0f + 12.0f};
   UT_CHECK(bar.on_mouse(up));
   UT_CHECK_EQ(NoticeService::instance().snapshot().size(), size_t(1));
   UT_CHECK(NoticeService::instance().snapshot()[0].id != first_id);
@@ -782,41 +789,37 @@ UT_TEST(t21_snackbar_wrap_and_right_click_copy) {
   set_text_engine(&fake);
 
   SnackbarW bar;
-  bar.set_position("top-right");
-  bar.set_bounds({0, 0, 600, 900});  // 宽窗 → 条目封顶 360，消息可用宽 360-104=256
+  bar.set_position("top-left");
+  bar.set_top_offset(30.0f);
+  bar.set_bounds({0, 0, 600, 900});  // 宽窗仍封顶 271（条目宽 259，消息可用宽 189）
 
-  // 单行：仍是 MUI Alert filled 的 48（6+36+6）
+  // 单行：12px/1.45 → 32（py 4*2 + 24）
   std::vector<NoticeItem> one;
   one.push_back({1, "info", 0, "short"});
   bar.set_items(one);
-  UT_CHECK_EQ(bar.item_rects()[0].h, 48.0f);
+  UT_CHECK_EQ(bar.item_rects()[0].w, 259.0f);
+  UT_CHECK_EQ(bar.item_rects()[0].h, 32.0f);
 
   // 长文案 → 折行 → 条目变高（不省略、不截断）
-  const std::string long_msg(120, 'x');  // 120 字符 / 每行 36 → 4 行
+  const std::string long_msg(120, 'x');  // 120 / 每行 27 → 5 行
   std::vector<NoticeItem> two;
   two.push_back({1, "info", 0, "short"});
   two.push_back({2, "error", 0, long_msg});
   bar.set_items(two);
   const float h0 = bar.item_rects()[0].h;
   const float h1 = bar.item_rects()[1].h;
-  UT_CHECK_EQ(h0, 48.0f);
-  UT_CHECK(h1 > 48.0f);
-  // 4 行 × 20.02 + 16(消息 padding) + 12(卡片 padding) = 108.1 → 取整 108
-  UT_CHECK_EQ(h1, 108.0f);
-  // 第二条 y = 20 + 48 + gap 10
-  UT_CHECK_EQ(bar.item_rects()[1].y, 78.0f);
-
-  // bottom 锚点：最新一条贴底，高度按各自折行算
-  bar.set_position("bottom-right");
-  bar.layout_items();
-  UT_CHECK_EQ(bar.item_rects()[1].y, 900.0f - 20.0f - h1);
-  UT_CHECK_EQ(bar.item_rects()[0].y, 900.0f - 20.0f - h1 - 10.0f - h0);
+  UT_CHECK_EQ(h0, 32.0f);
+  UT_CHECK(h1 > 32.0f);
+  // 5 行 × (12*1.43) + 4(消息 padding) + 8(卡片 padding) = 97.8 → 取整 98
+  UT_CHECK_EQ(h1, 98.0f);
+  // 第二条 y = 30(topOffset) + 4 + 32 + 4(gap) = 70
+  UT_CHECK_EQ(bar.item_rects()[1].y, 70.0f);
 
   // 右键 → 复制该条全文（不关闭）；用完清场避免污染其它用例
   for (const auto& stale : NoticeService::instance().snapshot())
     NoticeService::instance().hide(stale.id);
   NoticeService::instance().push("info", long_msg, 0);
-  bar.set_position("top-right");
+  bar.set_position("top-left");
   bar.attach(NoticeService::instance());
   bar.layout_items();
   UT_CHECK_EQ(bar.visible_count(), 1u);
@@ -826,9 +829,9 @@ UT_TEST(t21_snackbar_wrap_and_right_click_copy) {
   rd.buttons = kMouseRight;
   rd.pos = {item.x + 20.0f, item.y + 10.0f};  // 落在消息区（不在关闭按钮上）
   UT_CHECK(bar.on_mouse(rd));
-  // 关闭按钮上右键同样冒泡到 Alert 根 → 复制而非关闭（← :196-200）
+  // 关闭按钮上右键同样冒泡到 Alert 根 → 复制而非关闭（← :210-214）
   MouseEvent rd2 = rd;
-  rd2.pos = {item.x + item.w - 8.0f - 15.0f, item.y + 10.0f + 15.0f};
+  rd2.pos = {item.x + item.w - 6.0f - 12.0f, item.y + 4.0f + 12.0f};
   UT_CHECK(bar.on_mouse(rd2));
   // 两条通知都还在（右键不关闭）
   const auto snap = NoticeService::instance().snapshot();
@@ -874,30 +877,14 @@ UT_TEST(t21_first_run_guide_pills_wrap_no_overlap) {
   set_text_engine(nullptr);
 }
 
-UT_TEST(t21_v330_antivirus_modal_and_first_run_ready_card3) {
+UT_TEST(t21_v330_first_run_ready_without_antivirus_card) {
   make_offscreen(640, 680, 96);
   set_text_engine(nullptr);
-
-  AntivirusWhitelistModal av;
-  UT_CHECK(!av.is_open());
-  av.open();
-  UT_CHECK(av.is_open());
-  av.layout_tree({0, 0, 640, 680});
-  // BUG-395：两方案重构，UIA 虚拟子项 3 文本 + 3 按钮（静默/复制路径/复制内容）+ 1 关闭 = 7
-  UT_CHECK_EQ(av.a11y_virtual_child_count(), size_t(7));
-  // 新增按钮矩形在布局后应有有效尺寸
-  UT_CHECK(av.enable_silent_button_rect().h > 0.0f);
-  UT_CHECK(av.copy_path_button_rect().h > 0.0f);
-  UT_CHECK(av.copy_snippet_button_rect().h > 0.0f);
-  av.set_scroll_y(99999.0f);
-  UT_CHECK(av.scroll_y() <= av.max_scroll() + 0.5f);
-  av.on_key(KeyEvent{KeyEventType::Down, VK_ESCAPE});
-  UT_CHECK(!av.is_open());
 
   FirstRunGuideDialog dlg;
   dlg.open();
   dlg.set_step(FirstRunStep::Ready);
   dlg.layout_tree({0, 0, 640, 520});
-  // BUG-395（Mini v3.5.2）：Step 2 防误杀引导卡片已删除，帮助菜单入口保留
+  // BUG-395 / BUG-398（Mini v3.5.5）：防误杀说明外置至《轻量模式防误杀指南.txt》并由帮助菜单直开
   set_text_engine(nullptr);
 }

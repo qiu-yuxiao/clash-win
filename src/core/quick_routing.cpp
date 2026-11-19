@@ -618,7 +618,7 @@ std::string serialize_custom_routing_backup(
   for (const auto& r : rule_lines) out << r;
   out << YAML::EndSeq;
   out << YAML::EndMap;
-  return std::string("# Clash Mini Custom Routing Rules Backup\n") +
+  return std::string("# Clash Win Custom Routing Rules Backup\n") +
          out.c_str() + "\n";
 }
 

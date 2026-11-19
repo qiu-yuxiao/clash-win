@@ -17,6 +17,8 @@ struct MenuItem {
   std::wstring shortcut;  // 右侧灰字（T20 连接表用）
   bool danger = false;    // 红字项（Mini 删除项 color:error.main，_layout.tsx:1852）
   bool selected = false;  // 选中态（MUI selected：bg action.selected + text primary）
+  std::string icon;       // 可选前导矢量图标（MUI ListItemIcon 18px）
+  Color4f icon_color{0, 0, 0, 0};  // alpha>0 时覆盖图标颜色
 };
 
 // 菜单列表本体（也可被 Dropdown 复用）
@@ -67,7 +69,7 @@ class MenuList : public Widget {
   int font_weight_ = 0;      // 0 normal / 1 bold
   bool gold_hover_ = false;  // retro-3d hover 金渐变 + 深金文字
   bool gradient_panel_ = false;
-  GradientStop panel_grad_[3];
+  GradientStop panel_grad_[4] = {};
   float pad_top_ = 2;
   float pad_bottom_ = 2;
   float hover_inset_ = 4;
@@ -85,7 +87,7 @@ class MenuList : public Widget {
   Color4f hover_glow_color_;
   float hover_glow_blur_ = 0;
   bool panel_grad_on_ = false;
-  GradientStop panel_stops_[3] = {};
+  GradientStop panel_stops_[4] = {};
   int panel_n_ = 0;
   float panel_angle_ = 135.0f;
   Color4f panel_bg_{0, 0, 0, 0};
@@ -119,7 +121,7 @@ struct MenuStyle {
   Color4f danger_text = Color4f::hex(0xD32F2F);           // src: MUI error.main
   Color4f selected_bg = Color4f::hex(0x007AFF, 0.08f);   // src: MUI action.selected
   Color4f selected_text = Color4f::hex(0x000000, 0.87f);  // src: text.primary
-  GradientStop grad[3] = {};
+  GradientStop grad[4] = {};
 
   // ---- 6 套皮肤（← style-helpers.tsx:109-198 getMenuItemHoverStyle +
   //      index.scss:109-114 .MuiMenu-paper.theme-panel）----
@@ -139,7 +141,7 @@ struct MenuStyle {
 
   // 面板（.theme-panel 在 Menu paper 上的等价物）
   bool panel_grad_on = false;          // true → panel_stops 渐变底
-  GradientStop panel_stops[3] = {};
+  GradientStop panel_stops[4] = {};
   int panel_n = 0;
   float panel_angle = 135.0f;
   Color4f panel_bg{0, 0, 0, 0};        // a=0 → 用 bg

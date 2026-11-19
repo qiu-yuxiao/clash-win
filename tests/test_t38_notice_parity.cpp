@@ -163,7 +163,7 @@ UT_TEST(t38_snackbar_not_polluted_by_titlebar_shadow) {
 
   auto snack = std::make_unique<SnackbarW>();
   SnackbarW* snack_ptr = snack.get();
-  snack_ptr->set_position("top-right");
+  snack_ptr->set_top_offset(0.0f);  // 隐藏标题栏场景：从 y=4 起跨过 y=30..33 投影带
   events::NoticeItem item;
   item.id = 1;
   item.type = "success";
@@ -174,15 +174,15 @@ UT_TEST(t38_snackbar_not_polluted_by_titlebar_shadow) {
   root.layout_tree({0, 0, 271, 120});
   UT_CHECK_EQ(snack_ptr->item_rects().size(), 1u);
   const RectF alert_rc = snack_ptr->item_rects()[0];
-  // 通知条从 y=20 开始，跨越 y=30..33（原 TitleBar 投影所在行）
-  UT_CHECK(alert_rc.y <= 20.5f && alert_rc.bottom() >= 40.0f);
+  // 通知条从 y=4 开始，跨越 y=30..33（原 TitleBar 投影所在行）
+  UT_CHECK(alert_rc.y <= 4.5f && alert_rc.bottom() >= 34.0f);
 
   rt().begin_frame();
   rt().clear(ts.vars().theme_bg);
   root.paint_all(rt());
   rt().end_frame();
 
-  // 取通知条左侧内边距纯绿色底区域 x = alert_rc.x + 8，比较 y=25 与 y=31
+  // 取通知条左侧纯绿色底区域 x = alert_rc.x + 8，比较 y=25 与 y=31
   const int sample_x = static_cast<int>(alert_rc.x + 8.0f);
   const Px p_above = pixel(sample_x, 25);
   const Px p_shadow_row = pixel(sample_x, 31);
@@ -212,8 +212,9 @@ UT_TEST(t38_async_import_callbacks_non_blocking_state) {
 
   card.url_field()->on_submit();
   UT_CHECK_EQ(captured_url, std::string("https://example.com/sub.yaml"));
-  // 异步挂起期间：输入框与按钮处于禁用态，文本尚未清空
-  UT_CHECK(!card.url_field()->enabled());
+  // 异步挂起期间：url_field 保持可编辑以对齐 Mini，按钮禁用，文本尚未清空
+  UT_CHECK(card.is_importing());
+  UT_CHECK(card.url_field()->enabled());
   UT_CHECK(!import_btn->enabled());
   UT_CHECK(!card.url().empty());
 
@@ -255,11 +256,11 @@ UT_TEST(t38_async_import_callbacks_non_blocking_state) {
   UT_CHECK(dlg.step() == scene::FirstRunStep::Input);
   UT_CHECK(static_cast<bool>(resume_dlg));
 
-  // 模拟失败：退出加载态并显示错误提示
+  // 模拟失败：退出加载态并显示统一本地化 errImport 错误提示（← first-run-guide-dialog.tsx:412,416）
   resume_dlg(false, "DNS error");
   UT_CHECK(!dlg.is_importing());
   UT_CHECK(dlg.step() == scene::FirstRunStep::Input);
-  UT_CHECK(dlg.error_message().find("DNS error") != std::string::npos);
+  UT_CHECK_EQ(dlg.error_message(), tr8("layout.components.firstRun.errImport"));
 
   // 再次提交并模拟成功：进入 Ready 步
   dlg.on_key(enter);

@@ -60,6 +60,20 @@ class MockTrayBackend : public ITrayBackend {
     return true;
   }
 
+  struct BalloonCall {
+    HWND hwnd;
+    UINT uID;
+    std::wstring title;
+    std::wstring body;
+  };
+  std::vector<BalloonCall> balloon_calls;
+
+  bool show_balloon(HWND hwnd, UINT uID, const std::wstring& title,
+                    const std::wstring& body) override {
+    balloon_calls.push_back({hwnd, uID, title, body});
+    return true;
+  }
+
   void show_menu(HWND /*hwnd*/, POINT /*pt*/, bool in_lite_mode, std::function<void(int cmd_id)> on_cmd) override {
     shown_menu_labels.clear();
     if (in_lite_mode) {
@@ -513,4 +527,47 @@ UT_TEST(t19_deep_link_bug323_outer_params_and_nested_query) {
 
   // ⑤ 纯空白 url 参数必须拒绝
   UT_CHECK(!parse_deep_link("clash://install-config?url=%20%20%20&name=Empty").is_ok());
+}
+
+UT_TEST(t19_tray_lbuttondown_exiting_guard_and_silent_balloon) {
+  auto mock = std::make_unique<MockTrayBackend>();
+  auto* raw_mock = mock.get();
+  Tray tray(std::move(mock));
+  HWND dummy = reinterpret_cast<HWND>(0x1234);
+  UT_CHECK(tray.init(dummy));
+
+  int left_clicks = 0;
+  tray.set_on_left_click([&left_clicks]() { ++left_clicks; });
+
+  bool exiting = false;
+  tray.set_is_exiting_check([&exiting]() { return exiting; });
+
+  // WM_LBUTTONDOWN triggers left-click callback (WM_LBUTTONUP does not).
+  tray.handle_tray_message(0, WM_LBUTTONUP);
+  UT_CHECK_EQ(left_clicks, 0);
+
+  tray.handle_tray_message(0, WM_LBUTTONDOWN);
+  UT_CHECK_EQ(left_clicks, 1);
+
+  // Exiting guard suppresses tray callbacks.
+  exiting = true;
+  tray.handle_tray_message(0, WM_LBUTTONDOWN);
+  UT_CHECK_EQ(left_clicks, 1);
+  exiting = false;
+
+  // Cold silent balloon localization and 2s debounce.
+  UT_CHECK(tray.notify_silent_running("zh", 10000));
+  UT_CHECK_EQ(raw_mock->balloon_calls.size(), 1u);
+  UT_CHECK(raw_mock->balloon_calls[0].title.find(L"\u9759\u9ed8") != std::wstring::npos);
+
+  UT_CHECK(!tray.notify_silent_running("zh", 11500));
+  UT_CHECK_EQ(raw_mock->balloon_calls.size(), 1u);
+
+  UT_CHECK(tray.notify_silent_running("zhtw", 12000));
+  UT_CHECK_EQ(raw_mock->balloon_calls.size(), 2u);
+  UT_CHECK(raw_mock->balloon_calls[1].title.find(L"\u975c\u9ed8") != std::wstring::npos);
+
+  UT_CHECK(tray.notify_silent_running("en", 15000));
+  UT_CHECK_EQ(raw_mock->balloon_calls.size(), 3u);
+  UT_CHECK(raw_mock->balloon_calls[2].title.find(L"running silently") != std::wstring::npos);
 }

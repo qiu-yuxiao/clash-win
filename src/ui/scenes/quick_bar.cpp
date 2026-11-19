@@ -958,12 +958,14 @@ void TakeoverSegmented::on_paint(IRenderTarget& rt) {
                   sp.active_glow_blur);
     }
     TextStyle ts;
-    ts.size = 13;  // src: takeover-mode-card.tsx:116-117 zh 13px（非 zh 11px）
+    // src: takeover-mode-card.tsx:116-117 zh/zhtw 13px（非 zh 11px）
+    const auto& lang = i18n::I18n::instance().language();
+    ts.size = (lang == "zh" || lang == "zhtw") ? 13.0f : 11.0f;
     // src: button-styles.ts:1105-1122 选中文字 get3DSegmentedActiveTextColor；
     //   未选中 takeover-mode-card.tsx:110-115
     //     isRetro3DDark ? 'rgba(44,31,3,.75)' : 'text.secondary'
     //   hover :122-129 dark '#2C1F03'；active :130-137 dark rgba(44,31,3,.5)
-    const bool rd = retro;
+    const bool rd = retro && !ThemeService::instance().is_light();
     Color4f color = sel ? sp.active_text
                         : (rd ? Color4f::hex(0x2C1F03, 0.75f)
                               : ThemeService::instance().palette().secondary_text);

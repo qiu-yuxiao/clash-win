@@ -578,44 +578,16 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   bolt->size_ = 17;
   bolt->box_w = bolt->box_h = 26;
   bolt->color_ = pal.primary_text;
+  bolt->circle_hover = true;
   bolt->flex_weight = 0;
   // src: proxy-head.tsx:145 title={t('proxies.page.tooltips.delayCheck')}
   bolt->set_i18n_tooltip("proxies.page.tooltips.delayCheck");
   bolt->set_i18n_a11y_name("proxies.page.tooltips.delayCheck");
   bolt_btn_ = bolt.get();
   bolt->on_click = [this] {
-    // ★ §5.2/§5.6「所见即所选」（← Mini proxy-groups.tsx:230-275 handleCheckAll）：
-    //   测速范围 = 当前过滤后**可见**的节点子集，择优切换也限该子集。
-    //   与「全量自动优选」（F1 语义，走 AutoSelect 不传子集）区分。
-    if (!data_) return;
-    std::vector<std::string> names;
-    const auto& rows = data_->rows();
-    names.reserve(visible_.size());
-    for (int i : visible_) {
-      if (i < 0 || static_cast<size_t>(i) >= rows.size()) continue;
-      names.push_back(rows[static_cast<size_t>(i)].name);
-    }
-    if (names.empty()) return;
-    // BUG-321: 置 -2 前先拍摄延迟快照，异常/繁忙/空结果结束时立即回滚仍处于 -2 的节点
-    const auto snaps = data_->snapshot_delays(names);
-    data_->set_delays_batch(names, -2);  // src: src/services/delay.ts:456
-    set_testing(true);
-    invalidate();
-    const uint64_t wait_id = on_batch_test_begin ? on_batch_test_begin() : 0;
-    auto end_cb = on_batch_test_end;
-    auto* data_ptr = data_;
-    auto alive = alive_;
-    std::thread([this, alive, data_ptr, names, snaps, wait_id, end_cb] {
-      data_ptr->test_and_select(names);
-      const BatchTestSummary sum = data_ptr->last_batch_summary();
-      UiPostbox::instance().post([this, alive, data_ptr, snaps, end_cb, wait_id, sum] {
-        if (alive && alive->load()) {
-          data_ptr->restore_delays_for_still_pending(snaps);
-          set_testing(false);
-        }
-        if (end_cb) end_cb(wait_id, sum);
-      });
-    }).detach();
+    // BUG-397（proxy-groups.tsx:252-275 handleCheckAll）：⚡ 仅对可见子集测延迟（select=false, clean_stale=false）
+    const auto intent = util::resolve_batch_check_intent(util::BatchCheckTrigger::Bolt);
+    trigger_check_visible(intent.select);
   };
   bar_p->add_child(std::move(bolt));
 
@@ -628,6 +600,7 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   sort->size_ = 17;
   sort->box_w = sort->box_h = 26;
   sort->color_ = pal.primary_text;
+  sort->circle_hover = true;
   sort->set_i18n_tooltip("proxies.page.tooltips.sortDelay");  // src: locales/zh/proxies.json:34-36
   sort->set_i18n_a11y_name("proxies.page.tooltips.sortDelay");
   sort->on_click = [this] { toggle_sort(); };
@@ -690,12 +663,13 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
   };
   search_->on_submit = [this] {
     cancel_pending_filter_auto_test();
-    // BUG-392（proxy-head.tsx:158）：回车提交同样要求至少一个有效检索词
-    // G4: 同过滤词不重复触发（← Mini proxy-head.tsx lastTriggeredFilterRef）
-    if (util::has_effective_filter_term(filter_) && !visible_.empty() &&
-        filter_ != last_auto_select_filter_) {
+    // BUG-392/BUG-397（proxy-head.tsx:158）：回车提交要求至少一个有效完整检索词，且同词回车强制重跑
+    if (util::has_effective_filter_term(filter_) &&
+        !util::is_incomplete_filter_input(filter_) && !visible_.empty()) {
       last_auto_select_filter_ = filter_;
-      trigger_auto_select_visible();
+      const auto intent =
+          util::resolve_batch_check_intent(util::BatchCheckTrigger::Filter);
+      trigger_check_visible(intent.select);
     }
   };
   // G2: 删除 Win 加戏的失焦触发通道——Mini 只 onChangeText / onEnter 两通道
@@ -774,7 +748,11 @@ void NodeList::refresh_filter_spinner() {
 void NodeList::set_testing(bool testing) {
   if (is_testing_ == testing) return;
   is_testing_ = testing;
+  if (!is_testing_ && bolt_btn_) {
+    bolt_btn_->glow_ = false;
+  }
   refresh_filter_spinner();
+  invalidate();
 }
 
 bool NodeList::cancel_pending_filter_auto_test() {
@@ -787,19 +765,22 @@ bool NodeList::cancel_pending_filter_auto_test() {
 }
 
 void NodeList::fire_filter_auto_test_timer() {
-  // BUG-392：尾部重测/BUSY 续试走专用通道，不受"同词去重"拦截
+  // BUG-392/BUG-397：尾部重测/BUSY 续试走专用通道，保留当次期望的 select 语义
   if (recheck_timer_armed_) {
     recheck_timer_armed_ = false;
-    trigger_auto_select_visible();
+    trigger_check_visible(recheck_next_select_);
     return;
   }
   if (!pending_auto_test_) return;
   pending_auto_test_ = false;
   refresh_filter_spinner();
-  if (util::has_effective_filter_term(filter_) && !visible_.empty() &&
+  if (util::has_effective_filter_term(filter_) &&
+      !util::is_incomplete_filter_input(filter_) && !visible_.empty() &&
       filter_ != last_auto_select_filter_) {
     last_auto_select_filter_ = filter_;
-    trigger_auto_select_visible();
+    const auto intent =
+        util::resolve_batch_check_intent(util::BatchCheckTrigger::Filter);
+    trigger_check_visible(intent.select);
   }
 }
 
@@ -970,18 +951,23 @@ std::vector<std::string> NodeList::visible_node_names() const {
   return out;
 }
 
-void NodeList::trigger_auto_select_visible() {
-  // BUG-392（proxy-groups.tsx:247-258）：测速在途期间过滤词已变更为新的完整词，
-  // 登记尾部重测队列，不静默丢弃（避免 last_auto_select_filter_ 提前置位导致永不补跑）。
+void NodeList::trigger_check_visible(bool select) {
+  // BUG-392（proxy-groups.tsx:247-258）/ BUG-397（:252-330 handleCheckAll vs autoSelect）：
+  // 区分仅测延迟（select=false, clean_stale=false）与优选切换（select=true, clean_stale=true）。
   const std::string start_filter = util::trim(filter_);
   if (is_testing_) {
-    if (start_filter != active_test_filter_ &&
-        util::has_effective_filter_term(start_filter)) {
+    const bool has_valid_filter =
+        util::has_effective_filter_term(start_filter) &&
+        !util::is_incomplete_filter_input(start_filter);
+    if ((select && !active_check_select_) ||
+        (has_valid_filter && start_filter != active_test_filter_)) {
       pending_recheck_ = true;
+      pending_recheck_select_ = pending_recheck_select_ || select;
     }
     return;
   }
   active_test_filter_ = start_filter;
+  active_check_select_ = select;
   if (!data_ || visible_.empty()) return;
   std::vector<std::string> names;
   const auto& rows = data_->rows();
@@ -1004,20 +990,26 @@ void NodeList::trigger_auto_select_visible() {
 
   auto* data_ptr = data_;
   auto alive = alive_;
-  std::thread([this, alive, data_ptr, names, snaps, wait_id, end_cb] {
-    data_ptr->test_and_select(names);
+  const bool clean_stale = select;
+  std::thread([this, alive, data_ptr, names, snaps, wait_id, end_cb, select,
+               clean_stale] {
+    data_ptr->test_batch(names, select, clean_stale);
     const BatchTestSummary sum = data_ptr->last_batch_summary();
-    UiPostbox::instance().post([this, alive, data_ptr, snaps, end_cb, wait_id, sum] {
+    UiPostbox::instance().post([this, alive, data_ptr, snaps, end_cb, wait_id,
+                                sum] {
       if (alive && alive->load()) {
         data_ptr->restore_delays_for_still_pending(snaps);
+        const bool was_select = active_check_select_;
         set_testing(false);
 
-        // BUG-392（proxy-groups.tsx:338-366）：BUSY 有限续试 + 新过滤词尾部重测
+        // BUG-392（proxy-groups.tsx:338-366）：BUSY 有限续试 + 新过滤词/升级意图尾部重测
         const std::string latest_filter = util::trim(filter_);
+        const bool has_valid_filter =
+            util::has_effective_filter_term(latest_filter) &&
+            !util::is_incomplete_filter_input(latest_filter);
         bool hit_busy = false;
-        if (sum.busy) {
-          if (util::has_effective_filter_term(latest_filter) &&
-              busy_retry_count_ < 2) {
+        if (sum.busy && was_select) {
+          if (has_valid_filter && busy_retry_count_ < 2) {
             ++busy_retry_count_;
             hit_busy = true;
           } else {
@@ -1026,12 +1018,16 @@ void NodeList::trigger_auto_select_visible() {
         } else {
           busy_retry_count_ = 0;
         }
-        const bool queued_new_filter =
-            pending_recheck_ && util::has_effective_filter_term(latest_filter);
+        const bool queued_recheck =
+            pending_recheck_ && (pending_recheck_select_ || has_valid_filter);
+        const bool next_select =
+            queued_recheck ? pending_recheck_select_ : was_select;
         pending_recheck_ = false;
-        if (queued_new_filter || hit_busy) {
+        pending_recheck_select_ = false;
+        if (queued_recheck || hit_busy) {
           if (!hit_busy) busy_retry_count_ = 0;
           if (on_arm_filter_auto_test_timer) {
+            recheck_next_select_ = next_select;
             recheck_timer_armed_ = true;
             on_arm_filter_auto_test_timer(hit_busy ? 800 : 80);
           }
@@ -1040,6 +1036,10 @@ void NodeList::trigger_auto_select_visible() {
       if (end_cb) end_cb(wait_id, sum);
     });
   }).detach();
+}
+
+void NodeList::trigger_auto_select_visible() {
+  trigger_check_visible(true);
 }
 
 void NodeList::restyle_theme() {
@@ -1065,26 +1065,24 @@ void NodeList::rebuild_visible() {
   std::vector<int> idx;
   idx.reserve(rows.size());
   for (size_t i = 0; i < rows.size(); ++i) {
-    if (filter_.empty()) {
+    if (filter_.empty() || util::match_node_filter(rows[i].name, filter_)) {
       idx.push_back(static_cast<int>(i));
-      continue;
     }
-    // name 子串大小写不敏感
-    std::string lower;
-    for (char c : rows[i].name)
-      lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    if (lower.find(filter_) != std::string::npos)
-      idx.push_back(static_cast<int>(i));
   }
   if (sort_type_ == 1) {
     const auto& all_rows = data_->rows();
     std::stable_sort(idx.begin(), idx.end(), [this, &all_rows](int a, int b) {
       int da = data_->row_delay(all_rows[static_cast<size_t>(a)].name);
       int db = data_->row_delay(all_rows[static_cast<size_t>(b)].name);
-      // src: use-filter-sort.ts:56-64「delay === 0 … return [3, timeout]」
-      //   Timeout(0) 与 Unknown(-1)/testing(-2) 一并沉底；其余升序
-      auto key = [](int d) { return d <= 0 ? 1 << 30 : d; };
-      return key(da) < key(db);
+      // src: use-filter-sort.ts:48-75 categorizeDelay + services/delay.ts:37 (timeout=5000)
+      auto bucket = [](int d) -> std::pair<int, int> {
+        if (d > 100000) return {4, d};
+        if (d == 0 || (d >= kNodeDelayMaxMs && d <= 100000))
+          return {3, d > 0 ? d : kNodeDelayMaxMs};
+        if (d < 0) return {3, kNodeDelayMaxMs + 1};
+        return {0, d};
+      };
+      return bucket(da) < bucket(db);
     });
   } else if (sort_type_ == 2) {
     // src: use-filter-sort.ts:78 localeCompare
@@ -1188,8 +1186,8 @@ void NodeList::on_arrange(const RectF& area) {
   if (list_h < 0) list_h = 0;
 
   // ★ ❌1 宽窗三列判定（← use-render-list.ts:88 isMinimalWidth → col 1/3）：
-  //   内容宽 ≤285 单列，否则 3 列卡片墙；宽度/列数变化 → 重建网格
-  const int new_cols = (content_w <= kMinWidthForMultiCol) ? 1 : 3;
+  //   组件宽 ≤285 单列，否则 3 列卡片墙；宽度/列数变化 → 重建网格
+  const int new_cols = (area.w <= kMinWidthForMultiCol) ? 1 : 3;
   if (new_cols != cols_ || content_w != last_content_w_) {
     cols_ = new_cols;
     last_content_w_ = content_w;
@@ -1226,20 +1224,33 @@ void NodeList::on_arrange(const RectF& area) {
 
 void NodeList::on_paint(IRenderTarget& rt) {
   const auto& svc = ThemeService::instance();
-  const auto& vars = svc.vars();
   const bool light = svc.is_light();
-  // 【UIFIX】局部坐标约定 {0,0,w,h}；底色 = list_bg（主题变量）
   const float w = bounds().w, h = bounds().h;
   if (search_) {
     search_->apply_theme();
     search_->style_.size = 11;
     search_->caret_color_ = search_->style_.color;
   }
-  if (bolt_btn_) bolt_btn_->color_ = svc.palette().primary_text;
+  if (bolt_btn_) {
+    if (is_testing_) {
+      // src: src/components/proxy/proxy-head.tsx:34-50 pulseGlow 1.2s ease-in-out
+      const float now_s = static_cast<float>(GetTickCount64()) / 1000.0f;
+      const float cyc = std::fmod(now_s, 1.2f) / 1.2f;
+      const float k = 0.5f - 0.5f * std::cos(cyc * 6.2831853f);
+      bolt_btn_->color_ = Color4f::lerp(Color4f::hex(0xF59E0B, 0.80f),
+                                        Color4f::hex(0xFFC107, 1.00f), k);
+      bolt_btn_->glow_ = true;
+      bolt_btn_->glow_color_ = Color4f::hex(0xFFC107, 0.40f + 0.55f * k);
+      invalidate();
+    } else {
+      bolt_btn_->glow_ = false;
+      bolt_btn_->color_ = svc.palette().primary_text;
+    }
+  }
   if (sort_btn_) sort_btn_->color_ = svc.palette().primary_text;
   if (empty_icon_) empty_icon_->color_ = svc.palette().primary_text;
   if (empty_label_) empty_label_->style.color = svc.palette().primary_text;
-  rt.fill_rect({0, 0, w, h}, Brush{vars.list_bg});
+  // src: src/pages/_layout.tsx:1293 .layout-content 透明承接背景与极光
   // theme-panel 外框 ← src: proxy-groups.tsx:383「className="theme-panel"」+
   //   index.scss:75「border: 4px double var(--theme-border)」/:125「4px double #B8860B」
   //   范围 = 外层 mx:1 / mb:1 之内、顶部贴齐 → 过滤栏与列表同在一个框里。

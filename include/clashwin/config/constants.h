@@ -15,16 +15,16 @@ inline constexpr const char* kProxyHeadState = "proxy_head_state.json";
 
 // ---------- 应用版本（2026-11-06 23:20 用户裁定：Clash Win 独立版本线，
 //   从 0.1.0 起步逐版递增，不与 Clash Mini 版本号绑死；当前 v0.3.3 跟进 Clash Mini v3.3.0） ----------
-inline constexpr const char* kAppVersion = "1.0.3";
+inline constexpr const char* kAppVersion = "1.1.0";
 
 // ---------- 端口（1:1 对齐 Clash Mini 官方规范） ----------
 // 取消开发期同机共存特例，全量端口与密钥回归 1:1 对齐：
-// mixed 10801 / socks 10802 / http 10803 / guard 兜底 7899 /
+// mixed 10801 / socks 10802 / http 10803 / guard 兜底 10803 /
 // controller 9098（冲突时自 9098 向上寻位）/ 单实例 33335。
 inline constexpr uint16_t kDefaultMixed = 10801;
 inline constexpr uint16_t kDefaultSocks = 10802;
 inline constexpr uint16_t kDefaultHttp = 10803;
-inline constexpr uint16_t kHttpGuardFallback = 7899;
+inline constexpr uint16_t kHttpGuardFallback = 10803;
 inline constexpr uint16_t kControllerPort = 9098;
 inline constexpr uint16_t kSingletonPort = 33335;
 

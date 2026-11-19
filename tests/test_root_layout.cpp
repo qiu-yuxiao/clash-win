@@ -49,7 +49,7 @@ struct RootTree {
   void layout(float w, float h) { root.layout_tree({0, 0, w, h}); }
   void paint() {
     rt().begin_frame();
-    rt().clear({1, 1, 1, 1});
+    rt().clear(ThemeService::instance().vars().theme_bg);
     root.paint_all(rt());
     rt().end_frame();
   }

@@ -489,7 +489,6 @@ std::optional<YAML::Node> parse_vless(std::string_view link) {
   auto uh = rsplit_once_char(stripped.auth_host, '@');
   if (!uh) return std::nullopt;
   std::string uuid = percent_decode(uh->first);
-  if (uuid.empty()) return std::nullopt;
   std::optional<std::string_view> query = stripped.query;
 
   auto sp = extract_host_port(trim_end_slashes(uh->second), 443);

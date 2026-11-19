@@ -59,11 +59,14 @@ std::string language_from_installer_id(int id) {
 
 std::string installer_language() {
   // 键与值名必须与安装器一致：MUI_LANGDLL_REGISTRY_KEY="${MANUPRODUCTKEY}"
-  //（= Software\Clash Win\ClashWin）、VALUENAME="Installer Language"。
+  //（= Software\Clash Win\Clash Win），同时兼容旧版 Software\Clash Win\ClashWin。
   HKEY key = nullptr;
-  if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Clash Win\\ClashWin", 0,
+  if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Clash Win\\Clash Win", 0,
                     KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) {
-    return {};
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Clash Win\\ClashWin", 0,
+                      KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) {
+      return {};
+    }
   }
   wchar_t buf[64] = {};
   DWORD bytes = sizeof(buf) - sizeof(wchar_t);
@@ -641,6 +644,7 @@ void IVerge::enter_temp_tun_fallback(std::optional<bool> persisted_tun,
                                      std::optional<bool> persisted_sysproxy) {
   std::lock_guard<std::mutex> lk(temp_tun_fallback_mutex());
   auto& s = temp_tun_fallback_state();
+  if (s.active) return;  // 幂等保护：避免二次兜底覆写首次真实持久态
   s.active = true;
   s.enable_tun_mode = persisted_tun;
   s.enable_system_proxy = persisted_sysproxy;

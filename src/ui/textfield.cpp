@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <utility>
+#include <vector>
 
 #include "soft_shadow.h"
 #include "theme/theme.h"
@@ -15,10 +16,84 @@ namespace clashwin::ui {
 
 namespace {
 // ★ MUI 输入框行盒 = 23px 绝对值：InputBase 根 `lineHeight:'1.4375em'` 在 16px
-//   根字号下结算为 23px（docs/pixel-parity-audit.md P12）。多行输入框（P14 高 48、
-//   P16 高 125）的行距、光标步进、选区高都按这个行盒走；单行仍用单行行高。
+//   根字号下结算为 23px。多行输入框（48 / 125）的行距、光标步进、选区高都按这个行盒走。
 // src: node_modules/@mui/material/InputBase/InputBase.js:76-78
 constexpr float kMuiRowH = 23.0f;
+
+struct VisualLine {
+  int start = 0;
+  int end = 0;
+};
+
+std::vector<VisualLine> compute_visual_lines(ITextEngine* eng,
+                                             const std::wstring& text,
+                                             float avail_w,
+                                             const TextStyle& ts) {
+  std::vector<VisualLine> out;
+  const int len = static_cast<int>(text.size());
+  int pos = 0;
+  while (pos <= len) {
+    int nl = len;
+    for (int i = pos; i < len; ++i) {
+      if (text[static_cast<size_t>(i)] == L'\n') {
+        nl = i;
+        break;
+      }
+    }
+    if (pos == nl) {
+      out.push_back({pos, pos});
+    } else if (!eng || avail_w <= 16.0f) {
+      out.push_back({pos, nl});
+    } else {
+      int cur = pos;
+      for (int i = pos + 1; i <= nl; ++i) {
+        const float w = eng->measure_text(
+            text.substr(static_cast<size_t>(cur), static_cast<size_t>(i - cur)),
+            ts, 0).w;
+        if (w > avail_w && i - 1 > cur) {
+          out.push_back({cur, i - 1});
+          cur = i - 1;
+        }
+      }
+      out.push_back({cur, nl});
+    }
+    if (nl == len) break;
+    pos = nl + 1;
+  }
+  if (out.empty()) out.push_back({0, 0});
+  return out;
+}
+
+int find_visual_line_index(const std::vector<VisualLine>& lines, int cursor_idx) {
+  for (int r = 0; r < static_cast<int>(lines.size()); ++r) {
+    const VisualLine& vl = lines[static_cast<size_t>(r)];
+    if (cursor_idx < vl.start) return std::max(0, r - 1);
+    if (cursor_idx >= vl.start && cursor_idx <= vl.end) {
+      if (cursor_idx == vl.end && r + 1 < static_cast<int>(lines.size()) &&
+          lines[static_cast<size_t>(r + 1)].start == cursor_idx) {
+        return r + 1;
+      }
+      return r;
+    }
+  }
+  return std::max(0, static_cast<int>(lines.size()) - 1);
+}
+
+std::wstring normalize_clipboard_text(std::wstring s, bool multiline) {
+  std::wstring out;
+  out.reserve(s.size());
+  for (size_t i = 0; i < s.size(); ++i) {
+    if (s[i] == L'\r') {
+      if (i + 1 < s.size() && s[i + 1] == L'\n') ++i;
+      if (multiline) out.push_back(L'\n');
+    } else if (s[i] == L'\n') {
+      if (multiline) out.push_back(L'\n');
+    } else {
+      out.push_back(s[i]);
+    }
+  }
+  return out;
+}
 
 std::function<std::wstring()>& clip_get() {
   static std::function<std::wstring()> f;
@@ -124,7 +199,7 @@ RectF TextField::end_spinner_rect() const {
 }
 
 float TextField::text_right_pad() const {
-  float base = clear_button_ ? 32.0f : 8.0f;  // src: src/components/base/base-search-box.tsx:123
+  float base = clear_button_ ? 32.0f : pad_x_;  // src: src/components/base/base-search-box.tsx:123
   if (end_spinner_visible_) base += 15.0f;  // src: src/components/proxy/proxy-head.tsx:257
   return std::max(base, right_pad_);
 }
@@ -170,10 +245,7 @@ void TextField::copy() {
 }
 
 void TextField::paste() {
-  std::wstring s = clip_get_str();
-  // clipboard read handled above
-  s.erase(std::remove(s.begin(), s.end(), L'\r'), s.end());
-  s.erase(std::remove(s.begin(), s.end(), L'\n'), s.end());
+  const std::wstring s = normalize_clipboard_text(clip_get_str(), multiline_);
   if (!s.empty()) insert_text(s);
 }
 
@@ -190,9 +262,29 @@ void TextField::clear_text() {
   set_text(L"");
 }
 
+void TextField::set_multiline(bool multi, int min_rows, int max_rows) {
+  multiline_ = multi;
+  min_rows_ = std::max(1, min_rows);
+  max_rows_ = std::max(min_rows_, max_rows);
+  scroll_y_ = 0.0f;
+  invalidate();
+}
+
+float TextField::preferred_height(float width) const {
+  if (!multiline_) return height_;
+  // src: src/pages/_layout/components/profile-import-card.tsx:140,164 minRows/maxRows
+  const float avail_w = std::max(0.0f, width - pad_x_ - text_right_pad());
+  TextStyle ts = style_;
+  ts.size = (style_.size > 0) ? style_.size : 13;
+  const auto lines = compute_visual_lines(text_engine(), text_, avail_w, ts);
+  const int rows = std::clamp(static_cast<int>(lines.size()), min_rows_, max_rows_);
+  return multiline_pad_y_ * 2.0f + static_cast<float>(rows) * kMuiRowH;
+}
+
 SizeF TextField::on_measure(float max_w, float max_h) {
   (void)max_h;
-  return {max_w > 0 ? max_w : 120, height_};
+  const float w = max_w > 0 ? max_w : 120;
+  return {w, multiline_ ? preferred_height(w) : height_};
 }
 
 // ---- 键盘 ----
@@ -205,7 +297,11 @@ bool TextField::on_key(const KeyEvent& e) {
       return true;
     }
     if (e.ch == L'\r') {
-      if (on_submit) on_submit();
+      if (multiline_) {
+        insert_text(L"\n");
+      } else if (on_submit) {
+        on_submit();
+      }
       return true;
     }
     return false;
@@ -217,6 +313,54 @@ bool TextField::on_key(const KeyEvent& e) {
   bool has_sel = lo != hi;
 
   switch (e.key) {
+    case VK_RETURN:
+      if (multiline_ && e.ctrl) {
+        if (on_submit) on_submit();
+        return true;
+      }
+      return false;
+    case VK_UP:
+    case VK_DOWN: {
+      if (!multiline_) return false;
+      const float avail_w = std::max(0.0f, bounds().w - pad_x_ - text_right_pad());
+      TextStyle ts = style_;
+      ts.size = (style_.size > 0) ? style_.size : 13;
+      ITextEngine* eng = text_engine();
+      const auto lines = compute_visual_lines(eng, text_, avail_w, ts);
+      const int row = find_visual_line_index(lines, cursor_);
+      const int next_row = std::clamp(row + (e.key == VK_UP ? -1 : 1), 0,
+                                      static_cast<int>(lines.size()) - 1);
+      if (next_row == row) return true;
+      const VisualLine& cur_vl = lines[static_cast<size_t>(row)];
+      const float target_x =
+          eng ? eng->measure_text(
+                       text_.substr(static_cast<size_t>(cur_vl.start),
+                                    static_cast<size_t>(std::max(0, cursor_ - cur_vl.start))),
+                       ts, 0).w
+              : 0.0f;
+      const VisualLine& dst_vl = lines[static_cast<size_t>(next_row)];
+      int target_idx = dst_vl.start;
+      if (eng && dst_vl.end > dst_vl.start) {
+        float prev_w = 0.0f;
+        target_idx = dst_vl.end;
+        for (int i = dst_vl.start + 1; i <= dst_vl.end; ++i) {
+          const float w = eng->measure_text(
+              text_.substr(static_cast<size_t>(dst_vl.start),
+                           static_cast<size_t>(i - dst_vl.start)),
+              ts, 0).w;
+          if (w >= target_x) {
+            target_idx = (target_x - prev_w < w - target_x) ? (i - 1) : i;
+            break;
+          }
+          prev_w = w;
+        }
+      }
+      cursor_ = target_idx;
+      if (!e.shift) anchor_ = cursor_;
+      clamp_scroll();
+      invalidate();
+      return true;
+    }
     case VK_LEFT: {
       int target = has_sel && !e.shift ? lo : std::max(0, cursor_ - 1);
       cursor_ = target;
@@ -282,9 +426,7 @@ bool TextField::on_key(const KeyEvent& e) {
       return false;
     case 'V':
       if (e.ctrl) {
-        std::wstring s = clip_get_str();
-        s.erase(std::remove(s.begin(), s.end(), L'\r'), s.end());
-        s.erase(std::remove(s.begin(), s.end(), L'\n'), s.end());
+        const std::wstring s = normalize_clipboard_text(clip_get_str(), multiline_);
         if (!s.empty()) insert_text(s);
         return true;
       }
@@ -321,12 +463,39 @@ void TextField::insert_text(const std::wstring& s) {
 
 // ---- 鼠标 ----
 bool TextField::on_mouse(const MouseEvent& e) {
+  if (e.type == MouseEventType::Wheel) {
+    if (!multiline_) return false;
+    const float avail_w = std::max(0.0f, bounds().w - pad_x_ - text_right_pad());
+    TextStyle ts = style_;
+    ts.size = (style_.size > 0) ? style_.size : 13;
+    const auto lines = compute_visual_lines(text_engine(), text_, avail_w, ts);
+    const float total_h = static_cast<float>(lines.size()) * kMuiRowH;
+    const float view_h = std::max(0.0f, bounds().h - multiline_pad_y_ * 2.0f);
+    const float max_scroll = std::max(0.0f, total_h - view_h);
+    const float step = (static_cast<float>(e.wheel_delta) / 120.0f) * kMuiRowH;
+    const float next_sy = std::clamp(scroll_y_ - step, 0.0f, max_scroll);
+    if (next_sy != scroll_y_) {
+      scroll_y_ = next_sy;
+      invalidate();
+    }
+    return true;
+  }
+  if (e.type == MouseEventType::Enter) {
+    if (!hover_) {
+      hover_ = true;
+      invalidate();
+    }
+    return false;
+  }
   if (e.type == MouseEventType::Down) {
     if (e.buttons & kMouseRight) {
       // 右键：焦点 + 选区外点击移动光标（Win32 编辑控件行为），再交给宿主弹菜单
       request_focus();
-      if (right_pad_ > 0 && (e.buttons & kMouseRight) == 0 && e.pos.x >= bounds().w - right_pad_) { request_focus(); return true; }
-    int idx = hit_index(e.pos.x);
+      if (right_pad_ > 0 && (e.buttons & kMouseRight) == 0 && e.pos.x >= bounds().w - right_pad_) {
+        request_focus();
+        return true;
+      }
+      int idx = multiline_ ? hit_index_xy(e.pos.x, e.pos.y) : hit_index(e.pos.x);
       if (idx < std::min(cursor_, anchor_) || idx > std::max(cursor_, anchor_))
         cursor_ = anchor_ = idx;
       clamp_scroll();
@@ -342,19 +511,30 @@ bool TextField::on_mouse(const MouseEvent& e) {
       return true;
     }
     request_focus();
-    if (right_pad_ > 0 && e.pos.x >= bounds().w - right_pad_) { request_focus(); return true; }
-    int idx = hit_index(e.pos.x);
+    if (right_pad_ > 0 && e.pos.x >= bounds().w - right_pad_) {
+      request_focus();
+      return true;
+    }
+    int idx = multiline_ ? hit_index_xy(e.pos.x, e.pos.y) : hit_index(e.pos.x);
     cursor_ = anchor_ = idx;
+    clamp_scroll();
     invalidate();
     return true;
   }
   if (e.type == MouseEventType::Move) {
+    if (!hover_) {
+      hover_ = true;
+      invalidate();
+    }
     if (right_pad_ > 0) {
       bool eh = e.pos.x >= bounds().w - right_pad_;
-      if (eh != enter_hover_) { enter_hover_ = eh; invalidate(); }
+      if (eh != enter_hover_) {
+        enter_hover_ = eh;
+        invalidate();
+      }
     }
     if ((e.buttons & kMouseLeft) && focused()) {
-      cursor_ = hit_index(e.pos.x);
+      cursor_ = multiline_ ? hit_index_xy(e.pos.x, e.pos.y) : hit_index(e.pos.x);
       clamp_scroll();
       invalidate();
       return true;
@@ -376,18 +556,28 @@ bool TextField::on_mouse(const MouseEvent& e) {
     return false;
   }
   if (e.type == MouseEventType::Leave) {
-    if (enter_hover_) { enter_hover_ = false; invalidate(); }
+    bool changed = false;
+    if (hover_) {
+      hover_ = false;
+      changed = true;
+    }
+    if (enter_hover_) {
+      enter_hover_ = false;
+      changed = true;
+    }
     if (spinner_hover_) {
       spinner_hover_ = false;
-      invalidate();
+      changed = true;
     }
     if (clear_hover_) {
       clear_hover_ = false;
-      invalidate();
+      changed = true;
     }
+    if (changed) invalidate();
     return false;
   }
-  if (e.type == MouseEventType::Up) { if (right_pad_ > 0 && e.pos.x >= bounds().w - right_pad_ && on_submit) on_submit();
+  if (e.type == MouseEventType::Up) {
+    if (right_pad_ > 0 && e.pos.x >= bounds().w - right_pad_ && on_submit) on_submit();
     return true;
   }
   return false;
@@ -396,7 +586,7 @@ bool TextField::on_mouse(const MouseEvent& e) {
 int TextField::hit_index(float x) {
   ITextEngine* eng = text_engine();
   if (!eng || text_.empty()) return 0;
-  float content_x = x - 8 + scroll_x_;  // 8 = 内边距
+  float content_x = x - pad_x_ + scroll_x_;
   if (content_x <= 0) return 0;
   for (int i = 1; i <= static_cast<int>(text_.size()); ++i) {
     SizeF w = eng->measure_text(text_.substr(0, static_cast<size_t>(i)),
@@ -411,30 +601,56 @@ int TextField::hit_index(float x) {
   return static_cast<int>(text_.size());
 }
 
+int TextField::hit_index_xy(float x, float y) {
+  ITextEngine* eng = text_engine();
+  if (text_.empty()) return 0;
+  const float avail_w = std::max(0.0f, bounds().w - pad_x_ - text_right_pad());
+  TextStyle ts = style_;
+  ts.size = (style_.size > 0) ? style_.size : 13;
+  const auto lines = compute_visual_lines(eng, text_, avail_w, ts);
+  const float rel_y = y - multiline_pad_y_ + scroll_y_;
+  const int row = std::clamp(static_cast<int>(std::floor(rel_y / kMuiRowH)), 0,
+                             static_cast<int>(lines.size()) - 1);
+  const VisualLine& vl = lines[static_cast<size_t>(row)];
+  const float content_x = x - pad_x_;
+  if (!eng || content_x <= 0.0f || vl.start == vl.end) return vl.start;
+  float prev_w = 0.0f;
+  for (int i = vl.start + 1; i <= vl.end; ++i) {
+    const float w = eng->measure_text(
+        text_.substr(static_cast<size_t>(vl.start), static_cast<size_t>(i - vl.start)),
+        ts, 0).w;
+    if (w >= content_x) {
+      return (content_x - prev_w < w - content_x) ? (i - 1) : i;
+    }
+    prev_w = w;
+  }
+  return vl.end;
+}
+
 float TextField::cursor_x(int index) {
   // 文本内容坐标（不含 scroll 偏移）
   ITextEngine* eng = text_engine();
-  if (!eng || index <= 0) return 8;
+  if (!eng || index <= 0) return pad_x_;
   SizeF w = eng->measure_text(text_.substr(0, static_cast<size_t>(index)),
                               style_, 0);
-  return 8 + w.w;
+  return pad_x_ + w.w;
 }
 
 PointF TextField::caret_point() const {
   const RectF r = bounds();
   const float right_pad = text_right_pad();
-  const RectF text_r{8, 0, std::max(0.0f, r.w - 8 - right_pad), r.h};
+  const RectF text_r{pad_x_, 0, std::max(0.0f, r.w - pad_x_ - right_pad), r.h};
   TextStyle ts = style_;
   ts.size = (style_.size > 0) ? style_.size : 13;
 
   float cx = const_cast<TextField*>(this)->cursor_x(cursor_) - scroll_x_;
   if (!composition_.empty()) {
     if (ITextEngine* eng = text_engine()) {
-      cx = 8 + eng->measure_text(
-                      composition_.substr(
-                          0, static_cast<size_t>(composition_cursor_)),
-                      ts, 0)
-                    .w -
+      cx = pad_x_ + eng->measure_text(
+                            composition_.substr(
+                                0, static_cast<size_t>(composition_cursor_)),
+                            ts, 0)
+                          .w -
                 scroll_x_;
     }
   }
@@ -444,33 +660,22 @@ PointF TextField::caret_point() const {
   // 多行：光标高沿用 lineHeight 折算值（13→19），在 23px 行盒内垂直居中
   const float caret_h =
       multiline_
-          ? std::min(r.h - 8.0f, std::round(ts.size * 1.4375f))
+          ? std::min(r.h - multiline_pad_y_ * 2.0f, std::round(ts.size * 1.4375f))
           : line_h;
-  float cy = multiline_ ? 4.0f + (kMuiRowH - caret_h) * 0.5f
+  float cy = multiline_ ? multiline_pad_y_ + (kMuiRowH - caret_h) * 0.5f
                         : std::max(3.0f, (r.h - line_h) * 0.5f);
-  if (multiline_ && composition_.empty() && text_r.w > 16.0f) {
-    if (ITextEngine* eng = text_engine()) {
-      int line_start = 0;
-      int line_idx = 0;
-      for (int i = 1; i <= cursor_; ++i) {
-        float w = eng->measure_text(
-            text_.substr(static_cast<size_t>(line_start),
-                         static_cast<size_t>(i - line_start)),
-            ts, 0).w;
-        if (w > text_r.w && i - 1 > line_start) {
-          line_start = i - 1;
-          ++line_idx;
-        }
-      }
-      const int max_line = std::max(0, static_cast<int>((r.h - 8.0f) / line_h) - 1);
-      line_idx = std::min(line_idx, max_line);
-      cy = 4.0f + static_cast<float>(line_idx) * line_h +
-           (kMuiRowH - caret_h) * 0.5f;
-      cx = 8.0f + eng->measure_text(
-                      text_.substr(static_cast<size_t>(line_start),
-                                   static_cast<size_t>(cursor_ - line_start)),
-                      ts, 0).w - scroll_x_;
-    }
+  if (multiline_ && composition_.empty()) {
+    ITextEngine* eng = text_engine();
+    const auto lines = compute_visual_lines(eng, text_, text_r.w, ts);
+    const int row = find_visual_line_index(lines, cursor_);
+    const VisualLine& vl = lines[static_cast<size_t>(row)];
+    cy = multiline_pad_y_ - scroll_y_ + static_cast<float>(row) * line_h +
+         (kMuiRowH - caret_h) * 0.5f;
+    cx = pad_x_ + (eng ? eng->measure_text(
+                                 text_.substr(static_cast<size_t>(vl.start),
+                                              static_cast<size_t>(std::max(0, cursor_ - vl.start))),
+                                 ts, 0).w
+                       : 0.0f);
   }
 
   RectF gb = global_bounds();
@@ -481,21 +686,37 @@ float TextField::caret_height() const {
   TextStyle ts = style_;
   ts.size = (style_.size > 0) ? style_.size : 13;
   if (multiline_)  // 23px 行盒内的光标高（沿用 lineHeight 折算值，V6）
-    return std::min(bounds().h - 8.0f, std::round(ts.size * 1.4375f));
+    return std::min(bounds().h - multiline_pad_y_ * 2.0f, std::round(ts.size * 1.4375f));
   return std::min(bounds().h - 6.0f, std::round(ts.size * 1.4375f));
 }
 
 void TextField::clamp_scroll() {
   if (bounds().w <= 0) return;
-  float vis = bounds().w - 8 - text_right_pad();
-  float cx = 8;
+  const float avail_w = std::max(0.0f, bounds().w - pad_x_ - text_right_pad());
+  if (multiline_) {
+    scroll_x_ = 0.0f;
+    TextStyle ts = style_;
+    ts.size = (style_.size > 0) ? style_.size : 13;
+    const auto lines = compute_visual_lines(text_engine(), text_, avail_w, ts);
+    const int row = find_visual_line_index(lines, cursor_);
+    const float view_h = std::max(kMuiRowH, bounds().h - multiline_pad_y_ * 2.0f);
+    const float total_h = static_cast<float>(lines.size()) * kMuiRowH;
+    const float top = static_cast<float>(row) * kMuiRowH;
+    const float bot = top + kMuiRowH;
+    if (bot - scroll_y_ > view_h) scroll_y_ = bot - view_h;
+    if (top < scroll_y_) scroll_y_ = top;
+    const float max_scroll = std::max(0.0f, total_h - view_h);
+    scroll_y_ = std::clamp(scroll_y_, 0.0f, max_scroll);
+    return;
+  }
+  float cx = pad_x_;
   if (ITextEngine* eng = text_engine()) {
     SizeF w = eng->measure_text(text_.substr(0, static_cast<size_t>(cursor_)),
                                 style_, 0);
-    cx = 8 + w.w;
+    cx = pad_x_ + w.w;
   }
-  if (cx - scroll_x_ > vis) scroll_x_ = cx - vis;      // 光标在右缘外
-  if (cx - scroll_x_ < 0) scroll_x_ = cx;              // 光标在左缘外
+  if (cx - scroll_x_ > avail_w) scroll_x_ = cx - avail_w;  // 光标在右缘外
+  if (cx - scroll_x_ < 0) scroll_x_ = cx;                  // 光标在左缘外
   if (scroll_x_ < 0) scroll_x_ = 0;
 }
 
@@ -504,6 +725,7 @@ void TextField::apply_theme() {
   const auto p = theme::ThemeService::instance().input_paint();
   bg_ = p.bg;
   border_ = p.border;
+  border_hover_ = p.border_hover;
   border_focused_ = p.border_focused;
   border_w_ = p.border_w;
   border_w_focused_ = p.border_w_focused;
@@ -543,7 +765,11 @@ void TextField::on_paint(IRenderTarget& rt) {
   Brush bg_b{bg_};
   const float bw = focused() && border_w_focused_ > 0.01f ? border_w_focused_
                                                           : border_w_;
-  rt.round_rect(r, radius_, {focused() ? border_focused_ : border_, bw}, &bg_b);
+  // src: src/utils/button-styles.ts:757-876 hover notchedOutline 描边色
+  const Color4f bcol = focused()
+                           ? border_focused_
+                           : ((hover_ && border_hover_.a > 0.001f) ? border_hover_ : border_);
+  rt.round_rect(r, radius_, {bcol, bw}, &bg_b);
   // inset 内凹阴影（← get3DInputStyle inset 0 dy blur color）
   if (has_inset_ && inset_color_.a > 0.004f) {
     draw_inner_glow(rt, r, radius_, inset_color_, inset_blur_);
@@ -558,7 +784,7 @@ void TextField::on_paint(IRenderTarget& rt) {
   ts.wrap = false;
   ts.ellipsis = false;
   // 右侧给清空按钮让位（src: base-search-box.tsx:123 input pr 4）
-  RectF text_r{8, 0, r.w - 8 - text_right_pad(), r.h};
+  RectF text_r{pad_x_, 0, r.w - pad_x_ - text_right_pad(), r.h};
   ts.align_v = AlignV::Center;
 
   if (text_.empty() && composition_.empty()) {
@@ -569,11 +795,60 @@ void TextField::on_paint(IRenderTarget& rt) {
         ts.align_v = AlignV::Top;
         ts.line_h = kMuiRowH;  // 占位符与正文同行盒（V6）
         // src: profile-import-card.tsx:164 '& .MuiInputBase-input': { py: '4px' }
-        rt.draw_text(placeholder_, {text_r.x, 4.0f, text_r.w, r.h - 8.0f}, ts);
+        rt.draw_text(placeholder_,
+                     {text_r.x, multiline_pad_y_, text_r.w, r.h - multiline_pad_y_ * 2.0f},
+                     ts);
       } else {
         rt.draw_text(placeholder_, text_r, ts);
       }
     }
+  } else if (multiline_ && composition_.empty()) {
+    // src: src/pages/_layout/components/profile-import-card.tsx:140-165 & add-url-dialog.tsx:222
+    const RectF clip_r{text_r.x, multiline_pad_y_, std::max(0.0f, text_r.w),
+                       std::max(0.0f, r.h - multiline_pad_y_ * 2.0f)};
+    rt.push_clip(clip_r);
+    TextStyle lts = ts;
+    lts.size = (style_.size > 0) ? style_.size : 13;
+    lts.wrap = false;
+    lts.align_v = AlignV::Center;
+    ITextEngine* eng = text_engine();
+    const auto lines = compute_visual_lines(eng, text_, text_r.w, lts);
+    const int lo = std::min(cursor_, anchor_), hi = std::max(cursor_, anchor_);
+    const bool has_sel = (lo != hi && focused());
+    for (int row = 0; row < static_cast<int>(lines.size()); ++row) {
+      const float ly = multiline_pad_y_ - scroll_y_ + static_cast<float>(row) * kMuiRowH;
+      if (ly + kMuiRowH < clip_r.y || ly > clip_r.bottom()) continue;
+      const VisualLine& vl = lines[static_cast<size_t>(row)];
+      const std::wstring line_str =
+          text_.substr(static_cast<size_t>(vl.start), static_cast<size_t>(vl.end - vl.start));
+      float sx0 = 0.0f, sx1 = 0.0f;
+      if (has_sel && lo <= vl.end && hi >= vl.start) {
+        const int s0 = std::clamp(lo, vl.start, vl.end);
+        const int s1 = std::clamp(hi, vl.start, vl.end);
+        const float x0 =
+            (eng && s0 > vl.start)
+                ? eng->measure_text(line_str.substr(0, static_cast<size_t>(s0 - vl.start)), lts, 0).w
+                : 0.0f;
+        const float x1 =
+            (eng && s1 > vl.start)
+                ? eng->measure_text(line_str.substr(0, static_cast<size_t>(s1 - vl.start)), lts, 0).w
+                : 0.0f;
+        if (s1 > s0) {
+          sx0 = text_r.x + x0;
+          sx1 = text_r.x + x1;
+          rt.fill_rect({sx0, ly, sx1 - sx0, kMuiRowH}, Brush{selection_bg_});
+        }
+      }
+      rt.draw_text(line_str, {text_r.x, ly, text_r.w, kMuiRowH}, lts);
+      if (has_sel && sx1 > sx0) {
+        rt.push_clip({sx0, ly, sx1 - sx0, kMuiRowH});
+        TextStyle sel_ts = lts;
+        sel_ts.color = selection_text_;
+        rt.draw_text(line_str, {text_r.x, ly, text_r.w, kMuiRowH}, sel_ts);
+        rt.pop_clip();
+      }
+    }
+    rt.pop_clip();
   } else {
     rt.push_clip(text_r);
     // 选区高亮：src: index.scss:28-31 ::selection 背景 = var(--primary-main)（不透明）
@@ -581,20 +856,16 @@ void TextField::on_paint(IRenderTarget& rt) {
     const bool has_sel = (lo != hi && focused());
     float sx0 = 0.0f, sx1 = 0.0f;
     if (has_sel) {
-      float x0 = 8, x1 = 8;
+      float x0 = pad_x_, x1 = pad_x_;
       if (ITextEngine* eng = text_engine()) {
-        x0 = 8 + eng->measure_text(text_.substr(0, static_cast<size_t>(lo)), ts, 0).w;
-        x1 = 8 + eng->measure_text(text_.substr(0, static_cast<size_t>(hi)), ts, 0).w;
+        x0 = pad_x_ + eng->measure_text(text_.substr(0, static_cast<size_t>(lo)), ts, 0).w;
+        x1 = pad_x_ + eng->measure_text(text_.substr(0, static_cast<size_t>(hi)), ts, 0).w;
       }
       sx0 = x0 - scroll_x_;
       sx1 = x1 - scroll_x_;
       Brush sel_b{selection_bg_};
-      // src: profile-import-card.tsx:145-165 单行行高 13px * 1.4375；
-      //      多行按 MUI 行盒 23（P12）铺满一整行
-      const float sel_h =
-          multiline_ ? kMuiRowH
-                     : std::min(r.h - 6.0f, std::round(ts.size * 1.4375f));
-      const float sel_y = multiline_ ? 4.0f : (r.h - sel_h) * 0.5f;
+      const float sel_h = std::min(r.h - 6.0f, std::round(ts.size * 1.4375f));
+      const float sel_y = (r.h - sel_h) * 0.5f;
       rt.fill_rect({sx0, sel_y, sx1 - sx0, sel_h}, sel_b);
     }
     // 文本 / composition 预编辑串
@@ -602,18 +873,7 @@ void TextField::on_paint(IRenderTarget& rt) {
     if (!composition_.empty()) {
       rt.draw_text(composition_, text_rect, ts);
     } else {
-      if (multiline_) {
-        // src: profile-import-card.tsx:140-165 multiline minRows=2, py='4px'
-        // ★ 行盒 23px（InputBase lineHeight 1.4375em @16，P12/P14）：不给 line_h
-        //   则 DWrite 用默认 1.33em（13px≈17.3/行），比 Mini 紧密 5.7px/行。
-        TextStyle mts = ts;
-        mts.wrap = true;
-        mts.align_v = AlignV::Top;
-        mts.line_h = kMuiRowH;
-        rt.draw_text(text_, {text_r.x, 4.0f, text_r.w, r.h - 8.0f}, mts);
-      } else {
-        rt.draw_text(text_, text_rect, ts);
-      }
+      rt.draw_text(text_, text_rect, ts);
       // src: index.scss:29 ::selection { color: var(--selection-color) }：
       //   选区内的文字需以 --selection-color 重绘（剪裁到高亮矩形）
       if (has_sel && sx1 > sx0) {
@@ -632,11 +892,11 @@ void TextField::on_paint(IRenderTarget& rt) {
     float cx = cursor_x(cursor_) - scroll_x_;
     if (!composition_.empty()) {
       if (ITextEngine* eng = text_engine()) {
-        cx = 8 + eng->measure_text(
-                        composition_.substr(
-                            0, static_cast<size_t>(composition_cursor_)),
-                        ts, 0)
-                      .w -
+        cx = pad_x_ + eng->measure_text(
+                              composition_.substr(
+                                  0, static_cast<size_t>(composition_cursor_)),
+                              ts, 0)
+                            .w -
                   scroll_x_;
       }
     }
@@ -644,37 +904,29 @@ void TextField::on_paint(IRenderTarget& rt) {
     const float line_h = multiline_
                              ? kMuiRowH
                              : std::min(r.h - 6.0f, std::round(ts.size * 1.4375f));
-    // 多行：光标高沿用 lineHeight 折算值，在 23px 行盒内垂直居中（Chromium 半行距）
     const float caret_h =
-        multiline_ ? std::min(r.h - 8.0f, std::round(ts.size * 1.4375f))
+        multiline_ ? std::min(r.h - multiline_pad_y_ * 2.0f, std::round(ts.size * 1.4375f))
                    : line_h;
-    float cy = multiline_ ? 4.0f + (kMuiRowH - caret_h) * 0.5f
+    float cy = multiline_ ? multiline_pad_y_ + (kMuiRowH - caret_h) * 0.5f
                           : std::max(3.0f, (r.h - line_h) * 0.5f);
-    if (multiline_ && composition_.empty() && text_r.w > 16.0f) {
-      if (ITextEngine* eng = text_engine()) {
-        int line_start = 0;
-        int line_idx = 0;
-        for (int i = 1; i <= cursor_; ++i) {
-          float w = eng->measure_text(
-              text_.substr(static_cast<size_t>(line_start),
-                           static_cast<size_t>(i - line_start)),
-              ts, 0).w;
-          if (w > text_r.w && i - 1 > line_start) {
-            line_start = i - 1;
-            ++line_idx;
-          }
-        }
-        const int max_line = std::max(0, static_cast<int>((r.h - 8.0f) / line_h) - 1);
-        line_idx = std::min(line_idx, max_line);
-        cy = 4.0f + static_cast<float>(line_idx) * line_h +
-             (kMuiRowH - caret_h) * 0.5f;
-        cx = 8.0f + eng->measure_text(
-                        text_.substr(static_cast<size_t>(line_start),
-                                     static_cast<size_t>(cursor_ - line_start)),
-                        ts, 0).w;
-      }
+    if (multiline_ && composition_.empty()) {
+      TextStyle lts = ts;
+      lts.size = (style_.size > 0) ? style_.size : 13;
+      ITextEngine* eng = text_engine();
+      const auto lines = compute_visual_lines(eng, text_, text_r.w, lts);
+      const int row = find_visual_line_index(lines, cursor_);
+      const VisualLine& vl = lines[static_cast<size_t>(row)];
+      cy = multiline_pad_y_ - scroll_y_ + static_cast<float>(row) * line_h +
+           (kMuiRowH - caret_h) * 0.5f;
+      cx = pad_x_ + (eng ? eng->measure_text(
+                                   text_.substr(static_cast<size_t>(vl.start),
+                                                static_cast<size_t>(std::max(0, cursor_ - vl.start))),
+                                   lts, 0).w
+                         : 0.0f);
     }
-    rt.fill_rect({cx, cy, 1.5f, caret_h}, Brush{caret_color_});
+    if (!multiline_ || (cy + caret_h >= multiline_pad_y_ && cy <= r.h - multiline_pad_y_)) {
+      rt.fill_rect({cx, cy, 1.5f, caret_h}, Brush{caret_color_});
+    }
   }
 
   // BUG-360: 尾部加载旋转环（src: src/components/proxy/proxy-head.tsx:250-263）

@@ -18,8 +18,9 @@ int64_t now_ms() {
 }
 
 int default_duration(const std::string& type) {
-  // ← notice-service.ts:43-47 DEFAULT_DURATIONS
+  // ← notice-service.ts:44-49 DEFAULT_DURATIONS
   if (type == "success") return consts::kNoticeSuccessMs;
+  if (type == "warning") return consts::kNoticeWarningMs;
   if (type == "error") return consts::kNoticeErrorMs;
   return consts::kNoticeInfoMs;  // info
 }
