@@ -221,6 +221,28 @@ const char* errc_name(HttpErrc e) {
 
 // ===========================================================================
 
+static_assert(is_pipe_missing_os_error(ERROR_FILE_NOT_FOUND));
+static_assert(is_pipe_missing_os_error(ERROR_PATH_NOT_FOUND));
+static_assert(is_pipe_missing_os_error(ERROR_BAD_PATHNAME));
+static_assert(!is_pipe_missing_os_error(ERROR_SEM_TIMEOUT));
+static_assert(!is_pipe_missing_os_error(ERROR_PIPE_BUSY));
+static_assert(!is_pipe_missing_os_error(std::nullopt));
+
+bool is_named_pipe_server_missing(const std::wstring& socket_path) {
+  const size_t b = socket_path.find_first_not_of(L" \t\r\n");
+  if (b == std::wstring::npos) return false;
+  const size_t e = socket_path.find_last_not_of(L" \t\r\n");
+  const std::wstring trimmed = socket_path.substr(b, e - b + 1);
+  if (trimmed.empty()) return false;
+  const std::wstring full_name =
+      (trimmed.rfind(L"\\\\", 0) == 0) ? trimmed : (std::wstring(kPipePrefix) + trimmed);
+  if (::WaitNamedPipeW(full_name.c_str(), 1) != FALSE) {
+    return false;
+  }
+  const DWORD gle = ::GetLastError();
+  return is_pipe_missing_os_error(static_cast<int32_t>(gle));
+}
+
 PipeHttpClient::PipeHttpClient(PipeHttpConfig cfg) : cfg_(cfg) {}
 
 PipeHttpClient::~PipeHttpClient() { clear_pool(); }

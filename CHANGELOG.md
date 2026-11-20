@@ -2,11 +2,17 @@
 
 All notable changes to **Clash Win** are documented here.
 
-Version format follows the project's **own** line starting at `0.1.0` (constitution §5.3): Clash Win versions increment independently and are **not** bound to Clash Mini's `3.x` numbering (`v3.2.2` was the initial port reference anchor, now synced 1:1 through **v3.5.9**).
+Version format follows the project's **own** line starting at `0.1.0` (constitution §5.3): Clash Win versions increment independently and are **not** bound to Clash Mini's `3.x` numbering (`v3.2.2` was the initial port reference anchor, now synced 1:1 through **v3.5.10**).
 
 Format reference: `Changelog.md` in the Clash Mini repository (newest first, `## vX.Y.Z` headings with grouped change bullets). Content here is Clash Win's own history, not a copy of Mini's entries.
 
 ---
+
+## v1.1.3 (2026-11-20)
+
+### Upstream v3.5.10 Sync (`BUG-411` ~ `BUG-412`)
+- **BUG-411 (Fast Restart on Missing Core Pipe, Skip Redundant API Ready Wait & Steady-State Counter Reset)**: Added zero-handle named-pipe missing detection (`is_pipe_missing_os_error` / `is_named_pipe_server_missing` / `MihomoClient::is_local_socket_missing`, strictly separating `ERROR_FILE_NOT_FOUND` / `ERROR_PATH_NOT_FOUND` / `ERROR_BAD_PATHNAME` from busy states) paired with `CoreManager::should_expect_core_pipe_alive()` (`ScopedConfigUpdate` & `lifecycle_` lock guard) and a `500ms` double-confirm debounce inside `CoreMonitor` to immediately trigger `restart_core()` instead of waiting through `3` API polling rounds and `30s` readiness waits; added `ApiChannelPrecheck` (`KeepAlive` / `ProceedAutoSelect` / `ConfirmedDown`) so dead API channels skip the `30s` `wait_for_clash_ready()` wait, and reset `auto_select_fail_count` / `api_dead_heal_fail_count` on steady `NoAction` recovery.
+- **BUG-412 (600s Brownout Sliding-Window Escape, All-Stage Single-Target Fallback Skip & Dead-Node Connection Cleanup)**: Enabled `allow_single_target_skip = true` across all `evaluate_failover` probe phases when `>= 3` healthy real peers respond on the primary test URL so intermittent blackhole nodes cannot survive via fallback URL retries; added a `600s` brownout sliding window (`kBrownoutWindowSecs` / `kBrownoutConfirmFails = 2`) in `CoreMonitor::decide_self_heal` to escape flapping nodes after `2` independent `ShouldFailover` episodes; added `should_close_dead_node_proxy_connection` and `close_dead_node_proxy_connections` to cleanly close stale `PROXY` connections pinned to the confirmed dead/brownout node upon failover switch while leaving `DIRECT` / `REJECT` and healthy connections untouched.
 
 ## v1.1.2 (2026-11-20)
 

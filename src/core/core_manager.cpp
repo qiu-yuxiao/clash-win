@@ -535,9 +535,17 @@ bool CoreManager::wait_for_win_cores_exit(uint32_t max_wait_ms) const {
 void CoreManager::cleanup_local_state_after_service_stop() {
   mode_.store(RunningMode::NotRunning, std::memory_order_release);
   log_run_.store(false, std::memory_order_release);
+  if (lifecycle_owner_.load(std::memory_order_acquire) ==
+      std::this_thread::get_id()) {
+    pid_ = 0;
+    return;
+  }
   std::unique_lock<std::mutex> lk(lifecycle_, std::try_to_lock);
   if (lk.owns_lock()) {
+    lifecycle_owner_.store(std::this_thread::get_id(),
+                           std::memory_order_release);
     pid_ = 0;
+    lifecycle_owner_.store(std::thread::id{}, std::memory_order_release);
   }
 }
 
@@ -648,9 +656,21 @@ bool CoreManager::core_alive() const {
   return false;
 }
 
+bool CoreManager::should_expect_core_pipe_alive() const {
+  if (is_exiting()) return false;
+  if (running_mode() == RunningMode::NotRunning) return false;
+  if (is_config_update_in_progress()) return false;
+  if (lifecycle_owner_.load(std::memory_order_acquire) ==
+      std::this_thread::get_id()) {
+    return false;
+  }
+  std::unique_lock<std::mutex> lk(lifecycle_, std::try_to_lock);
+  return lk.owns_lock();
+}
+
 Result<void> CoreManager::start_sidecar(const std::wstring& config_file,
                                         const std::wstring& ipc_pipe) {
-  std::lock_guard<std::mutex> lock(lifecycle_);
+  LifecycleLockGuard lock(*this);
   return start_sidecar_locked(config_file, ipc_pipe);
 }
 
@@ -745,7 +765,7 @@ Result<void> CoreManager::start_sidecar_locked(const std::wstring& config_file,
 
 Result<void> CoreManager::start_auto(const std::wstring& config_file,
                                      const std::wstring& ipc_pipe) {
-  std::lock_guard<std::mutex> lock(lifecycle_);
+  LifecycleLockGuard lock(*this);
   if (mode_.load() != RunningMode::NotRunning) {
     CWLOG_INFO("start_auto called while a core is running; treated as no-op");
     return Result<void>::ok();
@@ -1000,7 +1020,7 @@ Result<void> CoreManager::stop() {
       }
     }
   }
-  std::lock_guard<std::mutex> lock(lifecycle_);
+  LifecycleLockGuard lock(*this);
   RunningMode m = mode_.load();
   if (m == RunningMode::Sidecar) {
     return stop_sidecar_locked();
@@ -1080,10 +1100,11 @@ bool CoreManager::has_start_auto_test_hooks() const {
 
 Result<void> CoreManager::restart_with_restore(ICoreApiClient& api, const CoreOps& ops,
                                                const RestoreTimings& t) {
-  // ← lifecycle.rs:106-148 + BUG-405 + BUG-407：
+  // ← lifecycle.rs:106-148 + BUG-405 + BUG-407 + BUG-411：
   //   记录过滤合规目标（快照优先并回写，越界/缺失回退持久化）→ 停 → 启 →
   //   生产异步后台选点恢复（不阻塞 lifecycle 锁且取消前序恢复）/ 单测栈 Mock 保持同步 →
   //   不再在重启瞬间抢发 kick() 触发首轮延迟探针并发冲击。
+  ScopedConfigUpdate update_guard(*this);
   auto saved = resolve_desired_proxy_selection(api);
   auto st = ops.stop();
   if (st.is_err()) return st;
@@ -1411,8 +1432,9 @@ void CoreManager::restore_proxy_group_now(ICoreApiClient& api, const std::string
 
 Result<void> CoreManager::apply_config(ICoreApiClient& api, const std::string& config_path,
                                        const CoreOps& ops, const RestoreTimings& t) {
-  // ← manager/config.rs:121-167 + BUG-405 + BUG-407：
+  // ← manager/config.rs:121-167 + BUG-405 + BUG-407 + BUG-411：
   //   reload_config 后生产改为异步 spawn_ensure_proxy_group_selection 并广播 refresh_clash
+  ScopedConfigUpdate update_guard(*this);
   auto saved = resolve_desired_proxy_selection(api);
   auto reload = api.reload_config(true, config_path);
   if (reload.is_ok()) {

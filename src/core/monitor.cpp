@@ -273,6 +273,7 @@ void CoreMonitor::reset_runtime_loop_state() {
   api_dead_heal_fail_count_.store(0);
   was_offline_.store(false);
   last_heal_ms_.store(0);
+  has_heal_attempt_.store(false);
   last_tick_ms_.store(0);
   last_https_verify_ms_.store(-1);
   reset_flowing_traffic_state();
@@ -292,6 +293,10 @@ void CoreMonitor::reset_runtime_loop_state() {
   {
     std::lock_guard<std::mutex> lock(switch_rate_m_);
     recent_auto_switches_ms_.clear();
+  }
+  {
+    std::lock_guard<std::mutex> lock(brownout_m_);
+    recent_brownout_episodes_ms_.clear();
   }
   {
     std::lock_guard<std::mutex> lock(health_m_);
@@ -405,6 +410,10 @@ void CoreMonitor::absorb_pending_manual_switch(int64_t fallback_now_ms) {
   has_node_change_.store(true);
   manual_grace_unmatched_.store(true);
   node_fail_count_.store(0);
+  {
+    std::lock_guard<std::mutex> lock(brownout_m_);
+    recent_brownout_episodes_ms_.clear();
+  }
   CWLOG_INFO("CoreMonitor: 吸收前端手动节点切换事件，立即刷新 20s 切换宽限期");
 }
 
@@ -505,6 +514,102 @@ CoreMonitor::SelfHealAction CoreMonitor::complete_restart_core_attempt(
   return SelfHealAction::FireAlert;
 }
 
+void CoreMonitor::fire_self_heal_alert(const Hooks& h) const {
+  CWLOG_WARN("CoreMonitor: 连续 5 次自愈选点失败，触发系统网络警报");
+  if (h.alert) {
+    h.alert(
+        L"Clash Win - 网络警报",
+        L"后台自动优选节点连续 5 次失败，当前所有代理节点均已失效，无法正常连接网络。\n\n请检查您的网络连接或节点订阅状态。");
+  }
+}
+
+void CoreMonitor::fire_core_restart_failed_alert(const Hooks& h) const {
+  CWLOG_ERROR("CoreMonitor: 重启内核失败，立即升级为终态告警并重置本轮计数");
+  if (h.alert) {
+    h.alert(
+        L"Clash Win - 网络警报",
+        L"后台检测到代理内核通信异常且自动重启内核失败，当前无法正常恢复代理连接。\n\n请检查系统服务权限或手动重启 Clash Win。");
+  }
+}
+
+bool CoreMonitor::is_mihomo_pipe_missing_confirmed(const Hooks& h) const {
+  if (!h.expect_core_pipe_alive || !h.pipe_missing) return false;
+  if (!h.expect_core_pipe_alive() || !h.pipe_missing()) return false;
+  if (h.sleep_ms) {
+    h.sleep_ms(kPipeMissingConfirmDelayMs);
+  } else {
+    std::this_thread::sleep_for(
+        std::chrono::milliseconds(kPipeMissingConfirmDelayMs));
+  }
+  return h.expect_core_pipe_alive() && h.pipe_missing();
+}
+
+CoreMonitor::Action CoreMonitor::execute_core_restart_with_accounting(
+    const Hooks& h, const std::string& reason_log, Action ok_action) {
+  CWLOG_WARN(reason_log);
+  const bool restart_ok = h.restart_core && h.restart_core().is_ok();
+  int auto_fails = auto_select_fail_count_.load();
+  int api_dead_fails = api_dead_heal_fail_count_.load();
+  const SelfHealAction post =
+      complete_restart_core_attempt(restart_ok, auto_fails, api_dead_fails);
+  auto_select_fail_count_.store(auto_fails);
+  api_dead_heal_fail_count_.store(api_dead_fails);
+  if (restart_ok) {
+    CWLOG_INFO(std::format(
+        "CoreMonitor: 重启内核成功，API 通道应已恢复（保留告警计数={}）",
+        auto_fails));
+    return ok_action;
+  }
+  if (post == SelfHealAction::FireAlert) {
+    fire_core_restart_failed_alert(h);
+    return Action::Alerted;
+  }
+  return Action::Idle;
+}
+
+std::optional<CoreMonitor::Action> CoreMonitor::try_fast_restart_missing_pipe(
+    const Hooks& h, const Params& p) {
+  if (!h.pipe_missing || !h.expect_core_pipe_alive) {
+    return std::nullopt;
+  }
+  const int64_t now =
+      h.now_ms ? h.now_ms() : static_cast<int64_t>(GetTickCount64());
+  const bool pipe_missing = h.pipe_missing();
+  const bool expect_alive = h.expect_core_pipe_alive();
+  const int64_t last = last_heal_ms_.load();
+  const bool has_last = has_heal_attempt_.load() || (last != 0);
+  std::optional<uint64_t> elapsed_secs;
+  if (has_last) {
+    elapsed_secs =
+        (now > last) ? static_cast<uint64_t>((now - last) / 1000) : 0ULL;
+  }
+  if (!can_fast_restart_missing_pipe(pipe_missing, expect_alive,
+                                     elapsed_secs)) {
+    return std::nullopt;
+  }
+  if (!is_mihomo_pipe_missing_confirmed(h)) {
+    return std::nullopt;
+  }
+
+  api_fail_count_.store(0);
+  const int64_t after_confirm_now =
+      h.now_ms ? h.now_ms() : static_cast<int64_t>(GetTickCount64());
+  last_heal_ms_.store(after_confirm_now);
+  has_heal_attempt_.store(true);
+  last_tick_ms_.store(after_confirm_now);
+  const int auto_fails = auto_select_fail_count_.fetch_add(1) + 1;
+  if (auto_fails >= p.alert_fail_threshold) {
+    auto_select_fail_count_.store(0);
+    api_dead_heal_fail_count_.store(0);
+    fire_self_heal_alert(h);
+    return Action::Alerted;
+  }
+  return execute_core_restart_with_accounting(
+      h,
+      "CoreMonitor: 检测到内核命名管道已不存在（进程退出），跳过轮询空等立即重启内核",
+      Action::Restarted);
+}
+
 CoreMonitor::Action CoreMonitor::heal(const std::string& uid,
                                       SelfHealOrigin origin,
                                       const std::string& dead_node) {
@@ -518,7 +623,8 @@ CoreMonitor::Action CoreMonitor::heal(const std::string& uid,
   const int64_t now = h.now_ms ? h.now_ms()
                                : static_cast<int64_t>(GetTickCount64());
   const int64_t last = last_heal_ms_.load();
-  if (last != 0 && now - last < p.heal_cooldown_ms) {
+  const bool has_last = has_heal_attempt_.load() || (last != 0);
+  if (has_last && now - last < p.heal_cooldown_ms) {
     CWLOG_INFO(std::format(
         "CoreMonitor: 自愈选点在 {} 秒冷却中（已过 {} 秒），跳过本次",
         p.heal_cooldown_ms / 1000, (now - last) / 1000));
@@ -560,43 +666,115 @@ CoreMonitor::Action CoreMonitor::heal(const std::string& uid,
     }
   }
 
-  // BUG-388 API 通道恢复保活门检
-  if (origin == SelfHealOrigin::ApiChannelDown && h.api_recovery_keep_alive &&
-      h.api_recovery_keep_alive()) {
-    auto_select_fail_count_.store(0);
-    api_dead_heal_fail_count_.store(0);
-    emit_network_health_notice("network_health::ok");
-    CWLOG_INFO("CoreMonitor: API 通道恢复且当前活跃真节点健康，保活现状并跳过切点");
-    return Action::Idle;
+  // BUG-388 API 通道恢复保活门检 / BUG-411 通道仍死直接免等
+  bool api_confirmed_down = false;
+  if (origin == SelfHealOrigin::ApiChannelDown) {
+    if (h.api_channel_precheck) {
+      const ApiChannelPrecheck pre = h.api_channel_precheck();
+      if (pre == ApiChannelPrecheck::KeepAlive) {
+        auto_select_fail_count_.store(0);
+        api_dead_heal_fail_count_.store(0);
+        emit_network_health_notice("network_health::ok");
+        last_tick_ms_.store(now);
+        CWLOG_INFO("CoreMonitor: API 通道自愈前复核已恢复且当前节点健康，保活现状并跳过切点");
+        return Action::Idle;
+      }
+      if (pre == ApiChannelPrecheck::ConfirmedDown) {
+        api_confirmed_down = true;
+      }
+    } else if (h.api_recovery_keep_alive && h.api_recovery_keep_alive()) {
+      auto_select_fail_count_.store(0);
+      api_dead_heal_fail_count_.store(0);
+      emit_network_health_notice("network_health::ok");
+      last_tick_ms_.store(now);
+      CWLOG_INFO("CoreMonitor: API 通道恢复且当前活跃真节点健康，保活现状并跳过切点");
+      return Action::Idle;
+    }
   }
 
+  const bool prev_has_attempt = has_heal_attempt_.exchange(true);
   last_heal_ms_.store(now);
-  if (!h.auto_select_trigger || uid.empty()) return Action::Idle;
 
-  auto r = h.auto_select_trigger();
-  if (r.is_ok() && r.value()) {
-    // 自愈成功：清零双计数并广播恢复健康（BUG-318 / BUG-359）
-    api_fail_count_.store(0);
-    node_fail_count_.store(0);
-    auto_select_fail_count_.store(0);
-    api_dead_heal_fail_count_.store(0);
-    emit_network_health_notice("network_health::ok");
-    const bool switched =
-        dead_node.empty() || !h.active_node_name ||
-        h.active_node_name() != dead_node;
-    if (switched) {
-      std::lock_guard<std::mutex> lock(switch_rate_m_);
-      recent_auto_switches_ms_.push_back(now);
+  bool failed_this_round = false;
+  if (api_confirmed_down) {
+    CWLOG_WARN("CoreMonitor: API 通道仍不可达，跳过 30 秒就绪空等直接计入自愈失败次数");
+    failed_this_round = true;
+  } else {
+    if ((!h.auto_select_for_heal && !h.auto_select_trigger) || uid.empty()) {
+      return Action::Idle;
     }
-    if (origin == SelfHealOrigin::NodeMigration && h.on_node_migration_healed) {
-      h.on_node_migration_healed();
+
+    auto on_select_success = [&](std::string new_node) -> Action {
+      // 自愈成功：清零双计数并广播恢复健康（BUG-318 / BUG-359）
+      api_fail_count_.store(0);
+      node_fail_count_.store(0);
+      auto_select_fail_count_.store(0);
+      api_dead_heal_fail_count_.store(0);
+      emit_network_health_notice("network_health::ok");
+      if (new_node.empty() && h.active_node_name) {
+        new_node = h.active_node_name();
+      }
+      const bool switched =
+          dead_node.empty() || new_node.empty() || dead_node != new_node;
+      if (switched) {
+        std::lock_guard<std::mutex> lock(switch_rate_m_);
+        recent_auto_switches_ms_.push_back(now);
+      }
+      if (origin == SelfHealOrigin::NodeMigration) {
+        if (h.on_node_migration_healed) {
+          h.on_node_migration_healed();
+        }
+      } else if (!dead_node.empty() && !new_node.empty() &&
+                 dead_node != new_node) {
+        if (h.on_dead_node_healed) {
+          h.on_dead_node_healed(dead_node);
+        }
+        CWLOG_INFO(std::format(
+            "CoreMonitor: 自愈已切换 {} -> {}（已同步清理原故障节点存量代理连接）",
+            dead_node, new_node));
+      }
+      return Action::Healed;
+    };
+
+    bool benign_abort = false;
+    if (h.auto_select_for_heal) {
+      const bool skip_wait_ready = (origin == SelfHealOrigin::ApiChannelDown);
+      auto r = h.auto_select_for_heal(skip_wait_ready);
+      if (r.is_ok() && r.value().selected) {
+        return on_select_success(std::move(r.value().selected_node));
+      }
+      if (r.is_err() && is_benign_auto_select_abort(r.error().message)) {
+        benign_abort = true;
+      } else {
+        if (r.is_ok()) {
+          CWLOG_WARN("CoreMonitor: 自愈选点未选出可用节点（所有节点不可达）");
+        } else {
+          CWLOG_WARN("CoreMonitor: 自愈选点失败 (" + r.error().message + ")");
+        }
+        failed_this_round = true;
+      }
+    } else {
+      auto r = h.auto_select_trigger();
+      if (r.is_ok() && r.value()) {
+        return on_select_success(std::string());
+      }
+      if ((r.is_ok() && !r.value()) ||
+          (r.is_err() && is_benign_auto_select_abort(r.error().message))) {
+        benign_abort = true;
+      } else {
+        failed_this_round = true;
+      }
     }
-    return Action::Healed;
+
+    if (benign_abort) {
+      // BUSY / MANUAL_PREEMPTED → 不计入失败、回退冷却时间戳允许下次重试
+      last_heal_ms_.store(last);
+      has_heal_attempt_.store(prev_has_attempt);
+      return Action::Idle;
+    }
   }
-  if ((r.is_ok() && !r.value()) ||
-      (r.is_err() && is_benign_auto_select_abort(r.error().message))) {
-    // BUSY / MANUAL_PREEMPTED → 不计入失败、回退冷却时间戳允许下次重试
-    last_heal_ms_.store(last);
+
+  if (!failed_this_round) {
     return Action::Idle;
   }
 
@@ -623,36 +801,17 @@ CoreMonitor::Action CoreMonitor::heal(const std::string& uid,
   api_dead_heal_fail_count_.store(api_dead_fails);
 
   if (decision == SelfHealAction::FireAlert) {
-    CWLOG_WARN("CoreMonitor: 连续 5 次自愈选点失败，触发系统网络警报");
-    if (h.alert) {
-      h.alert(
-          L"Clash Win - 网络警报",
-          L"后台自动优选节点连续 5 次失败，当前所有代理节点均已失效，无法正常连接网络。\n\n请检查您的网络连接或节点订阅状态。");
-    }
+    fire_self_heal_alert(h);
     return Action::Alerted;
   }
 
   if (decision == SelfHealAction::RestartCore) {
-    CWLOG_WARN(std::format(
-        "CoreMonitor: 连续 {} 次自愈选点失败且内核 API 不可达，尝试重启内核（当前告警计数={}）",
-        p.heal_fail_threshold, auto_fails));
-    const bool restart_ok = h.restart_core && h.restart_core().is_ok();
-    const SelfHealAction post = complete_restart_core_attempt(
-        restart_ok, auto_fails, api_dead_fails);
-    auto_select_fail_count_.store(auto_fails);
-    api_dead_heal_fail_count_.store(api_dead_fails);
-    if (restart_ok) {
-      return Action::RestartedOnHealFail;
-    }
-    if (post == SelfHealAction::FireAlert) {
-      CWLOG_ERROR("CoreMonitor: 重启内核失败，立即升级为终态告警并重置本轮计数");
-      if (h.alert) {
-        h.alert(
-            L"Clash Win - 网络警报",
-            L"后台检测到代理内核通信异常且自动重启内核失败，当前无法正常恢复代理连接。\n\n请检查系统服务权限或手动重启 Clash Win。");
-      }
-      return Action::Alerted;
-    }
+    return execute_core_restart_with_accounting(
+        h,
+        std::format(
+            "CoreMonitor: 连续 {} 次自愈选点失败且内核 API 不可达，尝试重启内核（当前告警计数={}）",
+            p.heal_fail_threshold, auto_fails),
+        Action::RestartedOnHealFail);
   }
 
   return Action::Idle;
@@ -696,8 +855,14 @@ CoreMonitor::Action CoreMonitor::tick_once() {
   // BUG-336 Checkpoint #1：任何提前返回（进程未跑 / 物理断网 / API 失败）前先吸收手动切换信号
   absorb_pending_manual_switch(now_tick);
 
-  // 1. 进程级直检：进程死 → 立即重启
+  // 1. 进程级直检：进程死 → 若接入管道探测则走防抖/保护/冷却快重启，否则沿用直连重启
   if (h.core_alive && !h.core_alive()) {
+    if (h.pipe_missing && h.expect_core_pipe_alive) {
+      if (auto act = try_fast_restart_missing_pipe(h, p)) {
+        return *act;
+      }
+      return Action::Idle;
+    }
     CWLOG_WARN("CoreMonitor: 内核进程静默退出（无退出日志）→ 自动重启");
     if (h.restart_core && h.restart_core().is_ok()) return Action::Restarted;
     return Action::Idle;
@@ -715,13 +880,20 @@ CoreMonitor::Action CoreMonitor::tick_once() {
   if (was_offline_.exchange(false)) {
     api_fail_count_.store(0);
     node_fail_count_.store(0);
+    {
+      std::lock_guard<std::mutex> lock(brownout_m_);
+      recent_brownout_episodes_ms_.clear();
+    }
     emit_network_health_notice("network_health::ok");
     CWLOG_INFO("CoreMonitor: 物理网络恢复，交由常规体检路径重新测量（不立即自愈）");
   }
 
-  // 3. API 存活：连续 3 次不可达且复核仍不可达 → 自愈
+  // 3. API 存活：优先缺管秒级快重启（BUG-411），否则连续 3 次不可达且复核仍不可达 → 自愈
   bool api_ok = h.api_alive ? h.api_alive() : true;
   if (!api_ok) {
+    if (auto act = try_fast_restart_missing_pipe(h, p)) {
+      return *act;
+    }
     int fails = api_fail_count_.fetch_add(1) + 1;
     if (fails >= p.api_fail_threshold) {
       const bool api_recheck = h.api_alive ? h.api_alive() : false;
@@ -772,6 +944,10 @@ CoreMonitor::Action CoreMonitor::tick_once() {
         has_node_change_.store(true);
       }
       node_fail_count_.store(0);
+      {
+        std::lock_guard<std::mutex> lock(brownout_m_);
+        recent_brownout_episodes_ms_.clear();
+      }
       CWLOG_INFO(std::format(
           "CoreMonitor: 活跃节点发生变化，起算 {}s 切换宽限期",
           p.switch_grace_ms / 1000));
@@ -813,6 +989,8 @@ CoreMonitor::Action CoreMonitor::tick_once() {
       CWLOG_WARN(
           "CoreMonitor: 测速链路不可用或主测速地址失真，本轮不判定节点死活");
       node_fail_count_.store(0);
+      auto_select_fail_count_.store(0);
+      api_dead_heal_fail_count_.store(0);
       return Action::Idle;
     }
   }
@@ -833,7 +1011,7 @@ CoreMonitor::Action CoreMonitor::tick_once() {
     return Action::Idle;
   }
 
-  // 4. 节点健康：连续 2 次判死 → 自愈（ConfirmedDead）
+  // 4. 节点健康：连续 2 次判死或 600s 滑窗内 ≥2 次间歇黑洞 → 自愈（ConfirmedDead）
   bool node_ok = h.node_healthy ? h.node_healthy() : true;
   if (!node_ok) {
     // BUG-336 Checkpoint #3：耗时拨测返回后立即吸收拨测期间发生的手动切节点信号
@@ -842,15 +1020,41 @@ CoreMonitor::Action CoreMonitor::tick_once() {
       CWLOG_INFO(
           "CoreMonitor: 活跃节点检测异常，当前处于切换宽限期，不计入连续失败");
       node_fail_count_.store(0);
+      {
+        std::lock_guard<std::mutex> lock(brownout_m_);
+        recent_brownout_episodes_ms_.clear();
+      }
       return Action::Idle;
     }
-    int fails = node_fail_count_.fetch_add(1) + 1;
+    const int fails = node_fail_count_.fetch_add(1) + 1;
+    const bool is_should_failover =
+        h.has_healthy_standby_in_subset ? h.has_healthy_standby_in_subset()
+                                        : true;
+    const int64_t episode_now_ms = now_fn();
+    size_t brownout_episodes = 0;
+    {
+      std::lock_guard<std::mutex> lock(brownout_m_);
+      if (fails == 1 && is_should_failover) {
+        brownout_episodes = record_brownout_episode(
+            recent_brownout_episodes_ms_, episode_now_ms);
+      } else {
+        prune_brownout_episodes(recent_brownout_episodes_ms_, episode_now_ms);
+        brownout_episodes = recent_brownout_episodes_ms_.size();
+      }
+    }
+    CWLOG_INFO(std::format(
+        "CoreMonitor: 活跃节点检测异常，连续失败次数: {}，窗口内间歇故障次数: {}",
+        fails, brownout_episodes));
     if (decide_self_heal(
             {SelfHealTrigger::Kind::NodeConfirmedDead,
-             static_cast<uint32_t>(fails), false},
+             static_cast<uint32_t>(fails), false, brownout_episodes},
             p.node_dead_threshold, p.api_fail_threshold) ==
         SelfHealDecision::Allow) {
       node_fail_count_.store(0);
+      {
+        std::lock_guard<std::mutex> lock(brownout_m_);
+        recent_brownout_episodes_ms_.clear();
+      }
       std::string dead_node = observed_active;
       if (dead_node.empty() && h.active_node_name) {
         dead_node = h.active_node_name();
@@ -874,6 +1078,8 @@ CoreMonitor::Action CoreMonitor::tick_once() {
         "CoreMonitor: 活跃节点复检恢复正常（此前连续失败 {} 次），解除重试状态",
         prev_fails));
   }
+  auto_select_fail_count_.store(0);
+  api_dead_heal_fail_count_.store(0);
   emit_network_health_notice("network_health::ok");
   return Action::Idle;
 }
@@ -1419,12 +1625,37 @@ bool CoreMonitor::should_sync_alive_ui(bool health_not_ok,
          *last_sync->history_time != *active_hist_time;
 }
 
+void CoreMonitor::prune_brownout_episodes(std::vector<int64_t>& episodes_ms,
+                                          int64_t now_ms) {
+  episodes_ms.erase(
+      std::remove_if(episodes_ms.begin(), episodes_ms.end(),
+                     [now_ms](int64_t ts) {
+                       const int64_t elapsed_secs =
+                           (now_ms > ts) ? ((now_ms - ts) / 1000) : 0;
+                       return elapsed_secs >= kBrownoutWindowSecs;
+                     }),
+      episodes_ms.end());
+}
+
+size_t CoreMonitor::record_brownout_episode(std::vector<int64_t>& episodes_ms,
+                                            int64_t now_ms) {
+  prune_brownout_episodes(episodes_ms, now_ms);
+  episodes_ms.push_back(now_ms);
+  return episodes_ms.size();
+}
+
+size_t CoreMonitor::brownout_episode_count_for_test() const {
+  std::lock_guard<std::mutex> lock(brownout_m_);
+  return recent_brownout_episodes_ms_.size();
+}
+
 CoreMonitor::SelfHealDecision CoreMonitor::decide_self_heal(
     const SelfHealTrigger& trigger, int node_dead_threshold,
-    int api_fail_threshold) {
+    int api_fail_threshold, size_t brownout_confirm_fails) {
   switch (trigger.kind) {
     case SelfHealTrigger::Kind::NodeConfirmedDead:
-      return (trigger.count >= static_cast<uint32_t>(node_dead_threshold))
+      return (trigger.count >= static_cast<uint32_t>(node_dead_threshold) ||
+              trigger.brownout_episodes >= brownout_confirm_fails)
                  ? SelfHealDecision::Allow
                  : SelfHealDecision::Wait;
     case SelfHealTrigger::Kind::NetworkRecovered:

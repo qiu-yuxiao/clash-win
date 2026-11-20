@@ -45,6 +45,8 @@ class MihomoClient {
 
   const std::wstring& pipe_name() const { return pipe_name_; }
   const std::string& secret() const { return secret_; }
+  // ← crates/tauri-plugin-mihomo/src/mihomo.rs:134-139 (BUG-411)
+  bool is_local_socket_missing() const;
 
   // ---- 基础 ----
   Result<MihomoVersion> get_version(int timeout_ms = kDefaultTimeout);

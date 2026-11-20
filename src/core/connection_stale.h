@@ -146,7 +146,9 @@ inline int close_matching_proxy_connections(mihomo::MihomoClient& client,
 }  // namespace detail
 
 // 前台显式切点成功后，精准关闭仍挂在非目标节点的 PROXY 存量长连接。
-// 后台自愈/冷启动严禁调用本函数（保持零断流热切换；过滤越界清理由 close_excluded_proxy_connections 负责）。
+// 其余两类精准清理分工：
+//   1) 过滤越界/生命周期迁移 → close_excluded_proxy_connections
+//   2) 后台自愈确认彻底故障或间歇黑洞切离原 dead_node → close_dead_node_proxy_connections
 // 返回实际发起关闭的连接条数（← monitor.rs:251 close_stale_proxy_connections）。
 inline int close_stale_proxy_connections(mihomo::MihomoClient& client,
                                          const std::string& target_node,
@@ -155,6 +157,44 @@ inline int close_stale_proxy_connections(mihomo::MihomoClient& client,
       client, [&](const std::vector<std::string>& chains) {
         return should_close_stale_proxy_connection(chains, group_name,
                                                    target_node);
+      });
+}
+
+// ← monitor.rs:298-308 should_close_dead_node_proxy_connection（BUG-412）：
+// 判断某条活跃连接在后台自愈切离确认故障/黑洞的 dead_node 后是否应被断开：
+// 仅精准匹配同时经过 group_name（"PROXY"）与该故障 dead_node 的连接，绝不触碰 DIRECT/REJECT/GLOBAL 与其它节点。
+inline bool should_close_dead_node_proxy_connection(
+    const std::vector<std::string>& chains, const std::string& group_name,
+    const std::string& dead_node) {
+  const std::string dead = detail::trim_copy(dead_node);
+  const std::string group = detail::trim_copy(group_name);
+  if (dead.empty() || group.empty()) return false;
+  const std::string upper_dead = detail::ascii_upper(dead);
+  if (upper_dead == "DIRECT" || upper_dead == "REJECT" ||
+      upper_dead == "GLOBAL") {
+    return false;
+  }
+  bool has_group = false;
+  bool has_dead = false;
+  for (const auto& c : chains) {
+    if (c == group) has_group = true;
+    if (c == dead) has_dead = true;
+  }
+  return has_group && has_dead;
+}
+
+// ← monitor.rs:312-325 close_dead_node_proxy_connections（BUG-412）：
+// 后台自愈确认原节点故障/间歇黑洞并切离后，精准断开滞留在原 dead_node 上的 PROXY 存量长连接，
+// 促使 HTTP/2 / gRPC 等长连接立即重建到新健康节点，绝不触碰 DIRECT/REJECT 与其它节点。
+inline int close_dead_node_proxy_connections(
+    mihomo::MihomoClient& client, const std::string& dead_node,
+    const std::string& group_name = "PROXY") {
+  const std::string dead = detail::trim_copy(dead_node);
+  if (dead.empty()) return 0;
+  return detail::close_matching_proxy_connections(
+      client, [&](const std::vector<std::string>& chains) {
+        return should_close_dead_node_proxy_connection(chains, group_name,
+                                                       dead);
       });
 }
 

@@ -26,6 +26,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -38,7 +39,11 @@ namespace clashwin::core {
 class CoreMonitor {
  public:
   // ← monitor.rs v3.5.0 ~ v3.5.6 Continuity-First & Traffic Liveness 常量
-  static constexpr uint64_t kSuspectWindowSecs = 30;
+  static constexpr int64_t kSuspectWindowSecs = 30;
+  static constexpr int64_t kBrownoutWindowSecs = 600;                   // BUG-412
+  static constexpr size_t kBrownoutConfirmFails = 2;                    // BUG-412
+  static constexpr uint64_t kSelfHealCooldownSecs = 25;                 // BUG-411
+  static constexpr uint32_t kPipeMissingConfirmDelayMs = 500;           // BUG-411
   static constexpr int64_t kPassiveTrafficMaxSkipSecs = 1800;  // BUG-399: 480s -> 1800s (30min)
   static constexpr int64_t kIdleHealthFreshSecs = 900;         // BUG-399: 300s -> 900s (15min)
   static constexpr int64_t kStallReprobeCooldownSecs = 60;
@@ -54,7 +59,7 @@ class CoreMonitor {
   static constexpr int64_t kHttpsVerifyAllFailedBackoffSecs = 600;
   static constexpr int64_t kProbeCoalesceWindowMs = 1500;
   static constexpr int64_t kSelfHealSnapshotReuseMs = 10000;
-  static constexpr bool kDeadConnCleanupEnabled = false;
+  static constexpr bool kDeadConnCleanupEnabled = true;        // BUG-412: 自愈切离 dead_node 后精准清理死链
   static constexpr const char* kVerifyHttpsUrlPrimary =
       "https://github.githubassets.com/favicons/favicon.svg";
   static constexpr const char* kVerifyHttpsUrlFallback =
@@ -83,6 +88,13 @@ class CoreMonitor {
     //   切换后 20s 内的失败判定只记日志、不计入连续失败次数
     //   （兼顾新节点状态稳定与切到不可用节点时的二次自愈时效）
     int64_t switch_grace_ms = 20000;
+  };
+
+  // ← monitor.rs:3223-3227 ApiChannelPrecheck (BUG-411)
+  enum class ApiChannelPrecheck { KeepAlive, ProceedAutoSelect, ConfirmedDown };
+  struct HealSelectOutcome {
+    bool selected = false;
+    std::string selected_node;
   };
 
   struct Hooks {
@@ -136,6 +148,18 @@ class CoreMonitor {
     std::function<void()> on_node_migration_healed;
     // 时钟（Unix 毫秒；测试注入虚拟时钟）
     std::function<int64_t()> now_ms;
+    // ← v3.5.10 (BUG-411)：零句柄命名管道缺失探测、期望管道存活判定与防抖延时注入
+    std::function<bool()> pipe_missing;
+    std::function<bool()> expect_core_pipe_alive;
+    std::function<void(uint32_t ms)> sleep_ms;
+    // ← v3.5.10 (BUG-411)：ApiChannelDown 通道预检（KeepAlive / ProceedAutoSelect / ConfirmedDown）
+    //   及支持 skip_wait_ready + 返回新选节点的自愈选点钩子
+    std::function<ApiChannelPrecheck()> api_channel_precheck;
+    std::function<Result<HealSelectOutcome>(bool skip_wait_ready)> auto_select_for_heal;
+    // ← v3.5.10 (BUG-412)：当前过滤子集内是否存在健康备选节点（区分 ShouldFailover 与 AllDead）
+    std::function<bool()> has_healthy_standby_in_subset;
+    // ← v3.5.10 (BUG-412)：自愈切离确认故障/黑洞旧节点后精准断开其存量 PROXY 死链
+    std::function<void(const std::string& dead_node)> on_dead_node_healed;
   };
 
   static CoreMonitor& instance();
@@ -329,11 +353,28 @@ class CoreMonitor {
     Kind kind = Kind::NodeConfirmedDead;
     uint32_t count = 0;
     bool api_alive_on_recheck = false;
+    size_t brownout_episodes = 0;
   };
   enum class SelfHealDecision { Allow, Wait };
-  static SelfHealDecision decide_self_heal(const SelfHealTrigger& trigger,
-                                           int node_dead_threshold = 2,
-                                           int api_fail_threshold = 3);
+  static SelfHealDecision decide_self_heal(
+      const SelfHealTrigger& trigger, int node_dead_threshold = 2,
+      int api_fail_threshold = 3,
+      size_t brownout_confirm_fails = kBrownoutConfirmFails);
+  // ← monitor.rs:1509-1526 can_fast_restart_missing_pipe / brownout 滑窗（BUG-411, BUG-412）
+  static constexpr bool can_fast_restart_missing_pipe(
+      bool pipe_missing, bool expect_alive,
+      std::optional<uint64_t> last_attempt_elapsed_secs) {
+    if (!pipe_missing || !expect_alive) return false;
+    if (last_attempt_elapsed_secs.has_value() &&
+        *last_attempt_elapsed_secs < kSelfHealCooldownSecs) {
+      return false;
+    }
+    return true;
+  }
+  static void prune_brownout_episodes(std::vector<int64_t>& episodes_ms,
+                                      int64_t now_ms);
+  static size_t record_brownout_episode(std::vector<int64_t>& episodes_ms,
+                                        int64_t now_ms);
   static bool self_heal_requires_dead_gate(SelfHealOrigin origin);
   static bool self_heal_subject_to_switch_rate_limit(SelfHealOrigin origin);
   static bool auto_switch_permitted(std::optional<int64_t> last_switch_age_secs,
@@ -408,6 +449,7 @@ class CoreMonitor {
   }
   int heal_fail_count() const { return auto_select_fail_count_.load(); }
   int64_t last_heal_ms() const { return last_heal_ms_.load(); }
+  size_t brownout_episode_count_for_test() const;
   // ★ §5.1 切换宽限期：当前是否处于宽限期内（切节点后 20s）
   bool in_switch_grace() const;
   int64_t last_node_change_ms() const { return last_node_change_ms_.load(); }
@@ -420,6 +462,14 @@ class CoreMonitor {
   Action heal(const std::string& uid,
               SelfHealOrigin origin = SelfHealOrigin::ConfirmedDead,
               const std::string& dead_node = {});  // 自愈记账核心（tick 内调用）
+  bool is_mihomo_pipe_missing_confirmed(const Hooks& h) const;
+  Action execute_core_restart_with_accounting(const Hooks& h,
+                                              const std::string& reason_log,
+                                              Action ok_action);
+  std::optional<Action> try_fast_restart_missing_pipe(const Hooks& h,
+                                                      const Params& p);
+  void fire_self_heal_alert(const Hooks& h) const;
+  void fire_core_restart_failed_alert(const Hooks& h) const;
   void absorb_pending_manual_switch(int64_t fallback_now_ms);
   void reset_runtime_loop_state();
 
@@ -435,9 +485,12 @@ class CoreMonitor {
   std::atomic<int> api_dead_heal_fail_count_{0};
   std::atomic<bool> was_offline_{false};
   std::atomic<int64_t> last_heal_ms_{0};
+  std::atomic<bool> has_heal_attempt_{false};
   std::atomic<int64_t> last_tick_ms_{0};
   std::atomic<int64_t> last_https_verify_ms_{-1};
   std::atomic<uint64_t> manual_switch_epoch_{0};
+  mutable std::mutex brownout_m_;
+  std::vector<int64_t> recent_brownout_episodes_ms_;
   // ★ §5.1 切换宽限期：最近一次「活跃节点发生变化」的时刻（ms）
   //   ← Mini monitor.rs:1174 last_node_change_time
   //   ★ 用独立标志位而非「值 != 0」判别：测试虚拟时钟可能从 0 起算，

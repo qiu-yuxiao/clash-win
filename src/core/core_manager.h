@@ -22,6 +22,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace clashwin::core {
@@ -209,6 +210,27 @@ class CoreManager {
   //   会被守护线程每轮判死并触发 16s 循环重启（2026-11-05 实机复现）。
   bool core_alive() const;
 
+  // BUG-411 (manager/mod.rs:90-104):
+  // 判断当前是否期望内核命名管道存活（排除退出态、NotRunning、配置更新中及生命周期锁占用态）。
+  bool should_expect_core_pipe_alive() const;
+  bool is_config_update_in_progress() const {
+    return config_update_depth_.load(std::memory_order_acquire) > 0;
+  }
+  class ScopedConfigUpdate {
+   public:
+    explicit ScopedConfigUpdate(CoreManager& mgr) : mgr_(mgr) {
+      mgr_.config_update_depth_.fetch_add(1, std::memory_order_acq_rel);
+    }
+    ~ScopedConfigUpdate() {
+      mgr_.config_update_depth_.fetch_sub(1, std::memory_order_acq_rel);
+    }
+    ScopedConfigUpdate(const ScopedConfigUpdate&) = delete;
+    ScopedConfigUpdate& operator=(const ScopedConfigUpdate&) = delete;
+
+   private:
+    CoreManager& mgr_;
+  };
+
   // ---- 重启 + 节点恢复（← lifecycle.rs::restart_core） ----
   Result<void> restart_with_restore(ICoreApiClient& api, const CoreOps& ops,
                                     const RestoreTimings& t = {});
@@ -270,6 +292,26 @@ class CoreManager {
   void set_start_auto_test_hooks(StartAutoTestHooks hooks);
   void reset_start_auto_test_hooks();
 
+  class LifecycleLockGuard {
+   public:
+    explicit LifecycleLockGuard(const CoreManager& mgr) : mgr_(mgr) {
+      mgr_.lifecycle_.lock();
+      mgr_.lifecycle_owner_.store(std::this_thread::get_id(),
+                                  std::memory_order_release);
+    }
+    ~LifecycleLockGuard() {
+      mgr_.lifecycle_owner_.store(std::thread::id{},
+                                  std::memory_order_release);
+      mgr_.lifecycle_.unlock();
+    }
+    LifecycleLockGuard(const LifecycleLockGuard&) = delete;
+    LifecycleLockGuard& operator=(const LifecycleLockGuard&) = delete;
+
+   private:
+    const CoreManager& mgr_;
+  };
+  using ScopedLifecycleLockForTest = LifecycleLockGuard;
+
  private:
   Result<void> stop_sidecar_locked();
   // 调用方须已持有 lifecycle_（start_auto 内部先决策再分派）
@@ -280,9 +322,11 @@ class CoreManager {
 
   std::atomic<RunningMode> mode_{RunningMode::NotRunning};
   std::atomic<uint64_t> selection_ensure_epoch_{0};
+  std::atomic<int> config_update_depth_{0};
   std::shared_ptr<std::atomic<bool>> alive_flag_{
       std::make_shared<std::atomic<bool>>(true)};
-  std::mutex lifecycle_;           // ← manager/mod.rs lifecycle_lock（串行化启停）
+  mutable std::mutex lifecycle_;           // ← manager/mod.rs lifecycle_lock（串行化启停）
+  mutable std::atomic<std::thread::id> lifecycle_owner_{};
   mutable std::mutex test_hooks_mu_;
   ProcEnumerator proc_enumerator_;
   std::optional<StartAutoTestHooks> start_auto_test_hooks_;

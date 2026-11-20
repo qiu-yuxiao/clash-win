@@ -899,10 +899,10 @@ bool App::init() {
         if (r.is_ok()) {
           probed_delays = std::move(r.value());
           link_ok = true;
-          const bool allow_single_target_skip =
-              (core::CoreMonitor::instance().node_fail_count() == 0);
+          // 单目标初检与二次确认在同组已有 >= 3 个真实节点通过主 URL 时均跳过备用 URL，
+          // 防止间歇性黑洞节点借备用地址压线逃生（BUG-401 / BUG-412）
           if (core::CoreMonitor::should_recheck_primary_with_fallback(
-                  probed_delays, {active}, allow_single_target_skip)) {
+                  probed_delays, {active}, /*allow_single_target_skip=*/true)) {
             auto rfb = client.delay_group("PROXY__METRICS", fallback_url,
                                           core::kNodeDelayMaxMs, 5000);
             if (rfb.is_ok()) {
@@ -1005,6 +1005,100 @@ bool App::init() {
              !IsWindowVisible(main_window_->hwnd());
     };
     mh.now_ms = [] { return static_cast<int64_t>(GetTickCount64()); };
+    mh.pipe_missing = [] {
+      return cmd::mihomo_unchecked().is_local_socket_missing();
+    };
+    mh.expect_core_pipe_alive = [] {
+      return core::CoreManager::instance().should_expect_core_pipe_alive();
+    };
+    mh.api_channel_precheck = [parse_proxy_delay_age]() {
+      auto& client = cmd::mihomo_unchecked();
+      auto grp = client.get_group_by_name("PROXY");
+      if (grp.is_err()) {
+        CWLOG_WARN("CoreMonitor: API 通道自愈前复核仍不可达 (" +
+                   grp.error().message + ")，跳过 30 秒空等直接计入失败");
+        return core::CoreMonitor::ApiChannelPrecheck::ConfirmedDown;
+      }
+      auto proxies = client.get_proxies();
+      if (proxies.is_ok() && grp.value().now && !grp.value().now->empty()) {
+        const std::string& active = *grp.value().now;
+        const bool is_valid_real =
+            active != "DIRECT" && active != "REJECT" &&
+            !util::is_dummy_node(active) &&
+            !util::is_confirmed_fake_node(active);
+        auto it = proxies.value().proxies.find(active);
+        core::CoreMonitor::NodeStatus st;
+        if (it != proxies.value().proxies.end()) {
+          auto [delay, age] = parse_proxy_delay_age(it->second);
+          st = core::CoreMonitor::classify_node_status(it->second.alive,
+                                                         delay, age);
+        }
+        if (core::CoreMonitor::should_keep_alive_on_api_recovery(
+                is_valid_real, st)) {
+          return core::CoreMonitor::ApiChannelPrecheck::KeepAlive;
+        }
+      }
+      return core::CoreMonitor::ApiChannelPrecheck::ProceedAutoSelect;
+    };
+    mh.auto_select_for_heal = [](bool skip_wait_ready)
+        -> Result<core::CoreMonitor::HealSelectOutcome> {
+      auto latest = config::Config::instance().profiles().latest_arc();
+      std::string uid = latest && latest->current ? *latest->current : "";
+      if (uid.empty()) {
+        return Result<core::CoreMonitor::HealSelectOutcome>::err(
+            Error{1, "no active profile"});
+      }
+      auto out = core::AutoSelect::instance().trigger(
+          uid, std::nullopt, /*sort_type=*/0, /*select=*/true, skip_wait_ready);
+      if (out.busy) {
+        return Result<core::CoreMonitor::HealSelectOutcome>::err(
+            Error{-2, "AUTO_SELECT_BUSY"});
+      }
+      if (out.preempted) {
+        return Result<core::CoreMonitor::HealSelectOutcome>::err(
+            Error{-3, "AUTO_SELECT_MANUAL_PREEMPTED"});
+      }
+      return Result<core::CoreMonitor::HealSelectOutcome>::ok(
+          core::CoreMonitor::HealSelectOutcome{out.selected,
+                                               std::move(out.selected_node)});
+    };
+    mh.has_healthy_standby_in_subset = [parse_proxy_delay_age,
+                                        read_current_filter_text]() -> bool {
+      auto& client = cmd::mihomo_unchecked();
+      auto grp = client.get_group_by_name("PROXY");
+      if (grp.is_err() || !grp.value().all) return false;
+      const std::string active = grp.value().now.value_or("");
+      auto proxies = client.get_proxies();
+      if (proxies.is_err()) return false;
+      const std::string filter_text = util::trim(read_current_filter_text());
+      for (const auto& name : *grp.value().all) {
+        if (name == active || util::is_dummy_node(name) ||
+            util::is_confirmed_fake_node(name)) {
+          continue;
+        }
+        if (!util::match_node_filter(name, filter_text)) {
+          continue;
+        }
+        auto it = proxies.value().proxies.find(name);
+        if (it == proxies.value().proxies.end()) continue;
+        auto [delay, age] = parse_proxy_delay_age(it->second);
+        auto st = core::CoreMonitor::classify_node_status(it->second.alive,
+                                                            delay, age);
+        if (st.kind == core::CoreMonitor::NodeStatusKind::Alive) {
+          return true;
+        }
+      }
+      return false;
+    };
+    mh.on_dead_node_healed = [](const std::string& dead_node) {
+      const int count = core::close_dead_node_proxy_connections(
+          cmd::mihomo_unchecked(), dead_node);
+      if (count > 0) {
+        CWLOG_INFO(std::format(
+            "CoreMonitor: 自愈切离故障节点 {}，已清理 {} 条滞留死链代理连接",
+            dead_node, count));
+      }
+    };
     monitor.set_hooks(std::move(mh));
 
     core::CoreUpdater::instance().set_is_exiting_check([] {

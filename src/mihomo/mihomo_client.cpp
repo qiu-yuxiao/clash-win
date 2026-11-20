@@ -73,6 +73,10 @@ Result<void> MihomoClient::update_controller(const std::wstring& pipe_name) {
 
 void MihomoClient::update_secret(const std::string& secret) { secret_ = secret; }
 
+bool MihomoClient::is_local_socket_missing() const {
+  return !pipe_name_.empty() && is_named_pipe_server_missing(pipe_name_);
+}
+
 Result<HttpResponse> MihomoClient::request(const char* method, const std::string& path,
                                            const std::string& body, int timeout_ms) {
   std::map<std::string, std::string> headers;

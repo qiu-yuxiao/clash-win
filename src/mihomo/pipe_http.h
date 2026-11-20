@@ -19,10 +19,25 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 
 namespace clashwin::mihomo {
+
+// ← crates/tauri-plugin-mihomo/src/ipc.rs:132-140 (BUG-411):
+// 判断 WaitNamedPipeW 返回 FALSE 时的 Win32 错误码是否代表命名管道服务端本身已不存在
+// （ERROR_FILE_NOT_FOUND = 2 / ERROR_PATH_NOT_FOUND = 3 / ERROR_BAD_PATHNAME = 161），
+// 严格排除管道存活但实例全忙时的 ERROR_SEM_TIMEOUT (121) 与 ERROR_PIPE_BUSY (231)。
+constexpr bool is_pipe_missing_os_error(std::optional<int32_t> raw_os_error) {
+  if (!raw_os_error.has_value()) return false;
+  const int32_t code = *raw_os_error;
+  return code == 2 || code == 3 || code == 161;
+}
+
+// ← crates/tauri-plugin-mihomo/src/ipc.rs:146-155 (BUG-411):
+// 零句柄侵占探测命名管道服务端是否已彻底消失（WaitNamedPipeW(..., 1)）。
+bool is_named_pipe_server_missing(const std::wstring& socket_path);
 
 struct PipeHttpConfig {
   int min_connections = 3;              // 池最小保活连接数

@@ -314,6 +314,7 @@ bool is_admin() {
 // ---------- enhance 全链 ----------
 core::validate::ValidationOutcome run_enhance_pipeline() {
   using core::validate::ValidationOutcome;
+  core::CoreManager::ScopedConfigUpdate update_guard(core::CoreManager::instance());
   // ① 生成运行时产物（enhance 流水线）
   auto runtime = enhance::run_from_config();
   if (runtime.is_err()) {
