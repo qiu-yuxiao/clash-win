@@ -161,7 +161,7 @@ Get-FileHash .\Clash.Win_<version>_x64_portable.zip -Algorithm SHA256
 | **Internationalization (i18n)** | 13 languages (`840+` keys) | **1:1 all 13 languages (`zh` / `zhtw` / `en` / `jp` / `ko` / `ru` / `de` / `es` / `id` / `tr` / `fa` / `ar` / `tt`), live hot-switch** |
 | **Screen Reader (A11y)** | WebView2 DOM `aria-*` exposed to Narrator / NVDA | **1:1 Native Win32 UI Automation (`WM_GETOBJECT` / `IRawElementProvider*`) — Narrator / NVDA / JAWS support across all 13 languages with 0 MB WebView** |
 | **Data Directory** | `%APPDATA%\io.github.clash-mini.clash-mini` | `%APPDATA%\io.github.clash-win.clash-win` |
-| **Version Track** | `3.x` | Independent (`v0.1.0` → current `v1.1.2`) |
+| **Version Track** | `3.x` | Independent (`v0.1.0` → current `v1.1.3`) |
 
 ### Peaceful Coexistence & Runtime Mutual Exclusion ("Borrow & Return" / 借用与归还)
 * **Safe Dual Installation**: Clash Win and Clash Mini store configurations, subscriptions, and logs in completely separate `%APPDATA%` directories. Neither installer nor uninstaller ever deletes the other's files, shortcuts, or autostart entries.

@@ -4,11 +4,11 @@
 
 ---
 
-## 一、项目当前状态（v1.1.2）
+## 一、项目当前状态（v1.1.3）
 
 | 维度 | 当前状态 |
 | :--- | :--- |
-| **当前发布版本** | `v1.1.2`（单一事实源：`include/clashwin/config/constants.h` 的 `kAppVersion`） |
+| **当前发布版本** | `v1.1.3`（单一事实源：`include/clashwin/config/constants.h` 的 `kAppVersion`） |
 | **上游同步基线** | **Clash Mini v3.5.10**（自 `v3.2.2` 起步，完整同步至 `v3.5.10`：含 clone-topology 去重与 24h HTTPS 验真隔离、统一 5 分桶实时+已关闭连接与路由备份导入导出、271px 窄窗左锚定弹窗体系、随窗宽自适应单一 `CanvasGraph`、三态托盘即时同步、缺管 500ms 复核秒级快重启、600s 黑洞滑窗逃生与故障旧死链精准清理及 BUG-384~412 全部收敛，并删除 Win 自编提示与独有 locale key） |
 | **代理内核与服务** | 上游 `MetaCubeX/mihomo` **v1.19.33**（`with_gvisor`，重命名为 `win-mihomo.exe`，缺失时支持自动下载校验恢复）；系统服务共用 `clash_verge_service` |
 | **与 Clash Mini 关系** | **可同机共处、不可同时运行**（「借用与归还」方针）：双端配置文件隔离、互不删改磁盘与注册表；启动或安装一方时自动礼貌终止另一方运行进程并共用服务，卸载时若对方仍在则自动归还服务路径 |
