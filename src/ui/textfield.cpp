@@ -229,7 +229,7 @@ std::optional<RectF> TextField::tooltip_anchor_rect() const {
 // ---- 编辑命令（EM_* 等价） ----
 bool TextField::can_cut() const { return has_selection(); }
 bool TextField::can_copy() const { return has_selection(); }
-bool TextField::can_paste() const { return true; }  // src: _layout.tsx:1908 粘贴项无 disabled
+bool TextField::can_paste() const { return true; }  // src: _layout.tsx:1588-1590 粘贴项无 disabled
 bool TextField::can_select_all() const { return !text_.empty(); }
 bool TextField::can_clear() const { return !text_.empty(); }
 
@@ -958,7 +958,7 @@ void TextField::on_paint(IRenderTarget& rt) {
   // src: base-search-box.tsx:126-136（ClearRounded 18 / disabled / opacity）
   if (clear_button_) {
     TextStyle cts = ts;
-    cts.size = 15.0f;  // ← ClearRounded fontSize 18 的视觉近似（图标框 24）
+    cts.size = 15.0f;  // src: components/base/base-search-box.tsx:90,190 ClearRounded 18px（24 viewBox 内字形折合 15px）
     cts.align_h = AlignH::Center;
     cts.align_v = AlignV::Center;
     cts.color = style_.color;

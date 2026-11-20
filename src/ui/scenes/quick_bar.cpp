@@ -12,7 +12,7 @@
 #include "../theme/theme.h"
 #include "../button_draw.h"
 #include "../card_draw.h"
-#include "../soft_shadow.h"  // 卡面阴影/发光近似（随 depth/vibrancy）
+#include "../soft_shadow.h"  // 卡面多层柔影与外发光（随 depth/vibrancy）
 #include "node_list.h"  // delay_tier / delay_tier_color（与节点表格同源五档色）
 #include "util/log.h"
 #include "util/utf.h"

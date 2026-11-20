@@ -301,7 +301,7 @@ bool D2dRenderTarget::create_for_hwnd(HWND hwnd) {
                                  static_cast<UINT32>(rc.bottom - rc.top));
   // 【DPIARCH】单缩放架构：target DPI=窗口 DPI（144），DIP→物理由 target
   // 自动完成；transform 恒等（见 apply_transform）。此前默认属性 DPI=0→
-  // 跟随系统 144 + transform×1.5 = 双缩放（实测 effDpi=144/m11=1.5），已修。
+  // 跟随系统 144 + transform×1.5 = 双缩放（调试期 effDpi=144/m11=1.5），已修。
   HRESULT hr = ctx_.d2d()->CreateHwndRenderTarget(
       D2D1::RenderTargetProperties(
           D2D1_RENDER_TARGET_TYPE_DEFAULT,
@@ -355,7 +355,7 @@ void D2dRenderTarget::on_target_ready() {
 }
 
 void D2dRenderTarget::apply_transform() {
-  // 【DPIARCH-EXP】最小实验：target 有效 DPI=144（实测 effDpi=144）已自动
+  // 【DPIARCH-EXP】最小实验：target 有效 DPI=144（运行时 effDpi=144）已自动
   // DIP→物理 ×1.5；transform 恒等（origin 为逻辑 DIP，平移在 DIP 空间，
   // 由 target DPI 统一换算），消除双缩放。
   active_rt_->SetTransform(
@@ -1025,7 +1025,7 @@ void D2dRenderTarget::draw_text(const std::wstring& text, const RectF& r,
     DWRITE_TRIMMING trim{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
     layout->SetTrimming(&trim, nullptr);
   }
-  // max_lines：DWrite 无直接接口，超出按行高截断 + trimming 省略（工具箱近似）
+  // max_lines：DWrite 无直接接口，超出按行高裁剪 + trimming 省略
   if (ts.max_lines > 0 && ts.wrap) {
     float line_h = ts.line_h > 0.0f ? ts.line_h : ts.size * 1.33f;
     float max_h = ts.max_lines * line_h;

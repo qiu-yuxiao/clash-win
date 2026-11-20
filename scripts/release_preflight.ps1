@@ -6,10 +6,10 @@
   在本地准备、pre-push 钩子拦截、以及 CI 构建前统一执行本脚本：
     GATE 1  版本四方严格一致：constants.h == clashwin.nsi == clashwin.rc == 目标版本号
     GATE 2  更新清单安全契约：updater/app-update.json 合法、无上游污染、版本不倒挂
-    GATE 3  发布说明与文档门禁：CHANGELOG.md 含对应版本章节且无 TODO/TBD、常青文档与 Issue 模板链接有效
+    GATE 3  发布说明与文档门禁：CHANGELOG.md 含对应版本章节且无 TODO/TBD、常青文档与 Issue 模板链接有效、跨文档版本/锚点/端口口径一致
     GATE 4  测试注册与内核名契约：tests/*.cpp 全量登记 CMakeLists.txt、内核进程名一致
     GATE 5  sidecar 5/5 二进制基线（含 win-mihomo.exe 大小与 SHA256）
-    GATE 6  UI 源码归属门禁（ui_src_gate.ps1）
+    GATE 6  UI 源码归属严格门禁（ui_src_gate.ps1 -Strict）
     GATE 7  脚本编码门禁：scripts/*.ps1 与 installer/*.ps1 全含 UTF-8 BOM 且无孤立 CR；git hook 为 LF
 #>
 [CmdletBinding()]
@@ -145,6 +145,66 @@ Get-ChildItem -Path (Join-Path $RepoRoot '.github\ISSUE_TEMPLATE') -Filter *.yml
 }
 Check 'Issue 模板文档链接全部有效（无死链）' ($tplBad.Count -eq 0) ($tplBad -join ', ')
 
+# 跨文档版本线 / 上游锚点 / 端口口径一致性
+$majorMinor = if ($baseVer -and ($baseVer -match '^([0-9]+\.[0-9]+)\.[0-9]+$')) { $Matches[1] } else { $null }
+$secDocPath = Join-Path $RepoRoot 'SECURITY.md'
+$readmePath = Join-Path $RepoRoot 'README.md'
+$docsReadmePath = Join-Path $RepoRoot 'docs\README.md'
+$contribPath = Join-Path $RepoRoot 'CONTRIBUTING.md'
+$avPath = Join-Path $RepoRoot 'docs\antivirus-whitelist.md'
+$constitutPath = Join-Path $RepoRoot '移植基本准则.md'
+
+$secTxt = if (Test-Path -LiteralPath $secDocPath) { Read-Utf8 $secDocPath } else { '' }
+$readmeTxt = if (Test-Path -LiteralPath $readmePath) { Read-Utf8 $readmePath } else { '' }
+$docsReadmeTxt = if (Test-Path -LiteralPath $docsReadmePath) { Read-Utf8 $docsReadmePath } else { '' }
+$contribTxt = if (Test-Path -LiteralPath $contribPath) { Read-Utf8 $contribPath } else { '' }
+$avTxt = if (Test-Path -LiteralPath $avPath) { Read-Utf8 $avPath } else { '' }
+$constitutTxt = if (Test-Path -LiteralPath $constitutPath) { Read-Utf8 $constitutPath } else { '' }
+
+$secOk = [bool]($majorMinor -and ($secTxt -match [regex]::Escape("``$majorMinor.x``")))
+Check "SECURITY.md 支持版本线 == $majorMinor.x" $secOk "expected='$majorMinor.x'"
+
+$readmeVerOk = [bool]($targetVer -and ($readmeTxt -match ([regex]::Escape("current ``v$targetVer``"))))
+$docsVerOk = [bool]($targetVer -and ($docsReadmeTxt -match [regex]::Escape("项目当前状态（v$targetVer）")) -and ($docsReadmeTxt -match [regex]::Escape("``v$targetVer``")))
+Check "README.md 与 docs/README.md 版本 == v$targetVer" ($readmeVerOk -and $docsVerOk) "readme=$readmeVerOk docsReadme=$docsVerOk"
+
+$anchorVer = $null
+if ($constitutTxt -match 'Clash Mini\s+\*\*(v[0-9]+\.[0-9]+\.[0-9]+)\s*当前内容\*\*') { $anchorVer = $Matches[1] }
+$anchorMiss = @()
+if (-not $anchorVer) {
+  $anchorMiss += '移植基本准则.md(未提取到锚点)'
+} else {
+  if ($readmeTxt -notmatch ("synced through \*\*$([regex]::Escape($anchorVer))\*\*")) { $anchorMiss += 'README.md' }
+  $contribMatches = [regex]::Matches($contribTxt, 'synced through (?:\*\*|`)?(v[0-9]+\.[0-9]+\.[0-9]+)')
+  if ($contribMatches.Count -eq 0 -or (@($contribMatches | Where-Object { $_.Groups[1].Value -ne $anchorVer }).Count -gt 0)) {
+    $anchorMiss += 'CONTRIBUTING.md'
+  }
+  if ($docsReadmeTxt -notmatch ("同步至 \*\*$([regex]::Escape($anchorVer))\*\*") -or
+      $docsReadmeTxt -notmatch ("Clash Mini $([regex]::Escape($anchorVer))") -or
+      $docsReadmeTxt -notmatch ("对齐 Mini $([regex]::Escape($anchorVer))")) {
+    $anchorMiss += 'docs/README.md'
+  }
+  if ($avTxt -notmatch ("同步至 Clash Mini $([regex]::Escape($anchorVer))")) { $anchorMiss += 'docs/antivirus-whitelist.md' }
+  if ((Test-Path -LiteralPath $changelogPath) -and ((Read-Utf8 $changelogPath) -notmatch [regex]::Escape($anchorVer))) {
+    $anchorMiss += 'CHANGELOG.md'
+  }
+}
+Check "跨文档 Clash Mini 上游锚点同步 ($anchorVer)" ($anchorMiss.Count -eq 0) ($anchorMiss -join ', ')
+
+$guardPort = $null
+if ((Test-Path -LiteralPath $constPath) -and ((Read-Utf8 $constPath) -match 'kHttpGuardFallback\s*=\s*([0-9]+)')) {
+  $guardPort = $Matches[1]
+}
+$guardBad = @()
+if (-not $guardPort) {
+  $guardBad += 'constants.h'
+} else {
+  if ($readmeTxt -notmatch ("HTTP Guard Fallback Port\s*\|\s*``$guardPort``\s*\|\s*``$guardPort``")) { $guardBad += 'README.md' }
+  if ($docsReadmeTxt -notmatch ("Guard 兜底\s*``$guardPort``")) { $guardBad += 'docs/README.md' }
+  if ($constitutTxt -notmatch ("\|\s*http guard 兜底\s*\|\s*$guardPort\s*\|")) { $guardBad += '移植基本准则.md' }
+}
+Check "跨文档 Guard 兜底端口 == $guardPort" ($guardBad.Count -eq 0) ($guardBad -join ', ')
+
 # ---------- GATE 4: 单测全量注册与内核名契约 ----------
 Write-Host "`n[GATE 4] 单测注册与内核名契约" -ForegroundColor Yellow
 $cmakeTxt = Read-Utf8 (Join-Path $RepoRoot 'CMakeLists.txt')
@@ -204,12 +264,12 @@ if ($SkipSidecar) {
   Check '打包脚本与工作流引用的 sidecar/*.exe 全部真实存在' ($missingRefs.Count -eq 0) ($missingRefs -join ', ')
 }
 
-# ---------- GATE 6: UI 源码归属门禁 ----------
-Write-Host "`n[GATE 6] UI 源码归属门禁" -ForegroundColor Yellow
+# ---------- GATE 6: UI 源码归属严格门禁 ----------
+Write-Host "`n[GATE 6] UI 源码归属严格门禁 (-Strict)" -ForegroundColor Yellow
 $uiGate = Join-Path $RepoRoot 'scripts\ui_src_gate.ps1'
-& $uiGate | Out-Null
+& $uiGate -Strict | Out-Null
 $uiCode = $LASTEXITCODE
-Check 'ui_src_gate.ps1 退出码 0' ($uiCode -eq 0) "exit=$uiCode"
+Check 'ui_src_gate.ps1 -Strict 退出码 0' ($uiCode -eq 0) "exit=$uiCode"
 
 # ---------- GATE 7: 脚本编码合规（UTF-8 BOM + 无孤立 CR + Git Hook 纯 LF） ----------
 Write-Host "`n[GATE 7] 脚本与钩子编码合规" -ForegroundColor Yellow

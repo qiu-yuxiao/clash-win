@@ -1,7 +1,7 @@
 #pragma once
 // F-D01：UI 文案统一取 Mini locales（13 语言 × 10 命名空间）。
 // ← MF:pages/_layout.tsx:203 const { t } = useTranslation()
-// ← MF:services/i18n.ts:147-171 init / changeLanguage / resolveLanguage
+// ← MF:services/i18n.ts:136-166 init / changeLanguage / initializeLanguage（resolveLanguage 见 :26-45）
 // 约定：key 必须能在 ClashVerge/src/locales/zh/<ns>.json 找到；
 //       Mini 自身硬编码英文或中文的例外（theme-settings-card 双滑块标签、
 //       图表 tooltip 兜底、语言下拉的自名标签）不走 tr()，见

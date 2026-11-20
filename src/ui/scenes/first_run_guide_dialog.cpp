@@ -57,7 +57,7 @@ constexpr float kBannerPadY = 6.0f;      // src: :661 py: 0.75
 constexpr float kBannerFont = 12.0f;     // src: :688 fontSize '12px'
 constexpr float kBannerH = 31.4f;        // src: :661/:688 6×2 + 12×1.45 + 1px 边框×2
 constexpr float kBannerMb = 10.0f;       // src: :659 mb: 1.25
-constexpr float kFieldH = 40.0f;         // 豁免: MUI TextField size=small 默认输入框高 40
+constexpr float kFieldH = 40.0f;         // src: node_modules/@mui/material/OutlinedInput/OutlinedInput.js:158-163 + node_modules/@mui/material/InputBase/InputBase.js:76-78（8.5×2 + 23 = 40）
 constexpr float kFieldMb = 8.0f;         // src: :697 mb: 1
 // 输入框圆角/描边宽逐皮肤（get3DInputStyle）→ 运行时取 input_paint().radius /
 //   .border_w，不再用固定常量。
@@ -198,10 +198,10 @@ void paint_button(IRenderTarget& rt, const RectF& orig_r, BtnStyle style,
   draw_text(rt, label, r, font_size, bp.weight, bp.text, AlignH::Center, AlignV::Center);
 }
 
-// src: :674-676 border 1px dashed（引擎无虚线图元，以离散段绘制）
+// src: first-run-guide-dialog.tsx:654 border 1px dashed（引擎无虚线图元，以离散段绘制）
 void dashed_rect(IRenderTarget& rt, const RectF& r, const Color4f& c) {
-  const float dash = 4.0f;  // 豁免: Mini 无对应物 — CSS dashed 无引擎图元，以 4/3 段模拟（出处: :674-676）
-  const float gap = 3.0f;   // 豁免: Mini 无对应物 — 同上（dash/gap 4/3；出处: :674-676）
+  const float dash = 4.0f;  // 豁免: Mini 无对应物 — CSS dashed 无引擎图元，段长 4（出处: first-run-guide-dialog.tsx:654）
+  const float gap = 3.0f;   // 豁免: Mini 无对应物 — CSS dashed 无引擎图元，段距 3（出处: first-run-guide-dialog.tsx:654）
   Brush b{c};
   for (float x = r.x; x < r.right(); x += dash + gap)
     rt.fill_rect({x, r.y, std::min(dash, r.right() - x), 1.0f}, b);
@@ -214,8 +214,8 @@ void dashed_rect(IRenderTarget& rt, const RectF& r, const Color4f& c) {
 }
 
 void dashed_line(IRenderTarget& rt, float x, float y, float w, const Color4f& c) {
-  const float dash = 4.0f;  // 豁免: Mini 无对应物 — CSS dashed 无引擎图元，段长 4（出处: :674-676）
-  const float gap = 3.0f;   // 豁免: Mini 无对应物 — 同上（gap 3；出处: :674-676）
+  const float dash = 4.0f;  // 豁免: Mini 无对应物 — CSS dashed 无引擎图元，段长 4（出处: first-run-guide-dialog.tsx:886）
+  const float gap = 3.0f;   // 豁免: Mini 无对应物 — CSS dashed 无引擎图元，段距 3（出处: first-run-guide-dialog.tsx:886）
   Brush b{c};
   for (float dx = x; dx < x + w; dx += dash + gap)
     rt.fill_rect({dx, y, std::min(dash, x + w - dx), 1.0f}, b);
@@ -647,8 +647,8 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
       }
     }
   }
-  // 引导文案实测高度（src: :593-603 是流式 Typography，行数随语言变化）：
-  //   固定 2 行高度会让后续胶囊/输入框压在文字上（日/德文案实测 4~5 行）
+  // 引导文案动态测量高度（src: first-run-guide-dialog.tsx:593-603 流式 Typography，行数随语言变化）：
+  //   固定 2 行高度会让后续胶囊/输入框压在文字上（日/德长译文可达 4~5 行）
   {
     const float inner_w = cw - kTitlePadX * 2.0f;
     float h = kIntroH;
@@ -749,7 +749,7 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
                  ? kInputStepH + (intro_h_ - kIntroH) + pills_extra +
                        (has_banner ? banner_h_ + kBannerMb : 0.0f) + err_block_h
                  : kTitleBlockH + kContentPad + ready_cards_h + kContentPad + kActionsH;
-  ch = std::min(ch, area.h - 8.0f);  // 豁免: Mini 无对应物 — 窄高视口防溢出安全留边 4px×2
+  ch = std::min(ch, area.h - 8.0f);  // 豁免: Mini 无对应物 — 窄高视口防溢出安全留边 4px×2（出处: 无）
 
   const float cx = 0.0f;  // src: popup-styles.ts:43-50 贴左停靠
   const float cy = std::max(0.0f, (area.h - ch) / 2.0f);
@@ -821,9 +821,9 @@ void FirstRunGuideDialog::on_arrange(const RectF& area) {
     if (star_y + star_h > pre_actions - 4.0f) {
       const float avail = pre_actions - 4.0f - star_y;
       if (avail < 70.0f) {
-        star_y = std::max(content_y + node_h + 2.0f, pre_actions - 4.0f - star_h);  // 豁免: 极矮视口下防底栏重叠
+        star_y = std::max(content_y + node_h + 2.0f, pre_actions - 4.0f - star_h);  // 豁免: Mini 无对应物 — 极矮视口下防底栏重叠安全间距（出处: 无）
       }
-      star_h = std::max(40.0f, pre_actions - 4.0f - star_y);  // 豁免: 视口受限时压缩卡片高
+      star_h = std::max(40.0f, pre_actions - 4.0f - star_y);  // 豁免: Mini 无对应物 — 极矮视口受限时卡片最小保底高度（出处: 无）
     }
     card_star_rect_ = {inner_x, star_y, inner_w, star_h};
     // src: :1059-1082 Wiki 文本按钮右对齐
@@ -944,13 +944,13 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
       const float banner_y = pills_y + pills_h_ + kPillMb + (hover_banner_ ? -1.0f : 0.0f);
       const RectF br = {inner_x, banner_y, inner_w, banner_h_};
       banner_clip_rect_ = br;
-      // src: :667-676 retro rgba(27,94,32,.12) / dark rgba(46,125,50,.18) /
+      // src: first-run-guide-dialog.tsx:647-657 retro rgba(27,94,32,.12) / dark rgba(46,125,50,.18) /
       //      light rgba(46,125,50,.1)，边框 1px dashed
       const Color4f b_bg = is_retro()
                                ? Color4f::hex(0x1B5E20, hover_banner_ ? 0.18f : 0.12f)
                                : (is_light() ? Color4f::hex(0x2E7D32, hover_banner_ ? 0.15f : 0.10f)
                                              : Color4f::hex(0x2E7D32, hover_banner_ ? 0.24f : 0.18f));
-      const Color4f b_bd = is_retro() ? Color4f::hex(0x1B5E20, 0.45f) : ready_color();
+      const Color4f b_bd = is_retro() ? Color4f::hex(0x1B5E20, 0.45f) : ready_color();  // src: first-run-guide-dialog.tsx:655-657
       Brush bbg{b_bg};
       rt.round_rect(br, 6.0f, {}, &bbg);
       dashed_rect(rt, br, b_bd);
@@ -1032,7 +1032,7 @@ void FirstRunGuideDialog::on_paint(IRenderTarget& rt) {
     const bool unconfirmed = this->unconfirmed();
     const float status_y = imported_y + kImportedH + kImportedMb + kStatusMt;
     if (!ready && !unconfirmed) {
-      // 豁免: CircularProgress 以 12px 空心圆近似（引擎无动画组件）
+      // src: first-run-guide-dialog.tsx:861 CircularProgress size={12} sx={{ color: secondaryText }}
       rt.round_rect({nc.x + kCardPad, status_y + 2.0f, 12.0f, 12.0f}, 6.0f,
                     Pen{secondary_text(), 1.0f}, nullptr);
       draw_text(rt, L"◌", {nc.x + kCardPad, status_y, 14.0f, 18.0f}, kStatusFont,
@@ -1354,12 +1354,12 @@ void FirstRunGuideDialog::open_url_menu(PointF anchor) {
   if (!url_menu_ || !url_field_) return;
   TextField* f = url_field_;
 
-  // 外观：src: _layout.tsx:1872-1884（minWidth 160 / radius 6 / border 1px
-  //   rgba(255,255,255,.12) / List padding 4px 0）+ style-helpers.tsx:126-145
+  // 外观：src: _layout.tsx:1564-1566 + utils/popup-styles.ts:349-370（minWidth 160 / radius 6 /
+  //   border 1px rgba(255,255,255,.12) / List padding 4px 0）+ style-helpers.tsx:126-145
   MenuStyle st;
   st.item_h = 48;
   st.padding_h = 16;
-  st.min_w = 160;  // src: _layout.tsx:1876 minWidth '160px'
+  st.min_w = 160;  // src: _layout.tsx:1565 minWidth '160px'
   st.radius = 6;
   st.font_size = 13.0f;
   st.pad_v = 4;
@@ -1373,7 +1373,7 @@ void FirstRunGuideDialog::open_url_menu(PointF anchor) {
   // 6 套皮肤：面板底/边框/圆角 + hover 全部走查表（← apply_menu_skin）
   apply_menu_skin(st);
 
-  // 5 项 + 1 分隔线：src: _layout.tsx:1886-1931（文案 zh: shared.json:27-31）
+  // 5 项 + 1 分隔线：src: _layout.tsx:1568-1601（文案 zh: shared.json:27-31）
   std::vector<MenuItem> its;
   its.push_back({L"✂️ " + tr("shared.actions.cut"), !f->can_clear(), false, L"", false});
   its.push_back({L"📋 " + tr("shared.actions.copy"), !f->can_clear(), false, L"", false});

@@ -282,10 +282,6 @@ void Segmented::on_paint(IRenderTarget& rt) {
     rt.draw_line({r.x + cont_radius, r.bottom() + 0.5f},
                  {r.right() - cont_radius, r.bottom() + 0.5f},
                  Pen{cont_top_hi, 1.0f});
-  if (false)
-    rt.draw_line({r.x + cont_radius, r.y + 0.5f},
-                 {r.right() - cont_radius, r.y + 0.5f},
-                 Pen{cont_top_hi, 1.0f});
   if (options_.empty()) return;
   float seg_w = padbox.w / static_cast<float>(options_.size());
   for (int i = 0; i < static_cast<int>(options_.size()); ++i) {
@@ -334,7 +330,7 @@ void Segmented::on_paint(IRenderTarget& rt) {
           draw_glow(rt, sr, act_radius, act_glow_color, act_glow_blur);
         rt.round_rect(sr, act_radius,
                       themed_ && act_border.a > 0 ? Pen{act_border, 1}
-                                                  : Pen{Color4f(0, 0, 0, 0), 0},
+                                                  : Pen{Color4f(0, 0, 0, 0), 0},  // src: utils/button-styles.ts:1035 非描边皮肤选中块 border: none
                       &sel_bg);
       }
     }

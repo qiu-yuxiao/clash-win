@@ -95,7 +95,7 @@ std::string strip_ver_prefix(std::string ver) {
   };
   trim_ws(ver);
   if (ver.rfind("Ver.", 0) == 0 || ver.rfind("ver.", 0) == 0) {
-    ver.erase(0, 4);  // 豁免: 字符串前缀长度 "Ver."（出处: 无）
+    ver.erase(0, 4);  // src: pages/_layout.tsx:920 剥离版本前缀 "Ver."（4 字符）
     trim_ws(ver);
   }
   while (!ver.empty() && (ver[0] == 'v' || ver[0] == 'V')) {
@@ -1700,7 +1700,7 @@ void LogViewerModal::on_paint(IRenderTarget& rt) {
   if (fade_.hidden()) return;
 
   // src: src/pages/logs.tsx + src/pages/_layout/components/layout-dialogs.tsx:595-641
-  // 已按 Mini 主题色实现，无终端风配色字面量（过时豁免注释已删）。
+  // 已按 Mini 主题色实现，无终端风配色字面量（历史旧注释已清理）。
   const float pane_w = std::min(theme::kPopupPaneWidth, bounds().w);
   rt.fill_rect({0, 0, pane_w, bounds().h}, Brush{Color4f(0, 0, 0, 0.5f)});
 

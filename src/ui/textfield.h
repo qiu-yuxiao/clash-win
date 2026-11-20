@@ -155,7 +155,7 @@ class TextField : public Widget {
   float height_ = 28;  // ← 行内输入框高 28（源码 size=small 布局）
   float right_pad_ = 0;  // ← endAdornment 右侧预留内距（first-run-guide-dialog.tsx:714）
   bool multiline_ = false;  // ← MUI TextField multiline 折行模式（profile-import-card.tsx:140）
-  static constexpr int kCaretBlinkMs = 500;  // 豁免: Mini 无对应物 — 光标闪烁半周期（MUI InputBase 无闪烁字面量）
+  static constexpr int kCaretBlinkMs = 500;  // 豁免: Mini 无对应物 — Win32 原生文本输入光标闪烁半周期 500ms（出处: 无）
 
  private:
   void insert_text(const std::wstring& s);

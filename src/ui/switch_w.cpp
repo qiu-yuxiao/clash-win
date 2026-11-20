@@ -147,6 +147,7 @@ void SwitchW::on_paint(IRenderTarget& rt) {
     hc.a *= (1.0f - a) * dis;
     const float half = std::min(track_radius, w * 0.5f);
     const float hi_w = sp.off_bottom_hi_w * scale;
+    // src: components/base/base-switch.tsx:90 trackUncheckedShadow 0 1px 0
     rt.draw_line({half, h - 0.5f * hi_w}, {w - half, h - 0.5f * hi_w},
                  Pen{hc, hi_w});
   }
@@ -190,6 +191,7 @@ void SwitchW::on_paint(IRenderTarget& rt) {
       hc.a *= a * dis;
       const float half = std::min(track_radius, w * 0.5f);
       const float hi_w = sp.on_bottom_hi_w * scale;
+      // src: components/base/base-switch.tsx:63 trackCheckedShadow 0 1px 0
       rt.draw_line({half, h - 0.5f * hi_w}, {w - half, h - 0.5f * hi_w},
                    Pen{hc, hi_w});
     }

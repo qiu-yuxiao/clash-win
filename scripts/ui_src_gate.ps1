@@ -77,7 +77,14 @@ $join = ($patterns | ForEach-Object { "(?:$_)" }) -join '|'
 
 # ---------- MiniRoot 与「纯文件名 -> 全路径」索引（G4-c） ----------
 $miniRootResolved = $null
-if (Test-Path $MiniRoot) { $miniRootResolved = (Resolve-Path $MiniRoot).Path }
+try {
+  if ($MiniRoot -and (Test-Path -LiteralPath $MiniRoot -ErrorAction Stop) -and
+      (Test-Path -LiteralPath (Join-Path $MiniRoot 'src') -ErrorAction Stop)) {
+    $miniRootResolved = (Resolve-Path -LiteralPath $MiniRoot -ErrorAction Stop).Path
+  }
+} catch {
+  $miniRootResolved = $null
+}
 $fileNameIndex = @{}
 if ($miniRootResolved) {
   # 只索引 src：node_modules/@mui 多为 pnpm 符号链接，PS5.1 -Recurse 不跟随

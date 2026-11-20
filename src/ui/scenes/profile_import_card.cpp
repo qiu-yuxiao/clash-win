@@ -110,7 +110,7 @@ void ProfileRowWidget::on_paint(IRenderTarget& rt) {
     Brush accent_b{ThemeService::instance().primary()};
     rt.push_clip({0.0f, 0.0f, 3.0f, h});  // ← borderLeft 3px src/pages/_layout/components/profile-import-card.tsx:231
     rt.round_rect(r, 6.0f,  // ← borderRadius 6 src/pages/_layout/components/profile-import-card.tsx:227
-                  Pen{Color4f(0, 0, 0, 0), 0},  // 豁免: 无边框哨兵（出处: 无）
+                  Pen{Color4f(0, 0, 0, 0), 0},  // 豁免: Mini 无对应物 — 左描边裁剪填充无需外框，Pen 透明零宽哨兵（出处: 无）
                   &accent_b);
     rt.pop_clip();
   }
@@ -137,6 +137,7 @@ void ProfileRowWidget::on_paint(IRenderTarget& rt) {
 
   RectF del_box{del_cx - 9.0f, btn_cy - 9.0f, 18.0f, 18.0f};
   if (hover_delete_) {
+    // src: profile-import-card.tsx:291-298 IconButton size="small" hover 圆形底
     Brush hbg{light ? Color4f::hex(0x000000, 0.06f) : Color4f::hex(0xFFFFFF, 0.08f)};
     rt.round_rect(del_box, 9.0f, Pen{Color4f(0, 0, 0, 0), 0}, &hbg);
   }
@@ -173,7 +174,7 @@ void ProfileRowWidget::on_paint(IRenderTarget& rt) {
       Brush track{action_hover(light)};
       Brush fill{ThemeService::instance().primary()};
       rt.round_rect({x0, bar_y, bar_w, 2.0f}, 1.0f,
-                    Pen{Color4f(0, 0, 0, 0), 0},  // 豁免: 无边框哨兵
+                    Pen{Color4f(0, 0, 0, 0), 0},  // 豁免: Mini 无对应物 — 进度条底槽无描边，Pen 透明零宽哨兵（出处: 无）
                     &track);
       rt.fill_rect({x0, bar_y, bar_w * progress_ / 100.0f, 2.0f}, fill);
     }

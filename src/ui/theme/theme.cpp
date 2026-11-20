@@ -280,7 +280,7 @@ void ThemeService::set_primary_override(const std::string& css_hex) {
 }
 
 // ---------- Button（← get3DButtonStyle colorType 分支 × 6 皮肤） ----------
-// 【近似差异】retro-3d 渐变（6 站点）→ 取中段站色为 fill、hover 渐变取其
+// 【渲染折算】retro-3d 渐变（6 站点）→ 取中段站色为 fill、hover 渐变取其
 // 中段站色；多层 bevel boxShadow（×depth/vibrancy）由 Button::draw_button_bg
 // 的重写点用 depth_factor()/vibrancy_factor() 绘制（T13 节点卡接入时按需）。
 ButtonPaint ThemeService::button_paint(const char* color_type,
@@ -559,7 +559,7 @@ ButtonPaint ThemeService::button_paint(const char* color_type,
       // ← :327-328 active 0 2px 4px rgba(0,0,0,.04)
       p.shadow_active[0] = {Color4f::hex(0x000000, 0.04f), 2.0f, 4.0f};
       p.shadow_active_n = 1;
-      // 禁用态 ← :330-343（backdropFilter 在 D2D 无对应，只取色值）
+      // 禁用态 ← :330-343（backdropFilter 在 D2D 无对应，仅用色彩分量）
       p.fill_disabled = Color4f::hex(light ? 0x000000 : 0xFFFFFF, 0.03f);
       p.border_disabled = Color4f::hex(light ? 0x000000 : 0xFFFFFF, light ? 0.08f : 0.05f);
       p.text_disabled = Color4f::hex(light ? 0x000000 : 0xFFFFFF, light ? 0.26f : 0.25f);
@@ -1599,7 +1599,7 @@ CardPaint ThemeService::card_paint(const char* card_type) const {
       p.radius = 6.0f;      // CSS borderRadius '6px'（不随 depth）
       p.border_w = 0.0f;    // border: none（borderColor 仅继承用）
       p.has_shadow = true;
-      p.shadow_color = bevel;  // CSS 是 0 1/2/3px 硬边 bevel，此处近似为贴边实影
+      p.shadow_color = bevel;  // CSS 是 0 1/2/3px 硬边 bevel，此处折算为贴边实影
       p.shadow_dy = 3.0f * d;
       p.shadow_blur = 2.0f * d;
       // ← :556/:561 boxShadow 首层 '0 1px 0 0 ${bevelShadowDark}' = 底缘 1px 实线

@@ -1,5 +1,5 @@
 #pragma once
-// 软阴影 / 外发光近似（D2D 无 CSS box-shadow）。
+// 软阴影 / 外发光多层外扩合成（D2D 无 CSS box-shadow 原语）。
 //
 // Mini 用 CSS box-shadow 表达阴影与发光，且几乎每一处都乘 depth/vibrancy：
 //   retro-3d  0 calc(8px * --depth-factor) calc(32px * --depth-factor) rgba(0,0,0, .3 * --depth-factor)

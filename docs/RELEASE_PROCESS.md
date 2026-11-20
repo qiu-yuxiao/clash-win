@@ -93,7 +93,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\release_preflight.ps
 | **GATE 3** | `CHANGELOG.md` 含非空 `## v<X.Y.Z>` 且无 `TODO`/`TBD`；`docs/KNOWN_LIMITATIONS.md` 存在且被 Issue 模板正确引用 | 防止空发版说明、未完成的占位符上线、或 Issue 模板出现 404 死链。 |
 | **GATE 4** | `tests/test_*.cpp` 100% 在 `CMakeLists.txt` 注册；`test_t35_release_readiness.cpp` 无硬编码死版本；内核进程名常量一致 | 防止新增测试文件漏注册静默跳过，或 `t35` 写死旧版本号卡死 CI。 |
 | **GATE 5** | 本地或 CI 还原后调用 `verify_sidecar.ps1` 校验 5 个上游二进制字节数与 SHA256；校验打包脚本引用的内核文件名真实存在 | 防止 `win-mihomo.exe` 缺失（如历史 v0.2.5 安装包漏内核事故）或上游二进制被签名脚本篡改。 |
-| **GATE 6** | 调用 `scripts/ui_src_gate.ps1` 校验 UI 源码溯源注释门禁 | 防止缺少 Mini 源码溯源标注的改动混入发布分支。 |
+| **GATE 6** | 调用 `scripts/ui_src_gate.ps1 -Strict` 校验 UI 源码溯源注释严格门禁 | 防止缺少 Mini 源码溯源标注、行号越界或弱标注的改动混入发布分支。 |
 | **GATE 7** | 扫描 `scripts/*.ps1` **及** `installer/*.ps1`：凡含非 ASCII 字符必须带 UTF-8 BOM (`EF BB BF`) 且无孤立 `CR`；`scripts/git-hooks/pre-push` 必须为纯 `LF` 且自动兼容 `powershell.exe` / `pwsh` | 防止中文 PowerShell 脚本在本地 5.1 与 CI `pwsh` 7 编码解析不一致（`ParserError`），以及防止本机无 `pwsh` 时 `pre-push` 钩子直接报错阻断推送。 |
 
 ---

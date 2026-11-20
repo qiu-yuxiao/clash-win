@@ -196,6 +196,7 @@ void Slider::on_paint(IRenderTarget& rt) {
                 {themed_ ? sp.rail_border : Color4f{0, 0, 0, 0}, rail_bw},
                 &rail_b);
   if (themed_ && sp.rail_top_hi.a > 0.004f)
+    // src: pages/_layout/utils/style-helpers.tsx:170-172 rail boxShadow 0 1px 0 顶高光线
     rt.draw_line({rail.x, rail.y + 0.5f}, {rail.right(), rail.y + 0.5f},
                  Pen{sp.rail_top_hi, 1.0f});
 
@@ -295,7 +296,7 @@ void Slider::on_paint(IRenderTarget& rt) {
       const Color4f base = use_hih ? sp.thumb_hover_inset_hi_color
                                    : sp.thumb_inset_hi_color;
       RectF ir{br.x, br.y + dy, br.w, br.h - dy};
-      // 只保留上缘：用一层贴顶的横向渐变近似 inset 顶部高光
+      // 只保留上缘：用分层贴顶描边还原 CSS inset 顶部高光
       const int layers = 4;
       for (int i = 0; i < layers; ++i) {
         const float t = static_cast<float>(i) / static_cast<float>(layers);

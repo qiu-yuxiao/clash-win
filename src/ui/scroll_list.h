@@ -42,9 +42,9 @@ class ScrollList : public Widget {
   void collect_transient_children(std::vector<Widget*>& out) const override;
 
   // 绘制参数
-  Color4f scrollbar_ = Color4f::hex(0x000000, 0.25f);  // 豁免: Mini 无对应物 — 滚动条缺省 25% 黑（可被主题覆盖）
+  Color4f scrollbar_ = Color4f::hex(0x000000, 0.25f);  // 豁免: Mini 无对应物 — ScrollList 未启用主题时的回退滚动条色（出处: 无）
   bool themed_ = false;  // T12：true 时取 --scrollbar-thumb
-  float scrollbar_w_ = 6;  // 豁免: 滚动条宽 6（主题覆盖前缺省）
+  float scrollbar_w_ = 6;  // src: pages/_layout/hooks/use-custom-theme.ts:544-547 ::-webkit-scrollbar width 6px
   void set_show_scrollbar(bool show) {
     if (show_scrollbar_ == show) return;
     show_scrollbar_ = show;

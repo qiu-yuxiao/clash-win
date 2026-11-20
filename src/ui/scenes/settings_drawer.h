@@ -295,14 +295,14 @@ class SettingsDrawer : public Stack {
   void sync_theme_mode(const std::wstring& mode);
   // 主题切换后重着色静态标签（Label 缓存 style.color，不重排则旧色残留）
   void restyle_cards();
-  // 底部行六格两态重刷（← _layout.tsx:1705-1749 选中格查当前皮肤）
+  // 底部行六格两态重刷（← _layout.tsx:1407-1468 选中格查当前皮肤）
   void refresh_skin_cells();
   // 皮肤选择（主题卡隐藏钮与底部行共用）
   void select_skin(int i);
   // 皮肤切换/恢复后同步滑块量程（max 逐皮肤）、标签与当前值
   void sync_skin_sliders(theme::SkinId skin, float depth, float vibrancy);
 
-  // 底部行（_layout.tsx:1534-1720）：窗口高 ≥831 DIP 才显示；
+  // 底部行（_layout.tsx:1260-1476）：窗口高 ≥831 DIP 才显示；
   //   左 0..80 = ? 帮助、80..177.5 = Language、177.5..640 = 6 个皮肤格
   Button* bottom_help_ = nullptr;
   Button* lang_btn_ = nullptr;

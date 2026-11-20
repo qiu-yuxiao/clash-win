@@ -209,6 +209,15 @@ Replace-RegexStrict (Join-Path $RepoRoot 'src\clashwin.rc') `
   '("ProductVersion",\s*")([^"]*)(")' ('${1}' + $Version + '${3}')
 Replace-RegexStrict (Join-Path $RepoRoot 'src\app.manifest') `
   '(<assemblyIdentity\s+version=")([^"]*)(")' ('${1}' + "$BaseSemVer.0" + '${3}')
+$MajorMinor = if ($BaseSemVer -match '^([0-9]+\.[0-9]+)\.') { $Matches[1] } else { $BaseSemVer }
+Replace-RegexStrict (Join-Path $RepoRoot 'README.md') `
+  '(Independent\s*\(`v0\.1\.0`\s*→\s*current\s*`v)([^`]+)(`)' ('${1}' + $Version + '${3}')
+Replace-RegexStrict (Join-Path $RepoRoot 'docs\README.md') `
+  '(## 一、项目当前状态（v)([^）]+)(）)' ('${1}' + $Version + '${3}')
+Replace-RegexStrict (Join-Path $RepoRoot 'docs\README.md') `
+  '(\|\s*\*\*当前发布版本\*\*\s*\|\s*`v)([^`]+)(`)' ('${1}' + $Version + '${3}')
+Replace-RegexStrict (Join-Path $RepoRoot 'SECURITY.md') `
+  '`([0-9]+\.[0-9]+)\.x`' ("``$MajorMinor.x``")
 
 # ---------- 3. 检查 / 自动生成 CHANGELOG.md 对应版本章节草稿 ----------
 Write-Host "`n[步骤 2/5] 检查 CHANGELOG.md 发布说明章节" -ForegroundColor Yellow

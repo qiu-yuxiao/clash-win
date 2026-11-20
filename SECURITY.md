@@ -4,10 +4,10 @@
 
 | Version | Supported |
 | :--- | :--- |
-| `1.0.x` (latest release) | ✅ |
+| `1.1.x` (latest release) | ✅ |
 | Older / pre-release builds | ❌ |
 
-Clash Win is currently on its `1.0.x` line. Security fixes are delivered as a new `1.0.x` release; there are no long-term support branches yet. Releases and checksums are published at [qiu-yuxiao/clash-win/releases](https://github.com/qiu-yuxiao/clash-win/releases).
+Clash Win is currently on its `1.1.x` line. Security fixes are delivered as a new `1.1.x` release; there are no long-term support branches yet. Releases and checksums are published at [qiu-yuxiao/clash-win/releases](https://github.com/qiu-yuxiao/clash-win/releases).
 
 ## Reporting a vulnerability
 

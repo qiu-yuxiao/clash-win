@@ -155,7 +155,7 @@ class LangSelectButton : public Button {
       rt.draw_text(text, {tr.x, tr.y + p.text_shadow_dy, tr.w, tr.h}, ts2);
     }
     rt.draw_text(text, tr, ts);
-    // src: _layout.tsx:1640 MuiSelect-icon 14px at right 4px
+    // src: _layout.tsx:1333-1336 MuiSelect-icon 14px at right 4px
     constexpr float kChevronSz = 14.0f;
     IconW::paint_at(rt, "keyboardarrowdown",
                     {r.right() - 18.0f, r.y + (r.h - kChevronSz) * 0.5f, kChevronSz, kChevronSz},
@@ -163,7 +163,7 @@ class LangSelectButton : public Button {
   }
 };
 
-// 底部行皮肤格（← _layout.tsx:1702-1778）：未选中仅 index==0 画左边框防双线；选中走 draw_button_skin
+// 底部行皮肤格（← _layout.tsx:1415-1473）：未选中仅 index==0 画左边框防双线；选中走 draw_button_skin
 class SkinCell : public Button {
  public:
   explicit SkinCell(std::wstring t, int idx = 0)
@@ -177,28 +177,28 @@ class SkinCell : public Button {
     // 悬停进度：按下沿用原语义（直接取悬停底），其余按 0.15s 过渡插值
     const float k = st == State::Pressed ? 1.0f : hover_mix();
     if (!selected) {
-      // src: _layout.tsx:1714-1748 未选中 color '#555555/#aaaaaa'、bg '#f3f3f3/#1e1e1e'
+      // src: _layout.tsx:1421-1443 未选中 color '#555555/#aaaaaa'、bg '#f3f3f3/#1e1e1e'
       Color4f bg = is_light()
                        ? mix_hover(Color4f::hex(0xF3F3F3), Color4f::hex(0xE5E5E5), k)
                        : mix_hover(Color4f::hex(0x1E1E1E), Color4f::hex(0x2D2D2D), k);
       const Pen border{is_light() ? Color4f::hex(0xD0D0D0) : Color4f::hex(0x404040), 1.0f};
       Brush fill{bg};
       rt.fill_rect(r, fill);
-      // src: _layout.tsx:1747 borderLeft: index === 0 ? '1px solid' : 'none'
+      // src: _layout.tsx:1433-1436 borderLeft: index === 0 ? '1px solid' : 'none'
       if (cell_index == 0) rt.draw_line({r.x + 0.5f, r.y}, {r.x + 0.5f, r.bottom()}, border);
       rt.draw_line({r.x, r.y + 0.5f}, {r.right(), r.y + 0.5f}, border);
       rt.draw_line({r.right() - 0.5f, r.y}, {r.right() - 0.5f, r.bottom()}, border);
       rt.draw_line({r.x, r.bottom() - 0.5f}, {r.right(), r.bottom() - 0.5f}, border);
       return;
     }
-    // src: _layout.tsx:1759-1778 get3DButtonStyle(theme, 'contained', 'primary')
+    // src: _layout.tsx:1445-1465 get3DButtonStyle(theme, 'contained', 'primary')
     const auto p = ThemeService::instance().button_paint("primary");
     draw_button_skin(rt, r, p, k, st == State::Pressed);
   }
 
   void draw_button_text(IRenderTarget& rt, const RectF& r) override {
     TextStyle ts = text_style;
-    // src: _layout.tsx:1714 未选中 '#555555'/'#aaaaaa'
+    // src: _layout.tsx:1430 未选中 '#555555'/'#aaaaaa'
     // src: button-styles.ts:35 selected primary textColor '#2C1F03'
     ts.color = selected
                    ? (ThemeService::instance().skin() == theme::SkinId::Retro3d
@@ -973,7 +973,7 @@ void ThemeCard::on_paint(IRenderTarget& rt) {
   const float y = copyright_->bounds().y - 9.0f;
   const float x0 = kCardPad, x1 = bounds().w - kCardPad;
   if (y > 0.0f && x1 > x0) {
-    // src: pages/_theme.tsx:47 divider light rgba(0,0,0,.12) / dark rgba(255,255,255,.12)
+    // src: node_modules/@mui/material/styles/createPalette.js:34,71 divider light rgba(0,0,0,.12) / dark rgba(255,255,255,.12)
     Brush dash{divider_color()};
     for (float x = x0; x + 3.0f < x1; x += 6.0f) {
       rt.fill_rect({x, y, 3.0f, 1.0f}, dash);
@@ -1433,7 +1433,7 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
 
   static const wchar_t* kSkinNames[6] = {L"Trump-3D", L"Original", L"Modern",
                                          L"Frosted", L"Cyberpunk", L"Monochrome"};
-  // src: _layout.tsx:1663-1688 每皮肤独立 fontFamily
+  // src: _layout.tsx:1375-1406 每皮肤独立 fontFamily
   //   ★ 取候选链首项（与全局皮肤字体共用 skin_font_candidates 单一真源）
   const theme::SkinId kSkinIds[6] = {
       theme::SkinId::Retro3d,   theme::SkinId::Original,
@@ -1451,7 +1451,7 @@ SettingsDrawer::SettingsDrawer(Widget* parent) : Stack(parent) {
     skin_row_.push_back(raw);
     panel_->add_child(std::move(b));
   }
-  refresh_skin_cells();  // 初始选中态（← _layout.tsx:1729-1749）
+  refresh_skin_cells();  // 初始选中态（← _layout.tsx:1407-1468）
 
   // T20：右列连接面板（宽窗并排，_layout.tsx:1519-1533）
   auto cp = std::make_unique<ConnectionsPanel>();
@@ -1767,7 +1767,7 @@ void SettingsDrawer::restyle_cards() {
       theme_card_->vibrancy_slider_->apply_theme();
     theme_card_->invalidate();
   }
-  // 底部行六格与固定功能按钮：选中/未选中两态随皮肤与亮暗重刷（← _layout.tsx:1705-1749）
+  // 底部行六格与固定功能按钮：选中/未选中两态随皮肤与亮暗重刷（← _layout.tsx:1407-1468）
   refresh_skin_cells();
   if (lang_btn_) lang_btn_->invalidate();
   if (bottom_help_) bottom_help_->invalidate();
@@ -2045,7 +2045,7 @@ void SettingsDrawer::open_profile_menu(const std::string& uid, PointF anchor) {
   // 6 套皮肤：面板底/边框/圆角 + hover 全部走查表（← apply_menu_skin）
   apply_menu_skin(st);
 
-  // 5 项 + 2 分隔线：src: _layout.tsx:1820-1856（图标/文案取自 zh 语言包）
+  // 5 项 + 2 分隔线：src: _layout.tsx:1523-1548（图标/文案取自 zh 语言包）
   std::vector<MenuItem> its;
   its.push_back({L"📝 " + tr("shared.actions.edit"), false, false, L"", false});
   its.push_back({L"📄 " + tr("profiles.components.menu.editFile"), false, false, L"", false});
@@ -2098,7 +2098,7 @@ void SettingsDrawer::open_url_menu(PointF anchor) {
   MenuStyle st;
   st.item_h = 32;
   st.padding_h = 14;
-  st.min_w = 160;  // src: _layout.tsx:1876 minWidth '160px'
+  st.min_w = 160;  // src: _layout.tsx:1565 minWidth '160px'
   st.radius = 6;
   st.font_size = 12.5f;
   st.pad_v = 4;
@@ -2112,7 +2112,7 @@ void SettingsDrawer::open_url_menu(PointF anchor) {
   // 6 套皮肤：面板底/边框/圆角 + hover 全部走查表（← apply_menu_skin）
   apply_menu_skin(st);
 
-  // 5 项 + 1 分隔线：src: _layout.tsx:1886-1931（文案 zh: shared.json:27-31）
+  // 5 项 + 1 分隔线：src: _layout.tsx:1568-1601（文案 zh: shared.json:27-31）
   std::vector<MenuItem> its;
   its.push_back({L"✂️ " + tr("shared.actions.cut"), !f->can_cut(), false, L"", false});
   its.push_back({L"📋 " + tr("shared.actions.copy"), !f->can_copy(), false, L"", false});

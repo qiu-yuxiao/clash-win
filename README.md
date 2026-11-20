@@ -170,10 +170,10 @@ Get-FileHash .\Clash.Win_<version>_x64_portable.zip -Algorithm SHA256
 | Shared Runtime Resource | Clash Win | Clash Mini |
 | :--- | :--- | :--- |
 | Mixed / SOCKS5 / HTTP Ports | `10801` / `10802` / `10803` | `10801` / `10802` / `10803` |
-| HTTP Guard Fallback Port | `7899` | `7899` |
+| HTTP Guard Fallback Port | `10803` | `10803` |
 | External Controller Port | `9098` (auto-increments if occupied) | `9098` (auto-increments if occupied) |
 | Single-Instance / PAC Port | `33335` (Dev `33336`) | `33335` (Dev `33336`) |
-| Named Pipe & Service | `\\.\pipe\mini-mihomo-win` · `clash_verge_service` | `\\.\pipe\mini-mihomo-win` · `clash_verge_service` |
+| Named Pipe & Service | `\\.\pipe\mini-mihomo-win` · `clash_verge_service` | `\\.\pipe\mini-mihomo` · `clash_verge_service` |
 
 ---
 

@@ -4,7 +4,7 @@
 //   setting.primary_color || 系统 AccentColor || 色板缺省；
 //   original 皮肤强制 hsl(239*val2, 26%, 49%)
 // - 控件族参数 ← utils/button-styles.ts get3DButtonStyle/get3DSegmented*/
-//   get3DInputStyle 按 skin×mode 查表（渐变/多层阴影 → C++ 离散色近似，
+//   get3DInputStyle 按 skin×mode 查表（渐变/多层阴影 → C++ 分层离散折算，
 //   差异逐项标注 theme.cpp）
 // - 切换热生效：subscribe 回调 → 控件 invalidate（对齐 clash-mini-skin-changed）
 // - 持久化键（← localStorage）：clash-mini-control-skin / theme_mode 归 T17 接
@@ -26,7 +26,7 @@ struct ButtonPaint {
   Color4f border;       // a=0 表示无边框
   float border_w = 1;
   float radius = 4;
-  int weight = 500;     // 字重（T12 字体近似：见 theme.cpp 注释）
+  int weight = 500;     // 字重（← MUI button fontWeight 500；字体候选链见 theme.cpp）
 
   // F-D02：3D 渐变 / 浮雕 / 文字阴影 / 位移（对齐 utils/button-styles.ts）
   // retro-3d 用 135° 多停渐变；其余皮肤用单色 fill + 位移。
@@ -50,7 +50,7 @@ struct ButtonPaint {
 
   // ---------- 三态阴影 / 外发光（← button-styles.ts 各皮肤 boxShadow 的
   //   `&:hover` / `&:active` 覆盖；台账 V8） ----------
-  // D2D 没有 box-shadow：每层柔影用「多层外扩 + 递减 alpha」近似（soft_shadow.h）。
+  // D2D 没有 box-shadow：每层柔影用「多层外扩 + 递减 alpha」合成（soft_shadow.h）。
   // retro-3d 的硬 bevel（0 d 0 / 0 2d 0 实色层）仍由 bevel_dark 单独表达，
   // 这里只放柔影层。
   struct ShadowLayer {

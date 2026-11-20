@@ -14,7 +14,7 @@ inline constexpr const char* kWindowState = "window_state.json";
 inline constexpr const char* kProxyHeadState = "proxy_head_state.json";
 
 // ---------- 应用版本（2026-11-06 23:20 用户裁定：Clash Win 独立版本线，
-//   从 0.1.0 起步逐版递增，不与 Clash Mini 版本号绑死；当前 v0.3.3 跟进 Clash Mini v3.3.0） ----------
+//   从 0.1.0 起步逐版递增，不与 Clash Mini 版本号绑死；现行上游锚点见《移植基本准则.md》） ----------
 inline constexpr const char* kAppVersion = "1.1.2";
 
 // ---------- 端口（1:1 对齐 Clash Mini 官方规范） ----------

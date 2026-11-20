@@ -1,9 +1,8 @@
 #pragma once
 // Win32 UI Automation (UIA) 原生无障碍读屏引擎接口。
-// 豁免: Mini 无对应物 — Clash Mini 依赖 WebView2 DOM/ARIA 暴露无障碍树；
-//   Clash Win 为零 WebView 纯 Direct2D 自绘架构，通过原生 COM
-//   IRawElementProviderSimple / Fragment / FragmentRoot 将 Widget 树与 13 语种
-//   文案直接暴露给 Windows 讲述人（Narrator）、NVDA 等读屏软件（出处: 无）。
+// 豁免: Mini 无对应物 — Clash Mini 依赖 WebView2 DOM/ARIA 暴露无障碍树，Win 以原生 UIA COM 桥接暴露（出处: 无）
+//   通过 IRawElementProviderSimple / Fragment / FragmentRoot 将自绘 Widget 树与
+//   13 语种文案直接暴露给 Windows 讲述人（Narrator）、NVDA、JAWS 等读屏软件。
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN

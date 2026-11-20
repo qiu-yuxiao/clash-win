@@ -257,7 +257,7 @@ bool MainWindow::create(bool show_immediately, bool defer_render) {
   build_widget_tree();
 
   // 皮肤/亮暗/主色热切换：ThemeService 六皮肤表由此接上订阅者，切皮肤即重绘。
-  // ← Mini: src/pages/_layout.tsx:1705-1749 选中格每次渲染按 get3DButtonStyle
+  // ← Mini: src/pages/_layout.tsx:1407-1468 选中格每次渲染按 get3DButtonStyle
   //   (theme, 'contained', 'primary') 取当前 skin；src: src/utils/button-styles.ts:22
   //   getActiveSkin(theme) —— 所有控件按当前皮肤即时换表，无需重启。
   theme_sub_ = theme::ThemeService::instance().subscribe([this] {
@@ -3152,7 +3152,7 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       Widget* hit_w = route_mouse_event(&root_, e);
       if (down) update_ime_position();
       // 【DIAG】鼠标命中诊断（Down/Up）：打印事件坐标与命中控件的全局矩形。
-      //   用途：脚本化截图/自动化点击若「点了没反应」，靠这条日志判断是
+      //   用途：自动化点击回归若「点了没反应」，靠这条日志判断是
       //   消息没送达、坐标换算错、还是命中被上层控件拦截。
       if (e.type == MouseEventType::Down || e.type == MouseEventType::Up) {
         std::string d = std::string("[MOUSEDBG] ") +

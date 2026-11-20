@@ -23,7 +23,7 @@ class Button : public Widget {
     Color4f fill_disabled = Color4f::hex(0x000000, 0.12f);  // ← 禁用 12% 黑
     Color4f text_normal = Color4f::hex(0xFFFFFF);  // ← MUI contained contrastText
     Color4f text_disabled = Color4f::hex(0x000000, 0.26f);  // ← 禁用文字 26% 黑
-    Pen border{Color4f(0, 0, 0, 0), 0};  // 豁免: 缺省无边框（透明色）
+    Pen border{Color4f(0, 0, 0, 0), 0};  // 豁免: Mini 无对应物 — Button 基类缺省无边框透明哨兵，由主题覆盖（出处: 无）
     float radius = 4;  // ← MUI shape.borderRadius 4
     // 可选渐变底：grad_count>0 时非禁用态改用 135° 多停渐变绘制
     //   （retro-3d contained primary 六停，src: button-styles.ts:38-39）

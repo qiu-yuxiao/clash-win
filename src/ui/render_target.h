@@ -57,7 +57,7 @@ struct RectF {
 
 struct Color4f {
   float r = 0, g = 0, b = 0, a = 1;
-  static constexpr Color4f hex(uint32_t rgb, float alpha = 1.0f) {  // 豁免: Mini 无对应物 — 颜色工具缺省 alpha 不透明
+  static constexpr Color4f hex(uint32_t rgb, float alpha = 1.0f) {  // 豁免: Mini 无对应物 — Color4f::hex 缺省不透明 alpha=1.0（出处: 无）
     return {((rgb >> 16) & 0xFF) / 255.0f, ((rgb >> 8) & 0xFF) / 255.0f,
             (rgb & 0xFF) / 255.0f, alpha};
   }
@@ -138,7 +138,7 @@ class IRenderTarget {
                                               const GradientStop* stops,
                                               int count, float css_angle_deg,
                                               int corner_mask = 0xF) {
-    // 默认退化：无角度支持时用水平渐变近似。
+    // 默认退化：无角度支持时回退到水平渐变接口。
     (void)css_angle_deg; (void)corner_mask;
     fill_round_rect_gradient(r, radius, stops, count);
   }
@@ -149,7 +149,7 @@ class IRenderTarget {
                                       const GradientStop* stops, int count,
                                       float cx_ratio, float cy_ratio,
                                       float rx, float ry) {
-    // 默认退化：无径向支持时用水平渐变近似。
+    // 默认退化：无径向支持时回退到水平渐变接口。
     (void)cx_ratio; (void)cy_ratio; (void)rx; (void)ry;
     fill_round_rect_gradient(r, radius, stops, count);
   }
