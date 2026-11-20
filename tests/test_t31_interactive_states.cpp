@@ -35,6 +35,7 @@
 #include "test_ui_helper.h"
 #include "test_util.h"
 #include "ui/slider.h"
+#include "ui/soft_shadow.h"
 #include "ui/switch_w.h"
 #include "ui/theme/theme.h"
 
@@ -131,20 +132,34 @@ UT_TEST(t31_switch_hover_event_tracks_state) {
   clear_input_state();
 }
 
-// 4) retro-3d 开关 on 态旋钮也带内浮雕
-//    ← base-switch.tsx:97-98：`.Mui-checked .MuiSwitch-thumb` 只覆盖
-//      background 与 border，boxShadow 继承基础 thumb 的 inset 高光 + 底暗线。
+// 4) retro-3d 开关 off/on 双态旋钮均对齐滑轨 3D 亮金圆珠契约（四停不透明金渐变 + 顶高光 + 无底部黑线）
 UT_TEST(t31_switch_retro_on_thumb_has_inset_bevel) {
   auto& svc = ThemeService::instance();
-  svc.init(SkinId::Retro3d, ThemeMode::Dark);
-  auto p = svc.switch_paint();
-  UT_CHECK(p.on_thumb_inset_hi);
-  UT_CHECK(p.on_thumb_inset_dark);
-  // 数值与 off 态一致（同一套 boxShadow 继承）
-  UT_CHECK(almost_eq(p.on_thumb_inset_hi_color.a,
-                     p.off_thumb_inset_hi_color.a));
-  UT_CHECK(almost_eq(p.on_thumb_inset_dark_color.a,
-                     p.off_thumb_inset_dark_color.a));
+  for (ThemeMode mode : {ThemeMode::Dark, ThemeMode::Light}) {
+    svc.init(SkinId::Retro3d, mode);
+    const auto p = svc.switch_paint();
+    const auto sp = svc.slider_paint();
+    UT_CHECK(p.off_thumb_grad);
+    UT_CHECK(p.on_thumb_grad);
+    UT_CHECK_EQ(p.off_thumb_n, 4);
+    UT_CHECK_EQ(p.on_thumb_n, 4);
+    for (int i = 0; i < 4; ++i) {
+      UT_CHECK(almost_eq(p.off_thumb_stops[i].color.a, 1.0f));
+      UT_CHECK(almost_eq(p.on_thumb_stops[i].color.a, 1.0f));
+      UT_CHECK(almost_eq(p.off_thumb_stops[i].color.r, sp.thumb_stops[i].color.r));
+      UT_CHECK(almost_eq(p.off_thumb_stops[i].color.g, sp.thumb_stops[i].color.g));
+      UT_CHECK(almost_eq(p.off_thumb_stops[i].color.b, sp.thumb_stops[i].color.b));
+      UT_CHECK(almost_eq(p.on_thumb_stops[i].color.r, sp.thumb_stops[i].color.r));
+      UT_CHECK(almost_eq(p.on_thumb_stops[i].color.g, sp.thumb_stops[i].color.g));
+      UT_CHECK(almost_eq(p.on_thumb_stops[i].color.b, sp.thumb_stops[i].color.b));
+    }
+    UT_CHECK(p.off_thumb_inset_hi);
+    UT_CHECK(p.on_thumb_inset_hi);
+    UT_CHECK(almost_eq(p.on_thumb_inset_hi_color.a,
+                       p.off_thumb_inset_hi_color.a));
+    UT_CHECK(!p.off_thumb_inset_dark);
+    UT_CHECK(!p.on_thumb_inset_dark);
+  }
   svc.init(SkinId::Retro3d, ThemeMode::Light);
 }
 
@@ -301,5 +316,41 @@ UT_TEST(t31_slider_keyboard_clamps_to_range) {
   UT_CHECK(near_f(sld.value_, 5.0f, 0.01f));
   key(&sld, VK_NEXT);    // -10 → 钳到 min
   UT_CHECK(near_f(sld.value_, 0.0f, 0.01f));
+  clear_input_state();
+}
+
+// 13) D2D 外阴影不得渗入元素自身盒内 + Trump-3D 关态开关圆点呈亮金实心球而非偏黑暗斑
+UT_TEST(t31_retro_switch_off_thumb_bright_gold_and_shadow_cutout) {
+  make_offscreen(60, 60, 96.0f);
+  rt().set_origin({0.0f, 0.0f});
+
+  // 13a) draw_soft_shadow 仅在盒外投射阴影，盒内中心不得被黑影污染
+  rt().begin_frame();
+  rt().clear(Color4f{1.0f, 1.0f, 1.0f, 1.0f});
+  draw_soft_shadow(rt(), {15.0f, 15.0f, 20.0f, 20.0f}, 10.0f,
+                   Color4f{0.0f, 0.0f, 0.0f, 0.7f}, 3.0f, 8.0f);
+  rt().end_frame();
+  const Px interior = pixel(25, 25);
+  UT_CHECK(interior.r >= 253 && interior.g >= 253 && interior.b >= 253);
+  const Px outside_shadow = pixel(25, 38);
+  UT_CHECK(outside_shadow.r < 245);
+
+  // 13b) Retro3d 明/暗两态下基础设置尺寸（23.8×11.9）关态开关圆点保持亮暖金色
+  auto& svc = ThemeService::instance();
+  for (ThemeMode mode : {ThemeMode::Dark, ThemeMode::Light}) {
+    svc.init(SkinId::Retro3d, mode);
+    svc.set_factors(0.3f, 1.0f);
+    SwitchW sw;
+    sw.set_checked(false, false);
+    sw.layout_tree({10.0f, 10.0f, 23.8f, 11.9f});
+    rt().begin_frame();
+    rt().clear(Color4f{0.98f, 0.75f, 0.18f, 1.0f});
+    sw.paint_all(rt());
+    rt().end_frame();
+    const Px thumb_center = pixel(16, 16);
+    UT_CHECK(thumb_center.r >= 220 && thumb_center.g >= 165 &&
+             thumb_center.r > thumb_center.b + 60);
+  }
+  svc.init(SkinId::Retro3d, ThemeMode::Light);
   clear_input_state();
 }

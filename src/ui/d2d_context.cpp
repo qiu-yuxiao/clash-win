@@ -10,6 +10,7 @@
 #include <wincodec.h>
 #include <windows.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -969,6 +970,53 @@ void D2dRenderTarget::round_rect_corners(const RectF& r, float radius,
       path->Release();
     }
   }
+}
+
+void D2dRenderTarget::fill_round_rect_outside(const RectF& outer_r,
+                                              float outer_radius,
+                                              const RectF& cutout_r,
+                                              float cutout_radius,
+                                              const Brush& fill) {
+  // 豁免: Mini 无对应物 — CSS box-shadow 天然挖空元素自身盒内区域，D2D 几何差集排除（出处: 无）
+  if (!active_rt_ || outer_r.is_empty()) return;
+  ID2D1SolidColorBrush* br = brush(fill.color);
+  if (!br) return;
+  const float r_out =
+      std::clamp(outer_radius, 0.0f, std::min(outer_r.w, outer_r.h) * 0.5f);
+  const D2D1_ROUNDED_RECT rr_out = D2D1::RoundedRect(
+      D2D1::RectF(outer_r.x, outer_r.y, outer_r.right(), outer_r.bottom()),
+      r_out, r_out);
+  if (cutout_r.is_empty() || !outer_r.intersects(cutout_r)) {
+    active_rt_->FillRoundedRectangle(rr_out, br);
+    return;
+  }
+  const float r_cut =
+      std::clamp(cutout_radius, 0.0f, std::min(cutout_r.w, cutout_r.h) * 0.5f);
+  const D2D1_ROUNDED_RECT rr_cut = D2D1::RoundedRect(
+      D2D1::RectF(cutout_r.x, cutout_r.y, cutout_r.right(), cutout_r.bottom()),
+      r_cut, r_cut);
+  ID2D1RoundedRectangleGeometry* g_outer = nullptr;
+  ID2D1RoundedRectangleGeometry* g_cut = nullptr;
+  ID2D1PathGeometry* diff = nullptr;
+  ID2D1GeometrySink* sink = nullptr;
+  if (SUCCEEDED(ctx_.d2d()->CreateRoundedRectangleGeometry(rr_out, &g_outer)) &&
+      g_outer &&
+      SUCCEEDED(ctx_.d2d()->CreateRoundedRectangleGeometry(rr_cut, &g_cut)) &&
+      g_cut && SUCCEEDED(ctx_.d2d()->CreatePathGeometry(&diff)) && diff &&
+      SUCCEEDED(diff->Open(&sink)) && sink) {
+    const HRESULT comb_hr = g_outer->CombineWithGeometry(
+        g_cut, D2D1_COMBINE_MODE_EXCLUDE, nullptr, sink);
+    const HRESULT close_hr = sink->Close();
+    sink->Release();
+    sink = nullptr;
+    if (SUCCEEDED(comb_hr) && SUCCEEDED(close_hr)) {
+      active_rt_->FillGeometry(diff, br);
+    }
+  }
+  if (sink) sink->Release();
+  if (diff) diff->Release();
+  if (g_cut) g_cut->Release();
+  if (g_outer) g_outer->Release();
 }
 
 // F-D11：MUI SVG path 扁平化后的多环填充（偶奇）。每环一个 FILLED+CLOSED

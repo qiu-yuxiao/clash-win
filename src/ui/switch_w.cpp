@@ -258,10 +258,10 @@ void SwitchW::on_paint(IRenderTarget& rt) {
         st[i].color.b = std::min(1.0f, st[i].color.b * b);
       }
     }
-    // CSS circle at 35% 35%：半径取 farthest-corner
-    const float corner_r = std::sqrt(2.0f) * (td * 0.65f);
+    // src: src/pages/_layout/utils/style-helpers.tsx:193-194 对齐滑块 3D 金珠径向渐变半径
+    const float grad_r = td * 0.65f;
     rt.fill_round_rect_radial(tr, t_radius, st, gn, 0.35f, 0.35f,
-                              corner_r, corner_r);
+                              grad_r, grad_r);
   } else {
     Color4f tc = on_side ? sp.on_thumb : sp.off_thumb;
     tc.a *= dis;

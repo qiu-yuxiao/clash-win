@@ -1064,79 +1064,67 @@ SwitchPaint ThemeService::switch_paint() const {
       p.on_bottom_hi_w = 1.0f;
       p.thumb_d = 14.0f;
       p.thumb_radius = 7.0f;
+      // 刻意偏差（2026-11-20 用户裁决）：Trump-3D 开关圆点（含关态与开态）统一复用主题设置滑轨的
+      //   四停不透明 3D 亮金圆珠样式与顶部高光（取消压暗底线），由凹槽与发光金槽区分开关态。
+      // src: src/pages/_layout/utils/style-helpers.tsx:191-194
       p.off_thumb_grad = true;
-      // src: src/components/base/base-switch.tsx:175-178 off 态淡金半透球
       p.off_thumb_stops[0] = {0.00f, Color4f::hex(light ? 0xFFFDE7 : 0xFFF9C4)};
-      p.off_thumb_stops[1] = {0.60f, light ? Color4f::hex(0xD4AF37, 0.30f)
-                                           : Color4f::hex(0x8A6D00, 0.30f)};
-      p.off_thumb_stops[2] = {1.00f, light ? Color4f::hex(0x8A6D00, 0.45f)
-                                           : Color4f::hex(0x634E00, 0.55f)};
-      p.off_thumb_n = 3;
-      // src: src/components/base/base-switch.tsx:175
-      p.off_thumb_border = light ? Color4f::hex(0x8A6D00, 0.40f)
-                                 : Color4f::hex(0x634E00, 0.45f);
+      p.off_thumb_stops[1] = {0.45f, Color4f::hex(light ? 0xFFD54F : 0xFFC107)};
+      p.off_thumb_stops[2] = {0.80f, Color4f::hex(0xFFA000)};
+      p.off_thumb_stops[3] = {1.00f, Color4f::hex(light ? 0xB8860B : 0x8A6D00)};
+      p.off_thumb_n = 4;
+      p.off_thumb_border = light ? Color4f::hex(0x8A6D00) : Color4f::hex(0x634E00);
       p.off_thumb_bw = 1.0f;
-      // :88-98 旋钮内浮雕：inset 0 1d 0 rgba(255,255,255,.7|.5)
-      //   + inset 0 -1d|-1.5d 0 rgba(0,0,0,.15|.45)
+      // src: src/pages/_layout/utils/style-helpers.tsx:197,200 顶部内高光
       p.off_thumb_inset_hi = true;
-      p.off_thumb_inset_hi_color = Color4f::hex(0xFFFFFF, light ? 0.70f : 0.50f);
+      p.off_thumb_inset_hi_color = Color4f::hex(0xFFFFFF, light ? 0.80f : 0.40f);
       p.off_thumb_inset_hi_dy = 1.0f * d;
-      p.off_thumb_inset_dark = true;
-      p.off_thumb_inset_dark_color =
-          Color4f::hex(0x000000, light ? 0.15f : 0.45f);
-      p.off_thumb_inset_dark_dy = (light ? -1.0f : -1.5f) * d;
+      p.off_thumb_inset_dark = false;
       p.on_thumb_grad = true;
-      p.on_thumb_stops[0] = {0.00f, Color4f::hex(light ? 0xFFFDE7 : 0xFFF9C4)};
-      p.on_thumb_stops[1] = {0.45f, Color4f::hex(light ? 0xFFD54F : 0xFFC107)};
-      p.on_thumb_stops[2] = {0.80f, Color4f::hex(0xFFA000)};
-      p.on_thumb_stops[3] = {1.00f, Color4f::hex(light ? 0xB8860B : 0x8A6D00)};
+      // src: src/pages/_layout/utils/style-helpers.tsx:191-194
+      p.on_thumb_stops[0] = p.off_thumb_stops[0];
+      p.on_thumb_stops[1] = p.off_thumb_stops[1];
+      p.on_thumb_stops[2] = p.off_thumb_stops[2];
+      p.on_thumb_stops[3] = p.off_thumb_stops[3];
       p.on_thumb_n = 4;
-      p.on_thumb_border = light ? Color4f::hex(0x8A6D00) : Color4f::hex(0x634E00);
+      p.on_thumb_border = p.off_thumb_border;
       p.on_thumb_bw = 1.0f;
-      // ★ on 态旋钮同样带内浮雕（← base-switch.tsx:97-98）
-      //   `.Mui-checked .MuiSwitch-thumb` 只覆盖 background 与 border，
-      //   boxShadow 继承基础 `.MuiSwitch-thumb` 的 inset 顶高光 + 底暗线。
+      // src: src/pages/_layout/utils/style-helpers.tsx:197,200 顶部内高光
       p.on_thumb_inset_hi = true;
-      p.on_thumb_inset_hi_color = Color4f::hex(0xFFFFFF, light ? 0.70f : 0.50f);
+      p.on_thumb_inset_hi_color = p.off_thumb_inset_hi_color;
       p.on_thumb_inset_hi_dy = 1.0f * d;
-      p.on_thumb_inset_dark = true;
-      p.on_thumb_inset_dark_color =
-          Color4f::hex(0x000000, light ? 0.15f : 0.45f);
-      p.on_thumb_inset_dark_dy = (light ? -1.0f : -1.5f) * d;
+      p.on_thumb_inset_dark = false;
+      // src: src/pages/_layout/utils/style-helpers.tsx:196,199 常态外阴影
       p.thumb_shadow = true;
-      p.thumb_shadow_color = light ? Color4f::hex(0x000000, 0.20f)
-                                   : Color4f::hex(0x000000, 0.50f);
-      p.thumb_shadow_dy = (light ? 2.5f : 3.0f) * d;
-      p.thumb_shadow_blur = (light ? 5.0f : 6.0f) * d;
+      p.thumb_shadow_color = light ? Color4f::hex(0x000000, 0.25f)
+                                   : Color4f::hex(0x000000, 0.60f);
+      p.thumb_shadow_dy = (light ? 3.0f : 4.0f) * d;
+      p.thumb_shadow_blur = (light ? 6.0f : 8.0f) * d;
+      // src: src/components/base/base-switch.tsx:158 on 态轨道外发光
       p.on_glow = true;
       p.on_glow_color = Color4f::hex(0xFFC107, 0.40f * v);
       p.on_glow_blur = 8.0f * v;
-      // ★ 旋钮悬停态（← base-switch.tsx:114-128 `&:hover .MuiSwitch-thumb`）
-      //   transform scale(1.2) + filter brightness(1.15)
-      //   boxShadow 覆盖：0 4d|5d 8d|10d rgba(0,0,0,.3|.6)
-      //                + inset 0 1d|1.2d 0 rgba(255,255,255,.8|.6)
-      //                + inset 0 -1d|-1.5d 0 rgba(0,0,0,.1|.4)
-      //                + 0 0 10v rgba(255,193,7,.35v)
+      // src: src/pages/_layout/utils/style-helpers.tsx:204-213 悬停放大、提亮、高光、阴影与金发光
       p.thumb_hover = true;
       p.thumb_hover_scale = 1.2f;
       p.thumb_hover_brightness = 1.15f;
       p.thumb_hover_shadow = true;
-      p.thumb_hover_shadow_color = light ? Color4f::hex(0x000000, 0.30f)
-                                         : Color4f::hex(0x000000, 0.60f);
-      p.thumb_hover_shadow_dy = (light ? 4.0f : 5.0f) * d;
-      p.thumb_hover_shadow_blur = (light ? 8.0f : 10.0f) * d;
+      p.thumb_hover_shadow_color = light ? Color4f::hex(0x000000, 0.35f)
+                                         : Color4f::hex(0x000000, 0.70f);
+      p.thumb_hover_shadow_dy = (light ? 5.0f : 6.0f) * d;
+      p.thumb_hover_shadow_blur = (light ? 10.0f : 12.0f) * d;
+      // src: src/pages/_layout/utils/style-helpers.tsx:209,212 悬停顶高光
       p.thumb_hover_inset_hi = true;
       p.thumb_hover_inset_hi_color =
-          Color4f::hex(0xFFFFFF, light ? 0.80f : 0.60f);
-      p.thumb_hover_inset_hi_dy = (light ? 1.0f : 1.2f) * d;
-      p.thumb_hover_inset_dark = true;
-      p.thumb_hover_inset_dark_color =
-          Color4f::hex(0x000000, light ? 0.10f : 0.40f);
-      p.thumb_hover_inset_dark_dy = (light ? -1.0f : -1.5f) * d;
+          Color4f::hex(0xFFFFFF, light ? 0.90f : 0.50f);
+      p.thumb_hover_inset_hi_dy = 1.0f * d;
+      p.thumb_hover_inset_dark = false;
+      // src: src/pages/_layout/utils/style-helpers.tsx:210,213 悬停金辉光
       p.thumb_hover_glow = true;
-      p.thumb_hover_glow_color = Color4f::hex(0xFFC107, 0.35f * v);
-      p.on_thumb_hover_glow_color = Color4f::hex(0xFFC107, 0.35f * v);
-      p.thumb_hover_glow_blur = 10.0f * v;
+      p.thumb_hover_glow_color =
+          Color4f::hex(0xFFC107, (light ? 0.35f : 0.40f) * v);
+      p.on_thumb_hover_glow_color = p.thumb_hover_glow_color;
+      p.thumb_hover_glow_blur = (light ? 12.0f : 14.0f) * v;
       break;
     }
     case SkinId::Original:

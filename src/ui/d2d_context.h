@@ -105,6 +105,9 @@ class D2dRenderTarget : public IRenderTarget, public ITextEngine {
   void round_rect_corners(const RectF& r, float radius, int corner_mask,
                           const Pen& p, const Brush* fill,
                           int border_sides_mask = 0xF) override;
+  void fill_round_rect_outside(const RectF& outer_r, float outer_radius,
+                               const RectF& cutout_r, float cutout_radius,
+                               const Brush& fill) override;
   void fill_round_rect_gradient(const RectF& r, float radius,
                                 const GradientStop* stops, int count) override;
   void fill_round_rect_gradient_angle(const RectF& r, float radius,

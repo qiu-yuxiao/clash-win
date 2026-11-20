@@ -124,6 +124,15 @@ class IRenderTarget {
     (void)border_sides_mask;
     round_rect(r, radius, p, fill);
   }
+  // 外阴影圆角环填充：仅填充 outer_r 减去 cutout_r 的外部区域（对齐 CSS 外投影裁剪 border-box）
+  // 豁免: Mini 无对应物 — CSS box-shadow 天然挖空元素自身盒内区域，D2D 需显式几何差集排除（出处: 无）
+  virtual void fill_round_rect_outside(const RectF& outer_r, float outer_radius,
+                                       const RectF& cutout_r, float cutout_radius,
+                                       const Brush& fill) {
+    (void)cutout_r;
+    (void)cutout_radius;
+    round_rect(outer_r, outer_radius, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &fill);
+  }
   // 水平线性渐变圆角填充（← Mini 流量卡；stops 按 offset 升序）
   virtual void fill_round_rect_gradient(const RectF& r, float radius,
                                         const GradientStop* stops,

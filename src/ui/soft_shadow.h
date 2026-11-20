@@ -31,7 +31,7 @@ inline void draw_soft_shadow(IRenderTarget& rt, const RectF& r, float radius,
     if (c.a <= 0.004f) continue;
     RectF rr{r.x - grow, r.y - grow + dy, r.w + grow * 2.0f, r.h + grow * 2.0f};
     Brush b{c};
-    rt.round_rect(rr, radius + grow, Pen{Color4f{0, 0, 0, 0}, 0.0f}, &b);
+    rt.fill_round_rect_outside(rr, radius + grow, r, radius, b);
   }
 }
 
