@@ -1,6 +1,6 @@
 #pragma once
 // 下栏流量区（T14 / BUG-410）：单一随窗宽自适应 CanvasGraph 接 /traffic WS + 指标卡 + Mini 态布局。
-// src: pages/_layout.tsx:1480-1501 容器（宽 135 / 窄 100，padding 8 12 2 12 / 3 6 2 6，background inherit）
+// src: src/pages/_layout.tsx:681-702 容器（宽 135 / 窄 100，padding 8 12 2 12 / 3 6 2 6，background inherit）
 //   + _layout/components/mini-traffic-panel.tsx:40-330（单图 flex1 + 指标卡行，
 //     卡高 18、三段文字 9/13/8px、色取 CSS fallback——--download-text 等
 //     仅 original 皮肤定义 index.scss:304-312，retro-3d 默认皮肤走 fallback）
@@ -63,7 +63,7 @@ class TrafficPane : public Widget {
 
   void set_mini(bool mini);  // 迷你窗：四卡仍常驻，仅面板总高 100（_layout.tsx:1484）
   bool is_mini() const { return mini_; }
-  // 宽/窄窗切换（只更新 CanvasGraph::set_minimal_width 与内距，绝不销毁重建；src: _layout.tsx:1483-1493）
+  // 宽/窄窗切换（只更新 CanvasGraph::set_minimal_width 与内距，绝不销毁重建；src: src/pages/_layout.tsx:684-696）
   void set_narrow(bool narrow);
   bool is_narrow() const { return narrow_; }
 

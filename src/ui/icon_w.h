@@ -49,7 +49,7 @@ class IconW : public Widget {
   // 矢量图标垂直镜像（绕盒中心；Mini CSS transform: scaleY(-1)，logs.tsx:141
   //   SwapVertRounded 降序态翻转）
   bool flip_y = false;
-  // 外发光（src: _layout.tsx:1359-1361 drop-shadow rgba(255,59,48,.85)；
+  // 外发光（src: src/pages/_layout.tsx:575-577 drop-shadow rgba(255,59,48,.85)；
   //   以环形偏移重绘等价改写高斯模糊）
   bool glow_ = false;
   Color4f glow_color_ = Color4f::hex(0xFF3B30, 0.85f);

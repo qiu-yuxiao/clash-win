@@ -356,13 +356,13 @@ ProfileImportCard::ProfileImportCard(Widget* parent) : Widget(parent) {
   auto btn = std::make_unique<Button>();
   btn->set_i18n_text("settings.mini.importConfig");
   import_btn_ = btn.get();
-  // src: button-styles.ts:17-491 get3DButtonStyle(theme,'contained','primary')
+  // src: src/utils/button-styles/button.ts:6-478 get3DButtonStyle(theme,'contained','primary')
   //   —— 6 套皮肤各自一套（retro-3d 六停金渐变 :39，其余单色主色），
   //   改走 ThemeService 查表，切皮肤实时生效。
   btn->themed_ = true;
   btn->theme_color_type_ = "primary";
   btn->text_style.size = 12;
-  btn->text_style.weight = 700;  // src: button-styles.ts:78 fontWeight 'bold'
+  btn->text_style.weight = 700;  // src: src/utils/button-styles/button.ts:67 fontWeight 'bold'
   btn->text_style.align_h = AlignH::Center;
   btn->text_style.align_v = AlignV::Center;
   btn->on_click = [this] { do_import(); };
@@ -521,7 +521,7 @@ void ProfileImportCard::on_arrange(const RectF& area) {
 }
 
 void ProfileImportCard::on_paint(IRenderTarget& rt) {
-  // 卡片底 = get3DCardStyle('default')（src: button-styles.ts:492-731）：
+  // 卡片底 = get3DCardStyle('default')（src: src/utils/button-styles/card.ts:6-245）：
   //   ★ 6 套皮肤逐皮肤分叉 —— retro-3d :534-541（135° 4 停金渐变）、
   //     original :572-606（白/#1e1f29）、modern-flat :611-648（白/#1f2937）、
   //     frosted-glass :653-669（半透明白）、cyberpunk :674-711（#fff/#05070c）、

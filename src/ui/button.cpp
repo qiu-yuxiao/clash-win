@@ -23,7 +23,7 @@ Color4f mix_color(const Color4f& a, const Color4f& b, float k) {
   return {a.r + (b.r - a.r) * k, a.g + (b.g - a.g) * k, a.b + (b.b - a.b) * k,
           a.a + (b.a - a.a) * k};
 }
-// ← button-styles.ts:188/258/313/399/464  transition: all .15s ease
+// ← src/utils/button-styles/button.ts:177/258/313/399/464  transition: all .15s ease
 constexpr double kHoverMs = 150.0;
 }  // namespace
 
@@ -99,7 +99,7 @@ void Button::draw_button_bg(IRenderTarget& rt, const RectF& r) {
     return;
   }
   if (state() != State::Disabled && paint_params.grad_count > 0) {
-    // src: button-styles.ts:38-39 retro-3d contained primary 135° 六停渐变
+    // src: src/utils/button-styles/button.ts:27-28 retro-3d contained primary 135° 六停渐变
     rt.fill_round_rect_gradient_angle(r, paint_params.radius, paint_params.grad,
                                       paint_params.grad_count, paint_params.grad_angle);
     if (paint_params.border.width > 0)
@@ -128,7 +128,7 @@ void Button::draw_button_text(IRenderTarget& rt, const RectF& r) {
     auto p = theme::ThemeService::instance().button_paint(theme_color_type_, theme_outlined_);
     const bool disabled = (state() == State::Disabled);
     ts.color = disabled ? p.text_disabled : p.text;
-    ts.weight = p.weight;  // ← button-styles.ts fontWeight
+    ts.weight = p.weight;  // ← src/utils/button-styles/button.ts:67 fontWeight
     ts.align_h = AlignH::Center;
     ts.align_v = AlignV::Center;
     // F-D02：文字阴影（先画偏移阴影层，再画主文字）

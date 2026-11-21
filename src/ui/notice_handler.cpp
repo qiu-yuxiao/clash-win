@@ -119,13 +119,13 @@ constexpr NoticeRule kRules[] = {
     // src: src/utils/quick-routing.ts:106 兼容历史 status 串
     {"profile_switched", "success",
      "profiles.page.feedback.notifications.quickRuleAdded", "rule", 2500},  // src: src/utils/quick-routing.ts:106
-    // ← _layout.tsx:929-932：切换订阅配置成功提示
+    // ← src/pages/_layout/hooks/use-profile-actions.ts:305-308：切换订阅配置成功提示
     {"profile_switched::ok", "success",
-     "profiles.page.feedback.notifications.profileSwitched", nullptr, 2500},  // src: src/pages/_layout.tsx:930
-    // ← _layout.tsx:938-952：更新订阅 info → success
+     "profiles.page.feedback.notifications.profileSwitched", nullptr, 2500},  // src: src/pages/_layout/hooks/use-profile-actions.ts:306
+    // ← src/pages/_layout/hooks/use-profile-actions.ts:314-337：更新订阅 info → success
     {"update_subscription::info", "info", "layout.notices.updatingSubscription", nullptr, 0},
     {"update_subscription::ok", "success", "layout.notices.subscriptionUpdated", nullptr, 0},
-    // ← _layout.tsx:954-963：删除配置成功
+    // ← src/pages/_layout/hooks/use-profile-actions.ts:348-359：删除配置成功
     {"profile_deleted::ok", "success",
      "shared.feedback.notifications.common.deleteSuccess", nullptr, 0},
     // ← components/connection/connection-table.tsx:301：success(key, {address}, 2000)

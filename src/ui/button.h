@@ -26,7 +26,7 @@ class Button : public Widget {
     Pen border{Color4f(0, 0, 0, 0), 0};  // 豁免: Mini 无对应物 — Button 基类缺省无边框透明哨兵，由主题覆盖（出处: 无）
     float radius = 4;  // ← MUI shape.borderRadius 4
     // 可选渐变底：grad_count>0 时非禁用态改用 135° 多停渐变绘制
-    //   （retro-3d contained primary 六停，src: button-styles.ts:38-39）
+    //   （retro-3d contained primary 六停，src: src/utils/button-styles/button.ts:27-28）
     GradientStop grad[6];
     int grad_count = 0;
     float grad_angle = 135.0f;
@@ -39,7 +39,7 @@ class Button : public Widget {
   // 默认 false 保持 paint_params 直绘。T13 场景挂载时统一开启）
   bool themed_ = false;
   const char* theme_color_type_ = "default";  // "primary" | "error" | "default"
-  // ← button-styles.ts get3DButtonStyle(theme, variant, colorType) 的 variant。
+  // ← src/utils/button-styles/button.ts:6-10 get3DButtonStyle(theme, variant, colorType) 的 variant。
   //   Mini 的次要按钮一律用 outlined（layout-dialogs.tsx:430 / add-url-dialog.tsx:262
   //   / help-menu-button.tsx:257 / antivirus-whitelist-dialog.tsx:301 等）；
   //   retro-3d 皮肤下 outlined+default 是「半透明浅金渐变 + 深金描边」，
@@ -77,7 +77,7 @@ class Button : public Widget {
  private:
   State state_ = State::Normal;
   Color4f last_fill_{};
-  // ---- 悬停过渡（← button-styles.ts:188/258/313/399/464 transition: all .15s ease）----
+  // ---- 悬停过渡（← src/utils/button-styles/button.ts:177/258/313/399/464 transition: all .15s ease）----
   // hover_mix_: 0 = 常态底，1 = 悬停底；绘制时在两种底色之间插值。
   // 动画只在 Enter/Leave 时启动，结束即把 hover_anim_start_ms_ 归零，
   // on_paint 不再 invalidate —— 不会引入持续重绘。

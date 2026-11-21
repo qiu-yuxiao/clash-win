@@ -1,11 +1,11 @@
 #pragma once
-// 快捷条（T13）：30px 顶栏（src: _layout.tsx:1318 height:'30px'）。
-//   容器无背景声明（透明，src: _layout.tsx:1310-1322）；
+// 快捷条（T13）：30px 顶栏（src: src/pages/_layout.tsx:532 height:'30px'）。
+//   容器无背景声明（透明，src: src/pages/_layout.tsx:524-536）；
 //   选中卡 28px 高 + 135° 四站渐变 + 圆角 6
-//   （src: active-node-card.tsx:241、button-styles.ts:538-539/549）；
+//   （src: active-node-card.tsx:241、src/utils/button-styles/card.ts:52-53/549）；
 //   内容按 Mini flex 顺序：「活跃节点：」标签 → 协议胶囊 → 12px 粗体节点名
 //   → 延迟 Chip → (地址)，gap 12（src: active-node-card.tsx:240/249/267/288/359）；
-//   右两枚 28×28 3D 按钮（src: _layout.tsx:1345-1346 / 1378-1379）。
+//   右两枚 28×28 3D 按钮（src: src/pages/_layout.tsx:561-562 / 1378-1379）。
 // 另导出 TakeoverSegmented（MAN/SYS/TUN 三段）：数据口径按任务卡——
 // 当前 mode 注入、应用经 patch_clash_mode 回调、失败回弹；场景布局由宿主
 // 决定（原版在设置抽屉 takeover-mode-card，T17 复用本组件）。
@@ -115,7 +115,7 @@ class QuickBar : public Row {
   bool pinned_ = false;
   bool has_proto_ = false;  // 有协议类型 → 胶囊可见
   RectF proto_pill_{};      // 协议胶囊外框（on_paint 描边/铺底）
-  // src: _layout.tsx:1365-1366 transition 'transform 0.2s ease, color 0.2s ease'
+  // src: src/pages/_layout.tsx:581-582 transition 'transform 0.2s ease, color 0.2s ease'
   float pin_rot_ = 0.0f;       // 当前图钉旋转角（度）
   float pin_rot_from_ = 0.0f;  // 过渡起点
   float pin_rot_to_ = 0.0f;    // 过渡终点

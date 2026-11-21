@@ -78,13 +78,13 @@ inline Color4f card_ink() {
   return ThemeService::instance().card_paint("default").text_color;
 }
 // 选中卡底缘 bevel 暗边已并入 ThemeService::card_paint("default")
-// 的 has_bottom_bevel / bottom_bevel_color（← button-styles.ts:540，
+// 的 has_bottom_bevel / bottom_bevel_color（← src/utils/button-styles/card.ts:54，
 // retro-3d 专属：boxShadow 首层 '0 1px 0 0 ${bevelShadowDark}'；其余 5 套皮肤
 // 的 boxShadow 无此层 → 不画这条线）。绘制统一走 card_draw::draw_card。
 
 // quickbar 右侧 pin/gear 的 3D 按钮底：Mini 用 IconButton + get3DButtonStyle
-// src: _layout.tsx:1338-1348（pin，contained/default 或 pinned→primary）、
-//      :1375-1381（gear，contained/default）
+// src: src/pages/_layout.tsx:555-565（pin，contained/default 或 pinned→primary）、
+//      :592-601（gear，contained/default）
 // T12：改为 ThemeService::button_paint() 查表（6 套皮肤 × 亮暗 × 状态），
 //   此前写死 retro-3d 金色，切皮肤后这两个按钮仍是金色 —— 是最显眼的残留。
 void paint_button_bg(IRenderTarget& rt, const RectF& r, bool primary, bool hover,
@@ -99,8 +99,8 @@ void paint_button_bg(IRenderTarget& rt, const RectF& r, bool primary, bool hover
 
 // ---------- QuickBar ----------
 QuickBar::QuickBar(Widget* parent) : Row(parent) {
-  set_padding(8, 0, 8, 2);  // src: _layout.tsx:1317 padding '0px 8px 2px 8px'
-  spacing = 0;              // src: _layout.tsx:1321 gap 0（卡片占满，右侧 pin/gear 紧贴）
+  set_padding(8, 0, 8, 2);  // src: src/pages/_layout.tsx:531 padding '0px 8px 2px 8px'
+  spacing = 0;              // src: src/pages/_layout.tsx:535 gap 0（卡片占满，右侧 pin/gear 紧贴）
   cross_align = CrossAlign::Center;
 
   // 「活跃节点：」标签（caption 11px；≤580 隐藏）
@@ -172,11 +172,11 @@ QuickBar::QuickBar(Widget* parent) : Row(parent) {
   auto pin = std::make_unique<IconW>();
   pin_ = pin.get();
   pin->set_icon("pushpin");
-  pin->size_ = 20;  // src: _layout.tsx:1353-1355 fontSize/width/height 20px
+  pin->size_ = 20;  // src: src/pages/_layout.tsx:569-571 fontSize/width/height 20px
   pin->color_ = Color4f::hex(0x888888);
   pin->box_w = 28;
   pin->box_h = 28;
-  pin->set_i18n_tooltip("layout.a11y.pinWindow");  // src: src/pages/_layout.tsx:1332
+  pin->set_i18n_tooltip("layout.a11y.pinWindow");  // src: src/pages/_layout.tsx:546
   pin->set_i18n_a11y_name("layout.a11y.pinWindow");
   pin->set_a11y_toggle_getter([this]() -> std::optional<bool> { return pinned_; });
   pin->on_click = [this] {
@@ -188,11 +188,11 @@ QuickBar::QuickBar(Widget* parent) : Row(parent) {
   auto gear = std::make_unique<IconW>();
   gear_ = gear.get();
   gear->set_icon("settings");
-  gear->size_ = 20;  // src: _layout.tsx:1385 fontSize/width/height 20px
+  gear->size_ = 20;  // src: src/pages/_layout.tsx:601 fontSize/width/height 20px
   gear->color_ = Color4f::hex(0x2C1F03);
   gear->box_w = 28;
   gear->box_h = 28;
-  gear->set_i18n_tooltip("layout.a11y.openSettings");  // src: src/pages/_layout.tsx:1373
+  gear->set_i18n_tooltip("layout.a11y.openSettings");  // src: src/pages/_layout.tsx:589
   gear->set_i18n_a11y_name("layout.a11y.openSettings");
   gear->on_click = [this] {
     if (on_open_settings) on_open_settings();
@@ -261,7 +261,7 @@ bool QuickBar::a11y_invoke_virtual_child(size_t index) {
 
 SizeF QuickBar::on_measure(float max_w, float max_h) {
   SizeF s = Row::on_measure(max_w, max_h);
-  // src: _layout.tsx:1318 快捷条容器 height 30px（内含卡高 28，见 active-node-card.tsx:241）
+  // src: src/pages/_layout.tsx:532 快捷条容器 height 30px（内含卡高 28，见 active-node-card.tsx:241）
   s.h = 30;
   return s;
 }
@@ -366,8 +366,8 @@ void QuickBar::set_self_heal_testing(bool testing) {
 void QuickBar::set_pinned(bool p) {
   pinned_ = p;
   if (pin_) {
-    // src: _layout.tsx:1356-1364 图钉色 pinned #FF3B30 / 未固定 #888888；
-    //   src: :1362-1366 pinned 时 rotate(45deg) + drop-shadow，transform/color/filter
+    // src: src/pages/_layout.tsx:572-580 图钉色 pinned #FF3B30 / 未固定 #888888；
+    //   src: :578-582 pinned 时 rotate(45deg) + drop-shadow，transform/color/filter
     //   均有 0.2s ease 过渡（过渡插值在 on_paint 推进）
     const float target = p ? 45.0f : 0.0f;
     if (target != pin_rot_to_) {
@@ -391,13 +391,13 @@ void QuickBar::on_arrange(const RectF& area) {
   health_pill_rect_ = {};
   const float pad_top = padding().t;
   const float content_h = area.h - padding().v();
-  const float btn_w = 28.0f, btn_h = 28.0f;  // src: src/pages/_layout.tsx:1345
+  const float btn_w = 28.0f, btn_h = 28.0f;  // src: src/pages/_layout.tsx:561
   const float btn_y = pad_top + (content_h - btn_h) / 2;
   const float right = area.w - padding().r;
   if (gear_) gear_->layout_tree({right - btn_w, btn_y, btn_w, btn_h});
   if (pin_) pin_->layout_tree({right - btn_w * 2, btn_y, btn_w, btn_h});
 
-  // 卡片：x=快捷条左 padding，右缘 = pin 左缘（quickbar gap 0，_layout.tsx:1321）
+  // 卡片：x=快捷条左 padding，右缘 = pin 左缘（quickbar gap 0，src/pages/_layout.tsx:535）
   const float card_x = padding().l;
   const float card_r = pin_ ? pin_->bounds().x : right;
   const float inner_l = card_x + 12;  // src: src/pages/_layout/components/active-node-card.tsx:342
@@ -616,10 +616,10 @@ bool QuickBar::on_mouse(const MouseEvent& e) {
 
 void QuickBar::on_paint(IRenderTarget& rt) {
   const float w = bounds().w, h = bounds().h;  // 局部坐标约定 {0,0,w,h}
-  // 条底透明：src: _layout.tsx:1310-1322 快捷条容器无 background 声明，
+  // 条底透明：src: src/pages/_layout.tsx:524-536 快捷条容器无 background 声明，
   //   透出内容底色（外层 Paper :1237 background:'transparent'）；不涂任何底色。
   (void)w;
-  // 图钉 0.2s ease 过渡推进（transform/color）：src: _layout.tsx:1365-1366
+  // 图钉 0.2s ease 过渡推进（transform/color）：src: src/pages/_layout.tsx:581-582
   if (pin_ && pin_anim_start_ms_ > 0) {
     const double e = (steady_ms() - pin_anim_start_ms_) / 200.0;
     const float t = static_cast<float>(std::min(1.0, e));
@@ -641,14 +641,14 @@ void QuickBar::on_paint(IRenderTarget& rt) {
     }
   }
   // 选中卡：src: active-node-card.tsx:235-241（m:0 高28 p:'0 12px'）+
-  //   button-styles.ts:538-539（135° 四停靠渐变）+ :549（圆角6）
+  //   src/utils/button-styles/card.ts:52-53（135° 四停靠渐变）+ :549（圆角6）
   if (pin_) {
     RectF card{8, 0, pin_->bounds().x - 8, 28};  // 高 = 30-2 = 28，m:0 顶对齐
     if (card.w > 0) {
       paint_card_gradient(rt, card);
     }
     // pin/gear 的 3D 按钮底（图标在子层绘制，先铺底）
-    // src: _layout.tsx:1330-1387 IconButton + get3DButtonStyle('contained', ...)
+    // src: src/pages/_layout.tsx:544-603 IconButton + get3DButtonStyle('contained', ...)
     paint_button_bg(rt, pin_->bounds(), pinned_, pin_->hover_, pin_->pressed_);
     if (gear_)
       paint_button_bg(rt, gear_->bounds(), false, gear_->hover_, gear_->pressed_);
@@ -673,7 +673,7 @@ void QuickBar::on_paint(IRenderTarget& rt) {
   if (active_label_) active_label_->style.color = caption_ink;
   if (addr_label_) addr_label_->style.color = caption_ink;
   if (proto_label_) proto_label_->style.color = proto_ink;
-  // 齿轮在金色 3D 钮上，取卡片墨色：src: button-styles.ts:535
+  // 齿轮在金色 3D 钮上，取卡片墨色：src: src/utils/button-styles/card.ts:49
   if (gear_) gear_->color_ = card_ink();
 
   // 协议胶囊外框：1px 边框 + 圆角 4（src: active-node-card.tsx:268-270）
@@ -892,7 +892,7 @@ void TakeoverSegmented::on_paint(IRenderTarget& rt) {
   const bool light = ThemeService::instance().is_light();
   const bool retro = ThemeService::instance().skin() == theme::SkinId::Retro3d;
   const auto sp = ThemeService::instance().segmented_paint();
-  // 容器：src: button-styles.ts:932-990（retro-3d 半透明金 + inset 暗影；
+  // 容器：src: src/utils/button-styles/segmented.ts:6-78（retro-3d 半透明金 + inset 暗影；
   //   original/modern/frosted/cyber/monochrome 各自底色与边框）
   const float cont_radius = sp.container_radius > 0.01f ? sp.container_radius : 4.0f;
   // ★ 盒模型同 Segmented：bounds = CSS border box（height:22 + p:1px + border:1px
@@ -925,7 +925,7 @@ void TakeoverSegmented::on_paint(IRenderTarget& rt) {
               std::max(0.0f, r.h - 2.0f)};
     bool sel = mode_ == takeover_mode(i);
     if (sel) {
-      // src: button-styles.ts:1000-1001 选中块 absolute inset 1px（相对 padding box）
+      // src: src/utils/button-styles/segmented.ts:90-93 选中块 absolute inset 1px（相对 padding box）
       //   radius 3（retro-3d 135° 六停金渐变 :1006-1007）
       RectF pill{seg.x + 1, seg.y + 1, seg.w - 2, seg.h - 2};
       const bool has_border = sp.active_border.a > 0.001f;
@@ -933,7 +933,7 @@ void TakeoverSegmented::on_paint(IRenderTarget& rt) {
         rt.fill_round_rect_gradient_angle(pill, sp.active_radius,
                                           sp.active_grad, sp.active_grad_count,
                                           sp.active_grad_angle);
-        // src: button-styles.ts:1021-1022 retro-3d 边框 1px
+        // src: src/utils/button-styles/segmented.ts:110-111 retro-3d 边框 1px
         if (has_border)
           rt.round_rect(pill, sp.active_radius, Pen{sp.active_border, 1.0f},
                         nullptr);
@@ -961,7 +961,7 @@ void TakeoverSegmented::on_paint(IRenderTarget& rt) {
     // src: takeover-mode-card.tsx:116-117 zh/zhtw 13px（非 zh 11px）
     const auto& lang = i18n::I18n::instance().language();
     ts.size = (lang == "zh" || lang == "zhtw") ? 13.0f : 11.0f;
-    // src: button-styles.ts:1105-1122 选中文字 get3DSegmentedActiveTextColor；
+    // src: src/utils/button-styles/segmented.ts:194-211 选中文字 get3DSegmentedActiveTextColor；
     //   未选中 takeover-mode-card.tsx:110-115
     //     isRetro3DDark ? 'rgba(44,31,3,.75)' : 'text.secondary'
     //   hover :122-129 dark '#2C1F03'；active :130-137 dark rgba(44,31,3,.5)

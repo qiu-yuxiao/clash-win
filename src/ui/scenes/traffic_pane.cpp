@@ -28,7 +28,7 @@ int64_t default_now_ms() {
 
 inline bool light_mode() { return ThemeService::instance().is_light(); }
 
-// src: pages/_layout.tsx:1491 padding: 宽窗 '8px 12px 2px 12px' / 窄窗 '3px 6px 2px 6px'
+// src: src/pages/_layout.tsx:692 padding: 宽窗 '8px 12px 2px 12px' / 窄窗 '3px 6px 2px 6px'
 constexpr float kPadTopWide = 8.0f, kPadXWide = 12.0f;
 constexpr float kPadTopNarrow = 3.0f, kPadXNarrow = 6.0f;
 constexpr float kPadBottom = 2.0f;
@@ -41,7 +41,7 @@ constexpr float kMetricsGapWide = 8.0f;
 // src: pages/_layout/components/mini-traffic-panel.tsx:66-105 指标卡尺寸
 constexpr float kCardPadX = 4.0f;
 constexpr float kCardH = 18.0f, kRowMtop = 2.0f, kRowPx = 2.0f;
-// src: utils/button-styles.ts:549 borderRadius 6px；mini-traffic-panel.tsx:88,104
+// src: src/utils/button-styles/card.ts:63 borderRadius 6px；mini-traffic-panel.tsx:88,104
 constexpr float kCardR = 6.0f;
 constexpr float kRunGap = 2.4f;
 constexpr float kIconBox = 14.0f;
@@ -252,7 +252,7 @@ void TrafficPane::refresh_labels() {
 void TrafficPane::set_mini(bool mini) {
   if (mini_ == mini) return;
   mini_ = mini;
-  // src: pages/_layout.tsx:1483-1500 迷你窗同样渲染 MiniTrafficPanel（四卡常驻），
+  // src: src/pages/_layout.tsx:684-701 迷你窗同样渲染 MiniTrafficPanel（四卡常驻），
   //   仅面板总高改为 TRAFFIC_PANE_HEIGHT_MINIMAL=100；不隐藏任何指标卡
   invalidate();
 }
@@ -269,7 +269,7 @@ void TrafficPane::on_arrange(const RectF& area) {
   // 【坐标约定】widget 树 = 逻辑 DIP（src 的 CSS px 直接用）
   const float w = area.w;
   const float h = area.h;
-  // src: pages/_layout.tsx:1491-1493 padding + 单子控件容器无外 gap
+  // src: src/pages/_layout.tsx:692-694 padding + 单子控件容器无外 gap
   const float pad_top = narrow_ ? kPadTopNarrow : kPadTopWide;
   const float pad_x = narrow_ ? kPadXNarrow : kPadXWide;
   // src: pages/_layout/components/mini-traffic-panel.tsx:57-77
@@ -346,7 +346,7 @@ void TrafficPane::on_paint(IRenderTarget& rt) {
     graph_->divider_color_ = vars.divider_color;
     graph_->scale_text_color_ = pal.secondary_text;
   }
-  // src: pages/_layout.tsx:1490 background: 'inherit' —— 透明承接极光，不铺不透明 theme_bg
+  // src: src/pages/_layout.tsx:691 background: 'inherit' —— 透明承接极光，不铺不透明 theme_bg
 
   if (graph_rect_.w <= 0) return;
 
@@ -367,7 +367,7 @@ void TrafficPane::on_paint(IRenderTarget& rt) {
   draw_card(rt, dl_r_, dcp, 0x6, 0xF);  // TR|BR 圆角
   draw_card(rt, ul_l_, ucp, 0x9, 0xD);
   draw_card(rt, ul_r_, ucp, 0x6, 0xF);
-  // 底缘 bevel / 内高光：retro-3d 专属（src: button-styles.ts:556-565 boxShadow
+  // 底缘 bevel / 内高光：retro-3d 专属（src: src/utils/button-styles/card.ts:69-79 boxShadow
   //   顶部 1px 内高光 + 底缘 1-2px 硬 bevel）。其余皮肤该层 boxShadow 已由
   //   card_paint 的 has_shadow/glow 表达，这里只在 retro 下补描边细节。
   const bool retro = ThemeService::instance().skin() == theme::SkinId::Retro3d;

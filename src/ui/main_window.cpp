@@ -1,116 +1,40 @@
 // 主窗口实现（T11）：无框窗 + 钳制 + Widget 树宿主 + 几何持久化。
 // 行为对照见任务报告「窗口行为对照表」。
 #include "main_window.h"
+#include "main_window_internal.h"
 
 #include <windowsx.h>
 #include <dwmapi.h>
 #pragma comment(lib, "dwmapi.lib")
 #include <imm.h>
 #pragma comment(lib, "imm32.lib")
-#include <shellapi.h>  // ShellExecuteW（T17 打开日志目录/帮助）
 
-#include <atomic>
-#include <chrono>
+#include <algorithm>
 #include <cmath>
-#include <deque>
+#include <cstdio>
 #include <filesystem>
-#include <fstream>
-#include <thread>
+#include <format>
 
 #include "clashwin/config/constants.h"
 #include "config/config.h"
-#include "config/proxy_head_state.h"
-#include "core/auto_select.h"
-#include "core/autostart.h"
-#include "core/connection_stale.h"  // BUG-396
-#include "core/monitor.h"
-#include "cmd/cmd_support.h"
-#include "cmd/command_service.h"
+#include "core/core_manager.h"
 #include "events/event_bus.h"
-#include "events/event_names.h"
-#include "ui/i18n_text.h"  // F-D01：通知文案走 locales，不硬编码中文
-#include "events/notice.h"
-#include "clashwin/update/client_updater.h"  // install_app_update（B-D44 更新流收口）
-#include "theme/theme.h"
-#include "ui/ui_postbox.h"
 #include "mihomo/ws_manager.h"
+#include "system/signals.h"
+#include "system/tray.h"
+#include "theme/theme.h"
+#include "ui/textfield.h"
+#include "ui/ui_postbox.h"
 #include "util/dirs.h"
 #include "util/log.h"
 #include "util/node.h"
 #include "util/utf.h"
-#include "system/tray.h"
-#include "system/signals.h"
-#include "system/service_runner.h"  // TUN 守卫：服务可用性探测
-#include "ui/help_menu.h"
-#include "ui/textfield.h"
-#include <cstring>
-#include <format>
 
 namespace clashwin::ui::win {
 
 namespace fs = std::filesystem;
 namespace utf = clashwin::utf;
 using config::window_state::WindowStateStore;
-using config::window_state::SavedWindowState;
-
-namespace {
-const wchar_t kWndClass[] = L"ClashWinMainWindow";
-// 单实例唤醒消息（T01 kAppWakeup 常量收编到本文件）
-constexpr UINT kAppWakeup = WM_APP + 1;
-// 定时器 id（WM_TIMER）
-constexpr UINT_PTR kTimerFrame = 1;   // 33ms 帧泵（§5.4 30fps 合帧）
-constexpr UINT_PTR kTimerIdle = 2;    // 1s stealth 空闲扫描（自续期）
-constexpr UINT_PTR kTimerNodeRetry = 3;  // 取数失败 2s 重试（内核配置就绪竞态）
-constexpr UINT_PTR kTimerFirstRun = 4;   // 首次引导 500ms 延迟（_layout.tsx:351-353）
-// 首启就绪轮询驱动 250ms（1.5s 轮询闸门 + 20s 超时由 dialog tick 判定）
-constexpr UINT_PTR kTimerFirstReady = 5;  // src: first-run-guide-dialog.tsx:46-48
-// TUN 可用性轮询 5s（← use-system-state.ts:65-67：启动期 5s / 常态 30s，
-// 取更密的启动期值，成本仅为一次服务 IPC 探测）
-constexpr UINT_PTR kTimerTunGuard = 6;
-// BUG-358：滑块拖动 200ms 防抖落盘定时器
-constexpr UINT_PTR kTimerSkinPersist = 7;  // src: src/pages/_layout/hooks/use-skin-controls.ts:4
-// BUG-360：过滤框 700ms 可取消自动测速防抖定时器
-constexpr UINT_PTR kTimerFilterAutoTest = 8;  // src: src/components/proxy/proxy-head.tsx:148
-constexpr UINT_PTR kTimerDelayCachePrune = 9;  // 5min 清理过期延迟缓存（src/services/delay.ts:100）
-constexpr int kResizeBorder = 10;     // ← resize-handles.tsx HANDLE_SIZE
-constexpr int kCornerSize = 20;       // ← HANDLE_SIZE*2（角落热区）
-// 关闭键拖动判定（原版 mouseup 位移 <5 恢复标题栏）
-constexpr float kStealthClickSlack = 5.0f;
-
-int64_t now_ms() { return static_cast<int64_t>(GetTickCount64()); }
-
-// 剪贴板：TextField 的生产实现（Ctrl+C/V/X 与右键编辑菜单共用）
-std::wstring read_clipboard_text() {
-  if (!OpenClipboard(nullptr)) return {};
-  std::wstring out;
-  if (HANDLE h = GetClipboardData(CF_UNICODETEXT)) {
-    if (const wchar_t* p = static_cast<const wchar_t*>(GlobalLock(h))) {
-      out.assign(p);
-      GlobalUnlock(h);
-    }
-  }
-  CloseClipboard();
-  return out;
-}
-
-void write_clipboard_text(const std::wstring& s) {
-  if (!OpenClipboard(nullptr)) return;
-  EmptyClipboard();
-  const size_t bytes = (s.size() + 1) * sizeof(wchar_t);
-  if (HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, bytes)) {
-    if (void* p = GlobalLock(h)) {
-      memcpy(p, s.c_str(), bytes);
-      GlobalUnlock(h);
-      if (SetClipboardData(CF_UNICODETEXT, h)) {
-        CloseClipboard();  // 成功后所有权归系统
-        return;
-      }
-    }
-    GlobalFree(h);  // 未交出：自行释放
-  }
-  CloseClipboard();
-}
-}  // namespace
 
 // ---------- LargeModeController 持久化 ----------
 void LargeModeController::save(const std::wstring& path, double w, double h) {
@@ -197,40 +121,6 @@ MainWindow::~MainWindow() {
   }
 }
 
-uint64_t MainWindow::push_tracked_wait_notice(const std::string& msg) {
-  const uint64_t wait_id = events::NoticeService::instance().push("info", msg, 0);
-  if (wait_id != 0) {
-    wait_notice_started_ms_[wait_id] = GetTickCount64();
-  }
-  return wait_id;
-}
-
-void MainWindow::hide_tracked_wait_notice(uint64_t wait_id) {
-  if (wait_id == 0) return;
-  uint64_t started_ms = 0;
-  if (auto it = wait_notice_started_ms_.find(wait_id);
-      it != wait_notice_started_ms_.end()) {
-    started_ms = it->second;
-    wait_notice_started_ms_.erase(it);
-  }
-  constexpr uint64_t kMinWaitDwellMs = 320;
-  const uint64_t now = GetTickCount64();
-  if (started_ms == 0 || now >= started_ms + kMinWaitDwellMs) {
-    events::NoticeService::instance().hide(wait_id);
-    return;
-  }
-  const uint64_t rem = (started_ms + kMinWaitDwellMs) - now;
-  auto alive = alive_;
-  std::thread([alive, wait_id, rem] {
-    std::this_thread::sleep_for(std::chrono::milliseconds(rem));
-    if (!alive || !alive->load(std::memory_order_acquire)) return;
-    UiPostbox::instance().post([alive, wait_id] {
-      if (!alive->load(std::memory_order_acquire)) return;
-      events::NoticeService::instance().hide(wait_id);
-    });
-  }).detach();
-}
-
 bool MainWindow::create(bool show_immediately, bool defer_render) {
   // UI 线程标记：通知可能由后台线程 push，SnackbarW 据此决定是否转投 UI 线程
   UiPostbox::instance().mark_ui_thread();
@@ -257,8 +147,8 @@ bool MainWindow::create(bool show_immediately, bool defer_render) {
   build_widget_tree();
 
   // 皮肤/亮暗/主色热切换：ThemeService 六皮肤表由此接上订阅者，切皮肤即重绘。
-  // ← Mini: src/pages/_layout.tsx:1407-1468 选中格每次渲染按 get3DButtonStyle
-  //   (theme, 'contained', 'primary') 取当前 skin；src: src/utils/button-styles.ts:22
+  // ← Mini: src/pages/_layout/components/settings-drawer.tsx:425-487 选中格每次渲染按 get3DButtonStyle
+  //   (theme, 'contained', 'primary') 取当前 skin；src: src/utils/button-styles/button.ts:11
   //   getActiveSkin(theme) —— 所有控件按当前皮肤即时换表，无需重启。
   theme_sub_ = theme::ThemeService::instance().subscribe([this] {
     if (settings_drawer_) settings_drawer_->restyle_cards();
@@ -272,7 +162,7 @@ bool MainWindow::create(bool show_immediately, bool defer_render) {
   apply_geometry_restore();
 
   // 断点 → 标题栏图标/场景挂卸
-  // 连接面板只在设置抽屉右列（src: pages/_layout.tsx:1519 {!isMinimalWidth && <ConnectionsPanel/>}）。
+  // 连接面板只在设置抽屉右列（src: src/pages/_layout/components/settings-drawer.tsx:306-310 {!isMinimalWidth && <ConnectionsPanel/>}）。
   bp_.subscribe([this](WinState prev, WinState cur) {
     CWLOG_INFO(std::format(
         "[DPIARCH] bp {}->{} narrow={} large={} logical={:.2f}x{:.2f}",
@@ -284,7 +174,7 @@ bool MainWindow::create(bool show_immediately, bool defer_render) {
     // T14：Mini → 流量条占满上栏空间（census 极小窗布局）
     if (traffic_pane_) {
       traffic_pane_->set_mini(bp_.state() == WinState::Mini);
-      traffic_pane_->set_narrow(bp_.is_narrow());  // src: _layout.tsx:1483 宽窄内距与曲线模式分支
+      traffic_pane_->set_narrow(bp_.is_narrow());  // src: src/pages/_layout.tsx:684 宽窄内距与曲线模式分支
     }
     // T17：皮肤条高≤830 隐藏（census 口径；窗口客户区逻辑高）
     if (settings_drawer_ && hwnd_) {
@@ -328,25 +218,22 @@ bool MainWindow::create(bool show_immediately, bool defer_render) {
 
   build_scene();
   // 【LAYOUTFIX】quickbar / 节点列表是在 build_scene 里才挂上树的，晚于上面
-  // 首次 layout_tree → 这些后挂控件停留在 0×0（快捷条不绘制、齿轮/图钉无法
-  // 命中，关闭钮也被挤到窗口外）。挂载完成后再按当前客户区重排一次。
+  // 首次 layout_tree → 挂载完成后再按当前客户区重排一次。
   {
     RECT rc2;
     GetClientRect(hwnd_, &rc2);
-    // 同上：启动期重排不落盘（apply_geometry_restore 已置 restore_done_=true，
-    //   原会立刻回写 window_state.json 覆盖刚恢复的值）
+    // 同上：启动期重排不落盘
     on_client_resized(rc2.right - rc2.left, rc2.bottom - rc2.top, false);
   }
 
-  // 静默启动直入轻量：跳过定时器（轻量模式不跑帧/空闲扫描/TUN 守卫，
-  // 由 entry_lightweight_mode→release_d2d_resources 统一停表，退出时 restore 补设）
+  // 静默启动直入轻量：跳过定时器
   if (!defer_render) {
-    SetTimer(hwnd_, kTimerFrame, FrameClock::kFrameIntervalMs, nullptr);
-    SetTimer(hwnd_, kTimerIdle, 1000, nullptr);
-    SetTimer(hwnd_, kTimerTunGuard, 5000, nullptr);
-    SetTimer(hwnd_, kTimerDelayCachePrune, 300000, nullptr);
+    SetTimer(hwnd_, detail::kTimerFrame, FrameClock::kFrameIntervalMs, nullptr);
+    SetTimer(hwnd_, detail::kTimerIdle, 1000, nullptr);
+    SetTimer(hwnd_, detail::kTimerTunGuard, 5000, nullptr);
+    SetTimer(hwnd_, detail::kTimerDelayCachePrune, 300000, nullptr);
   }
-  start_ms_ = now_ms();
+  start_ms_ = detail::now_ms();
   if (show_immediately) show_and_activate();
   CWLOG_INFO("MainWindow: 创建完成（无框 271x680 + 标题栏三键 + 钳制就绪）");
   return true;
@@ -376,7 +263,7 @@ bool MainWindow::init_window_class() {
         nullptr, ico_path.c_str(), IMAGE_ICON,
         GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_LOADFROMFILE));
   }
-  wc.lpszClassName = kWndClass;
+  wc.lpszClassName = detail::kWndClass;
   if (!RegisterClassExW(&wc)) {
     DWORD err = GetLastError();
     if (err != ERROR_CLASS_ALREADY_EXISTS) {
@@ -390,8 +277,6 @@ bool MainWindow::init_window_class() {
 
 bool MainWindow::create_hwnd() {
   // 默认几何（restore 会覆盖）；【DPIARCH】← window.rs：内部=逻辑 px，物理=×dpi/96
-  // 【RULERFIX】取整一律 round-half-up：271×1.5=406.5 → 407（与 Mini 落盘分数 DIP
-  //   得到的外框同宽；截断会少 1px，属可见差异）。高度 680×1.5=1020 不受影响。
   const float s = static_cast<float>(GetDpiForSystem()) / 96.0f;
   int w = static_cast<int>(kDefaultWindowW * s + 0.5f);
   int h = static_cast<int>(kDefaultWindowH * s + 0.5f);
@@ -404,7 +289,7 @@ bool MainWindow::create_hwnd() {
       L"Clash Win Ver." +
       utf::utf8_to_utf16(clashwin::config::consts::kAppVersion);
   hwnd_ = CreateWindowExW(
-      WS_EX_APPWINDOW, kWndClass, win_title.c_str(),
+      WS_EX_APPWINDOW, detail::kWndClass, win_title.c_str(),
       WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_SYSMENU,
       x, y, w, h, nullptr, nullptr, GetModuleHandleW(nullptr), this);
   {
@@ -449,9 +334,7 @@ bool MainWindow::create_hwnd() {
                    SWP_NOZORDER | SWP_NOACTIVATE);
     }
   }
-  // 【RULERFIX】创建期 WS_THICKFRAME 的非客户框在首次显影前仍占 10px（实测 +0.9s
-  //   客户区只有 386×1000，+2.5s 才变 406×1020）。这里强制重算外框，使显影前
-  //   client 就与窗口矩形一致，避免截图/布局踩到瞬态小窗。
+  // 【RULERFIX】强制重算外框，使显影前 client 就与窗口矩形一致
   // D11: 消除非客户区厚白边框（DWM 延伸客户区到边缘）
   MARGINS m{1, 1, 1, 1};
   DwmExtendFrameIntoClientArea(hwnd_, &m);
@@ -476,104 +359,6 @@ bool MainWindow::init_render() {
   return true;
 }
 
-void MainWindow::build_widget_tree() {
-  // 生产剪贴板接 Win32（TextField 的 Ctrl+C/V/X 与右键编辑命令共用）
-  TextField::set_clipboard_hooks(read_clipboard_text, write_clipboard_text);
-
-  // root = Stack{ flow = Column{ titlebar(30), content = Stack{ scene, drawer } } }
-  // 【T17-fix 根治】此前 root_ 直接挂 titlebar/scene——Stack::on_arrange
-  //   铺满语义使两者 bounds 均为全窗（30px 只是 titlebar 绘制假设，scene
-  //   从 y=0 盖过标题栏），真窗仅靠 WM 层 NCHITTEST 硬撑。现流式布局收进
-  //   flow Column（titlebar measure 固定 30 + content flex 撑满剩余），
-  //   Stack 只承担 overlay（抽屉覆盖）。
-  // 【P0-drawer】抽屉挂载范围与 Mini 对齐：源码 Settings Drawer 在
-  //   .layout-content（标题栏下方内容区，_layout.tsx:1254-1424 的
-  //   position:absolute top:0/left:0/100%×100%），标题栏始终在它上方、
-  //   保持可见可点（最小化/关闭/齿轮）。此前挂在 root_ = 整窗覆盖，
-  //   把标题栏吃掉。现改为 content Stack 的第二个子层（全内容区覆盖）。
-  auto flow = std::make_unique<Column>();
-  flow_ = flow.get();
-  root_.add_child(std::move(flow));
-
-  // 悬停提示层（src: node_modules/@mui/material/Tooltip/Tooltip.js:331 enterDelay=100ms）
-  auto tip = std::make_unique<TooltipHost>();
-  tooltip_host_ = tip.get();
-  tooltip_host_->bind_owner_hwnd(hwnd_);
-  root_.add_child(std::move(tip));
-
-  // 通知条（← components/layout/notice-manager.tsx:157-216，zIndex 1500）。
-  // 【缺口修复】此前 SnackbarW 存在但从未挂载 → NoticeService.push 的所有提示
-  //   （检查更新/内核更新/导入结果/错误）全部静默，用户侧表现为「没有任何反馈」。
-  auto snack = std::make_unique<SnackbarW>();
-  snackbar_ = snack.get();
-  root_.add_child(std::move(snack));
-  snackbar_->attach(events::NoticeService::instance());
-  // 后端状态串 → 本地化 toast（← pages/_layout/utils/notification-handlers.ts）。
-  // 【缺口修复】EventBus::notice_message 此前零订阅者 → 导入/校验/服务结果全静默。
-  install_notice_handler();
-
-  // 订阅刷新代理配置事件（择优选点/配置刷新时触发）：自动重新同步活跃节点
-  // BUG-407: kRefreshClash 统一由 postbox_sub_refresh_（下方第 1275 行，含 node_retry_left_ = 8）处理，
-  // 避免双重订阅导致每次 refresh_clash 执行两次 reload_nodes()。
-  events::EventBus::instance().subscribe(
-      events::names::kRefreshProxies,
-      [this](const events::Payload&) {
-        UiPostbox::instance().post([this] { reload_nodes(); });
-      });
-  // ← use-core-update.ts:39-62 listen('core-upgrade-progress')：
-  //   驱动弹窗进度条，并在 done/error 时弹出 coreUpdateSuccess / coreUpdateFailed 通知
-  bus_sub_core_upgrade_ = events::EventBus::instance().subscribe(
-      events::names::kCoreUpgradeProgress,
-      [this](const events::Payload& payload) {
-        if (!payload.is_object()) return;
-        const std::string st = payload.value("status", std::string());
-        const int prog = payload.value("progress", 0);
-        const std::string msg = payload.value("message", std::string());
-        UiPostbox::instance().post([this, st, prog, msg] {
-          if (!core_update_ || !core_update_->is_open()) return;
-          core_update_->handle_progress_event(st, prog, msg);
-          if (st == "done") {
-            events::NoticeService::instance().push(
-                "success", tr8("layout.notices.coreUpdateSuccess"));
-          } else if (st == "error") {
-            events::NoticeService::instance().push(
-                "error", tr8("layout.notices.coreUpdateFailed", {{"message", msg}}));
-          }
-        });
-      });
-  bus_sub_open_guide_ = events::EventBus::instance().subscribe(
-      "ui:open_guide",
-      [this](const events::Payload&) {
-        UiPostbox::instance().post([this] {
-          if (settings_drawer_) settings_drawer_->set_open(false);
-          if (first_run_) first_run_->open();
-        });
-      });
-
-  auto tb = std::make_unique<TitleBar>(this);
-  title_bar_ = tb.get();
-  title_bar_->set_z_order(10);  // 使标题栏下投影叠在 content_ 之上，同时低于 SnackbarW(1500)
-  title_bar_->set_version(utf::utf8_to_utf16(config::consts::kAppVersion));  // 单一事实源
-  flow_->add_child(std::move(tb));
-
-  auto content = std::make_unique<ContentStack>();
-  content->flex_weight = 1;  // 标题栏下方剩余高度
-  content_ = content.get();  // 布局时按底部流量区高度给抽屉留边
-  Stack* content_raw = content.get();  // 【CRASHFIX】move 后 content 为空，
-                                       // use-after-move 曾致 add_child(this=0) AV
-  flow_->add_child(std::move(content));
-
-  auto scene = std::make_unique<MainScene>();
-  scene_ = scene.get();
-  content_raw->add_child(std::move(scene));
-
-  auto drawer = std::make_unique<scene::SettingsDrawer>();
-  settings_drawer_ = drawer.get();
-  drawer_mounted_ = true;
-  content_->overlay = settings_drawer_;  // 只铺上栏，不遮底部流量条
-  content_raw->add_child(std::move(drawer));
-}
-
 void ContentStack::on_arrange(const RectF& area) {
   set_bounds(area);
   const float h = (std::max)(0.0f, area.h - (bottom_inset > 0.0f ? bottom_inset : 0.0f));
@@ -585,205 +370,6 @@ void ContentStack::on_arrange(const RectF& area) {
     else
       c->layout_tree({0, 0, area.w, area.h});
   }
-}
-
-void MainWindow::sync_quick_bar(bool empty_as_dash) {
-  if (!node_data_ || !quick_bar_) return;
-  const std::string now = node_data_->now();
-  const char* fallback = empty_as_dash ? "-" : "暂无激活的代理节点";
-  quick_bar_->set_node_text(utf::utf8_to_utf16(now.empty() ? fallback : now));
-  quick_bar_->set_badge(node_data_->row_delay(now), !now.empty());
-  // 协议胶囊 + 异步地址解析（BUG-356/339：切节点与批量刷延迟 0ms 更新 UI，不阻塞在 IPC）
-  // src: src/pages/_layout/components/active-node-card.tsx:155
-  std::string type;
-  for (const auto& r : node_data_->rows()) {
-    if (r.name == now) {
-      type = r.type;
-      break;
-    }
-  }
-  if (now.empty()) {
-    quick_bar_meta_node_.clear();
-    quick_bar_meta_addr_.clear();
-    quick_bar_->set_node_meta(type, L"");
-    return;
-  }
-  if (now == quick_bar_meta_node_) {
-    quick_bar_->set_node_meta(type, quick_bar_meta_addr_);
-    return;
-  }
-  quick_bar_meta_node_ = now;
-  quick_bar_meta_addr_.clear();
-  quick_bar_->set_node_meta(type, L"");
-  std::thread([this, now, type] {
-    std::wstring addr;
-    auto r = cmd::CommandService::instance().invoke(
-        "get_proxy_addr", nlohmann::json::object({{"name", now}}));
-    if (r.is_ok() && r.value().is_object()) {
-      const std::string server = r.value().value("server", std::string());
-      const int port = r.value().value("port", 0);
-      if (!server.empty()) {
-        addr = utf::utf8_to_utf16(server + ":" + std::to_string(port));
-      }
-    }
-    UiPostbox::instance().post([this, now, type, addr] {
-      if (!node_data_ || !quick_bar_ || node_data_->now() != now) return;
-      quick_bar_meta_node_ = now;
-      quick_bar_meta_addr_ = addr;
-      quick_bar_->set_node_meta(type, addr);
-    });
-  }).detach();
-}
-
-void MainWindow::switch_node_optimistic_async(const std::string& target) {
-  if (!node_data_ || target.empty()) return;
-  // BUG-356：0ms 乐观高亮更新，点击瞬间切换主列表与顶栏活跃节点，失败按代数守卫回滚
-  // src: src/hooks/use-proxy-selection.ts:95
-  const std::string prev = node_data_->set_now_optimistic(target);
-  sync_quick_bar(true);
-  const uint64_t epoch =
-      switch_epoch_.fetch_add(1, std::memory_order_acq_rel) + 1;
-
-  std::thread([this, target, prev, epoch] {
-    bool ok = false;
-    auto mc = cmd::mihomo();
-    if (!mc.is_ok() || !mc.value()) {
-      CWLOG_WARN("switch node: mihomo client unavailable");
-    } else {
-      auto r = mc.value()->select_node_for_group("PROXY", target);
-      ok = r.is_ok();
-      if (!ok) CWLOG_WARN("switch node failed: " + r.error().message);
-    }
-
-    if (ok) {
-      // BUG-336：通知后端自愈监控进入手动切点宽限期，并持久化写回当前订阅 selected
-      // src: src/hooks/use-proxy-selection.ts:111
-      (void)cmd::CommandService::instance().invoke(
-          "notify_node_switched", nlohmann::json::object());
-
-      std::string uid;
-      if (auto p = config::Config::instance().profiles().latest_arc();
-          p && p->current && !p->current->empty()) {
-        uid = *p->current;
-      }
-      if (!uid.empty()) {
-        // src: src/hooks/use-proxy-selection.ts:74
-        auto pr = cmd::CommandService::instance().invoke(
-            "patch_profile",
-            nlohmann::json::object(
-                {{"index", uid},
-                 {"profile",
-                  {{"selected",
-                    nlohmann::json::array(
-                        {{{"name", "PROXY"}, {"now", target}}})}}}}));
-        if (!pr.is_ok()) {
-          CWLOG_WARN("persist selected node failed: " + pr.error().message);
-        }
-      }
-
-      // BUG-396（use-proxy-selection.ts:91-92）：前台显式切点后立即精准清理
-      // 仍挂在非目标节点上的 PROXY 存量长连接；不再按旧节点全量断流，
-      // DIRECT/REJECT 与同节点连接保持零中断。
-      if (mc.is_ok() && mc.value()) {
-        (void)core::close_stale_proxy_connections(*mc.value(), target);
-      }
-    }
-
-    UiPostbox::instance().post([this, prev, epoch, ok] {
-      if (!node_data_) return;
-      if (!ok) {
-        if (switch_epoch_.load(std::memory_order_acquire) == epoch) {
-          // src: src/hooks/use-proxy-selection.ts:128
-          node_data_->set_now_optimistic(prev);
-          sync_quick_bar(true);
-        }
-      }
-      // 自编节点切换成功/失败提示已按用户裁决删除（Mini 无对应提示）
-    });
-  }).detach();
-}
-
-void MainWindow::test_single_node_async(const std::string& node) {
-  if (!node_data_ || node.empty() || scene::is_preset_proxy(node)) return;
-  auto latest = config::Config::instance().profiles().latest_arc();
-  const std::string uid = latest ? latest->current.value_or("") : std::string();
-  if (uid.empty()) return;
-
-  // BUG-321/357：保存原始延迟与时间戳快照，异常/忙碌/空结果时原样恢复，绝不卡在 -2
-  // src: src/services/delay.ts:351
-  auto snap = node_data_->snapshot_delays({node});
-  const auto started = std::chrono::steady_clock::now();
-  node_data_->set_delay(node, -2);  // src: src/services/delay.ts:354
-  if (quick_bar_ && node == node_data_->now()) {
-    quick_bar_->set_badge(-2, true);  // src: src/services/delay.ts:354
-  }
-
-  std::thread([this, node, uid, snap = std::move(snap), started]() mutable {
-    nlohmann::json args = nlohmann::json::object();
-    args["profile_uid"] = uid;
-    args["node_names"] = nlohmann::json::array({node});
-    args["sort_type"] = 0;
-    args["select"] = false;
-    auto r = cmd::CommandService::instance().invoke("trigger_auto_select", args);
-
-    int delay = 0;
-    std::string err;
-    if (!r.is_ok()) {
-      err = r.error().message;
-    } else if (!r.value().is_array() || r.value().empty()) {
-      err = "AUTO_SELECT_NO_RESULT";  // src: src/services/delay.ts:364
-    } else {
-      bool matched = false;
-      for (const auto& item : r.value()) {
-        if (item.is_array() && item.size() == 2 && item[0].is_string() &&
-            item[0].get<std::string>() == node) {
-          delay = item[1].get<int>();
-          matched = true;
-          break;
-        }
-      }
-      if (!matched) delay = 0;  // src: src/services/delay.ts:369
-      const auto elapsed =
-          std::chrono::duration_cast<std::chrono::milliseconds>(
-              std::chrono::steady_clock::now() - started)
-              .count();
-      if (elapsed < 500) {  // src: src/services/delay.ts:373
-        std::this_thread::sleep_for(
-            std::chrono::milliseconds(500 - elapsed));  // src: src/services/delay.ts:437
-      }
-    }
-
-    UiPostbox::instance().post(
-        [this, node, snap = std::move(snap), delay, err] {
-          if (!node_data_) return;
-          if (!err.empty()) {
-            // src: src/services/delay.ts:383
-            node_data_->restore_delays_for_still_pending(snap);
-            if (quick_bar_ && node == node_data_->now()) {
-              quick_bar_->set_badge(node_data_->row_delay(node), true);
-            }
-            // src: src/pages/_layout/components/active-node-card.tsx:192
-            if (err.find("AUTO_SELECT_BUSY") != std::string::npos ||
-                err.find("AUTO_SELECT_MANUAL_PREEMPTED") != std::string::npos) {
-              events::NoticeService::instance().push(
-                  "info", tr8("settings.mini.testingInProgress"));
-            } else if (err.find("AUTO_SELECT_NO_RESULT") != std::string::npos) {
-              events::NoticeService::instance().push(
-                  "error", tr8("settings.mini.testNotExecuted"));
-            } else {
-              events::NoticeService::instance().push(
-                  "error", tr8("settings.mini.testFailed", {{"message", err}}));
-            }
-            return;
-          }
-          node_data_->set_delay(node, delay);
-          node_data_->restore_delays_for_still_pending(snap);
-          if (quick_bar_ && node == node_data_->now()) {
-            quick_bar_->set_badge(delay, true);
-          }
-          // 自编单节点测速提示已删除（Mini 无对应提示）
-        });
-  }).detach();
 }
 
 bool MainWindow::should_tray_click_hide(bool in_lightweight_mode) const {
@@ -810,19 +396,6 @@ bool MainWindow::is_any_overlay_open() const {
 bool MainWindow::is_editable_focused() const {
   // src: src/utils/disable-webview-shortcuts.ts:9
   return dynamic_cast<TextField*>(focused_widget()) != nullptr;
-}
-
-void MainWindow::reload_nodes() {
-  if (!node_data_ || !quick_bar_) return;
-  bool ok = node_data_->load();
-  sync_quick_bar(false);
-  if (ok) {
-    node_retry_left_ = 0;
-    KillTimer(hwnd_, kTimerNodeRetry);
-  } else if (node_retry_left_ > 0) {
-    --node_retry_left_;
-    SetTimer(hwnd_, kTimerNodeRetry, 2000, nullptr);
-  }
 }
 
 void MainWindow::update_ime_position() {
@@ -861,1557 +434,6 @@ void MainWindow::update_ime_position() {
     ImmSetCandidateWindow(himc, &cdf);
 
     ImmReleaseContext(hwnd_, himc);
-  }
-}
-
-void MainWindow::trigger_auto_select_and_refresh(const std::string& uid,
-                                                 bool user_initiated,
-                                                 bool skip_probe_if_fresh) {
-  if (uid.empty()) return;
-  const uint64_t gen = auto_select_coord_gen_.fetch_add(1) + 1;
-  const uint64_t wait_id = user_initiated ? begin_batch_test_notice() : 0;
-  // BUG-321/355：用户主动全量测速（如 F1）先快照并批量置 -2，结束后为仍停在 -2 的行兜底回滚
-  // src: src/services/delay.ts:445
-  scene::NodeData::DelaySnapshotMap snap;
-  bool ui_fresh_active = false;
-  if (node_data_) {
-    std::vector<std::string> names;
-    for (const auto& row : node_data_->rows()) {
-      if (!scene::is_preset_proxy(row.name)) {
-        names.push_back(row.name);
-      }
-    }
-    if (skip_probe_if_fresh && !user_initiated && !names.empty()) {
-      ui_fresh_active = node_data_->has_fresh_active_exit_latency(names);
-    }
-    if (user_initiated && !names.empty()) {
-      snap = node_data_->snapshot_delays(names);
-      node_data_->set_delays_batch(names, -2);  // src: src/services/delay.ts:452
-      if (quick_bar_ && !node_data_->now().empty() &&
-          !scene::is_preset_proxy(node_data_->now())) {
-        quick_bar_->set_badge(-2, true);  // src: src/services/delay.ts:452
-      }
-    }
-  }
-  std::thread([this, uid, gen, user_initiated, skip_probe_if_fresh,
-               ui_fresh_active, wait_id, snap = std::move(snap)]() mutable {
-    auto is_stale_coord = [&]() -> bool {
-      if (app::Lifecycle::instance().is_exiting()) return true;
-      if (!user_initiated &&
-          auto_select_coord_gen_.load(std::memory_order_acquire) != gen) {
-        return true;
-      }
-      auto latest = config::Config::instance().profiles().latest_arc();
-      return !latest || !latest->current || *latest->current != uid;
-    };
-
-    auto deadline = std::chrono::steady_clock::now() +
-                    std::chrono::seconds(10);  // src: src/pages/_layout/utils/profile-coordination.ts:240
-    while (std::chrono::steady_clock::now() < deadline) {
-      if (is_stale_coord()) break;
-      if (cmd::mihomo_unchecked().get_base_config().is_ok()) break;
-      std::this_thread::sleep_for(
-          std::chrono::milliseconds(200));  // src: src/pages/_layout/utils/profile-coordination.ts:240
-    }
-    if (!user_initiated && is_stale_coord()) return;
-
-    // 连续性优先（← profile-coordination.ts / monitor.rs）：非用户主动触发时若持久出口仍在过滤子集内且非假节点，只测速不换点
-    bool should_select = user_initiated;
-    if (!user_initiated) {
-      bool keep_exit = false;
-      auto grp_init = cmd::mihomo_unchecked().get_group_by_name("PROXY");
-      if (grp_init.is_ok()) {
-        std::string filter_text;
-        try {
-          auto st = config::proxy_head_state::load();
-          if (auto gs = config::proxy_head_state::get_group_state(st, uid, "PROXY")) {
-            filter_text = gs->filter_text;
-          }
-        } catch (...) {
-        }
-        const bool confirmed_fake =
-            grp_init.value().now && !grp_init.value().now->empty() &&
-            util::is_confirmed_fake_node(*grp_init.value().now);
-        const std::vector<std::string>* all_ptr =
-            grp_init.value().all ? &(*grp_init.value().all) : nullptr;
-        keep_exit = core::CoreMonitor::persisted_exit_is_usable(
-            grp_init.value().now, all_ptr, filter_text, confirmed_fake);
-        // BUG-402：若允许首启/轻量跳过且持久出口有效 + 活跃延迟仍新鲜（45min 内），零拨测直接刷新展示
-        if (skip_probe_if_fresh && keep_exit && !is_stale_coord()) {
-          bool fresh_exit = ui_fresh_active;
-          if (!fresh_exit && grp_init.value().now && !grp_init.value().now->empty()) {
-            auto px = cmd::mihomo_unchecked().get_proxy_by_name(*grp_init.value().now);
-            if (px.is_ok()) {
-              const int64_t epoch_ms =
-                  std::chrono::duration_cast<std::chrono::milliseconds>(
-                      std::chrono::system_clock::now().time_since_epoch())
-                      .count();
-              fresh_exit = scene::is_proxy_history_fresh_and_valid(
-                  px.value().alive, px.value().history, epoch_ms);
-            }
-          }
-          if (fresh_exit) {
-            UiPostbox::instance().post([this] { reload_nodes(); });
-            return;
-          }
-        }
-      }
-      should_select = !keep_exit;
-    }
-
-    // BUG-396（proxy-groups.tsx:408-415）：仅用户主动 F1/过滤词/F4 传
-    // clean_stale_connections=true；配置切换后的后台初始化不清理存量连接。
-    auto r = cmd::CommandService::instance().invoke(
-        "trigger_auto_select",
-        nlohmann::json::object({{"profile_uid", uid},
-                                {"sort_type", 0},
-                                {"select", should_select},
-                                {"clean_stale_connections", user_initiated}}));
-
-    scene::BatchTestSummary sum;
-    if (user_initiated) {
-      if (!r.is_ok()) {
-        if (r.error().message.find("AUTO_SELECT_BUSY") != std::string::npos ||
-            r.error().message.find("AUTO_SELECT_MANUAL_PREEMPTED") !=
-                std::string::npos) {
-          sum.busy = true;
-        }
-      } else if (r.value().is_array() && !r.value().empty()) {
-        sum.executed = true;
-        auto grp = cmd::mihomo_unchecked().get_group_by_name("PROXY");
-        const std::string now_node =
-            (grp.is_ok() && grp.value().now) ? *grp.value().now : std::string();
-        for (const auto& item : r.value()) {
-          if (item.is_array() && item.size() == 2 && item[0].is_string() &&
-              item[0].get<std::string>() == now_node) {
-            const int d = item[1].get<int>();
-            if (d >= core::kNodeDelayMinMs && d < core::kNodeDelayMaxMs) {
-              sum.selected = true;
-              sum.selected_node = now_node;
-              sum.selected_delay_ms = d;
-            }
-            break;
-          }
-        }
-      }
-    }
-
-    UiPostbox::instance().post(
-        [this, user_initiated, wait_id, sum, snap = std::move(snap)] {
-          if (node_data_ && !snap.empty()) {
-            node_data_->restore_delays_for_still_pending(snap);
-          }
-          reload_nodes();
-          if (node_data_ && !snap.empty()) {
-            node_data_->restore_delays_for_still_pending(snap);
-          }
-          if (user_initiated) finish_batch_test_notice(wait_id, sum);
-        });
-  }).detach();
-}
-
-// TUN 自动关闭守卫 ← use-system-state.ts:99-128
-//   TUN 已开 且 当前不可用（非管理员 且 服务不可用）→
-//   patchVerge({enable_tun_mode:false, enable_system_proxy:true})，
-//   成功 info tunMode.autoDisabled / 失败 error tunMode.autoDisableFailed。
-//   Mini 的 isLoading / isStartingUp / isLongOperationRunning 三重闸门在此对应为：
-//   - isStartingUp → 启动 10s 宽限（STARTUP_GRACE_MS，services/delay.ts:39）
-//   - isLongOperationRunning → install_service 是阻塞命令，UI 线程期间定时器不触发
-//   - isLoading → 探测本身在 worker 线程串行（busy 标志），不重复判定
-void MainWindow::tun_guard_tick() {
-  if (start_ms_ != 0 && now_ms() - start_ms_ < 10000) return;  // 启动宽限
-  if (now_ms() < tun_guard_cool_until_) return;               // 1s 冷却（:123-127）
-  if (tun_guard_busy_.exchange(true)) return;                 // 上一轮探测未完
-  std::thread([this] {
-    const bool tun_on =
-        config::Config::instance().verge().latest_arc()->enable_tun_mode.value_or(false);
-    bool available = true;
-    if (tun_on) {
-      available = cmd::is_admin();
-      if (!available) {
-        auto runner = system::get_service_runner();
-        available = runner && runner->is_available();
-      }
-    }
-    if (tun_on && !available) {
-      auto r = cmd::CommandService::instance().invoke(
-          "patch_verge_config",
-          nlohmann::json::object(
-              {{"enable_tun_mode", false}, {"enable_system_proxy", true}}));
-      // ← :110-120 成功/失败两条提示，绝静默
-      events::NoticeService::instance().push(
-          r.is_ok() ? "info" : "error",
-          tr8(r.is_ok()
-                  ? "settings.sections.system.notifications.tunMode.autoDisabled"
-                  : "settings.sections.system.notifications.tunMode.autoDisableFailed"));
-      if (r.is_ok()) {
-        UiPostbox::instance().post([this] {
-          if (settings_drawer_) settings_drawer_->sync_takeover(true, false);
-        });
-      }
-      tun_guard_cool_until_ = now_ms() + 1000;
-    }
-    tun_guard_busy_.store(false);
-  }).detach();
-}
-
-// 首启就绪轮询：refreshProxy（getProxies 全量）+ activeDelay（src:
-// first-run-guide-dialog.tsx:143-170/:236-245）；row_delay(-1/-2) → null(-1)
-void MainWindow::sync_first_run_proxy() {  if (!node_data_) return;
-  node_data_->load();
-  const std::string now = node_data_->now();
-  const int delay = now.empty() ? -1 : node_data_->row_delay(now);
-  if (quick_bar_) {
-    quick_bar_->set_node_text(utf::utf8_to_utf16(now.empty() ? "暂无激活的代理节点" : now));
-    quick_bar_->set_badge(delay, !now.empty());
-  }
-  if (first_run_) {
-    first_run_->set_active_node_name(now);
-    first_run_->set_active_delay_ms(delay >= 0 ? delay : -1);
-  }
-}
-
-void MainWindow::build_scene() {
-  // T13：场景装配——数据（production hooks）→ 快捷条/节点列表挂载 → 事件订阅
-  node_data_ = std::make_unique<scene::NodeData>(scene::NodeData::production_hooks());
-
-  node_data_sub_ = node_data_->subscribe([this] {
-    sync_quick_bar(true);
-  });
-
-  auto qb = std::make_unique<scene::QuickBar>();
-  quick_bar_ = qb.get();
-  scene_->attach_quick_bar(std::move(qb));
-
-  auto nl = std::make_unique<scene::NodeList>();
-  node_list_ = nl.get();
-  node_list_->bind(node_data_.get());
-  // BUG-336/356：点击节点行 → 0ms 乐观高亮更新 + 异步 IPC/回滚 + selected 持久化
-  // src: src/hooks/use-proxy-selection.ts:95
-  node_list_->select_node = [this](const std::string& node) {
-    switch_node_optimistic_async(node);
-    return true;
-  };
-  // BUG-357：点击节点行右侧 65px 延迟热区 → 单节点探测（不切换活跃节点）
-  // src: src/components/proxy/proxy-item.tsx:161
-  node_list_->on_test_single = [this](const std::string& name) {
-    test_single_node_async(name);
-  };
-  // BUG-360：过滤框 700ms 可取消自动测速防抖定时器接线
-  // src: src/components/proxy/proxy-head.tsx:148
-  node_list_->on_arm_filter_auto_test_timer = [this](uint32_t ms) {
-    if (hwnd_) SetTimer(hwnd_, kTimerFilterAutoTest, ms, nullptr);
-  };
-  node_list_->on_cancel_filter_auto_test_timer = [this] {
-    if (hwnd_) KillTimer(hwnd_, kTimerFilterAutoTest);
-  };
-  node_list_->on_batch_test_begin = [] { return begin_batch_test_notice(); };
-  node_list_->on_batch_test_end =
-      [](uint64_t wait_id, const scene::BatchTestSummary& sum) {
-        finish_batch_test_notice(wait_id, sum);
-      };
-  // 自编排序切换提示已删除（Mini 无对应提示）
-  node_list_->on_sort_changed = [](int) {};
-  // src: src/pages/_layout/components/active-node-card.tsx:205 handleCycleNode：
-  //   在当前过滤+排序后的可见列表中顺序轮换，自动跳过已确认超时（delay==0 || delay>=5000）的节点；
-  //   若全部超时则回退至紧邻下一个节点，并走统一乐观切换 + selected 持久化链路（BUG-336/356）。
-  quick_bar_->on_cycle_node = [this] {
-    if (!node_data_) return;
-    std::vector<std::string> candidates;
-    if (node_list_) candidates = node_list_->visible_node_names();
-    if (candidates.empty()) {
-      for (const auto& r : node_data_->rows()) candidates.push_back(r.name);
-    }
-    if (candidates.size() < 2) return;
-    const std::string cur_name = node_data_->now();
-    size_t cur = candidates.size() - 1;  // 未匹配 → 从索引 0 开始尝试
-    for (size_t i = 0; i < candidates.size(); ++i) {
-      if (candidates[i] == cur_name) {
-        cur = i;
-        break;
-      }
-    }
-    size_t chosen = (cur + 1) % candidates.size();
-    for (size_t step = 1; step <= candidates.size(); ++step) {
-      const size_t idx = (cur + step) % candidates.size();
-      const int d = node_data_->row_delay(candidates[idx]);
-      // src: src/pages/_layout/components/active-node-card.tsx:245
-      if (d != 0 && d < scene::kNodeDelayMaxMs) {
-        chosen = idx;
-        break;
-      }
-    }
-    if (candidates[chosen] == cur_name) return;
-    switch_node_optimistic_async(candidates[chosen]);
-  };
-
-  // 点击延迟 Chip → 单点测速（src: src/pages/_layout/components/active-node-card.tsx:174）
-  quick_bar_->on_test_delay = [this] {
-    if (node_data_) test_single_node_async(node_data_->now());
-  };
-
-  // BUG-359：网络健康度持久胶囊同步 + 点击立即重测自愈（src: src/pages/_layout/components/active-node-card.tsx:105-147）
-  quick_bar_->set_network_health(latest_network_health());
-  net_health_sub_ = subscribe_network_health(
-      [this](scene::NetworkHealthIssue issue) {
-        UiPostbox::instance().post([this, issue] {
-          if (quick_bar_) quick_bar_->set_network_health(issue);
-        });
-      });
-  quick_bar_->on_self_heal_retest = [this] {
-    if (!node_data_) return;
-    auto latest = config::Config::instance().profiles().latest_arc();
-    const std::string uid = latest ? latest->current.value_or("") : std::string();
-    if (uid.empty()) return;
-    if (self_heal_busy_.exchange(true)) {
-      events::NoticeService::instance().push(
-          "info", tr8("settings.mini.testingInProgress"));
-      return;
-    }
-    if (quick_bar_) quick_bar_->set_self_heal_testing(true);
-    std::vector<std::string> names;
-    for (const auto& row : node_data_->rows()) {
-      if (!scene::is_preset_proxy(row.name)) {
-        names.push_back(row.name);
-      }
-    }
-    auto snap = node_data_->snapshot_delays(names);
-    if (!names.empty()) node_data_->set_delays_batch(names, -2);  // src: src/services/delay.ts:452
-    const bool select_node =
-        (latest_network_health() != scene::NetworkHealthIssue::Offline);
-    std::thread([this, uid, select_node, snap = std::move(snap)]() mutable {
-      // src: src/pages/_layout/components/active-node-card.tsx:121
-      // BUG-396（active-node-card.tsx:155-161）：顶栏异常胶囊前台重测，
-      // 选中节点时同步清理旧节点存量连接（离线仅测速不切换，不清理）。
-      auto r = cmd::CommandService::instance().invoke(
-          "trigger_auto_select",
-          nlohmann::json::object({{"profile_uid", uid},
-                                  {"sort_type", 0},
-                                  {"select", select_node},
-                                  {"clean_stale_connections", select_node}}));
-      bool has_healthy = false;
-      bool empty_result = false;
-      std::string err;
-      if (!r.is_ok()) {
-        err = r.error().message;
-      } else if (!r.value().is_array() || r.value().empty()) {
-        empty_result = true;
-      } else {
-        for (const auto& item : r.value()) {
-          if (item.is_array() && item.size() == 2 && item[1].is_number_integer()) {
-            const int d = item[1].get<int>();
-            // src: src/pages/_layout/components/active-node-card.tsx:127
-            if (d > 0 && d < scene::kNodeDelayMaxMs) {
-              has_healthy = true;
-              break;
-            }
-          }
-        }
-      }
-      UiPostbox::instance().post(
-          [this, snap = std::move(snap), has_healthy, empty_result, err] {
-            self_heal_busy_.store(false);
-            if (quick_bar_) quick_bar_->set_self_heal_testing(false);
-            if (node_data_) node_data_->restore_delays_for_still_pending(snap);
-            reload_nodes();
-            if (node_data_) node_data_->restore_delays_for_still_pending(snap);
-            if (!err.empty()) {
-              // src: src/pages/_layout/components/active-node-card.tsx:137
-              if (err.find("AUTO_SELECT_BUSY") != std::string::npos ||
-                  err.find("AUTO_SELECT_MANUAL_PREEMPTED") !=
-                      std::string::npos) {
-                events::NoticeService::instance().push(
-                    "info", tr8("settings.mini.testingInProgress"));
-              } else if (err.find("AUTO_SELECT_NO_RESULT") != std::string::npos) {
-                events::NoticeService::instance().push(
-                    "error", tr8("settings.mini.testNotExecuted"));
-              } else {
-                events::NoticeService::instance().push(
-                    "error", tr8("settings.mini.testFailed", {{"message", err}}));
-              }
-              return;
-            }
-            if (has_healthy) {
-              // src: src/pages/_layout/components/active-node-card.tsx:128
-              set_latest_network_health(scene::NetworkHealthIssue::None);
-              if (quick_bar_)
-                quick_bar_->set_network_health(scene::NetworkHealthIssue::None);
-            } else if (empty_result) {
-              events::NoticeService::instance().push(
-                  "error", tr8("settings.mini.testNotExecuted"));
-            } else {
-              // src: src/pages/_layout/components/active-node-card.tsx:132
-              const auto cur_issue = latest_network_health();
-              events::NoticeService::instance().push(
-                  "error",
-                  tr8(cur_issue == scene::NetworkHealthIssue::Offline
-                          ? "settings.mini.networkOffline"
-                          : "settings.mini.allNodesTimeout"));
-            }
-          });
-    }).detach();
-  };
-  scene_->attach_node_list(std::move(nl));
-
-  // 数据初始加载（内核配置就绪竞态：失败 2s 重试，最多 8 次）
-  node_retry_left_ = 8;  // src: src/pages/_layout.tsx:351
-  reload_nodes();
-
-  // 延迟结果事件：局部刷新（BUG-344：区分实时探测 120s 与近期缓存复用 30s 封顶）
-  // src: src/services/delay.ts:397
-  postbox_sub_delay_ = UiPostbox::instance().subscribe_ui(
-      events::names::kBackendDelayResults, [this](const nlohmann::json& p) {
-        const bool from_probe =
-            p.is_object() ? p.value("fromProbe", true) : true;
-        node_data_->apply_delay_results(p, from_probe);
-        quick_bar_->set_node_text(utf::utf8_to_utf16(
-            node_data_->now().empty() ? "-" : node_data_->now()));
-        quick_bar_->set_badge(node_data_->row_delay(node_data_->now()),
-                              !node_data_->now().empty());
-      });
-  // 配置/代理刷新事件：全量重载
-  postbox_sub_refresh_ = UiPostbox::instance().subscribe_ui(
-      events::names::kRefreshClash, [this](const nlohmann::json&) {
-        node_retry_left_ = 8;  // src: src/pages/_layout.tsx:351
-        reload_nodes();
-      });
-
-  // T14：流量面板挂 traffic_slot；连接面板 Large 模式挂载（census：宽≤285
-  // 时不挂载）
-  auto tp = std::make_unique<scene::TrafficPane>();
-  traffic_pane_ = tp.get();
-  if (auto* slot = scene_->traffic_slot()) {
-    slot->add_child(std::move(tp));  // 所有权移交场景树
-  } else {
-    traffic_pane_holder_ = std::move(tp);  // 无 slot 兜底持有
-    traffic_pane_->set_visible(false);
-  }
-
-  conn_data_ = std::make_unique<scene::ConnectionData>(300);  // src: src/hooks/use-connection-data.ts:24
-  conn_data_->on_resync = [this] {
-    CWLOG_WARN("conn resync：等待下一个 snapshot 帧（WS 重连）");
-    if (ws_sub_conn_ != 0 && ws_) {
-      ws_->unsubscribe(ws_sub_conn_);
-      ws_sub_conn_ = 0;
-      update_conn_ws_state();
-    }
-  };
-
-  build_ws_pipes();
-
-  // QuickBar 齿轮/图钉接线（Mini：橙方块 gear=开抽屉，pin=置顶并持久化 enable_always_on_top，BUG-340）
-  if (quick_bar_) {
-    quick_bar_->on_open_settings = [this] {
-      CWLOG_INFO("[GEAR] on_click → toggle drawer");
-      if (settings_drawer_) settings_drawer_->set_open(!settings_drawer_->is_open());
-    };
-    quick_bar_->on_toggle_pin = [this] {
-      // src: src/pages/_layout.tsx:446
-      const bool target_pin = !pinned_;
-      pinned_ = target_pin;
-      if (hwnd_) {
-        SetWindowPos(hwnd_, target_pin ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0,
-                     0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-      }
-      if (quick_bar_) quick_bar_->set_pinned(target_pin);
-      std::thread([this, target_pin] {
-        auto r = cmd::CommandService::instance().invoke(
-            "patch_verge_config",
-            nlohmann::json::object({{"enable_always_on_top", target_pin}}));
-        const bool ok = r.is_ok();
-        const std::string err = ok ? std::string() : r.error().message;
-        UiPostbox::instance().post([this, target_pin, ok, err] {
-          if (!ok) {
-            pinned_ = !target_pin;
-            if (hwnd_) {
-              SetWindowPos(hwnd_, pinned_ ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0,
-                           0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            }
-            if (quick_bar_) quick_bar_->set_pinned(pinned_);
-            events::NoticeService::instance().push("error", err);
-          }
-        });
-      }).detach();
-    };
-  }
-
-  // ---------- T17/T20：设置抽屉命令链接线 ----------
-  if (settings_drawer_) {
-    if (auto* cp = settings_drawer_->conn_panel()) {
-      cp->bind(conn_data_.get());
-      cp->on_close_one = [](const std::string& id) {
-        std::thread([id] {
-          auto r = cmd::CommandService::instance().invoke(
-              "close_connection", nlohmann::json::object({{"id", id}}));
-          const bool ok = r.is_ok();
-          const std::string err = ok ? std::string() : r.error().message;
-          UiPostbox::instance().post([err] {
-            // 自编断开单条成功提示已删除（Mini 无对应提示），仅透传错误
-            if (!err.empty()) events::NoticeService::instance().push("error", err);
-          });
-        }).detach();
-      };
-      cp->on_close_all = [] {
-        std::thread([] {
-          auto r = cmd::CommandService::instance().invoke(
-              "close_all_connections", nlohmann::json::object());
-          const bool ok = r.is_ok();
-          const std::string err = ok ? std::string() : r.error().message;
-          UiPostbox::instance().post([ok, err] {
-            dispatch_close_all_connections_notice(ok, err);
-          });
-        }).detach();
-      };
-      cp->on_clear_history = [this] {
-        if (conn_data_) conn_data_->clear_closed();
-        // 自编清空历史提示已删除（Mini 无对应提示）
-      };
-    }
-    settings_drawer_->on_open_changed = [this](bool open) {
-      // src: _layout.tsx:1047,1132「!drawerOpen」→ 抽屉打开时快捷栏与节点列表均不渲染
-      if (quick_bar_) quick_bar_->set_visible(!open);
-      if (node_list_) {
-        node_list_->set_visible(!open);
-        node_list_->set_a11y_hidden(open);
-      }
-      update_conn_ws_state();
-    };
-    // patch_verge 键 → patch_verge_config；clash 键 → patch_clash_config
-    // 【点击不位移修复】← on_takeover_change（:963-1064）现成异步范式：
-    //   command_service.cpp:92 在调用线程 wait_for(kTimeoutConfig=30000) 同步等待，
-    //   旧实现把 svc.invoke 放在 UI 线程 → 阻塞消息循环，SwitchW::set_checked
-    //   （switch_w.cpp:14-21 已即时 anim_ 置位 + invalidate）的重绘排不上队，
-    //   于是「点下去没立刻位移」。Mini 是乐观更新 + 异步 await IPC，UI 线程不阻塞。
-    //   现：UI 线程做乐观/通知准备（常驻 info 的 wait_id 必须 UI 线程生成）→
-    //   std::thread 后台执行 svc.invoke → 收尾经 UiPostbox 回 UI 线程。
-    settings_drawer_->on_patch_verge =
-        [this](const std::string& k, const nlohmann::json& v) {
-          const std::string success_msg = resolve_verge_patch_success_message(k, v);
-          if (k == "clash_mini_control_skin") {
-            // 皮肤偏好已由 SettingsDrawer::select_skin 落盘至 clashwin-skin.json；
-            // 自编皮肤切换提示已删除（Mini 无对应提示）。
-            return;
-          }
-          const bool is_clash = (k == "clash_allow_lan" || k == "clash_ipv6");
-          const bool is_basic_toggle =
-              (k == "enable_auto_launch" || k == "enable_silent_start" ||
-               k == "enable_tun_sniffer");
-          const bool is_auto_launch = (k == "enable_auto_launch");
-          const bool want_auto_launch =
-              (is_auto_launch && v.is_boolean()) ? v.get<bool>() : false;
-          const bool is_rule = (k == "rule_fallback");
-          const char* info_key =
-              (is_clash || is_basic_toggle)
-                  ? "layout.notices.adjusting"
-                  : (is_rule ? "layout.notices.adjustingProxyMode" : nullptr);
-          const std::string cmd =
-              is_clash ? "patch_clash_config" : "patch_verge_config";
-          nlohmann::json args;
-          if (is_clash) {
-            const std::string field =
-                (k == "clash_allow_lan") ? "allow-lan" : "ipv6";
-            args = nlohmann::json::object({{field, v}});
-          } else {
-            args = nlohmann::json::object({{k, v}});
-          }
-          const uint64_t wait_id =
-              info_key ? push_tracked_wait_notice(tr8(info_key)) : 0;
-
-          // ---- 后台线程：只做阻塞式 svc.invoke（UI 线程不再被 wait_for 拖住）----
-          std::thread([this, k, cmd, args, wait_id, success_msg, is_clash, is_rule,
-                       is_auto_launch, want_auto_launch] {
-            std::optional<cmd::LongOperationGuard> long_guard;
-            if (is_clash || is_rule) long_guard.emplace();
-            auto r = cmd::CommandService::instance().invoke(cmd, args);
-            if (r.is_ok() && is_rule) {
-              // ← _layout.tsx:405-413 切分流同步切 clash mode='rule'，合并在同一后台事务中
-              cmd::CommandService::instance().invoke(
-                  "patch_clash_mode", nlohmann::json::object({{"mode", "rule"}}));
-            }
-            const bool ok = r.is_ok();
-            bool auto_launch_mismatch = false;
-            if (ok && is_auto_launch) {
-              // ← basic-settings-card.tsx:221-248 回查注册表真实自启状态，防被安全软件静默拦截
-              auto st = core::AutostartManager::instance().get_launch_status();
-              if (!st.is_ok() || st.value() != want_auto_launch) {
-                auto_launch_mismatch = true;
-              }
-            }
-            const std::string err = ok ? std::string() : r.error().message;
-            CWLOG_INFO(std::string("[PATCH_VERGE] ") + k + "=" + args.dump() +
-                       (ok ? " ok" : " FAIL " + err));
-            // ---- 收尾统一回 UI 线程（避免 NoticeService 变更回调跨线程触碰 SnackbarW）----
-            UiPostbox::instance().post(
-                [this, wait_id, success_msg, ok, err, is_auto_launch,
-                 want_auto_launch, auto_launch_mismatch] {
-                  auto& notices = events::NoticeService::instance();
-                  if (wait_id) hide_tracked_wait_notice(wait_id);  // finally hideNotice
-                  if (!settings_drawer_) return;       // 同 on_takeover_change 生命周期守卫
-                  if (ok) {
-                    if (is_auto_launch) {
-                      if (auto_launch_mismatch) {
-                        notices.push("warning",
-                                     tr8("settings.mini.autoLaunchVerifyFailed"));
-                        resync_settings_ui();
-                      } else {
-                        notices.push(
-                            "success",
-                            tr8(want_auto_launch ? "settings.mini.settingEnabled"
-                                                 : "settings.mini.settingDisabled"));
-                      }
-                    } else if (!success_msg.empty()) {
-                      notices.push("success", success_msg);
-                    }
-                  } else {
-                    notices.push("error", err);
-                    resync_settings_ui();  // ★ ❌5 失败回滚到权威值（Mini mutateInfo）
-                  }
-                });
-          }).detach();
-        };
-    // 流量接管模式切换 ← _layout.tsx:1042-1114 handleTakeoverModeChange
-    //   manual/system：patchVerge(enable_system_proxy/enable_tun_mode) + success/error；
-    //   tun：isTunModeAvailable=isAdminMode||isServiceOk，不可用先 installServiceAndRestartCore，
-    //        失败 push tunServiceConfigFailed 且 return（不 patch，分段回弹）。
-    settings_drawer_->on_takeover_change =
-        [this](const std::string& mode) -> bool {
-          std::string prev_mode = "MAN";
-          try {
-            const auto& v = *config::Config::instance().verge().latest_arc();
-            if (v.enable_tun_mode.value_or(false)) prev_mode = "TUN";
-            else if (v.enable_system_proxy.value_or(false)) prev_mode = "SYS";
-          } catch (...) {}
-
-          const uint64_t wait_id =
-              push_tracked_wait_notice(tr8("layout.notices.adjusting"));
-
-          std::thread([this, mode, prev_mode, wait_id] {
-            cmd::LongOperationGuard long_guard;
-            auto& svc = cmd::CommandService::instance();
-
-            if (mode == "MAN") {
-              if (prev_mode == "TUN") {
-                svc.invoke("stop_service");
-              }
-              auto r = svc.invoke(
-                  "patch_verge_config",
-                  nlohmann::json::object({{"enable_system_proxy", false},
-                                          {"enable_tun_mode", false}}));
-              const bool ok = r.is_ok();
-              if (ok) {
-                // ← _layout.tsx:1058-1064 手动模式开启 auto_close_connection 时断开存量连接
-                bool auto_close = false;
-                try {
-                  auto latest = config::Config::instance().verge().latest_arc();
-                  if (latest) {
-                    auto_close = latest->auto_close_connection.value_or(false);
-                  }
-                } catch (...) {}
-                if (auto_close) {
-                  svc.invoke("close_all_connections", nlohmann::json::object());
-                }
-              }
-              const std::string err = ok ? std::string() : r.error().message;
-              UiPostbox::instance().post([this, wait_id, ok, err, prev_mode] {
-                auto& nots = events::NoticeService::instance();
-                hide_tracked_wait_notice(wait_id);
-                if (ok) {
-                  nots.push("success", tr8("layout.notices.switchedToManualMode"));
-                  if (settings_drawer_) settings_drawer_->sync_takeover(false, false);
-                } else {
-                  nots.push("error", err);
-                  if (settings_drawer_)
-                    settings_drawer_->sync_takeover(prev_mode == "SYS", prev_mode == "TUN");
-                }
-              });
-              return;
-            }
-
-            if (mode == "SYS") {
-              if (prev_mode == "TUN") {
-                svc.invoke("stop_service");
-              }
-              auto r = svc.invoke(
-                  "patch_verge_config",
-                  nlohmann::json::object({{"enable_system_proxy", true},
-                                          {"enable_tun_mode", false}}));
-              const bool ok = r.is_ok();
-              const std::string err = ok ? std::string() : r.error().message;
-              UiPostbox::instance().post([this, wait_id, ok, err, prev_mode] {
-                auto& nots = events::NoticeService::instance();
-                hide_tracked_wait_notice(wait_id);
-                if (ok) {
-                  nots.push("success", tr8("layout.notices.systemProxyEnabled"));
-                  if (settings_drawer_) settings_drawer_->sync_takeover(true, false);
-                } else {
-                  nots.push("error", err);
-                  if (settings_drawer_)
-                    settings_drawer_->sync_takeover(prev_mode == "SYS", prev_mode == "TUN");
-                }
-              });
-              return;
-            }
-
-            // mode == "TUN"
-            bool is_admin = false;
-            {
-              auto ar = svc.invoke("app_is_admin");
-              if (ar.is_ok() && ar.value().is_boolean())
-                is_admin = ar.value().get<bool>();
-            }
-            const bool service_ok = svc.invoke("is_service_available").is_ok();
-            if (!(is_admin || service_ok)) {
-              auto inst = svc.invoke("install_service");
-              if (!inst.is_ok()) {
-                UiPostbox::instance().post([this, wait_id, prev_mode] {
-                  auto& nots = events::NoticeService::instance();
-                  hide_tracked_wait_notice(wait_id);
-                  nots.push("error", tr8("layout.notices.tunServiceConfigFailed"));
-                  if (settings_drawer_)
-                    settings_drawer_->sync_takeover(prev_mode == "SYS", prev_mode == "TUN");
-                });
-                return;
-              }
-            }
-            auto r = svc.invoke(
-                "patch_verge_config",
-                nlohmann::json::object({{"enable_system_proxy", false},
-                                        {"enable_tun_mode", true}}));
-            const bool ok = r.is_ok();
-            const std::string err = ok ? std::string() : r.error().message;
-            UiPostbox::instance().post([this, wait_id, ok, err, prev_mode] {
-              auto& nots = events::NoticeService::instance();
-              hide_tracked_wait_notice(wait_id);
-              if (ok) {
-                nots.push("success", tr8("layout.notices.tunModeEnabled"));
-                if (settings_drawer_) settings_drawer_->sync_takeover(false, true);
-              } else {
-                nots.push("error", err);
-                if (settings_drawer_)
-                  settings_drawer_->sync_takeover(prev_mode == "SYS", prev_mode == "TUN");
-              }
-            });
-          }).detach();
-
-          return true;
-        };
-    settings_drawer_->on_patch_clash_mode = [](const std::string&) {
-      // 生产主窗口中已由 on_patch_verge("rule_fallback") 在同一后台线程内串行执行，
-      // 避免 UI 线程同步阻塞并消除与 patch_verge_config 的并发竞态。
-    };
-    // Mixed Port 保存 ← use-minimal-settings.ts:87-107 handleSavePort：
-    //   ① 与 verge/clash 现值都相同 → 静默返回（:88-89）
-    //   ② 后台执行 isPortInUse → 双写 mixed-port + verge_mixed_port
-    //   ③ 成功 push portSaved 并更新 port_current_；失败/占用 push 错误并回滚输入框
-    settings_drawer_->on_save_port = [this](int port) -> bool {
-      auto& cfg = config::Config::instance();
-      const int verge_port =
-          static_cast<int>(cfg.verge().latest_arc()->verge_mixed_port.value_or(0));
-      const int core_port =
-          static_cast<int>(cfg.clash().latest_arc()->get_mixed_port());
-      if (port == verge_port && port == core_port) return true;  // 无变更，静默
-      const uint64_t wait_id =
-          push_tracked_wait_notice(tr8("layout.notices.adjusting"));
-      std::thread([this, port, wait_id] {
-        cmd::LongOperationGuard long_guard;
-        auto& svc = cmd::CommandService::instance();
-        auto inuse =
-            svc.invoke("is_port_in_use", nlohmann::json::object({{"port", port}}));
-        if (inuse.is_ok() && inuse.value().is_boolean() && inuse.value().get<bool>()) {
-          UiPostbox::instance().post([this, port, wait_id] {
-            auto& notices = events::NoticeService::instance();
-            hide_tracked_wait_notice(wait_id);
-            notices.push(
-                "error", tr8("settings.modals.clashPort.messages.portInUse",
-                             {{"port", std::to_string(port)}}));
-            if (settings_drawer_ && settings_drawer_->basic_card() &&
-                settings_drawer_->basic_card()->port_current_ > 0) {
-              settings_drawer_->basic_card()->port_field_->set_text(
-                  std::to_wstring(settings_drawer_->basic_card()->port_current_));
-              settings_drawer_->basic_card()->port_field_->invalidate();
-            }
-          });
-          return;
-        }
-        auto a = svc.invoke("patch_clash_config",
-                            nlohmann::json::object({{"mixed-port", port}}));
-        auto b = svc.invoke("patch_verge_config",
-                            nlohmann::json::object({{"verge_mixed_port", port}}));
-        const bool ok = a.is_ok() && b.is_ok();
-        const std::string err =
-            ok ? std::string() : (a.is_ok() ? b.error().message : a.error().message);
-        UiPostbox::instance().post([this, port, wait_id, ok, err] {
-          auto& notices = events::NoticeService::instance();
-          hide_tracked_wait_notice(wait_id);
-          if (ok) {
-            if (settings_drawer_ && settings_drawer_->basic_card()) {
-              settings_drawer_->basic_card()->port_current_ = port;
-            }
-            notices.push("success", tr8("settings.mini.portSaved"));
-          } else {
-            notices.push("error", err);
-            if (settings_drawer_ && settings_drawer_->basic_card() &&
-                settings_drawer_->basic_card()->port_current_ > 0) {
-              settings_drawer_->basic_card()->port_field_->set_text(
-                  std::to_wstring(settings_drawer_->basic_card()->port_current_));
-              settings_drawer_->basic_card()->port_field_->invalidate();
-            }
-          }
-        });
-      }).detach();
-      return true;
-    };
-    settings_drawer_->on_import_profile =
-        [this](const std::string& url, const std::string& name) {
-          nlohmann::json args = nlohmann::json::object({{"url", url}});
-          if (!name.empty()) args["name"] = name;
-          bool used_proxy = false;
-          auto r = cmd::CommandService::instance().invoke("import_profile", args);
-          if (!r.is_ok()) {
-            args["option"] = nlohmann::json::object(
-                {{"with_proxy", false}, {"self_proxy", true}});
-            r = cmd::CommandService::instance().invoke("import_profile", args);
-            used_proxy = true;
-          }
-          if (r.is_ok()) {
-            events::NoticeService::instance().push(
-                "success",
-                tr8(used_proxy
-                        ? "shared.feedback.notifications.importWithClashProxy"
-                        : "shared.feedback.notifications.importSuccess"));
-            std::string new_uid;
-            if (r.value().is_object()) {
-              new_uid = r.value().value("uid", std::string());
-            }
-            if (!new_uid.empty()) {
-              auto cur = config::Config::instance().profiles().latest_arc()->current;
-              if (!cur || *cur != new_uid) {
-                cmd::CommandService::instance().invoke(
-                    "patch_profiles_config",
-                    nlohmann::json::object({{"current", new_uid}}));
-              }
-              trigger_auto_select_and_refresh(new_uid);
-            }
-            reload_nodes();
-            return true;
-          }
-          events::NoticeService::instance().push(
-              "error", tr8("profiles.page.feedback.notifications.importFail") +
-                           " " + r.error().message);
-          return false;
-        };
-    settings_drawer_->on_import_profile_async =
-        [this](const std::string& url, const std::string& name,
-               std::function<void(bool ok)> done) {
-          run_import_profile_async(
-              url, name,
-              [done = std::move(done)](bool ok, const std::string&) {
-                if (done) done(ok);
-              });
-        };
-    settings_drawer_->on_select_profile = [this](const std::string& uid) {
-      // ← _layout.tsx:911-935：同当前订阅无操作；切订阅先清缓存，后台切换并弹通知
-      if (auto p = config::Config::instance().profiles().latest_arc();
-          p && p->current && *p->current == uid) {
-        return;
-      }
-      if (node_data_) node_data_->clear_delay_cache();
-      // 自编"正在切换订阅"常驻提示已删除（Mini 无对应提示）
-      const uint64_t wait_id = 0;
-      std::thread([this, uid, wait_id] {
-        cmd::LongOperationGuard long_guard;
-        auto r = cmd::CommandService::instance().invoke(
-            "patch_profiles_config", nlohmann::json::object({{"current", uid}}));
-        const bool ok = r.is_ok();
-        const std::string err = ok ? std::string() : r.error().message;
-        if (ok) {
-          // BUG-340：手动切订阅成功后 best-effort 清理旧订阅遗留连接（src: src/pages/_layout.tsx:924）
-          auto cr = cmd::CommandService::instance().invoke(
-              "close_all_connections", nlohmann::json::object());
-          if (!cr.is_ok()) {
-            CWLOG_WARN("close_all_connections after profile switch failed: " +
-                       cr.error().message);
-          }
-        }
-        UiPostbox::instance().post([this, uid, wait_id, ok, err] {
-          events::NoticeService::instance().hide(wait_id);
-          if (ok) {
-            events::EventBus::notice_message("profile_switched::ok", "");
-            if (settings_drawer_ && settings_drawer_->profile_card()) {
-              settings_drawer_->profile_card()->reload_profiles();
-              settings_drawer_->invalidate();
-            }
-            reload_nodes();
-            trigger_auto_select_and_refresh(uid);
-          } else {
-            events::EventBus::notice_message("update_failed", err);
-          }
-        });
-      }).detach();
-    };
-    settings_drawer_->on_update_profile = [this](const std::string& uid) {
-      // ← _layout.tsx:938-952：常驻 info「正在更新订阅」→ 后台更新 → 收尾隐藏并通知
-      const uint64_t wait_id =
-          push_tracked_wait_notice(tr8("layout.notices.updatingSubscription"));
-      std::thread([this, uid, wait_id] {
-        cmd::LongOperationGuard long_guard;
-        auto r = cmd::CommandService::instance().invoke(
-            "update_profile", nlohmann::json::object({{"index", uid}}));
-        const bool ok = r.is_ok();
-        const std::string err = ok ? std::string() : r.error().message;
-        UiPostbox::instance().post([this, uid, wait_id, ok, err] {
-          hide_tracked_wait_notice(wait_id);
-          if (ok) {
-            events::EventBus::notice_message("update_subscription::ok", "");
-            if (settings_drawer_ && settings_drawer_->profile_card()) {
-              settings_drawer_->profile_card()->reload_profiles();
-              settings_drawer_->invalidate();
-            }
-            reload_nodes();
-            trigger_auto_select_and_refresh(uid);
-          } else {
-            // ← use-profile-actions.ts handleUpdateProfile（BUG-417）：三级回退全失败的
-            //   带前缀错误映射为本地化 update_failed_even_with_clash 提示，其余走通用失败提示
-            static constexpr const char* kProxyFailedPrefix = "update_failed_even_with_clash:";
-            CWLOG_ERROR("on_update_profile failed: " + err);
-            if (err.rfind(kProxyFailedPrefix, 0) == 0) {
-              std::string detail = err.substr(std::char_traits<char>::length(kProxyFailedPrefix));
-              while (!detail.empty() && detail.front() == ' ') detail.erase(detail.begin());
-              events::EventBus::notice_message("update_failed_even_with_clash", detail);
-            } else {
-              events::EventBus::notice_message("update_failed", err);
-            }
-          }
-        });
-      }).detach();
-    };
-    settings_drawer_->on_delete_profile = [this](const std::string& uid) {
-      // ← _layout.tsx:954-963：后台删除 → 成功 common.deleteSuccess / 失败原文
-      std::thread([this, uid] {
-        cmd::LongOperationGuard long_guard;
-        auto r = cmd::CommandService::instance().invoke(
-            "delete_profile", nlohmann::json::object({{"index", uid}}));
-        const bool ok = r.is_ok();
-        const std::string err = ok ? std::string() : r.error().message;
-        UiPostbox::instance().post([this, ok, err] {
-          if (ok) {
-            events::EventBus::notice_message("profile_deleted::ok", "");
-            if (settings_drawer_ && settings_drawer_->profile_card()) {
-              settings_drawer_->profile_card()->reload_profiles();
-              if (settings_drawer_->bounds().w > 0)
-                settings_drawer_->layout_tree(settings_drawer_->bounds());
-              settings_drawer_->invalidate();
-            }
-            reload_nodes();
-          } else {
-            events::EventBus::notice_message("update_failed", err);
-          }
-        });
-      }).detach();
-    };
-    // 编辑订阅保存 → patch_profile（← _layout.tsx:1021-1028；payload 见
-    // src/cmd/cmd_profile.cpp:339-359）
-    settings_drawer_->on_patch_profile = [this](const std::string& uid,
-                                                const std::string& name,
-                                                const std::string& url, int interval) {
-      // patch_item 是 option 整体替换（src/config/profiles.cpp:311），
-      // 必须带上原有 option 字段，否则会清掉 user_agent / with_proxy 等。
-      nlohmann::json opt = nlohmann::json::object();
-      if (const config::PrfItem* cur =
-              config::Config::instance().profiles().data_arc()->get_item(uid)) {
-        if (cur->option) {
-          const auto& o = *cur->option;
-          if (o.user_agent) opt["user_agent"] = *o.user_agent;
-          if (o.with_proxy) opt["with_proxy"] = *o.with_proxy;
-          if (o.self_proxy) opt["self_proxy"] = *o.self_proxy;
-          if (o.timeout_seconds) opt["timeout_seconds"] = *o.timeout_seconds;
-          if (o.danger_accept_invalid_certs)
-            opt["danger_accept_invalid_certs"] = *o.danger_accept_invalid_certs;
-          if (o.allow_auto_update) opt["allow_auto_update"] = *o.allow_auto_update;
-          if (o.merge) opt["merge"] = *o.merge;
-          if (o.script) opt["script"] = *o.script;
-          if (o.rules) opt["rules"] = *o.rules;
-          if (o.proxies) opt["proxies"] = *o.proxies;
-          if (o.groups) opt["groups"] = *o.groups;
-        }
-      }
-      opt["update_interval"] = interval;
-      nlohmann::json patch = {{"name", name}, {"url", url}, {"option", opt}};
-      std::thread([this, uid, patch] {
-        cmd::LongOperationGuard long_guard;
-        auto r = cmd::CommandService::instance().invoke(
-            "patch_profile",
-            nlohmann::json::object({{"index", uid}, {"profile", patch}}));
-        const bool ok = r.is_ok();
-        const std::string err = ok ? std::string() : r.error().message;
-        UiPostbox::instance().post([this, ok, err] {
-          if (ok) {
-            events::NoticeService::instance().push(
-                "success", tr8("layout.notices.profileSaved"));
-            if (settings_drawer_ && settings_drawer_->profile_card()) {
-              settings_drawer_->profile_card()->reload_profiles();
-              if (settings_drawer_->bounds().w > 0)
-                settings_drawer_->layout_tree(settings_drawer_->bounds());
-              settings_drawer_->invalidate();
-            }
-          } else {
-            events::NoticeService::instance().push("error", err);
-          }
-        });
-      }).detach();
-      return true;
-    };
-    auto start_log_stream = [this] {
-      if (ws_sub_logs_ != 0 || !ws_) return;
-      ws_sub_logs_ = ws_->subscribe_logs(
-          mihomo::LogLevel::Info, [this](const std::string& payload) {
-            UiPostbox::instance().post([this, payload] {
-              if (!log_viewer_) return;
-              try {
-                auto j = nlohmann::json::parse(payload);
-                std::string type = j.value("type", "info");
-                std::string msg = j.value("payload", payload);
-                log_viewer_->push_log(type, msg);
-              } catch (...) {
-                log_viewer_->push_log_line(payload);
-              }
-            });
-          });
-    };
-    auto stop_log_stream = [this] {
-      if (ws_sub_logs_ != 0 && ws_) {
-        ws_->unsubscribe(ws_sub_logs_);
-        ws_sub_logs_ = 0;
-      }
-    };
-    settings_drawer_->on_open_logs = [this, start_log_stream] {
-      // ← Mini 调试日志：应用内 LogViewerModal（pages/logs.tsx），
-      //   首开时回填 logs/clashwin.log 末尾并抓取 Mihomo 内核日志与实时 WS 流
-      if (!log_viewer_) return;
-      if (log_viewer_->log_count() == 0 && log_viewer_->incoming_count() == 0) {
-        clashwin::Logger::instance().flush();
-        std::wstring p1 = clashwin::util::dirs::exe_dir() + L"\\logs\\latest.log";
-        std::wstring p2 = clashwin::util::dirs::app_latest_log();
-        std::wstring path = fs::exists(p2) ? p2 : p1;
-        std::ifstream in(fs::path(path), std::ios::in | std::ios::binary);
-        // 豁免: Mini 无对应物 — 使用 fs::path 打开宽字符日志路径（出处: 无）
-        if (in) {
-          std::deque<std::string> tail;
-          std::string line;
-          while (std::getline(in, line)) {
-            if (!line.empty() && line.back() == '\r') line.pop_back();
-            if (!line.empty()) tail.push_back(std::move(line));
-            if (tail.size() > scene::LogViewerModal::kMaxLogLines) tail.pop_front();
-          }
-          for (const auto& l : tail) log_viewer_->push_log_line(l);
-        }
-        // 拉取 Mihomo 内核运行日志（调用 get_clash_logs 命令）
-        auto kr = cmd::CommandService::instance().invoke("get_clash_logs", {});
-        if (kr.is_ok() && kr.value().is_array()) {
-          for (const auto& item : kr.value()) {
-            if (item.is_string()) {
-              log_viewer_->push_log_line(item.get<std::string>());
-            } else if (item.is_object()) {
-              log_viewer_->push_log(item.value("type", "info"), item.value("payload", item.dump()));
-            }
-          }
-        }
-        if (log_viewer_->log_count() == 0 && log_viewer_->incoming_count() == 0) {
-          log_viewer_->push_log("info", "Clash Win runtime logger active: " + utf::utf16_to_utf8(path));
-        }
-      }
-      // 订阅实时内核日志流（src: use-log-data.ts:25-45，仅非暂停态自动连接）
-      if (!log_viewer_->is_paused()) start_log_stream();
-      log_viewer_->flush_incoming();
-      log_viewer_->open();
-    };
-    // 日志弹窗装载（覆盖抽屉，与 Mini 的独立 logs modal 一致）
-    {
-      auto lv = std::make_unique<scene::LogViewerModal>();
-      log_viewer_ = lv.get();
-      lv->set_z_order(1001);
-      lv->on_dismiss = [this, stop_log_stream] {
-        stop_log_stream();
-        root_.invalidate();
-      };
-      lv->on_pause_changed = [this, start_log_stream, stop_log_stream](bool paused) {
-        if (paused) {
-          stop_log_stream();
-        } else if (log_viewer_ && log_viewer_->is_open()) {
-          start_log_stream();
-        }
-      };
-      root_.add_child(std::move(lv));
-    }
-    // 添加网址弹窗（Mini：AddUrlDialog 挂在抽屉右列，_layout.tsx:1485-1488）
-    {
-      auto au = std::make_unique<scene::AddUrlDialog>();
-      add_url_ = au.get();
-      au->set_z_order(960);  // ctor 已设；显式声明与 root_ 其它弹窗层序
-      auto au_menu = std::make_unique<ContextMenu>();
-      au_menu->set_z_order(965);
-      add_url_->set_context_menu(au_menu.get());
-      root_.add_child(std::move(au));
-      root_.add_child(std::move(au_menu));
-    }
-    // 客户端/内核更新弹窗（Mini：_layout.tsx:1948/1956，帮助菜单点击才弹）
-    {
-      auto cu = std::make_unique<scene::ClientUpdateModal>();
-      client_update_ = cu.get();
-      cu->set_z_order(1001);
-      root_.add_child(std::move(cu));
-    }
-    {
-      auto co = std::make_unique<scene::CoreUpdateModal>();
-      core_update_ = co.get();
-      co->set_z_order(1001);
-      root_.add_child(std::move(co));
-    }
-    // 检查软件更新（src: use-client-update.ts:32-54）：有新版才开弹窗。
-    // F-D05：检查期间禁用「检查更新」菜单项（对齐 Mini use-client-update.ts 的 checking 状态）。
-    settings_drawer_->on_check_app_update = [this] {
-      if (!client_update_) return;
-      settings_drawer_->set_app_update_checking(true);
-      std::thread([this] {
-        auto r = cmd::CommandService::instance().invoke(
-            "check_app_update", nlohmann::json::object());
-        if (!r.is_ok()) {
-          // ← use-client-update.ts:46-50 clientCheckFailed
-          CWLOG_ERROR("on_check_app_update failed: " + r.error().message);
-          events::NoticeService::instance().push(
-              "error", tr8("layout.notices.clientCheckFailed", {{"message", r.error().message}}));
-          UiPostbox::instance().post([this] { settings_drawer_->set_app_update_checking(false); });
-          return;
-        }
-        const auto& v = r.value();
-        if (!v.value("has_update", false)) {
-          // ← use-client-update.ts:43-45 clientUpToDate
-          events::NoticeService::instance().push("info", tr8("layout.notices.clientUpToDate"));
-          UiPostbox::instance().post([this] { settings_drawer_->set_app_update_checking(false); });
-          return;
-        }
-        const std::string dl_url = v.value("download_url", std::string());
-        const std::string dl_sha = v.value("sha256", std::string());
-        const std::string dl_sig = v.value("signature", std::string());
-        UiPostbox::instance().post([this, v, dl_url, dl_sha, dl_sig] {
-          if (!client_update_) return;
-          pending_client_sha256_ = dl_sha;
-          pending_client_signature_ = dl_sig;
-          settings_drawer_->set_app_update_checking(false);
-          client_update_->open(v.value("current_version", std::string()),
-                               v.value("latest_version", std::string()),
-                               v.value("notes", std::string()), dl_url);
-        });
-      }).detach();
-    };
-    // 检查内核更新（src: use-core-update.ts:64-86）：版本不同才开弹窗。
-    // F-D05：检查期间禁用「检查内核更新」菜单项（对齐 Mini use-core-update.ts 的 checking 状态）。
-    settings_drawer_->on_check_core_update = [this] {
-      if (!core_update_) return;
-      settings_drawer_->set_core_update_checking(true);
-      std::thread([this] {
-        std::string cur;
-        auto m = cmd::mihomo();
-        if (m.is_ok()) {
-          auto v = m.value()->get_version(300);
-          if (v.is_ok()) cur = v.value().version;
-        }
-        auto r = cmd::CommandService::instance().invoke(
-            "check_core_update", nlohmann::json::object());
-        if (!r.is_ok()) {
-          // ← use-core-update.ts:78-82 coreCheckFailed
-          events::NoticeService::instance().push(
-              "error", tr8("layout.notices.coreCheckFailed", {{"message", r.error().message}}));
-          UiPostbox::instance().post([this] { settings_drawer_->set_core_update_checking(false); });
-          return;
-        }
-        const std::string latest = r.value().value("tag_name", std::string());
-        auto strip = [](std::string s) {
-          if (!s.empty() && (s[0] == 'v' || s[0] == 'V')) s.erase(0, 1);
-          return s;
-        };
-        if (latest.empty() || strip(cur) == strip(latest)) {
-          // ← use-core-update.ts:69-71 coreUpToDate
-          events::NoticeService::instance().push("info", tr8("layout.notices.coreUpToDate"));
-          UiPostbox::instance().post([this] { settings_drawer_->set_core_update_checking(false); });
-          return;
-        }
-        const std::string rel_json = r.value().dump();
-        UiPostbox::instance().post([this, cur, latest, rel_json] {
-          if (!core_update_) return;
-          pending_core_release_json_ = rel_json;
-          settings_drawer_->set_core_update_checking(false);
-          core_update_->open(cur, latest);
-        });
-      }).detach();
-    };
-    // 客户端更新包下载+安装（src: use-client-update.ts:56-125 downloadAndInstall）。
-    //   Mini 的 downloadAndInstall 在下载完成后于同一调用内启动安装器并
-    //   std::process::exit(0)（tauri-plugin-updater 2.10.1 updater.rs:843-854），
-    //   clientInstallCompleted 通知因进程先退出而不可达——这里保持同一行为：
-    //   成功启动安装器（/UPDATE /ARGS）后立即退出，不走通知分支。
-    if (client_update_) {
-      client_update_->on_start_update = [this] {
-        if (!client_update_ || client_update_->download_url().empty()) return;
-        const std::string url = client_update_->download_url();
-        const std::string sha = pending_client_sha256_;
-        const std::string sig = pending_client_signature_;
-        std::thread([this, url, sha, sig] {
-          auto r = cmd::CommandService::instance().invoke(
-              "download_app_update",
-              nlohmann::json::object({{"url", url}, {"sha256", sha}, {"signature", sig}}));
-          if (!r.is_ok()) {
-            CWLOG_ERROR("client download_app_update failed: " + r.error().message);
-            const std::string msg =
-                tr8("layout.notices.clientUpdateFailed", {{"message", r.error().message}});
-            // ← use-client-update.ts:114-123 clientUpdateFailed（进度行 + 通知双显）
-            events::NoticeService::instance().push("error", msg);
-            UiPostbox::instance().post([this, msg] {
-              if (client_update_) client_update_->handle_progress_event("error", 0, msg);
-            });
-            return;
-          }
-          // ← updater.rs:843-854：启动安装器（/UPDATE /ARGS）后 exit(0)；
-          //   Mini 的 clientInstallCompleted 通知因进程先退出而不可达。
-          const std::wstring installer =
-              utf::utf8_to_utf16(r.value().value("path", std::string()));
-          auto ir = update::ClientUpdater::instance().install_app_update(installer);
-          if (!ir.is_ok()) {
-            CWLOG_ERROR("install_app_update failed: " + ir.error().message);
-            events::NoticeService::instance().push(
-                "error", tr8("layout.notices.clientUpdateFailed", {{"message", ir.error().message}}));
-            return;
-          }
-          // Mini 同款：立即退出（updater.rs:853 std::process::exit(0)）
-          std::exit(0);
-        }).detach();
-      };
-    }
-    // 启动内核热升级（src: use-core-update.ts:88-120 start_core_upgrade）：
-    //   把检查时拿到的 release 原样回传，避免二次请求 GitHub API。
-    if (core_update_) {
-      core_update_->on_start_upgrade = [this] {
-        if (!core_update_) return;
-        const std::string rel_json = pending_core_release_json_;
-        std::thread([this, rel_json] {
-          nlohmann::json args = nlohmann::json::object();
-          try {
-            if (!rel_json.empty()) args = nlohmann::json::parse(rel_json);
-          } catch (...) {
-          }
-          auto r = cmd::CommandService::instance().invoke("start_core_upgrade", args);
-          if (!r.is_ok()) {
-            const std::string msg = "启动失败: " + r.error().message;
-            // ← use-core-update.ts:107-118 coreStartFailed（进度行）+
-            //   coreUpgradeStartFailed（通知）
-            events::NoticeService::instance().push(
-                "error",
-                tr8("layout.notices.coreUpgradeStartFailed", {{"message", r.error().message}}));
-            UiPostbox::instance().post([this, msg] {
-              if (core_update_) core_update_->handle_progress_event("error", 0, msg);
-            });
-          }
-        }).detach();
-      };
-    }
-    // 首次运行向导（Mini：无真实订阅时 500ms 后弹出，_layout.tsx:347-355）
-    {
-      auto fr = std::make_unique<scene::FirstRunGuideDialog>();
-      first_run_ = fr.get();
-      fr->set_z_order(980);
-      fr->on_import_async =
-          [this](const std::string& url,
-                 std::function<void(bool ok, const std::string& err)> done) {
-            run_import_profile_async(url, "", std::move(done));
-          };
-      fr->on_patch_system_proxy = [this](bool enable) {
-        std::thread([this, enable] {
-          cmd::LongOperationGuard long_guard;
-          auto r = cmd::CommandService::instance().invoke(
-              "patch_verge_config",
-              nlohmann::json::object({{"enable_system_proxy", enable},
-                                      {"enable_tun_mode", false}}));
-          const bool ok = r.is_ok();
-          UiPostbox::instance().post([this, enable, ok] {
-            if (ok && settings_drawer_) {
-              settings_drawer_->sync_takeover(enable, false);
-            }
-          });
-        }).detach();
-      };
-      // src: :236-245 就绪步轮询 refreshProxy（getProxies 全量重载）
-      fr->on_refresh_proxy = [this] { sync_first_run_proxy(); };
-      // src: :188-225 重测并优选：trigger_auto_select + forceFull 刷新（异步）
-      fr->on_retest_nodes = [this] {
-        std::thread([this] {
-          std::string uid;
-          if (auto p = config::Config::instance().profiles().data_arc();
-              p && p->current) {
-            uid = *p->current;
-          }
-          if (!uid.empty()) {
-            cmd::CommandService::instance().invoke(
-                "trigger_auto_select",
-                nlohmann::json::object(
-                    {{"profile_uid", uid}, {"sort_type", 0}, {"select", true}}));
-          }
-          UiPostbox::instance().post([this] {
-            sync_first_run_proxy();
-            if (first_run_) first_run_->on_retest_finished();
-          });
-        }).detach();
-      };
-      fr->on_dismiss = [] {
-        scene::FirstRunGuideDialog::set_first_run_completed(true);
-      };
-      // ★ ❌9 点「稍后」完成引导后自动滑开左侧设置抽屉，指引订阅卡位置（Mini 同构）
-      fr->on_dismiss_later = [this] {
-        if (settings_drawer_) settings_drawer_->set_open(true);
-      };
-      // BUG-395：Ready 步第 3 张安全软件卡片已删除，防误杀指南改由帮助菜单承载
-      root_.add_child(std::move(fr));
-    }
-    // 帮助菜单已改自绘（SettingsDrawer::open_help_menu → ContextMenu），
-    //   不再走原生 HMENU（TrackPopupMenu 无法截图/样式不一致）。
-    // 代理方式第三段 → 添加网址弹窗（Mini：handleAddUrlClick 先 patch
-    // rule_fallback=addurl，再 setAddUrlOpen(true)，_layout.tsx:427-430）
-    settings_drawer_->on_add_rule = [this] {
-      if (add_url_) add_url_->open();
-    };
-    // 齿轮入口已统一到 quickbar（Mini 同构）；标题栏仅三键
-    // BUG-358：皮肤滑块拖动 200ms 防抖写盘定时器接线（src: src/pages/_layout/hooks/use-skin-controls.ts:4）
-    settings_drawer_->on_arm_skin_persist_timer = [this](uint32_t ms) {
-      if (hwnd_) SetTimer(hwnd_, kTimerSkinPersist, ms, nullptr);
-    };
-    settings_drawer_->on_cancel_skin_persist_timer = [this] {
-      if (hwnd_) KillTimer(hwnd_, kTimerSkinPersist);
-    };
-    settings_drawer_->wire_callbacks();
-    // 恢复上次皮肤/因子（clashwin-skin.json）
-    settings_drawer_->restore_prefs();
-    // verdict: Mini 的 theme_mode 存在 verge.yaml，是单一事实源；
-    //   本地 skin.json 只是缓存。启动期以 verge 为准回填（不触发回写）。
-    try {
-      const auto& v = *config::Config::instance().verge().latest_arc();
-      // BUG-340：启动恢复窗口置顶状态（src: src/pages/_layout.tsx:446）
-      pinned_ = v.enable_always_on_top.value_or(false);
-      if (hwnd_) {
-        SetWindowPos(hwnd_, pinned_ ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-      }
-      if (quick_bar_) quick_bar_->set_pinned(pinned_);
-      if (v.theme_mode.has_value())
-        settings_drawer_->sync_theme_mode(utf::utf8_to_utf16(*v.theme_mode));
-      settings_drawer_->sync_takeover(v.enable_system_proxy.value_or(false),
-                                      v.enable_tun_mode.value_or(false));
-      settings_drawer_->sync_routing(v.rule_fallback.value_or("direct"));
-      // ★ ❌7：自启开关读真实注册表状态（Run 键）而非 verge 配置值，
-      //   避免「开关显示开、实际开机不自启」错位（← Mini autostart.rs:65 真实状态优先）。
-      bool real_auto_launch = v.enable_auto_launch.value_or(false);
-      auto launch_st = core::AutostartManager::instance().get_launch_status();
-      if (launch_st.is_ok()) real_auto_launch = launch_st.value();
-      // clash 侧 Allow LAN / IPv6 权威值（IClashTemp 存于 YAML mapping_，经 get_client_info 读取）
-      //   ← Mini 挂载即由 react-query 拉真值（use-minimal-settings.ts），无硬编码关窗口。
-      //   旧实现硬编码 false,false → 开机后这两个开关恒显示关；与 resync_settings_ui
-      //   （:1564-1571）同口径回填。
-      bool allow_lan = false, ipv6 = false;
-      int mixed_port = static_cast<int>(v.verge_mixed_port.value_or(0));
-      auto cl = config::Config::instance().clash().latest_arc();
-      if (cl) {
-        auto info = cl->get_client_info();
-        allow_lan = info.allow_lan;
-        ipv6 = info.ipv6;
-        if (mixed_port <= 0) mixed_port = static_cast<int>(info.mixed_port);
-      }
-      if (mixed_port <= 0) mixed_port = static_cast<int>(config::consts::kDefaultMixed);
-      settings_drawer_->sync_basic(real_auto_launch,
-                                   v.enable_silent_start.value_or(false),
-                                   allow_lan, ipv6, mixed_port,
-                                   v.enable_tun_sniffer);
-      // 通知位置：verge.notice_position（缺省 top-right，verge.rs:353）
-      if (snackbar_)
-        snackbar_->set_position(v.notice_position.value_or("top-right"));
-    } catch (...) {
-    }
-  }
-
-  // ← Mini _layout.tsx:340-355：未完成向导且无真实订阅（remote/local）→
-  //   500ms 后自动弹出首次引导；Merge/Script 内置项不算订阅。
-  if (first_run_ && !scene::FirstRunGuideDialog::is_first_run_completed() &&
-      !scene::FirstRunGuideDialog::has_real_profile()) {
-    SetTimer(hwnd_, kTimerFirstRun, 500, nullptr);
-  }
-}
-
-void MainWindow::run_import_profile_async(
-    const std::string& url, const std::string& name,
-    std::function<void(bool ok, const std::string& err)> done) {
-  // ← _layout.tsx:838-908 handleImportProfile（抽屉导入与首次向导共用同一条链路）
-  if (profile_importing_.exchange(true)) {
-    // 自编"正在导入"提示已删除（Mini 无此常驻提示）
-    if (done) done(false, std::string());
-    return;
-  }
-  const uint64_t wait_id = 0;  // Mini 无常驻导入提示
-  std::thread([this, url, name, wait_id, done = std::move(done)]() mutable {
-    cmd::LongOperationGuard long_guard;
-    nlohmann::json args = nlohmann::json::object({{"url", url}});
-    if (!name.empty()) args["name"] = name;
-    bool used_proxy = false;
-    auto r = cmd::CommandService::instance().invoke("import_profile", args);
-    if (!r.is_ok()) {
-      // src: _layout.tsx:853 首次直连失败 → 走 Clash 自身代理重试
-      args["option"] =
-          nlohmann::json::object({{"with_proxy", false}, {"self_proxy", true}});
-      r = cmd::CommandService::instance().invoke("import_profile", args);
-      used_proxy = true;
-    }
-    const bool ok = r.is_ok();
-    std::string new_uid;
-    if (ok && r.value().is_object()) {
-      new_uid = r.value().value("uid", std::string());
-      if (!new_uid.empty()) {
-        auto cur = config::Config::instance().profiles().latest_arc()->current;
-        if (!cur || *cur != new_uid) {
-          cmd::CommandService::instance().invoke(
-              "patch_profiles_config",
-              nlohmann::json::object({{"current", new_uid}}));
-        }
-      }
-    }
-    const std::string err = ok ? std::string() : r.error().message;
-    UiPostbox::instance().post(
-        [this, wait_id, ok, used_proxy, new_uid, err, done = std::move(done)] {
-          profile_importing_.store(false);
-          events::NoticeService::instance().hide(wait_id);
-          if (ok) {
-            events::NoticeService::instance().push(
-                "success",
-                tr8(used_proxy
-                        ? "shared.feedback.notifications.importWithClashProxy"
-                        : "shared.feedback.notifications.importSuccess"));
-            if (settings_drawer_ && settings_drawer_->profile_card()) {
-              settings_drawer_->profile_card()->reload_profiles();
-              if (settings_drawer_->bounds().w > 0)
-                settings_drawer_->layout_tree(settings_drawer_->bounds());
-              settings_drawer_->invalidate();
-            }
-            reload_nodes();
-            if (!new_uid.empty()) trigger_auto_select_and_refresh(new_uid);
-          } else {
-            // ← _layout.tsx:898-901 showNotice.error('profiles.page.feedback.notifications.importFail', detail)
-            events::NoticeService::instance().push(
-                "error", tr8("profiles.page.feedback.notifications.importFail") +
-                             " " + err);
-          }
-          if (done) done(ok, err);
-        });
-  }).detach();
-}
-
-void MainWindow::resync_settings_ui() {
-  // ★ ❌5 设置开关失败回滚：patch 失败后用权威配置值回填抽屉开关。
-  //   sync_basic/sync_takeover 内部 set_checked(…, false) 不触发回调，故不会二次 patch；
-  //   对齐 Mini use-minimal-settings.ts:77-79 patch 失败 → mutateInfo() 权威值回滚、开关弹回。
-  if (!settings_drawer_) return;
-  try {
-    const auto& v = *config::Config::instance().verge().latest_arc();
-    // BUG-340：权威值回填置顶状态（src: src/pages/_layout.tsx:446）
-    pinned_ = v.enable_always_on_top.value_or(false);
-    if (hwnd_) {
-      SetWindowPos(hwnd_, pinned_ ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
-                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    }
-    if (quick_bar_) quick_bar_->set_pinned(pinned_);
-    if (v.theme_mode.has_value())
-      settings_drawer_->sync_theme_mode(utf::utf8_to_utf16(*v.theme_mode));
-    settings_drawer_->sync_takeover(v.enable_system_proxy.value_or(false),
-                                    v.enable_tun_mode.value_or(false));
-    settings_drawer_->sync_routing(v.rule_fallback.value_or("direct"));
-    // ★ ❌7：自启开关读真实注册表状态（Run 键），非 verge 配置值
-    bool real_auto_launch = v.enable_auto_launch.value_or(false);
-    auto launch_st = core::AutostartManager::instance().get_launch_status();
-    if (launch_st.is_ok()) real_auto_launch = launch_st.value();
-    // clash 侧 Allow LAN / IPv6 权威值（IClashTemp 存于 YAML mapping_，经 get_client_info 读取）
-    bool allow_lan = false, ipv6 = false;
-    int mixed_port = static_cast<int>(v.verge_mixed_port.value_or(0));
-    auto cl = config::Config::instance().clash().latest_arc();
-    if (cl) {
-      auto info = cl->get_client_info();
-      allow_lan = info.allow_lan;
-      ipv6 = info.ipv6;
-      if (mixed_port <= 0) mixed_port = static_cast<int>(info.mixed_port);
-    }
-    if (mixed_port <= 0) mixed_port = static_cast<int>(config::consts::kDefaultMixed);
-    settings_drawer_->sync_basic(real_auto_launch,
-                                 v.enable_silent_start.value_or(false),
-                                 allow_lan, ipv6, mixed_port,
-                                 v.enable_tun_sniffer);
-  } catch (...) {}
-}
-
-void MainWindow::build_ws_pipes() {
-  // T14：WS 订阅 → UiPostbox 转投 UI 线程（复用 T13 范式）
-  ws_ = std::make_unique<mihomo::WsManager>();
-  // BUG-406: 停核前第 0ms 断开全部本地命名管道 WS 与空闲 HTTP 连接池句柄
-  auto alive = alive_;
-  core::CoreManager::instance().set_pre_stop_hook([this, alive] {
-    if (alive && alive->load(std::memory_order_acquire) && ws_) {
-      ws_->disconnect_all(0u);
-    }
-    cmd::mihomo_unchecked().http().clear_idle();
-  });
-  ws_->configure(clashwin::util::dirs::ipc_path(),
-                 clashwin::config::consts::kDefaultSecret);
-  ws_sub_traffic_ = ws_->subscribe_traffic([this](const std::string& payload) {
-    UiPostbox::instance().post([this, payload] {
-      if (traffic_pane_) traffic_pane_->on_traffic_payload(payload);
-    });
-  });
-  ws_sub_conn_ = 0;
-  update_conn_ws_state();
-}
-
-void MainWindow::update_conn_ws_state() {
-  // Mini 同构：/connections 流仅抽屉打开且宽>285 且未最小化时订阅（连接面板只在抽屉右列）
-  const bool needed = settings_drawer_ && settings_drawer_->is_open() &&
-                      !bp_.is_narrow() && !bp_.is_mini() &&
-                      bp_.logical_h() > win::kMiniHeightThreshold &&
-                      (!hwnd_ || !IsIconic(hwnd_));
-  if (needed) {
-    conn_gc_deadline_ms_ = 0;
-  } else if (conn_gc_deadline_ms_ == 0) {
-    conn_gc_deadline_ms_ = now_ms() + 30000;
-  }
-  if (needed && ws_sub_conn_ == 0 && ws_) {
-    ws_sub_conn_ = ws_->subscribe_connections(
-        [this](const std::string& payload) {
-          UiPostbox::instance().post([this, payload] {
-            if (conn_data_) conn_data_->consume(payload);
-          });
-        });
-    std::thread([this] {
-      auto mc = cmd::mihomo();
-      if (!mc.is_ok() || !mc.value()) return;
-      auto cr = mc.value()->get_connections();
-      if (!cr.is_ok()) return;
-      nlohmann::json arr = nlohmann::json::array();
-      for (const auto& c : cr.value().connections) {
-        nlohmann::json m = {{"network", c.metadata.network}, {"type", c.metadata.type}, {"host", c.metadata.host}, {"sourceIP", c.metadata.source_ip}, {"sourcePort", c.metadata.source_port}, {"destinationIP", c.metadata.destination_ip}, {"destinationPort", c.metadata.destination_port}, {"remoteDestination", c.metadata.remote_destination}, {"process", c.metadata.process}, {"processPath", c.metadata.process_path}};
-        arr.push_back({{"id", c.id}, {"upload", c.upload}, {"download", c.download}, {"start", c.start}, {"chains", c.chains}, {"rule", c.rule}, {"rulePayload", c.rule_payload}, {"metadata", std::move(m)}});
-      }
-      nlohmann::json snap = {{"type", "snapshot"}, {"data", {{"epochId", ""}, {"sequenceId", -1}, {"uploadTotal", cr.value().upload_total}, {"downloadTotal", cr.value().download_total}, {"memory", cr.value().memory}, {"connections", std::move(arr)}}}};
-      std::string payload = snap.dump();
-      UiPostbox::instance().post([this, payload] {
-        if (conn_data_ && conn_data_->active().empty()) {
-          conn_data_->consume(payload);
-          conn_data_->flush_notify_for_test();
-        }
-      });
-    }).detach();
-  } else if (!needed && ws_sub_conn_ != 0 && ws_) {
-    ws_->unsubscribe(ws_sub_conn_);
-    ws_sub_conn_ = 0;
   }
 }
 
@@ -2457,10 +479,7 @@ void MainWindow::apply_geometry_restore() {
 // ---------- 行为入口 ----------
 void MainWindow::show_and_activate() {
   if (!hwnd_) return;
-  // src: src-tauri/src/utils/window_manager.rs:503-555 show_main_window / activate_window：
-  //   1) 先检查最小化（IsIconic），须用 SW_RESTORE 还原而非 SW_SHOW（否则仍缩在任务栏且坐标为 -32000）
-  //   2) 非最小化唤醒时复核窗口是否落在有效工作区内（外接显示器拔除防丢窗）
-  //   3) 激活 trick 后若用户已开启图钉置顶（pinned_），必须保持 HWND_TOPMOST 不被冲掉
+  // src: src-tauri/src/utils/window_manager.rs:503-555 show_main_window / activate_window
   const bool was_minimized = IsIconic(hwnd_) != FALSE;
   if (was_minimized) {
     ShowWindow(hwnd_, SW_RESTORE);
@@ -2503,7 +522,7 @@ void MainWindow::show_and_activate() {
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
   }
   SetForegroundWindow(hwnd_);
-  const int64_t now = now_ms();
+  const int64_t now = detail::now_ms();
   stealth_.feed_activity(now);
 
   // ← src/pages/_layout.tsx:474-479 退出轻量唤醒走 skipProbeIfFresh 刷新；普通恢复可见仅 3s 节流同步展示状态（BUG-404）
@@ -2541,34 +560,29 @@ void MainWindow::release_d2d_resources() {
   if (tooltip_host_) tooltip_host_->leave();
   rt_.destroy();
   if (!hwnd_) return;
-  KillTimer(hwnd_, kTimerFrame);
-  // 轻量模式：停 stealth 空闲扫描（窗口已隐藏，每秒 tick 纯冗余）与 TUN 守卫。
-  // 对齐 Mini「销毁窗口 → 其所有窗口定时器一并消失」，使轻量模式真正静默：
-  // 否则隐藏窗口仍每秒/每 5 秒被 WM_TIMER 唤醒（tun_guard_tick 还会起 detached
-  // 线程做 is_admin/服务探测，必要时 patch_verge_config），与本应空闲的轻量态相悖。
-  KillTimer(hwnd_, kTimerIdle);
-  KillTimer(hwnd_, kTimerTunGuard);
-  KillTimer(hwnd_, kTimerSkinPersist);
-  KillTimer(hwnd_, kTimerFilterAutoTest);
-  KillTimer(hwnd_, kTimerDelayCachePrune);
+  KillTimer(hwnd_, detail::kTimerFrame);
+  KillTimer(hwnd_, detail::kTimerIdle);
+  KillTimer(hwnd_, detail::kTimerTunGuard);
+  KillTimer(hwnd_, detail::kTimerSkinPersist);
+  KillTimer(hwnd_, detail::kTimerFilterAutoTest);
+  KillTimer(hwnd_, detail::kTimerDelayCachePrune);
 }
 
 void MainWindow::restore_d2d_resources() {
   if (!hwnd_) return;
   lightweight_wakeup_pending_ = true;
   rt_.create_for_hwnd(hwnd_);
-  // 静默启动 defer_render=true 时跳过了 init_render()，此处必须补齐 clock_ 与 frame_clock，
-  // 否则后续 SnackbarW / SwitchW 的 invalidate() 全程无法排帧。
+  // 静默启动 defer_render=true 时跳过了 init_render()，此处必须补齐 clock_ 与 frame_clock
   dpi_ = rt_.dpi();
   clock_.bind([this](const RectF&) { draw(); });
   set_frame_clock(&clock_);
   RECT rc;
   GetClientRect(hwnd_, &rc);
   on_client_resized(rc.right - rc.left, rc.bottom - rc.top);
-  SetTimer(hwnd_, kTimerFrame, 33, nullptr);  // src: src/pages/_layout.tsx:1
-  SetTimer(hwnd_, kTimerIdle, 1000, nullptr);  // src: src/providers/window/window-provider.tsx:1
-  SetTimer(hwnd_, kTimerTunGuard, 5000, nullptr);  // src: src/hooks/use-system-state.ts:65
-  SetTimer(hwnd_, kTimerDelayCachePrune, 300000, nullptr);
+  SetTimer(hwnd_, detail::kTimerFrame, 33, nullptr);  // src: src/pages/_layout.tsx:1
+  SetTimer(hwnd_, detail::kTimerIdle, 1000, nullptr);  // src: src/providers/window/window-provider.tsx:1
+  SetTimer(hwnd_, detail::kTimerTunGuard, 5000, nullptr);  // src: src/hooks/use-system-state.ts:65
+  SetTimer(hwnd_, detail::kTimerDelayCachePrune, 300000, nullptr);
   InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
@@ -2636,7 +650,7 @@ void MainWindow::toggle_large() {
     bp_.set_large(false);
   }
   update_conn_ws_state();
-  stealth_.feed_activity(now_ms());
+  stealth_.feed_activity(detail::now_ms());
   if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
@@ -2671,7 +685,7 @@ void MainWindow::on_client_resized(int cw, int ch, bool persist) {
     traffic_pane_->set_narrow(bp_.is_narrow());
   }
   if (settings_drawer_ && settings_drawer_->theme_card()) {
-    // src: src/pages/_layout.tsx:1312 @media (max-height: 830px)
+    // src: src/pages/_layout/components/settings-drawer.tsx:420-422 @media (max-height: 830px)
     const bool show_skin = lh > 830.0;
     for (auto* b : settings_drawer_->theme_card()->skin_buttons_)
       b->set_visible(show_skin);
@@ -2683,17 +697,11 @@ void MainWindow::on_client_resized(int cw, int ch, bool persist) {
   if (content_)
     content_->bottom_inset = static_cast<float>(
         bp_.is_narrow() ? kTrafficPaneMinimal : kTrafficPaneWide);
-  // 【LAYOUTFIX】widget 树为逻辑 DIP：传 lw/lh 而非物理 cw/ch（否则 150% 下
-  // 布局区 = 物理像素，组件被当作更宽的逻辑画布 → 堆叠/溢出）
+  // 【LAYOUTFIX】widget 树为逻辑 DIP：传 lw/lh 而非物理 cw/ch
   root_.layout_tree({0, 0, static_cast<float>(lw), static_cast<float>(lh)});
   arrange_modal_overlays(static_cast<float>(lw), static_cast<float>(lh));
   clock_.invalidate({0, 0, static_cast<float>(lw), static_cast<float>(lh)});
   update_conn_ws_state();
-  // persist=false：启动期显式重排（create() 两次）跳过落盘，防 0.2.6 defer_render
-  //   路径下 dpi_scale() 尚未换挡的中间几何写回 window_state.json 覆盖刚恢复的值
-  //   （← Mini 窗口构建前一次性注入几何，无「恢复后立刻回写」窗口）。
-  //   真实 WM_SIZE/WM_DPICHANGED 与运行时重排默认 true；WM_DESTROY 的
-  //   persist_geometry(true) 直接调用，不受此开关影响。
   if (persist) persist_geometry();
 }
 
@@ -2709,8 +717,7 @@ void MainWindow::persist_geometry(bool immediately) {
   }
   if (client_w_ <= 0 || client_h_ <= 0) return;
   float s = dpi_scale();
-  // 【DPIARCH】内部数值必须整数：÷s 后四舍五入取整（406/1.5=270.67→271），
-  // restore ×s 截断闭环（271×1.5=406.5→406）。
+  // 【DPIARCH】内部数值必须整数：÷s 后四舍五入取整
   double w = std::round(static_cast<double>(client_w_) / s);
   double h = std::round(static_cast<double>(client_h_) / s);
   RECT wr;
@@ -2736,22 +743,10 @@ void MainWindow::draw() {
   if (rt_.pixel_width() == 0) return;
   rt_.begin_frame();
   // src: assets/styles/layout.scss:8 「background: var(--theme-bg) !important」
-  //   → --theme-bg（use-custom-theme.ts:421-423 original / :457-460 其余五皮肤）
-  //   原生窗口底色（tauri backgroundColor #F5F5F5/#2E303D）另由窗口类设置，不走此层
   rt_.clear(theme::ThemeService::instance().vars().theme_bg);
   // src: assets/styles/layout.scss:12-28 .layout::before 极光三径向层
-  //   （top -50% / left -50% / 200%×200%；circle at 30%30% 主色 .18、
-  //     70%70% rgba(0,132,255,.15)、80%20% rgba(212,175,55,.12)）
-  //   注意：::before 位于 .layout 内容层之下，仅从半透明/未覆盖处的缝隙透出。
-  //   src: layout.scss:23,292-302 animation: aurora-move 25s ease infinite alternate
-  //   0%→50% translate(0,0)→(-10%,10%)、rotate 0→180deg、scale 1→1.1；
-  //   50%→100% 反向（alternate + 100% 关键帧 translate(10%,-10%) rotate(360) scale(1)
-  //   与 0% 同态）→ 等效为 50s 往返。等价改写：smoothstep 逼近 ease 曲线，10fps 节流续帧。
   {
     // F-D03：极光按皮肤分支（src: layout.scss .layout::before 与各皮肤覆盖块）
-    //   modern-flat / monochrome → opacity:0 关闭；cyberpunk → 霓虹三色（α×depth，
-    //   25s/(vibrancy) 单向）；retro-3d / original / frosted-glass → 默认三色极光
-    //   （frost 经半透明面板透出；α×vibrancy）。
     const theme::SkinId skin = theme::ThemeService::instance().skin();
     if (skin == theme::SkinId::ModernFlat || skin == theme::SkinId::Monochrome ||
         skin == theme::SkinId::Original) {
@@ -2766,7 +761,7 @@ void MainWindow::draw() {
       const float period = (skin == theme::SkinId::Cyberpunk)
                                ? 25000.0f / (vf + 0.001f)  // 25s/(vibrancy) 单向
                                : 25000.0f;                   // 25s 单向（50s 往返）
-      const double u = std::fmod(static_cast<double>(now_ms()) / period, 2.0);
+      const double u = std::fmod(static_cast<double>(detail::now_ms()) / period, 2.0);
       const double s = u < 1.0 ? u : 2.0 - u;
       const float k = static_cast<float>(s * s * (3.0 - 2.0 * s));  // 逼近 ease 曲线
       const float ca = std::cos(k * 3.14159265f), sa = std::sin(k * 3.14159265f);
@@ -2810,7 +805,7 @@ void MainWindow::draw() {
       rt_.fill_round_rect_radial(big, 0.0f, g3, 2, x3, y3, rr, rr);
       // 动画续帧（极慢速位移，10fps 足以视觉平滑；隐藏时停帧）
       if (hwnd_ && IsWindowVisible(hwnd_)) {
-        const int64_t nm = now_ms();
+        const int64_t nm = detail::now_ms();
         if (nm - aurora_tick_ms_ >= 100) {
           aurora_tick_ms_ = nm;
           root_.invalidate();
@@ -2819,8 +814,6 @@ void MainWindow::draw() {
     }
   }
   root_.paint_all(rt_);
-  // 标题栏下投影已移入 TitleBar::on_paint（z_order=10，高于 content_ 但低于 SnackbarW/弹窗），
-  // 避免在 root_.paint_all 之后绘制而把阴影线画到顶部通知条上。
   // src: assets/styles/layout.scss:9  .layout { box-shadow: inset 0 0 0 1px
   //      var(--theme-border); } —— 整窗 1px 内描边（CSS 1px = 1 DIP）
   const float cw = rt_.size().w, ch = rt_.size().h;
@@ -2841,26 +834,24 @@ int MainWindow::hit_test_nc(POINT screen_pt) {
   const float s = dpi_scale();
   // src: resize-handles.tsx:329「if (isLargeMode) return null」→ 大尺寸态无侧边热区
   if (!bp_.is_large()) {
-  const auto rb = static_cast<LONG>(kResizeBorder * s);
-  const auto cs = static_cast<LONG>(kCornerSize * s);
-  bool left = pt.x < rb;
-  bool right = pt.x >= rc.right - rb;
-  bool top = pt.y < rb;
-  bool bottom = pt.y >= rc.bottom - rb;
-  // 角落 20px 热区（src: resize-handles.tsx:58-96 HANDLE_SIZE*2 = 20x20 正方形）
-  if (pt.x < cs && pt.y < cs) return HTTOPLEFT;
-  if (pt.x >= rc.right - cs && pt.y < cs) return HTTOPRIGHT;
-  if (pt.x < cs && pt.y >= rc.bottom - cs) return HTBOTTOMLEFT;
-  if (pt.x >= rc.right - cs && pt.y >= rc.bottom - cs) return HTBOTTOMRIGHT;
-  if (left) return HTLEFT;
-  if (right) return HTRIGHT;
-  if (top) return HTTOP;
-  if (bottom) return HTBOTTOM;
+    const auto rb = static_cast<LONG>(detail::kResizeBorder * s);
+    const auto cs = static_cast<LONG>(detail::kCornerSize * s);
+    bool left = pt.x < rb;
+    bool right = pt.x >= rc.right - rb;
+    bool top = pt.y < rb;
+    bool bottom = pt.y >= rc.bottom - rb;
+    // 角落 20px 热区（src: resize-handles.tsx:58-96 HANDLE_SIZE*2 = 20x20 正方形）
+    if (pt.x < cs && pt.y < cs) return HTTOPLEFT;
+    if (pt.x >= rc.right - cs && pt.y < cs) return HTTOPRIGHT;
+    if (pt.x < cs && pt.y >= rc.bottom - cs) return HTBOTTOMLEFT;
+    if (pt.x >= rc.right - cs && pt.y >= rc.bottom - cs) return HTBOTTOMRIGHT;
+    if (left) return HTLEFT;
+    if (right) return HTRIGHT;
+    if (top) return HTTOP;
+    if (bottom) return HTBOTTOM;
   }
 
-  // 标题栏拖动区：y < 30×s 且不在四键区（【DPIARCH】pt/rc 为物理像素，
-  // 旧代码用 DIP 常量 30/96 直接比较 → 150% 下按钮区/栏高错位；
-  // 现按 widget DIP bounds ×s 精确判定四键热区）
+  // 标题栏拖动区：y < 30×s 且不在三键区
   if (title_bar_ && title_bar_->visible() && pt.y < kTitleBarH * s) {
     PointF p{static_cast<float>(pt.x) / s, static_cast<float>(pt.y) / s};
     for (Widget* b : {static_cast<Widget*>(title_bar_->btn_minimize()),
@@ -2891,13 +882,8 @@ LRESULT CALLBACK MainWindow::wndproc(HWND hwnd, UINT msg, WPARAM wp,
     self = static_cast<MainWindow*>(
         reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams);
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
-    // 【坑】handle() 内 DefWindowProcW 用成员 hwnd_；创建序列中 NCCREATE
-    // 先于构造完成，必须先落成员（否则 DefWindowProcW(nullptr,...) 返回 0
-    // → CreateWindowExW 失败 ERROR_INVALID_WINDOW_HANDLE 1400）
     if (self) {
       self->hwnd_ = hwnd;
-      // 【DPIARCH】取窗口实际 DPI（150% 屏=144）：全链统一
-      // 物理 = 逻辑 × dpi/96（persist ÷s / restore ×s / 输入 ÷s / D2D transform）。
       self->dpi_ = static_cast<float>(GetDpiForWindow(hwnd));
     }
   } else {
@@ -2931,7 +917,6 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_GETMINMAXINFO: {
       // ← min_inner_size(271,126) / max_inner_size(640,860)；outer==inner
       auto* mmi = reinterpret_cast<MINMAXINFO*>(lp);
-      // 【DPIARCH】逻辑 min/max × 实际 DPI 四舍五入（与 create 的 407 同口径）
       float s = static_cast<float>(GetDpiForWindow(hwnd_)) / 96.0f;
       mmi->ptMinTrackSize.x = static_cast<LONG>(kMinWindowW * s + 0.5f);
       mmi->ptMinTrackSize.y = static_cast<LONG>(kMinWindowH * s + 0.5f);
@@ -2960,7 +945,7 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       int min_h_px = static_cast<int>(kMinWindowH * s + 0.5);
       if (clamp_sizing_top(static_cast<uint32_t>(wp), *rc, min_h_px))
         return TRUE;
-      break;  // 其余交给 DefWindowProc（系统按 MINMAX 钳制）
+      break;
     }
 
     case WM_SIZE: {
@@ -2974,20 +959,17 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       }
       if (traffic_pane_) traffic_pane_->set_enabled(true);
       const int cw = LOWORD(lp), ch = HIWORD(lp);
-      // 【DPIARCH】D2D HWND target 不会自行跟帧（本 WndProc 未走 DefWindowProc）：
-      // backbuffer 停在创建期 386x1000 → 406x1020 客户区被拉伸 5.2% 呈现。
-      // 显式 Resize 使像素尺寸恒等于客户区（DIP=px/scale 恒为 271x680）。
       rt_.resize(cw, ch);
       on_client_resized(cw, ch);
       InvalidateRect(hwnd_, nullptr, FALSE);
-      stealth_.feed_activity(now_ms());  // 几何变化 = 交互（续期）
+      stealth_.feed_activity(detail::now_ms());  // 几何变化 = 交互（续期）
       return 0;
     }
 
     case WM_MOVE:
       if (tooltip_host_) tooltip_host_->leave();
       persist_geometry();
-      stealth_.feed_activity(now_ms());
+      stealth_.feed_activity(detail::now_ms());
       break;
 
     case WM_PAINT: {
@@ -3002,41 +984,41 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       return 1;  // D2D 全域 Clear，跳过背景擦除防闪烁
 
     case WM_TIMER:
-      if (wp == kTimerFrame) {
+      if (wp == detail::kTimerFrame) {
         pump_frame();
-        if (tooltip_host_) tooltip_host_->tick_now(now_ms());
-      } else if (wp == kTimerIdle) {
-        const int64_t now = now_ms();
+        if (tooltip_host_) tooltip_host_->tick_now(detail::now_ms());
+      } else if (wp == detail::kTimerIdle) {
+        const int64_t now = detail::now_ms();
         stealth_.tick(now);  // 到点隐藏（自续期 = 下一秒再 tick）
         if (conn_gc_deadline_ms_ != 0 && now >= conn_gc_deadline_ms_) {
           conn_gc_deadline_ms_ = 0;
           if (conn_data_) conn_data_->clear_all();
         }
-      } else if (wp == kTimerNodeRetry) {
-        KillTimer(hwnd_, kTimerNodeRetry);
+      } else if (wp == detail::kTimerNodeRetry) {
+        KillTimer(hwnd_, detail::kTimerNodeRetry);
         reload_nodes();
-      } else if (wp == kTimerTunGuard) {
+      } else if (wp == detail::kTimerTunGuard) {
         tun_guard_tick();
-      } else if (wp == kTimerFirstRun) {
-        KillTimer(hwnd_, kTimerFirstRun);
+      } else if (wp == detail::kTimerFirstRun) {
+        KillTimer(hwnd_, detail::kTimerFirstRun);
         if (first_run_) {
           first_run_->open();
-          // src: src/pages/_layout/components/first-run-guide-dialog.tsx:228
-          SetTimer(hwnd_, kTimerFirstReady, 250, nullptr);  // src: src/pages/_layout/components/first-run-guide-dialog.tsx:46
+          // src: src/pages/_layout/components/first-run-guide-dialog/index.tsx:218-226
+          SetTimer(hwnd_, detail::kTimerFirstReady, 250, nullptr);  // src: src/pages/_layout/components/first-run-guide-dialog/index.tsx:34
         }
-      } else if (wp == kTimerFirstReady) {
+      } else if (wp == detail::kTimerFirstReady) {
         if (first_run_ && first_run_->is_open()) {
-          first_run_->tick(now_ms());
+          first_run_->tick(detail::now_ms());
         } else {
-          KillTimer(hwnd_, kTimerFirstReady);
+          KillTimer(hwnd_, detail::kTimerFirstReady);
         }
-      } else if (wp == kTimerSkinPersist) {
-        KillTimer(hwnd_, kTimerSkinPersist);
+      } else if (wp == detail::kTimerSkinPersist) {
+        KillTimer(hwnd_, detail::kTimerSkinPersist);
         if (settings_drawer_) settings_drawer_->flush_pending_skin_prefs();
-      } else if (wp == kTimerFilterAutoTest) {
-        KillTimer(hwnd_, kTimerFilterAutoTest);
+      } else if (wp == detail::kTimerFilterAutoTest) {
+        KillTimer(hwnd_, detail::kTimerFilterAutoTest);
         if (node_list_) node_list_->fire_filter_auto_test_timer();
-      } else if (wp == kTimerDelayCachePrune) {
+      } else if (wp == detail::kTimerDelayCachePrune) {
         if (node_data_) node_data_->clean_expired_delays();
       }
       return 0;
@@ -3049,22 +1031,19 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       } else {
         last_blur_ms_.store(0, std::memory_order_release);
       }
-      // 对齐 Mini traffic-graph.tsx:84-95：失焦时不暂停，仅在最小化(document.hidden)时停采
       break;
 
     case WM_SETFOCUS:
-      stealth_.feed_activity(now_ms());
+      stealth_.feed_activity(detail::now_ms());
       update_ime_position();
       return 0;
 
     case WM_KILLFOCUS:
-      stealth_.feed_activity(now_ms());
+      stealth_.feed_activity(detail::now_ms());
       if (tooltip_host_) tooltip_host_->leave();
       DestroyCaret();
       return 0;
 
-    // 【INPUTFIX】鼠标/键盘路由给 widget 树（此前仅 feed_activity，
-    // route_*_event 只在 tests/ 被调 → 实机开关点击无反应）
     case WM_GETOBJECT: {
       if (uia_) {
         LRESULT r = uia_->handle_wm_getobject(hwnd_, wp, lp);
@@ -3101,13 +1080,13 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_NCMOUSEMOVE:
       clear_mouse_hover();
-      if (tooltip_host_) tooltip_host_->leave();  // 移入非客户区 → 清悬停态并收起提示
+      if (tooltip_host_) tooltip_host_->leave();
       break;
 
     case WM_MOUSELEAVE:
       mouse_tracking_ = false;
       clear_mouse_hover();
-      if (tooltip_host_) tooltip_host_->leave();  // 移出无边框窗口 → 清悬停态并收起提示
+      if (tooltip_host_) tooltip_host_->leave();
       return 0;
 
     case WM_IME_SETCONTEXT:
@@ -3129,7 +1108,7 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_RBUTTONUP:
     case WM_MBUTTONDOWN:
     case WM_MBUTTONUP: {
-      stealth_.feed_activity(now_ms());
+      stealth_.feed_activity(detail::now_ms());
       float s = dpi_scale();
       MouseEvent e;
       e.pos = {static_cast<float>(GET_X_LPARAM(lp)) / s,
@@ -3155,7 +1134,6 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
         tme.hwndTrack = hwnd_;
         if (TrackMouseEvent(&tme)) mouse_tracking_ = true;
       }
-      // 捕获：Down 后移出窗口仍能收到 Move/Up（开关拖动 thumb 跟随）
       if (down) {
         if (tooltip_host_) tooltip_host_->leave();
         SetCapture(hwnd_);
@@ -3164,9 +1142,6 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       }
       Widget* hit_w = route_mouse_event(&root_, e);
       if (down) update_ime_position();
-      // 【DIAG】鼠标命中诊断（Down/Up）：打印事件坐标与命中控件的全局矩形。
-      //   用途：自动化点击回归若「点了没反应」，靠这条日志判断是
-      //   消息没送达、坐标换算错、还是命中被上层控件拦截。
       if (e.type == MouseEventType::Down || e.type == MouseEventType::Up) {
         std::string d = std::string("[MOUSEDBG] ") +
                         (e.type == MouseEventType::Down ? "down" : "up") +
@@ -3183,14 +1158,14 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       }
       // 悬停提示：命中控件（或父链）→ 100ms 后显示（src: node_modules/@mui/material/Tooltip/Tooltip.js:331）
       if (tooltip_host_ && e.type == MouseEventType::Move) {
-        tooltip_host_->tick_now(now_ms());
+        tooltip_host_->tick_now(detail::now_ms());
         tooltip_host_->hover(hovered_widget(), e.pos);
       }
       return 0;
     }
 
     case WM_MOUSEWHEEL: {
-      stealth_.feed_activity(now_ms());
+      stealth_.feed_activity(detail::now_ms());
       if (tooltip_host_) tooltip_host_->leave();
       float s = dpi_scale();
       POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};  // wheel lp = 屏幕坐标
@@ -3206,23 +1181,17 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
     case WM_KEYUP: {
-      stealth_.feed_activity(now_ms());
+      stealth_.feed_activity(detail::now_ms());
       KeyEvent e;
       e.type = (msg == WM_KEYUP) ? KeyEventType::Up : KeyEventType::Down;
       e.key = static_cast<uint32_t>(wp);
       e.ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
       e.shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
       e.alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
-      // G3: IME 组词期 Enter 由 IME 消费（← Mini base-search-box.tsx:127-135
-      //   !isComposing && keyCode!==229；Win32 组词期该键多呈 VK_PROCESSKEY=229，
-      //   直通 VK_RETURN 的输入法也在此挡住，防误触发提交/首启完成）
       if (ime_composing_ && wp == VK_RETURN) {
         update_ime_position();
         return 0;
       }
-      // 首启引导弹窗：Esc 关闭、就绪步 Enter 完成（src: :533-542 / :417-446）。
-      // 订阅框 TextField 已吞掉输入步的字符/Enter（on_submit），此处仅在就绪步
-      // 接管 Enter，并对两步统一接管 Esc——对话框 on_key 焦点已被输入框抢占。
       if (first_run_ && first_run_->is_open() && msg == WM_KEYDOWN) {
         if (wp == VK_ESCAPE) {
           if (!first_run_->is_importing()) first_run_->finish();
@@ -3235,7 +1204,7 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
         }
       }
       if (msg == WM_KEYDOWN) {
-        // BUG-355：统一全局快捷键收口（Ctrl+F 聚焦全选过滤框 / F4 可见子集测速择优 / F1 全量组测速择优）
+        // BUG-355：统一全局快捷键收口（Ctrl+F / F4 / F1）
         // src: src/utils/disable-webview-shortcuts.ts:35-77
         const bool is_repeat = (lp & (1LL << 30)) != 0;  // src: src/utils/disable-webview-shortcuts.ts:38
         switch (classify_global_shortcut(static_cast<uint32_t>(wp), e.ctrl, e.alt,
@@ -3272,12 +1241,11 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       bool handled = route_key_event(&root_, e);
       update_ime_position();
       if (handled) return 0;
-      break;  // 未处理 → DefWindowProc（助记符/系统键）
+      break;
     }
 
     case WM_CHAR: {
-      stealth_.feed_activity(now_ms());
-      // G3: 组词期泄漏的 '\r'（提交候选后跟随的回车）不进 widget 树
+      stealth_.feed_activity(detail::now_ms());
       if (ime_composing_ && wp == L'\r') return 0;
       KeyEvent e;
       e.type = KeyEventType::Char;
@@ -3303,8 +1271,8 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
         POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
         float dx = static_cast<float>(pt.x - nc_down_->x);
         float dy = static_cast<float>(pt.y - nc_down_->y);
-        if (dx * dx + dy * dy < kStealthClickSlack * kStealthClickSlack)
-          stealth_.restore_chrome(now_ms());
+        if (dx * dx + dy * dy < detail::kStealthClickSlack * detail::kStealthClickSlack)
+          stealth_.restore_chrome(detail::now_ms());
         nc_down_.reset();
       }
       break;
@@ -3320,8 +1288,6 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       return 0;
 
     case WM_DPICHANGED: {
-      // 【DPIARCH】← Mini(tao) 行为：dpi_ 换挡 → 重建 target（transform ×scale）
-      // → 应用建议矩形（= 保持逻辑尺寸、按新 DPI 换物理）→ 重排。
       CWLOG_INFO(std::format(
           "[DPIARCH] DPICHANGED new={} sug={}x{}@{},{}",
           HIWORD(wp),
@@ -3343,7 +1309,7 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       return 0;
     }
 
-    case kAppWakeup: {  // 单实例唤醒（← /commands/visible & tray/mod.rs:216）
+    case detail::kAppWakeup: {  // 单实例唤醒（← /commands/visible & tray/mod.rs:216）
       bool stay_silent = false;
       std::string lang = "zh";
       try {
@@ -3397,8 +1363,7 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
       // 退出序列：立即落盘（跳过节流；← save_window_state_immediately）
       persist_geometry(true);
       set_frame_clock(nullptr);
-      // src: src-tauri/src/lib.rs:377-383 RunEvent::ExitRequested 防意外退出铁律（BUG-315）：
-      //   仅当 Lifecycle 已进入显式退出流程时才投递 WM_QUIT，防止非预期窗口销毁杀死托盘与守护线程。
+      // src: src-tauri/src/lib.rs:377-383 RunEvent::ExitRequested 防意外退出铁律（BUG-315）
       if (app::Lifecycle::instance().is_exiting()) {
         PostQuitMessage(0);
       } else {

@@ -3,7 +3,7 @@
 // - 主色解析链（← use-custom-theme.ts:170-181）：
 //   setting.primary_color || 系统 AccentColor || 色板缺省；
 //   original 皮肤强制 hsl(239*val2, 26%, 49%)
-// - 控件族参数 ← utils/button-styles.ts get3DButtonStyle/get3DSegmented*/
+// - 控件族参数 ← src/utils/button-styles/button.ts:6-10 (get3DButtonStyle)/get3DSegmented*/
 //   get3DInputStyle 按 skin×mode 查表（渐变/多层阴影 → C++ 分层离散折算，
 //   差异逐项标注 theme.cpp）
 // - 切换热生效：subscribe 回调 → 控件 invalidate（对齐 clash-mini-skin-changed）
@@ -35,7 +35,7 @@ struct ButtonPaint {
   GradientStop grad_hover[6];            // hover 态渐变站（无单独站时回退 default）
   int grad_count = 0;
   // hover 站的站数：0 = 与 grad_count 相同。
-  // ← button-styles.ts:59-63 vs :109-111：retro-3d 的 outlined default 常态是
+  // ← src/utils/button-styles/button.ts:48-52 vs :109-111：retro-3d 的 outlined default 常态是
   //   2 站半透明渐变（to bottom），悬停却是 4 站不透明浅金（135deg），两者站数不同。
   int grad_hover_count = 0;
   float grad_angle = 135.0f;
@@ -48,7 +48,7 @@ struct ButtonPaint {
   float translate_hover = 0;             // hover 位移 translateY（px，负=上移）
   float translate_active = 0;            // active 位移 translateY（px）
 
-  // ---------- 三态阴影 / 外发光（← button-styles.ts 各皮肤 boxShadow 的
+  // ---------- 三态阴影 / 外发光（← src/utils/button-styles/button.ts:6-10 各皮肤 boxShadow 的
   //   `&:hover` / `&:active` 覆盖；台账 V8） ----------
   // D2D 没有 box-shadow：每层柔影用「多层外扩 + 递减 alpha」合成（soft_shadow.h）。
   // retro-3d 的硬 bevel（0 d 0 / 0 2d 0 实色层）仍由 bevel_dark 单独表达，
@@ -124,7 +124,7 @@ struct SegmentedPaint {
 // 与聚焦外发光（retro 0 0 8v 金、cyber 0 0 0 3px 粉）全部在此表达。
 struct InputPaint {
   Color4f bg, border, border_focused;
-  // src: src/utils/button-styles.ts:757-876 hover 边框色（a=0 表示沿用 border）
+  // src: src/utils/button-styles/input.ts:29-148 hover 边框色（a=0 表示沿用 border）
   Color4f border_hover{0, 0, 0, 0};
   float border_w = 1;            // 已含 depth/vibrancy
   float border_w_focused = 1;    // 已含 depth/vibrancy
@@ -166,7 +166,7 @@ struct PanelPaint {
   BorderKind border = BorderKind::Double;
   Color4f border_color;
 
-  float radius = 8.0f;  // ← utils/button-styles.ts:598/639/661（card 8px×val1），已含 skin 的 base×depth
+  float radius = 8.0f;  // ← src/utils/button-styles/card.ts:112/639/661（card 8px×val1），已含 skin 的 base×depth
 
   // 外阴影（多层等效，见 ui/soft_shadow.h）
   bool has_shadow = false;
@@ -205,7 +205,7 @@ struct CardPaint {
   Color4f bg;  // 非渐变底色
   Color4f border;
   float border_w = 0.0f;  // 0 = 无边框
-  float radius = 6.0f;    // ← utils/button-styles.ts:79（button 6px），已含 skin 的 base×depth
+  float radius = 6.0f;    // ← src/utils/button-styles/button.ts:68（button 6px），已含 skin 的 base×depth
   bool has_shadow = false;
   Color4f shadow_color;
   float shadow_dy = 0.0f;

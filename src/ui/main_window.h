@@ -283,7 +283,7 @@ class MainWindow : public app::ILifecycleWindow {
   void update_ime_position();                      // IME 候选窗跟随光标与 Win32 原生 Caret 同步
   // 首启就绪轮询：只刷新 proxies/activeDelay，不触发组测速
   void sync_first_run_proxy();
-  // 异步订阅导入（← _layout.tsx:838-908 handleImportProfile + FirstRunGuide 共用）
+  // 异步订阅导入（← src/pages/_layout/hooks/use-profile-actions.ts:211-289 handleImportProfile + FirstRunGuide 共用）
   void run_import_profile_async(
       const std::string& url, const std::string& name,
       std::function<void(bool ok, const std::string& err)> done);
@@ -358,7 +358,7 @@ class MainWindow : public app::ILifecycleWindow {
   std::atomic<uint64_t> switch_epoch_{0};          // BUG-356：异步切点并发代数守卫
   std::atomic<uint64_t> auto_select_coord_gen_{0}; // 后台选点协调代数（切配置即取消）
   std::atomic<uint64_t> last_blur_ms_{0};          // BUG-361：最近一次失焦时刻（GetTickCount64）
-  std::atomic<bool> profile_importing_{false};  // ← _layout.tsx:839 isImportingRef 防重入锁
+  std::atomic<bool> profile_importing_{false};  // ← src/pages/_layout/hooks/use-profile-actions.ts:215 isImportingRef 防重入锁
   int64_t aurora_tick_ms_ = 0;  // 极光动画自续帧节流（10fps；src: layout.scss:23）
 
   Breakpoints bp_;

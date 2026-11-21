@@ -21,7 +21,7 @@
 
 namespace clashwin::ui::scene {
 
-inline constexpr float kImportCardW = 240;  // ← 抽屉左列 240px（_layout.tsx:1428-1429）
+inline constexpr float kImportCardW = 240;  // ← 抽屉左列 240px（src/pages/_layout/components/settings-drawer.tsx:217-218）
 
 // 行可视高 = 53（src: profile-import-card.tsx:217-366 推导：
 //   p6 + 标题行 18 + mt2 + 次行 15 + mt4 + 进度 2 + p6 = 53）

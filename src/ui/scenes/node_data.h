@@ -164,7 +164,7 @@ class NodeData {
   // BUG-321: 测速前拍摄延迟缓存快照，异常/繁忙/空结果结束时将仍处于 -2 的节点回滚原值
   DelaySnapshotMap snapshot_delays(const std::vector<std::string>& names) const;
   bool restore_delays_for_still_pending(const DelaySnapshotMap& snaps);
-  // 切换订阅时清空内存延迟缓存（← _layout.tsx:921 delayManager.clearCache()）
+  // 切换订阅时清空内存延迟缓存（← src/pages/_layout/hooks/use-profile-actions.ts:295 delayManager.clearCache()）
   void clear_delay_cache() {
     if (delay_cache_.empty()) return;
     delay_cache_.clear();

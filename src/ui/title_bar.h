@@ -1,6 +1,6 @@
 #pragma once
 // 标题栏（T11）：30px —— AppIcon 16 + "Clash Win Ver.{v}" + 右三键 28×28。
-// ← _layout.tsx:1119-1183（customTitlebar）+ window-controller.tsx（三键）。
+// ← src/pages/_layout.tsx:348-411（customTitlebar）+ window-controller.tsx（三键）。
 // - 三键：最小化 / 大尺寸□（large 态换 restore 字形）/ 关闭（hover 红底白字）
 // - 关闭 = 隐藏窗口 + entry_lightweight_mode（← 02§7，非退出）
 // - 大尺寸键 = toggle 640×860（禁 OS maximize），恢复 last-non-large-size
@@ -126,17 +126,17 @@ class TitleBarButton : public Widget {
   }
 };
 
-// AppIcon 16×16（src: _layout.tsx:1143-1154；位图资源 resources/icons/32x32.png）
+// AppIcon 16×16（src: src/pages/_layout.tsx:371-382；位图资源 resources/icons/32x32.png）
 class TitleBarIcon : public Widget {
  public:
   explicit TitleBarIcon(Widget* parent = nullptr) : Widget(parent) {}
 
   SizeF on_measure(float max_w, float max_h) override {
     (void)max_w; (void)max_h;
-    return {16, 16};  // src: _layout.tsx:1149-1150 width/height 16px
+    return {16, 16};  // src: src/pages/_layout.tsx:377-378 width/height 16px
   }
 
-  // pointerEvents: 'none'（src: _layout.tsx:1152）
+  // pointerEvents: 'none'（src: src/pages/_layout.tsx:380）
   bool hit_self(PointF local) const override {
     (void)local;
     return false;

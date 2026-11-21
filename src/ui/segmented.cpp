@@ -12,7 +12,7 @@ namespace clashwin::ui {
 
 namespace {
 // 未接主题时（themed_=false 且 gold_3d_=true）的 retro-3d 选中块渐变兜底。
-// src: button-styles.ts:1006-1007
+// src: src/utils/button-styles/segmented.ts:95-96
 const GradientStop kRetroActiveGrad[6] = {
     {0.00f, Color4f::hex(0xFFE082)}, {0.20f, Color4f::hex(0xFFD54F)},
     {0.45f, Color4f::hex(0xFFC107)}, {0.70f, Color4f::hex(0xFFB300)},
@@ -206,7 +206,7 @@ void Segmented::on_paint(IRenderTarget& rt) {
   float act_radius = radius_ - 2;
   float cont_bw = gold_3d_ ? 1.0f : 0.0f;
   float cont_radius = radius_;
-  // ★ d/v 消费（← button-styles.ts:932-990 容器 + :992-1103 选中块）
+  // ★ d/v 消费（← src/utils/button-styles/segmented.ts:6-78 容器 + :992-1103 选中块）
   bool cont_inset = false;
   Color4f cont_inset_color{}, cont_top_hi{};
   float cont_inset_dy = 0, cont_inset_blur = 0;
@@ -257,7 +257,7 @@ void Segmented::on_paint(IRenderTarget& rt) {
                std::max(0.0f, r.w - kBorder * 2.0f),
                std::max(0.0f, r.h - kBorder * 2.0f)};
   Brush bg{bg_c};
-  // src: button-styles.ts:939-945 容器 1px rgba(212,175,55,.35/.22)（gold_3d_）
+  // src: src/utils/button-styles/segmented.ts:28-35 容器 1px rgba(212,175,55,.35/.22)（gold_3d_）
   Color4f border_c = themed_ ? cont_border : act_border;
   if (!themed_ && gold_3d_)
     border_c = Color4f::hex(0xD4AF37, theme::ThemeService::instance().is_light()
@@ -269,7 +269,7 @@ void Segmented::on_paint(IRenderTarget& rt) {
   if (cont_inset) {
     draw_top_inset_shadow(rt, cbox, std::max(0.0f, cont_radius - kBorderInset),
                           cont_inset_color, cont_inset_dy, cont_inset_blur);
-    // src: button-styles.ts:934-938 inset 0 3d 5d 轨道四周内凹阴影（含左/右内边界阴影）
+    // src: src/utils/button-styles/segmented.ts:23-27 inset 0 3d 5d 轨道四周内凹阴影（含左/右内边界阴影）
     draw_inner_glow(rt, cbox, std::max(0.0f, cont_radius - kBorderInset),
                     Color4f{cont_inset_color.r, cont_inset_color.g,
                             cont_inset_color.b, cont_inset_color.a * 0.65f},
@@ -288,11 +288,11 @@ void Segmented::on_paint(IRenderTarget& rt) {
     RectF seg{padbox.x + seg_w * i, padbox.y, seg_w, padbox.h};
     bool sel = i == selected_;
     if (sel) {
-      // src: button-styles.ts:1000-1001 选中块 absolute inset 1px（相对 padding box）
+      // src: src/utils/button-styles/segmented.ts:90-93 选中块 absolute inset 1px（相对 padding box）
       const float inset = 1.0f;
       RectF sr{seg.x + inset, seg.y + inset, seg.w - 2 * inset, seg.h - 2 * inset};
       if (gold_3d_) {
-        // src: button-styles.ts:1006-1007 135° 六停金渐变（retro-3d）
+        // src: src/utils/button-styles/segmented.ts:95-96 135° 六停金渐变（retro-3d）
         //   themed_ 时取查表（单一真源），未接主题时用本地兜底。
         act_radius = 3.0f;
         const GradientStop* g =
@@ -300,7 +300,7 @@ void Segmented::on_paint(IRenderTarget& rt) {
         const int gc = act_grad_count > 0 ? act_grad_count : 6;
         const float ga = act_grad_count > 0 ? act_grad_angle : 135.0f;
         rt.fill_round_rect_gradient_angle(sr, act_radius, g, gc, ga);
-        // src: button-styles.ts:1021-1022 边框 light '#8A6D00' / dark '#634E00'
+        // src: src/utils/button-styles/segmented.ts:110-111 边框 light '#8A6D00' / dark '#634E00'
         rt.round_rect(sr, act_radius,
                       Pen{act_border.a > 0 ? act_border
                                             : (theme::ThemeService::instance()
@@ -330,7 +330,7 @@ void Segmented::on_paint(IRenderTarget& rt) {
           draw_glow(rt, sr, act_radius, act_glow_color, act_glow_blur);
         rt.round_rect(sr, act_radius,
                       themed_ && act_border.a > 0 ? Pen{act_border, 1}
-                                                  : Pen{Color4f(0, 0, 0, 0), 0},  // src: utils/button-styles.ts:1035 非描边皮肤选中块 border: none
+                                                  : Pen{Color4f(0, 0, 0, 0), 0},  // src: src/utils/button-styles/segmented.ts:124 非描边皮肤选中块 border: none
                       &sel_bg);
       }
     }

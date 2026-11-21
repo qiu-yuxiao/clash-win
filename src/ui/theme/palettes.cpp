@@ -107,14 +107,14 @@ CssVars css_vars(ThemeMode mode, SkinId skin) {
     v.theme_input_border = light ? Color4f::hex(0xcbd5e1) : Color4f::hex(0x555555);
     v.theme_border_outer = light ? Color4f::hex(0x000000, 0.05f)
                                  : Color4f::hex(0x000000, 0.25f);
-    // src: _layout.tsx:1194 内容容器 background light #fff / dark #181a1b
+    // src: src/pages/_layout.tsx:422 内容容器 background light #fff / dark #181a1b
     v.list_bg = light ? Color4f::hex(0xffffff) : Color4f::hex(0x181a1b);
   } else {
     // 其余 5 皮肤共用分支（← use-custom-theme.ts:456-500）
     // src: use-custom-theme.ts:457-460 dark --theme-bg '#0f1423'
     //   （旧值 0F1524 已按源码回退，出处: use-custom-theme.ts:457-460）
     v.theme_bg = light ? Color4f::hex(0xf0f5ff) : Color4f::hex(0x0f1423);
-    // src: _layout.tsx:1194 内容容器 background light #fff / dark #181a1b
+    // src: src/pages/_layout.tsx:422 内容容器 background light #fff / dark #181a1b
     v.list_bg = light ? Color4f::hex(0xffffff) : Color4f::hex(0x181a1b);
     v.theme_panel_bg = light ? Color4f::hex(0xffffff) : Color4f::hex(0x1e2438);
     v.theme_popover_bg = light ? Color4f::hex(0xffffff) : Color4f::hex(0x1e1e23);

@@ -745,7 +745,7 @@ void IconW::on_paint(IRenderTarget& rt) {
   const float glyph_side = (size_ > 0.0f && size_ < (w < h ? w : h))
                                ? size_
                                : (w < h ? w : h);
-  // 旋转（绕盒中心；src: _layout.tsx:1362-1364 transform: rotate(45deg)）
+  // 旋转（绕盒中心；src: src/pages/_layout.tsx:578-580 transform: rotate(45deg)）
   auto rotated = [&](const std::vector<std::vector<PointF>>& loops,
                      std::vector<std::vector<PointF>>& out) {
     out = loops;
@@ -790,7 +790,7 @@ void IconW::on_paint(IRenderTarget& rt) {
         scaled.push_back(std::move(pts));
       }
       if (glow_) {
-        // src: _layout.tsx:1099-1101 drop-shadow(0 0 3px rgba(255,59,48,.85))
+        // src: src/pages/_layout.tsx:575-577 drop-shadow(0 0 3px rgba(255,59,48,.85))
         //   + drop-shadow(0 1px 1px rgba(255,255,255,.45))；
         //   无高斯模糊核 → 8 向 2.5px 偏移填充 + 白色下沿等效重绘
         Color4f g = glow_color_;
@@ -838,7 +838,7 @@ void IconW::on_paint(IRenderTarget& rt) {
         for (const auto& p : poly) {
           float x = ox + p.x * side, y = oy + p.y * side;
           if (rotate_deg != 0.0f) {
-            // src: _layout.tsx:1102-1104 transform: rotate(45deg)（绕盒中心）
+            // src: src/pages/_layout.tsx:578-580 transform: rotate(45deg)（绕盒中心）
             const float cx = w * 0.5f, cy = h * 0.5f;
             const float rad = rotate_deg * 3.14159265f / 180.0f;
             const float ca = std::cos(rad), sa = std::sin(rad);
@@ -853,7 +853,7 @@ void IconW::on_paint(IRenderTarget& rt) {
       }
     };
     if (glow_) {
-      // src: _layout.tsx:1099-1101 drop-shadow(0 0 3px rgba(255,59,48,.85))
+      // src: src/pages/_layout.tsx:575-577 drop-shadow(0 0 3px rgba(255,59,48,.85))
       //   + drop-shadow(0 1px 1px rgba(255,255,255,.45))；
       //   无高斯模糊核 → 8 向 2.5px 环形偏移重绘等效实现
       Pen g; g.color = glow_color_; g.width = pen.width;

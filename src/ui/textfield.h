@@ -153,7 +153,7 @@ class TextField : public Widget {
   float focus_glow_blur_ = 0;
   float focus_ring_ = 0;
   float height_ = 28;  // ← 行内输入框高 28（源码 size=small 布局）
-  float right_pad_ = 0;  // ← endAdornment 右侧预留内距（first-run-guide-dialog.tsx:714）
+  float right_pad_ = 0;  // ← endAdornment 右侧预留内距（src/pages/_layout/components/first-run-guide-dialog/input-step.tsx:203-218）
   bool multiline_ = false;  // ← MUI TextField multiline 折行模式（profile-import-card.tsx:140）
   static constexpr int kCaretBlinkMs = 500;  // 豁免: Mini 无对应物 — Win32 原生文本输入光标闪烁半周期 500ms（出处: 无）
 

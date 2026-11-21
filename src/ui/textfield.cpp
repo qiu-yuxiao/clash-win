@@ -229,7 +229,7 @@ std::optional<RectF> TextField::tooltip_anchor_rect() const {
 // ---- 编辑命令（EM_* 等价） ----
 bool TextField::can_cut() const { return has_selection(); }
 bool TextField::can_copy() const { return has_selection(); }
-bool TextField::can_paste() const { return true; }  // src: _layout.tsx:1588-1590 粘贴项无 disabled
+bool TextField::can_paste() const { return true; }  // src: src/pages/_layout/components/input-context-menu.tsx:58 粘贴项无 disabled
 bool TextField::can_select_all() const { return !text_.empty(); }
 bool TextField::can_clear() const { return !text_.empty(); }
 
@@ -765,7 +765,7 @@ void TextField::on_paint(IRenderTarget& rt) {
   Brush bg_b{bg_};
   const float bw = focused() && border_w_focused_ > 0.01f ? border_w_focused_
                                                           : border_w_;
-  // src: src/utils/button-styles.ts:757-876 hover notchedOutline 描边色
+  // src: src/utils/button-styles/input.ts:29-148 hover notchedOutline 描边色
   const Color4f bcol = focused()
                            ? border_focused_
                            : ((hover_ && border_hover_.a > 0.001f) ? border_hover_ : border_);
@@ -966,9 +966,9 @@ void TextField::on_paint(IRenderTarget& rt) {
     rt.draw_text(L"✕", clear_button_rect(), cts);
   }
   if (right_pad_ > 0) {
-    // src: first-run-guide-dialog.tsx:713-728 endAdornment KeyboardReturn 16px
+    // src: src/pages/_layout/components/first-run-guide-dialog/input-step.tsx:203-218 endAdornment KeyboardReturn 16px
     TextStyle ets = ts;
-    ets.size = 16.0f;  // src: first-run-guide-dialog.tsx:725 fontSize 16
+    ets.size = 16.0f;  // src: src/pages/_layout/components/first-run-guide-dialog/input-step.tsx:213-215 fontSize 16
     ets.align_h = AlignH::Center;
     ets.align_v = AlignV::Center;
     ets.color = enter_hover_ ? theme::ThemeService::instance().primary() : placeholder_color_;

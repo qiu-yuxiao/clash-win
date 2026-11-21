@@ -27,9 +27,9 @@ enum class FirstRunStep {
 
 // ← services/delay.ts:33 NODE_DELAY_MAX_MS（与后端判死阈值统一，严禁漂移）
 inline constexpr int kReadyDelayMaxMs = 5000;
-// src: first-run-guide-dialog.tsx:46 READY_TIMEOUT_MS = 20_000
+// src: src/pages/_layout/components/first-run-guide-dialog/index.tsx:34 READY_TIMEOUT_MS = 20_000
 inline constexpr int64_t kReadyTimeoutMs = 20000;
-// src: first-run-guide-dialog.tsx:48 READY_POLL_INTERVAL_MS = 1_500
+// src: src/pages/_layout/components/first-run-guide-dialog/index.tsx:36 READY_POLL_INTERVAL_MS = 1_500
 inline constexpr int64_t kReadyPollIntervalMs = 1500;
 
 class FirstRunGuideDialog : public Widget {
@@ -66,11 +66,11 @@ class FirstRunGuideDialog : public Widget {
   int active_delay_ms() const { return active_delay_ms_; }
   void set_active_delay_ms(int ms);
 
-  // src: first-run-guide-dialog.tsx:169-170 proxyReady（activeDelay > 0 且 < 5000）
+  // src: src/pages/_layout/components/first-run-guide-dialog/index.tsx:151-152 proxyReady（activeDelay > 0 且 < 5000）
   bool proxy_ready() const {
     return active_delay_ms_ > 0 && active_delay_ms_ < kReadyDelayMaxMs;
   }
-  // src: first-run-guide-dialog.tsx:173-174 isUnconfirmed
+  // src: src/pages/_layout/components/first-run-guide-dialog/index.tsx:155-156 isUnconfirmed
   bool unconfirmed() const;
   bool ready_timed_out() const { return gave_up_; }  // src: :230 setGaveUp(true)
   bool takeover_active() const { return takeover_active_; }
@@ -96,7 +96,7 @@ class FirstRunGuideDialog : public Widget {
   std::function<void()> on_open_github;
   std::function<void()> on_dismiss;
   // ★ ❌9「稍后配置」：点「稍后」完成引导后，宿主自动滑开左侧设置抽屉指引订阅卡位置
-  //   （← Mini first-run-guide-dialog.tsx:469-473 handleDismissLater 自动滑开抽屉）。
+  //   （← Mini src/pages/_layout/components/first-run-guide-dialog/index.tsx:454-472 handleDismissLater 自动滑开抽屉）。
   std::function<void()> on_dismiss_later;
   // BUG-395：Ready 步 Card 3 防误杀卡片已删除，对应回调随之移除
 
@@ -195,9 +195,9 @@ class FirstRunGuideDialog : public Widget {
   RectF btn_finish_star_rect_;
   RectF btn_finish_rect_;
   float warn_y_ = 0.0f;  // 接管提示绘制 y（随绿色卡内部块流式定位，不再依赖重测按钮）
-  float status_h_ = 37.5f;      // src: first-run-guide-dialog.tsx:909 动态测量折行高
-  float star_title_h_ = 19.6f;  // src: first-run-guide-dialog.tsx:1041 动态测量折行高
-  float star_body_h_ = 58.2f;   // src: first-run-guide-dialog.tsx:1052 动态测量折行高
+  float status_h_ = 37.5f;      // src: src/pages/_layout/components/first-run-guide-dialog/ready-step.tsx:129-155 动态测量折行高
+  float star_title_h_ = 19.6f;  // src: src/pages/_layout/components/first-run-guide-dialog/ready-step.tsx:271-282 动态测量折行高
+  float star_body_h_ = 58.2f;   // src: src/pages/_layout/components/first-run-guide-dialog/ready-step.tsx:284-293 动态测量折行高
   float ready_scroll_y_ = 0.0f;
   float max_ready_scroll_ = 0.0f;
 

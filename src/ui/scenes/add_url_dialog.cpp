@@ -494,7 +494,7 @@ bool AddUrlDialog::on_key(const KeyEvent& e) {
       close();
       return true;
     }
-    // src: add-url-dialog.tsx:274-311 测试桩或聚焦态粘贴快捷键兼容
+    // src: src/pages/_layout/components/add-url-dialog.tsx:272-289 测试桩或聚焦态粘贴快捷键兼容
     if ((e.ctrl && (e.key == 'V' || e.key == 'v')) ||
         (e.shift && e.key == VK_INSERT)) {
       if (test_clipboard_reader()) {

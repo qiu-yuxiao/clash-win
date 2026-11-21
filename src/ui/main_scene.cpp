@@ -13,10 +13,10 @@ MainScene::MainScene(Widget* parent) : Widget(parent) {
   auto upper = std::make_unique<Column>();
   upper_ = upper.get();
   auto qb = std::make_unique<Box>();
-  // src: _layout.tsx:1314-1322 仅有一层容器，padding 由该层承担；
+  // src: src/pages/_layout.tsx:526-535 仅有一层容器，padding 由该层承担；
   //   本 Box 只是 30px 承载槽，零内距与源码等价（内距见 quick_bar.cpp set_padding）
   qb->set_padding(0, 0, 0, 0);
-  qb->set_z_order(9998);  // src: _layout.tsx:1320「zIndex: 9998」
+  qb->set_z_order(9998);  // src: src/pages/_layout.tsx:534「zIndex: 9998」
   quickbar_ = qb.get();
   quickbar_->flex_weight = 0;
   upper_->add_child(std::move(qb));
@@ -91,7 +91,7 @@ void MainScene::on_arrange(const RectF& area) {
       traffic_->layout_tree({0, traffic_y, w, std::max(0.0f, area.h - traffic_y)});
     }
   } else {
-    // src: pages/_layout.tsx:1006-1013, 1481-1496 Upper flex: '1 1 0%', minHeight: 0; Lower flex: 0 1 135px, maxHeight: 100%
+    // src: src/pages/_layout.tsx:483-489, 682-697 Upper flex: '1 1 0%', minHeight: 0; Lower flex: 0 1 135px, maxHeight: 100%
     const float avail_h = (std::max)(0.0f, area.h);
     const float target_traffic_h =
         static_cast<float>(narrow_ ? kTrafficPaneMinimal : kTrafficPaneWide);
@@ -109,7 +109,7 @@ void MainScene::on_arrange(const RectF& area) {
 }
 
 void MainScene::on_paint(IRenderTarget& rt) {
-  // src: pages/_layout.tsx:990-991 .layout-content 透明承接 .layout theme_bg 与 .layout::before 极光
+  // src: src/pages/_layout.tsx:466-478 .layout-content 透明承接 .layout theme_bg 与 .layout::before 极光
   // 底色由 MainWindow::paint_window 先铺 theme_bg + 极光，本层不铺不透明底色避免遮挡极光
   (void)rt;
 }

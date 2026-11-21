@@ -92,7 +92,7 @@ void TitleBarIcon::on_paint(IRenderTarget& rt) {
   if (auto* d2d = dynamic_cast<D2dRenderTarget*>(&rt)) {
     if (!d2d->has_bitmap(kAppIconBitmapId)) register_app_icon(*d2d);
   }
-  // 全不透明绘制（src: _layout.tsx:1143-1154 img 无 opacity 样式）
+  // 全不透明绘制（src: src/pages/_layout.tsx:371-382 img 无 opacity 样式）
   rt.draw_bitmap(kAppIconBitmapId, RectF{0, 0, bounds().w, bounds().h}, 1.0f);
 }
 
@@ -103,7 +103,7 @@ TitleBar::TitleBar(MainWindow* owner) {
   flex_weight = 0;
   cross_align = CrossAlign::Center;  // 28×28 键在 30px 栏内垂直居中（y=1）
 
-  // 左：AppIcon 16×16（src: _layout.tsx:1143-1154）
+  // 左：AppIcon 16×16（src: src/pages/_layout.tsx:371-382）
   auto icon = std::make_unique<TitleBarIcon>();
   icon_ = icon.get();
   icon_->set_a11y_hidden(true);
@@ -115,9 +115,9 @@ TitleBar::TitleBar(MainWindow* owner) {
   title_label_ = label.get();
   title_label_->style.size = 12;
   title_label_->style.weight = static_cast<int>(Weight::Medium);
-  title_label_->style.align_v = AlignV::Center;  // src: _layout.tsx:1135 alignItems 'center'
+  title_label_->style.align_v = AlignV::Center;  // src: src/pages/_layout.tsx:356 alignItems 'center'
   title_label_->style.ellipsis = true;
-  // src: _layout.tsx:1155-1169 标题 span flex 不伸缩、宽度随内容
+  // src: src/pages/_layout.tsx:383-397 标题 span flex 不伸缩、宽度随内容
   title_label_->flex_weight = 0;
   title_label_->shrink_to_free = false;
   title_label_->set_text(L"Clash Win Ver.");
@@ -181,14 +181,14 @@ void TitleBar::on_paint(IRenderTarget& rt) {
   // src: layout.scss:166 .the_titlebar !important 覆写 inline var(--background-color)
   // （:1128-1140 inline 只是 fallback）；按皮肤六分支，见 title_bar_bg()
   const auto& svc = theme::ThemeService::instance();
-  // src: _layout.tsx:1155-1169 标题 span 用 var(--text-primary-color)
+  // src: src/pages/_layout.tsx:383-397 标题 span 用 var(--text-primary-color)
   //   （= _theme.tsx:19-20 primary_text '#000000'/'#FFFFFF'）；每帧跟随主题刷新。
   if (title_label_) title_label_->style.color = svc.text_primary();
   rt.fill_rect(bounds(), Brush{title_bar_bg(svc)});
-  // src: pages/_layout.tsx:887 inline `borderBottom: '1px solid var(--divider-color)'`
+  // src: src/pages/_layout.tsx:363 inline `borderBottom: '1px solid var(--divider-color)'`
   //   --divider-color 亮暗色值见 createPalette.js:34,71（0.06 顶栏实效半透线）
   rt.fill_rect({bounds().x, bounds().bottom() - 1, bounds().w, 1},
-               Brush{svc.is_light() ? Color4f::hex(0x000000, 0.06f)  // src: pages/_layout.tsx:887
+               Brush{svc.is_light() ? Color4f::hex(0x000000, 0.06f)  // src: src/pages/_layout.tsx:363
                                     : Color4f::hex(0xFFFFFF, 0.06f)});
   // src: layout.scss:168 box-shadow 0 1px 4px var(--theme-border-outer)
   //   TitleBar 在 flow_ 内 z_order=10 高于 content_(0)，而 flow_(0) 低于

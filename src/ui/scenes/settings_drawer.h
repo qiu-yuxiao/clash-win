@@ -236,7 +236,7 @@ class SettingsDrawer : public Stack {
       on_patch_verge;
   std::function<void(const std::string& fb, bool open_add_url_after)>
       on_routing_change_async;
-  // 流量接管模式切换（← _layout.tsx:1042-1114 handleTakeoverModeChange）：
+  // 流量接管模式切换（← src/pages/_layout/hooks/use-proxy-mode-actions.ts:92-140 handleTakeoverModeChange）：
   //   宿主负责 isTunModeAvailable 判定 / 试装 service / patchVerge / Notice；
   //   返回 false → 分段不回弹不改态（quick_bar.cpp:635-642 门）+ 宿主已 push 错误。
   //   未接线时回落到 on_patch_verge 旧语义（单测）。
@@ -254,7 +254,7 @@ class SettingsDrawer : public Stack {
   std::function<void(const std::string& uid)> on_select_profile;
   std::function<void(const std::string& uid)> on_update_profile;
   std::function<void(const std::string& uid)> on_delete_profile;
-  // 订阅编辑保存：patch_profile（← _layout.tsx:1021-1028）
+  // 订阅编辑保存：patch_profile（← src/pages/_layout/hooks/use-profile-actions.ts:412-435）
   std::function<bool(const std::string& uid, const std::string& name,
                      const std::string& url, int interval_mins)>
       on_patch_profile;
@@ -295,7 +295,7 @@ class SettingsDrawer : public Stack {
   void sync_theme_mode(const std::wstring& mode);
   // 主题切换后重着色静态标签（Label 缓存 style.color，不重排则旧色残留）
   void restyle_cards();
-  // 底部行六格两态重刷（← _layout.tsx:1407-1468 选中格查当前皮肤）
+  // 底部行六格两态重刷（← src/pages/_layout/components/settings-drawer.tsx:425-487 选中格查当前皮肤）
   void refresh_skin_cells();
   // 皮肤选择（主题卡隐藏钮与底部行共用）
   void select_skin(int i);

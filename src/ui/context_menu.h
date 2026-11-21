@@ -113,7 +113,7 @@ struct MenuStyle {
   // src: style-helpers.tsx:126-145 MenuItem padding '8px 16px' → 水平 16
   float padding_h = 12;
   float hover_inset = 4;
-  // MUI Menu 缺省（dark/light paper 由宿主覆盖；src: _layout.tsx:1520,1565 + utils/popup-styles.ts:349-370）
+  // MUI Menu 缺省（dark/light paper 由宿主覆盖；src: src/pages/_layout/components/settings-drawer.tsx:349,1565 + utils/popup-styles.ts:349-370）
   Color4f bg = Color4f::hex(0xFFFFFF);                   // src: MUI palette.background.paper
   Color4f border = Color4f::hex(0x000000, 0.12f);        // src: MUI palette.divider
   Color4f text = Color4f::hex(0x000000, 0.87f);          // src: MUI text.primary

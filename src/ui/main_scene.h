@@ -1,6 +1,6 @@
 #pragma once
 // 主场景骨架（T11）：上栏(撑满)+下栏流量区(135/100)的分区骨架 + 区域挂载点。
-// ← _layout.tsx:1004-1502（Upper/Lower Pane）。
+// ← src/pages/_layout.tsx:481-702（Upper/Lower Pane）。
 // - 上栏：快捷条占位 30px（T13 填 ActiveNodeCard）+ 节点列表挂载点（T13）
 // - 下栏：MiniTrafficPanel 挂载点（T14），高 135（窄窗 100，← TRAFFIC_PANE_*）
 // - 极小窗（Mini）：上栏真实卸载（remove_child，React unmount 语义），

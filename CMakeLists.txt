@@ -28,7 +28,9 @@ add_library(clashwin_util STATIC
   src/util/speed.cpp
   src/util/json_utils.cpp
   src/util/yaml_utils.cpp
-  src/util/node.cpp
+  src/util/node_filter.cpp
+  src/util/node_fingerprint.cpp
+  src/util/node_verify_store.cpp
 )
 target_include_directories(clashwin_util PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -126,8 +128,11 @@ add_library(clashwin_core STATIC
   src/core/quick_routing.cpp
   src/core/autostart.cpp
   src/core/monitor.cpp
+  src/core/monitor_probe.cpp
+  src/core/monitor_verdict.cpp
   src/core/monitor_observer.cpp
   src/core/core_updater.cpp
+  src/core/pe_verify.cpp
 )
 target_include_directories(clashwin_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -198,23 +203,33 @@ add_library(clashwin_ui STATIC
   src/ui/ui_postbox.cpp
   src/ui/theme/palettes.cpp
   src/ui/theme/theme.cpp
+  src/ui/theme/theme_controls.cpp
   src/ui/scenes/connection_data.cpp
   src/ui/scenes/path_control.cpp
   src/ui/scenes/connections_panel.cpp
   src/ui/scenes/connection_detail_dialog.cpp
   src/ui/scenes/add_url_dialog.cpp
   src/ui/scenes/first_run_guide_dialog.cpp
-  src/ui/scenes/utility_modals.cpp
+  src/ui/scenes/first_run_guide_steps.cpp
+  src/ui/scenes/dialogs/edit_profile_modal.cpp
+  src/ui/scenes/dialogs/client_update_modal.cpp
+  src/ui/scenes/dialogs/core_update_modal.cpp
+  src/ui/scenes/dialogs/log_viewer_modal.cpp
+  src/ui/scenes/dialogs/delete_profile_modal.cpp
   src/ui/scenes/node_data.cpp
   src/ui/scenes/quick_bar.cpp
   src/ui/scenes/node_list.cpp
   src/ui/scenes/profile_import_card.cpp
   src/ui/scenes/traffic_pane.cpp
   src/ui/scenes/settings_drawer.cpp
+  src/ui/scenes/settings_cards.cpp
+  src/ui/scenes/settings_skin_prefs.cpp
   src/ui/breakpoints.cpp
   src/ui/title_bar.cpp
   src/ui/main_scene.cpp
   src/ui/main_window.cpp
+  src/ui/main_window_scene.cpp
+  src/ui/main_window_data.cpp
   src/ui/uia_provider.cpp
   src/ui/help_menu.cpp
 )

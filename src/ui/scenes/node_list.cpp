@@ -636,14 +636,14 @@ NodeList::NodeList(Widget* parent) : Widget(parent) {
 
   // 搜索框：input py .3 / px .5 / fontSize 11（src: proxy-head.tsx:258）；
   //   get3DInputStyle 2px 金描边 + dark 底 rgba(26,22,14,.4)
-  // src: button-styles.ts:734-778；base-search-box.tsx:22-34
+  // src: src/utils/button-styles/input.ts:6-50；base-search-box.tsx:22-34
   auto search = std::make_unique<TextField>();
   search_ = search.get();
   search_->flex_weight = 1;
   // placeholder src: base-search-box.tsx:117 shared.placeholders.filter
   search_->set_placeholder(tr("shared.placeholders.filter"));
   search_->set_i18n_a11y_name("shared.placeholders.filter");
-  // src: button-styles.ts:734-927 get3DInputStyle（6 套皮肤全部走 apply_theme）
+  // src: src/utils/button-styles/input.ts:6-186 get3DInputStyle（6 套皮肤全部走 apply_theme）
   search_->apply_theme();
   search_->style_.size = 11;
   search_->caret_color_ = search_->style_.color;
@@ -955,7 +955,7 @@ void NodeList::toggle_sort() {
 }
 
 // 皮肤/亮暗热切换：重刷控件级缓存
-// src: button-styles.ts:734-927 get3DInputStyle —— 每次 render 现取，
+// src: src/utils/button-styles/input.ts:6-186 get3DInputStyle —— 每次 render 现取，
 //   Win 侧 apply_theme 把结果缓存进成员，切皮肤后必须重调。
 std::vector<std::string> NodeList::visible_node_names() const {
   std::vector<std::string> out;
@@ -1269,7 +1269,7 @@ void NodeList::on_paint(IRenderTarget& rt) {
   if (sort_btn_) sort_btn_->color_ = svc.palette().primary_text;
   if (empty_icon_) empty_icon_->color_ = svc.palette().primary_text;
   if (empty_label_) empty_label_->style.color = svc.palette().primary_text;
-  // src: src/pages/_layout.tsx:1293 .layout-content 透明承接背景与极光
+  // src: src/pages/_layout.tsx:466 .layout-content 透明承接背景与极光
   // theme-panel 外框 ← src: proxy-groups.tsx:383「className="theme-panel"」+
   //   index.scss:75「border: 4px double var(--theme-border)」/:125「4px double #B8860B」
   //   范围 = 外层 mx:1 / mb:1 之内、顶部贴齐 → 过滤栏与列表同在一个框里。
