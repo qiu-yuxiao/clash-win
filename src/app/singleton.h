@@ -6,8 +6,10 @@
 //   - GET /commands/visible -> 200 OK "ok"（退出轻量模式，唤醒窗口）
 //   - GET /commands/pac -> 200 OK Content-Type: application/x-ns-proxy-autoconfig（替换 %mixed-port%）
 //   - GET /commands/scheme?param=<url> -> 200 OK "ok"（解码并触发深链导入）
+//   - GET /commands/ping -> 200 OK "clash-win-ok"（BUG-414：--silent 二次启动探活）
 //   - 其他路由 -> 404 Not Found
-// - 二次启动客户端判定：--silent 静默退出 / clash:// 调 scheme / 缺省调 visible
+// - 二次启动客户端判定：--silent 探活 ping / clash:// 调 scheme / 缺省调 visible；
+//   仅收到本方有效响应才退出，连接被拒按 3 × 150ms 短退避重绑
 
 #include <windows.h>
 #include <cstdint>
@@ -56,13 +58,31 @@ class SingletonServer {
 
 class SingletonClient {
  public:
+  // BUG-414（← server.rs SingletonProbeTarget / WakeInstanceOutcome）
+  enum class ProbeTarget { Scheme, Ping, Visible };
+  enum class WakeOutcome { NotifiedExisting, TransientConnectRefused, UnexpectedResponse };
+
+  // 深链参数优先 → Scheme；--silent → Ping（只探活不唤醒）；缺省 → Visible
+  static ProbeTarget resolve_singleton_probe_target(bool has_scheme, bool has_silent);
+  // 仅当 2xx 且 body 为期望值（ping=clash-win-ok / 其它=ok）时才视为本方实例
+  static bool is_valid_singleton_reply(bool expected_ping, int status, const std::string& body);
+  // 从原始 HTTP 响应文本中提取正文
+  static std::string extract_http_body(const std::string& raw_response);
+
+  // 探测 / 通知既有实例（不退出进程），由调用方决定后续动作
+  static WakeOutcome probe_or_notify_existing_instance(uint16_t port, int argc, wchar_t* argv[],
+                                                       std::string* detail_out = nullptr);
+
   // 检查是否已有实例占用端口；
   // 若未占用返回 false；
   // 若占用：根据命令行参数发送 HTTP 请求，然后调用 exit(0) 或返回 true
   static bool notify_or_exit(uint16_t port, int argc, wchar_t* argv[], bool do_exit = true);
 
   // 客户端轻量 HTTP 发送工具（供测试或内部调用）
-  static int send_request(uint16_t port, const std::string& path_and_query, std::string* response_out = nullptr);
+  // 返回 HTTP 状态码；连接失败返回 -1（connect_refused_out=true）
+  static int send_request(uint16_t port, const std::string& path_and_query,
+                          std::string* response_out = nullptr,
+                          bool* connect_refused_out = nullptr);
 };
 
 // 本进程实际绑定的单实例端口（SingletonServer::start 成功后更新）。

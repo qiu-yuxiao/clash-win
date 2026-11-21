@@ -585,7 +585,15 @@ void IVerge::patch_config(const IVerge& p) {
   if (p.proxy_host) proxy_host = p.proxy_host;
   if (p.theme_setting) theme_setting = p.theme_setting;
   if (p.web_ui_list) web_ui_list = p.web_ui_list;
-  if (p.clash_core) clash_core = p.clash_core;
+  if (p.clash_core) {
+    // BUG-413：拒绝非白名单 clash_core，强制收敛
+    const std::string normalized = normalize_valid_clash_core(p.clash_core);
+    if (util::trim(*p.clash_core) != normalized) {
+      CWLOG_WARN("拒绝非白名单 clash_core 配置 '" + *p.clash_core + "'，已强制收敛为 '" +
+                 normalized + "'");
+    }
+    clash_core = normalized;
+  }
   if (p.enable_always_on_top) enable_always_on_top = p.enable_always_on_top;
   if (p.auto_close_connection) auto_close_connection = p.auto_close_connection;
   if (p.auto_check_update) auto_check_update = p.auto_check_update;
@@ -609,15 +617,20 @@ void IVerge::patch_config(const IVerge& p) {
   if (p.rule_fallback) rule_fallback = p.rule_fallback;
 }
 
-std::string IVerge::get_valid_clash_core() const {
-  // ← verge.rs::get_valid_clash_core
-  if (clash_core) {
-    std::string s = util::trim(*clash_core);
+std::string IVerge::normalize_valid_clash_core(const std::optional<std::string>& raw) {
+  // ← verge.rs::normalize_valid_clash_core（BUG-413）
+  if (raw) {
+    const std::string s = util::trim(*raw);
     for (const char* valid : kValidClashCores) {
       if (s == valid) return s;
     }
   }
   return "win-mihomo";
+}
+
+std::string IVerge::get_valid_clash_core() const {
+  // ← verge.rs::get_valid_clash_core
+  return normalize_valid_clash_core(clash_core);
 }
 
 namespace {

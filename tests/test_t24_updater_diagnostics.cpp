@@ -217,7 +217,7 @@ UT_TEST(t24_core_updater_progress_event_stream) {
     std::string sha;
     Result<std::string> fetch_latest_release_json() override {
       return Result<std::string>::ok(
-          R"({"tag_name":"v1.0.0","assets":[{"name":"mihomo-windows-amd64-v1.0.0.zip","browser_download_url":"https://mock/dl.zip"},{"name":"checksums.txt","browser_download_url":"https://mock/cs.txt"}]})");
+          R"({"tag_name":"v1.0.0","assets":[{"name":"mihomo-windows-amd64-v1.0.0.zip","browser_download_url":"https://github.com/MetaCubeX/mihomo/releases/download/v1.0.0/mihomo-windows-amd64-v1.0.0.zip"},{"name":"checksums.txt","browser_download_url":"https://github.com/MetaCubeX/mihomo/releases/download/v1.0.0/checksums.txt"}]})");
     }
     Result<std::string> fetch_checksum_content(const std::string&) override {
       return Result<std::string>::ok(sha + "  mihomo-windows-amd64-v1.0.0.zip\n");
@@ -266,8 +266,8 @@ UT_TEST(t24_core_updater_progress_event_stream) {
   GithubRelease rel;
   rel.tag_name = "v1.0.0";
   rel.assets = {
-      {"mihomo-windows-amd64-v1.0.0.zip", "https://mock/dl.zip"},
-      {"checksums.txt", "https://mock/cs.txt"},
+      {"mihomo-windows-amd64-v1.0.0.zip", "https://github.com/MetaCubeX/mihomo/releases/download/v1.0.0/mihomo-windows-amd64-v1.0.0.zip"},
+      {"checksums.txt", "https://github.com/MetaCubeX/mihomo/releases/download/v1.0.0/checksums.txt"},
   };
 
   auto upgrade_res = CoreUpdater::instance().start_core_upgrade(rel);
@@ -356,8 +356,8 @@ UT_TEST(t24_core_updater_sha256_mismatch_rejection) {
   GithubRelease rel;
   rel.tag_name = "v1.0.0";
   rel.assets = {
-      {"mihomo-windows-amd64-v1.0.0.zip", "https://mock/dl.zip"},
-      {"checksums.txt", "https://mock/cs.txt"},
+      {"mihomo-windows-amd64-v1.0.0.zip", "https://github.com/MetaCubeX/mihomo/releases/download/v1.0.0/mihomo-windows-amd64-v1.0.0.zip"},
+      {"checksums.txt", "https://github.com/MetaCubeX/mihomo/releases/download/v1.0.0/checksums.txt"},
   };
 
   auto res = CoreUpdater::instance().start_core_upgrade(rel);
@@ -447,7 +447,9 @@ UT_TEST(t24_core_updater_proxy_group_snapshot_restore) {
 
   GithubRelease rel;
   rel.tag_name = "v1.0.0";
-  rel.assets = {{"mihomo-windows-amd64-v1.0.0.zip", "https://mock/dl.zip"}};
+  rel.assets = {{"mihomo-windows-amd64-v1.0.0.zip", "https://github.com/MetaCubeX/mihomo/releases/download/v1.0.0/mihomo-windows-amd64-v1.0.0.zip"}};
+  // BUG-413 Fail-Closed：无校验和文件时必须由 asset.digest 提供 SHA-256
+  rel.assets[0].digest = "sha256:" + CoreUpdater::compute_file_sha256(zip_path.wstring()).value();
 
   auto res = CoreUpdater::instance().start_core_upgrade(rel);
   UT_CHECK(res.is_ok());
@@ -574,6 +576,10 @@ UT_TEST(t24_client_updater_download_failure_emits_error) {
   };
 
   ClientUpdater::instance().set_downloader(std::make_shared<FailingDownloader>());
+  ClientUpdater::instance().set_sleep_fn([](uint32_t) {});
+  struct SleepResetGuard {
+    ~SleepResetGuard() { ClientUpdater::instance().set_sleep_fn(nullptr); }
+  } sleep_reset_guard;
 
   std::string last_status;
   std::string last_message;

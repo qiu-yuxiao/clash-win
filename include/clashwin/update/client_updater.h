@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -49,9 +50,18 @@ struct IAppUpdateDownloader {
 
 class ClientUpdater {
  public:
+  // ← utils/client-update.ts (BUG-417)
+  static constexpr uint16_t kDefaultMixedPort = 10801;
+  static constexpr uint64_t kCheckProxyTimeoutSecs = 15;
+  static constexpr uint64_t kCheckDirectTimeoutSecs = 20;
+  static constexpr uint32_t kCheckRetryDelayMs = 1000;
+  static constexpr uint64_t kDownloadAttemptTimeoutSecs = 180;
+  static constexpr int kDownloadMaxAttempts = 3;
+
   static ClientUpdater& instance();
 
   void set_downloader(std::shared_ptr<IAppUpdateDownloader> downloader);
+  void set_sleep_fn(std::function<void(uint32_t ms)> fn);
   void set_current_version(const std::string& version);
   const std::string& current_version() const { return current_version_; }
 
@@ -65,14 +75,23 @@ class ClientUpdater {
   static bool is_version_newer(const std::string& latest, const std::string& current);
   static Result<AppUpdateInfo> parse_manifest(const std::string& json_text,
                                              const std::string& current_version);
+  // BUG-417：verge_mixed_port -> clash mixed-port -> 10801
+  static uint16_t resolve_local_mixed_port(std::optional<int> verge_mixed_port,
+                                           std::optional<int> clash_mixed_port);
+  static std::string resolve_local_mixed_proxy_url(std::optional<int> verge_mixed_port,
+                                                   std::optional<int> clash_mixed_port);
+  // attempt 从 1 起：1 → 1500ms，2 → 2500ms，其余 → 0ms
+  static uint32_t download_retry_delay_ms(int attempt);
   // CNG SHA-256 流水线；文件不存在/读取失败返回空串
   static std::string compute_sha256_hex(const std::wstring& file_path);
 
  private:
   ClientUpdater();
   ~ClientUpdater() = default;
+  void sleep_for_retry(uint32_t ms) const;
 
   std::shared_ptr<IAppUpdateDownloader> downloader_;
+  std::function<void(uint32_t ms)> sleep_fn_;
   std::string current_version_ = config::consts::kAppVersion;  // 单一事实源（← constants.h kAppVersion，与 Mini 同为 3.2.2）
 };
 

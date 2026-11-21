@@ -309,9 +309,14 @@ UT_TEST(bug346_atomic_staging_upgrade_and_wait_cores_exit) {
   };
   CoreUpdater::instance().set_lifecycle_ops(ops);
 
+  // BUG-413：官方 Release 下载地址白名单 + Fail-Closed SHA-256（asset.digest）
+  const std::string kOfficialCoreUrl =
+      "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.0/"
+      "mihomo-windows-amd64-v1.19.0.zip";
   GithubRelease rel;
   rel.tag_name = "v1.19.0";
-  rel.assets = {{"mihomo-windows-amd64-v1.19.0.zip", "https://mock/core.zip"}};
+  rel.assets = {{"mihomo-windows-amd64-v1.19.0.zip", kOfficialCoreUrl}};
+  rel.assets[0].digest = "sha256:" + CoreUpdater::compute_file_sha256(bad_zip.wstring()).value();
 
   auto bad_res = CoreUpdater::instance().start_core_upgrade(rel);
   UT_CHECK(bad_res.is_err());
@@ -328,6 +333,7 @@ UT_TEST(bug346_atomic_staging_upgrade_and_wait_cores_exit) {
                {{"mini-mihomo.exe", build_pe64_image(6u * 1024u * 1024u)}})
                .is_ok());
   dl->zip_file = good_zip.wstring();
+  rel.assets[0].digest = "sha256:" + CoreUpdater::compute_file_sha256(good_zip.wstring()).value();
   auto good_res = CoreUpdater::instance().start_core_upgrade(rel);
   UT_CHECK(good_res.is_ok());
   UT_CHECK_EQ(wait_arg_seen, 3000u);

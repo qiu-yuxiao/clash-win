@@ -213,6 +213,19 @@ class CoreManager {
   // BUG-411 (manager/mod.rs:90-104):
   // 判断当前是否期望内核命名管道存活（排除退出态、NotRunning、配置更新中及生命周期锁占用态）。
   bool should_expect_core_pipe_alive() const;
+  // BUG-417（← lifecycle.rs reconcile_running_mode_if_needed）：
+  // 启动期短暂超时导致 NotRunning 时，若无 Sidecar 子进程且服务管道 + Mihomo 管道在线，自动对账恢复 Service。
+  struct ReconcileProbe {
+    std::function<bool()> service_ipc_present;
+    std::function<bool()> mihomo_pipe_present;
+    std::function<bool()> api_alive;
+  };
+  bool reconcile_running_mode_if_needed();
+  bool reconcile_running_mode_if_needed_with(const ReconcileProbe& probe);
+  // 测试辅助：仅供单元测试构造状态（生产勿调）
+  void set_running_mode_for_test(RunningMode mode) {
+    mode_.store(mode, std::memory_order_release);
+  }
   bool is_config_update_in_progress() const {
     return config_update_depth_.load(std::memory_order_acquire) > 0;
   }
@@ -257,10 +270,14 @@ class CoreManager {
       std::optional<std::pair<std::optional<std::string>, std::string>>
           override_state = std::nullopt,
       uint64_t expected_epoch = 0,
-      bool* out_selection_changed = nullptr);
+      bool* out_selection_changed = nullptr,
+      std::optional<uint64_t> start_manual_epoch = std::nullopt);
   // BUG-407: 非阻塞后台调度，由原子 epoch 自动取消前序未完任务，避免阻塞启停/重载互斥锁
+  // BUG-414: 捕获调度时刻的手动切换代际号，用户手动切点后在途任务立即让路
   void spawn_ensure_proxy_group_selection(
       std::optional<std::string> preferred = std::nullopt);
+  // BUG-414（← lifecycle.rs abort_pending_selection_ensure）：递增代际号中止在途选点恢复
+  void abort_pending_selection_ensure();
   uint64_t bump_selection_ensure_epoch();
   uint64_t selection_ensure_epoch() const;
   void restore_proxy_group_now(ICoreApiClient& api, const std::string& node,

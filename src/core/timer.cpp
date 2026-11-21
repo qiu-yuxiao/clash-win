@@ -210,9 +210,8 @@ void ProfileTimer::finish_locked(const std::string& uid, bool success) {
   auto it = tasks_.find(uid);
   if (it == tasks_.end()) return;
   it->second.running = false;
-  uint64_t interval = success
-                          ? it->second.interval_minutes
-                          : std::min(it->second.interval_minutes, 2ULL);
+  uint64_t interval =
+      compute_next_schedule_minutes(it->second.interval_minutes, success);
   it->second.next_run_ms = now_ms_() + static_cast<int64_t>(interval) * 60000;
 }
 

@@ -21,6 +21,11 @@ class DiagnosticBundle {
   static std::string redact_log_text(const std::string& text);
   static std::string redact_yaml_text(const std::string& yaml_text);
 
+  // BUG-416：WER 事件块 / CrashDumps 文件名命中判定（入参须已小写）。
+  // WER 额外命中带空格的「clash win」显示名；转储文件名不含空格形态。
+  static bool is_clash_wer_target(const std::string& lower);
+  static bool is_clash_dump_target(const std::string& lower);
+
   // Log tail truncation (caps at max_bytes, trims to newline, prepends notice)
   static std::string tail_truncate_log(const std::string& text, size_t max_bytes);
 

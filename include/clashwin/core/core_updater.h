@@ -15,10 +15,15 @@ namespace clashwin::core {
 struct GithubAsset {
   std::string name;
   std::string browser_download_url;
+  // BUG-413：GitHub Release API 原生携带的 "sha256:<hex>" 摘要与声明体积（可缺失）
+  std::optional<std::string> digest;
+  std::optional<uint64_t> size;
 };
 
 inline void to_json(nlohmann::json& j, const GithubAsset& a) {
   j = nlohmann::json{{"name", a.name}, {"browser_download_url", a.browser_download_url}};
+  if (a.digest.has_value()) j["digest"] = *a.digest;
+  if (a.size.has_value()) j["size"] = *a.size;
 }
 
 inline void from_json(const nlohmann::json& j, GithubAsset& a) {
@@ -27,6 +32,14 @@ inline void from_json(const nlohmann::json& j, GithubAsset& a) {
   }
   if (j.contains("browser_download_url") && j["browser_download_url"].is_string()) {
     a.browser_download_url = j["browser_download_url"].get<std::string>();
+  }
+  if (j.contains("digest") && j["digest"].is_string()) {
+    a.digest = j["digest"].get<std::string>();
+  }
+  if (j.contains("size") && j["size"].is_number_unsigned()) {
+    a.size = j["size"].get<uint64_t>();
+  } else if (j.contains("size") && j["size"].is_number_integer() && j["size"].get<int64_t>() >= 0) {
+    a.size = static_cast<uint64_t>(j["size"].get<int64_t>());
   }
 }
 
@@ -70,6 +83,9 @@ struct ICoreUpdateDownloader {
 
 // BUG-319 / BUG-346: Mihomo x64 PE 二进制完整性校验最小尺寸与三态判定
 inline constexpr uint64_t kMinValidCoreBytes = 5ULL * 1024 * 1024;
+// BUG-413：下载压缩包与解压后内核体积安全上限（防超大下载 / 解压炸弹）
+inline constexpr uint64_t kMaxCoreArchiveBytes = 100ULL * 1024 * 1024;
+inline constexpr uint64_t kMaxCoreExtractedBytes = 150ULL * 1024 * 1024;
 
 enum class CoreBinaryValidationKind {
   Valid,
@@ -107,6 +123,10 @@ class CoreUpdater {
   static std::optional<std::string> parse_checksum_for_asset(const std::string& checksum_text,
                                                             const std::string& asset_name);
   static Result<std::string> compute_file_sha256(const std::wstring& file_path);
+  // BUG-413：解析 "sha256:<64hex>" 或裸 64 位 hex，返回小写摘要；非法返回 nullopt
+  static std::optional<std::string> parse_asset_sha256_digest(const std::optional<std::string>& digest);
+  // BUG-413：仅允许 https://github.com/MetaCubeX/mihomo/releases/download/...（无端口/用户信息/..）
+  static Result<void> validate_official_mihomo_asset_url(const std::string& url);
   static CoreBinaryValidation inspect_mihomo_pe_binary(const std::wstring& file_path);
   static Result<void> validate_mihomo_pe_binary(const std::wstring& file_path);
   static std::optional<std::wstring> resolve_usable_custom_core(const std::wstring& cores_dir);

@@ -2,10 +2,13 @@
 
 #include <windows.h>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 
 #include "config/config.h"
 #include "util/dirs.h"
 #include "util/log.h"
+#include "util/str_utils.h"
 #include "util/utf.h"
 
 namespace clashwin::core {
@@ -80,6 +83,24 @@ class WindowsAutostartAccess : public IAutostartAccess {
       return std::wstring(buf, len);
     }
     return util::dirs::exe_dir() + L"\\clash-win.exe";
+  }
+
+  bool is_admin() override {
+    HANDLE token = nullptr;
+    if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token)) return false;
+    TOKEN_ELEVATION elevation{};
+    DWORD len = 0;
+    const BOOL ok = ::GetTokenInformation(token, TokenElevation, &elevation,
+                                          sizeof(elevation), &len);
+    ::CloseHandle(token);
+    return ok && elevation.TokenIsElevated != 0;
+  }
+
+  std::optional<std::filesystem::path> system_tasks_dir() override {
+    wchar_t buf[MAX_PATH];
+    const DWORD n = ::GetEnvironmentVariableW(L"SystemRoot", buf, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return std::nullopt;
+    return std::filesystem::path(std::wstring(buf, n)) / L"System32" / L"Tasks";
   }
 
   // ★ ❌6 StartupApproved\Run\<name>：REG_BINARY，首字节 0x02=批准启用 / 0x03=禁用，
@@ -162,36 +183,77 @@ Result<bool> AutostartManager::get_launch_status() {
   return access_->is_enabled();
 }
 
+bool should_skip_cleanup_from_marker(const std::optional<std::string>& marker_content,
+                                     bool is_admin) {
+  // ← autostart.rs should_skip_cleanup_from_marker（BUG-414）
+  if (!marker_content.has_value()) return false;
+  const std::string m = util::trim(*marker_content);
+  if (m == kMarkerDone) return true;
+  if (m == kMarkerPendingAdmin) return !is_admin;
+  return false;
+}
+
+bool is_task_file_definitely_absent(const std::optional<std::filesystem::path>& tasks_dir,
+                                    const std::wstring& task_name) {
+  // ← autostart.rs is_task_file_definitely_absent（BUG-414）
+  if (!tasks_dir.has_value()) return false;
+  std::error_code ec;
+  if (!std::filesystem::is_directory(*tasks_dir, ec) || ec) return false;
+  const auto st = std::filesystem::symlink_status(*tasks_dir / task_name, ec);
+  if (ec) {
+    return ec == std::errc::no_such_file_or_directory;
+  }
+  return st.type() == std::filesystem::file_type::not_found;
+}
+
 void AutostartManager::cleanup_legacy_scheduled_tasks() {
   if (!access_) return;
   std::wstring home = util::dirs::app_home_dir();
   std::wstring marker = home + L"\\" + kAutostartMigrationMarker;
 
-  DWORD attr = ::GetFileAttributesW(marker.c_str());
-  if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
-    return;  // 已经迁移过，直接跳过
+  std::optional<std::string> existing_marker;
+  {
+    std::ifstream ifs(std::filesystem::path(marker), std::ios::binary);
+    if (ifs.is_open()) {
+      existing_marker = std::string((std::istreambuf_iterator<char>(ifs)),
+                                    std::istreambuf_iterator<char>());
+    }
+  }
+  const bool is_admin = access_->is_admin();
+  if (should_skip_cleanup_from_marker(existing_marker, is_admin)) {
+    return;
   }
 
+  const auto tasks_dir = access_->system_tasks_dir();
+  bool all_clean = true;
   for (const auto* name : kLegacyTaskNames) {
+    if (is_task_file_definitely_absent(tasks_dir, name)) {
+      continue;
+    }
     auto r = access_->delete_scheduled_task(name);
-    CWLOG_INFO("AutostartManager: cleaned legacy task " +
-               utf::utf16_to_utf8(name) + " status=" +
-               std::to_string(r.is_ok() && r.value()));
+    if (r.is_ok() && r.value()) {
+      CWLOG_INFO("AutostartManager: cleaned legacy task " + utf::utf16_to_utf8(name));
+    } else if (is_task_file_definitely_absent(tasks_dir, name)) {
+      CWLOG_DEBUG("AutostartManager: legacy task already absent " + utf::utf16_to_utf8(name));
+    } else {
+      all_clean = false;
+      CWLOG_WARN("AutostartManager: legacy task cannot be deleted now (may need admin): " +
+                 utf::utf16_to_utf8(name));
+    }
   }
 
   // 确保父目录存在
   std::error_code ec;
   std::filesystem::create_directories(home, ec);
 
-  // 写入迁移标记 "1"
+  const std::string next_marker = all_clean ? kMarkerDone : kMarkerPendingAdmin;
   HANDLE h = ::CreateFileW(marker.c_str(), GENERIC_WRITE, 0, nullptr,
                            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (h != INVALID_HANDLE_VALUE) {
-    const char val = '1';
     DWORD written = 0;
-    ::WriteFile(h, &val, 1, &written, nullptr);
+    ::WriteFile(h, next_marker.data(), static_cast<DWORD>(next_marker.size()), &written, nullptr);
     ::CloseHandle(h);
-    CWLOG_INFO("AutostartManager: migration marker written");
+    CWLOG_INFO("AutostartManager: migration marker written: " + next_marker);
   } else {
     CWLOG_WARN("AutostartManager: failed to write migration marker, gle=" +
                std::to_string(::GetLastError()));

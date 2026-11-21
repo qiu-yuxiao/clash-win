@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -16,6 +17,19 @@ inline constexpr const wchar_t* kLegacyTaskNames[] = {
 
 // 迁移完成标记文件（放在 app_home 下，与配置数据同生命周期）
 inline constexpr const wchar_t* kAutostartMigrationMarker = L".autostart_task_migrated";
+
+// BUG-414：两档迁移标记。全部清净写 done；存在普通权限删不掉的 Admin 任务写 pending_admin，
+// 留待提权启动时补删。历史 "1" 视为未完成迁移（重新检查一次）。
+inline constexpr const char* kMarkerDone = "done";
+inline constexpr const char* kMarkerPendingAdmin = "pending_admin";
+
+// BUG-414 纯函数：根据标记内容与当前是否管理员决定是否跳过清理
+bool should_skip_cleanup_from_marker(const std::optional<std::string>& marker_content, bool is_admin);
+
+// BUG-414 纯函数：仅当 Tasks 父目录可读存在且子条目确定 NotFound 时返回 true；
+// 无法判断（目录不存在 / 权限拒绝）保守返回 false，交由 schtasks 处理。
+bool is_task_file_definitely_absent(const std::optional<std::filesystem::path>& tasks_dir,
+                                    const std::wstring& task_name);
 
 // 注册表 Run 键路径与值名称
 inline constexpr const wchar_t* kRunKeySubPath = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -35,6 +49,10 @@ class IAutostartAccess {
   virtual Result<void> disable() = 0;
   virtual Result<bool> delete_scheduled_task(const std::wstring& task_name) = 0;
   virtual std::wstring current_exe_path() = 0;
+  // BUG-414：当前进程是否管理员（默认 false，测试替身可覆盖）
+  virtual bool is_admin() { return false; }
+  // BUG-414：%SystemRoot%\System32\Tasks（默认 nullopt = 无法判断，交由 schtasks）
+  virtual std::optional<std::filesystem::path> system_tasks_dir() { return std::nullopt; }
 };
 
 // 生产实现（真实操作注册表与 schtasks）

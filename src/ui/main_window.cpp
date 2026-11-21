@@ -1769,8 +1769,18 @@ void MainWindow::build_scene() {
             }
             reload_nodes();
             trigger_auto_select_and_refresh(uid);
-          } else if (err.rfind("[notified] ", 0) != 0) {
-            events::EventBus::notice_message("update_failed", err);
+          } else {
+            // ← use-profile-actions.ts handleUpdateProfile（BUG-417）：三级回退全失败的
+            //   带前缀错误映射为本地化 update_failed_even_with_clash 提示，其余走通用失败提示
+            static constexpr const char* kProxyFailedPrefix = "update_failed_even_with_clash:";
+            CWLOG_ERROR("on_update_profile failed: " + err);
+            if (err.rfind(kProxyFailedPrefix, 0) == 0) {
+              std::string detail = err.substr(std::char_traits<char>::length(kProxyFailedPrefix));
+              while (!detail.empty() && detail.front() == ' ') detail.erase(detail.begin());
+              events::EventBus::notice_message("update_failed_even_with_clash", detail);
+            } else {
+              events::EventBus::notice_message("update_failed", err);
+            }
           }
         });
       }).detach();
@@ -1967,6 +1977,7 @@ void MainWindow::build_scene() {
             "check_app_update", nlohmann::json::object());
         if (!r.is_ok()) {
           // ← use-client-update.ts:46-50 clientCheckFailed
+          CWLOG_ERROR("on_check_app_update failed: " + r.error().message);
           events::NoticeService::instance().push(
               "error", tr8("layout.notices.clientCheckFailed", {{"message", r.error().message}}));
           UiPostbox::instance().post([this] { settings_drawer_->set_app_update_checking(false); });
@@ -2050,6 +2061,7 @@ void MainWindow::build_scene() {
               "download_app_update",
               nlohmann::json::object({{"url", url}, {"sha256", sha}, {"signature", sig}}));
           if (!r.is_ok()) {
+            CWLOG_ERROR("client download_app_update failed: " + r.error().message);
             const std::string msg =
                 tr8("layout.notices.clientUpdateFailed", {{"message", r.error().message}});
             // ← use-client-update.ts:114-123 clientUpdateFailed（进度行 + 通知双显）
@@ -2065,6 +2077,7 @@ void MainWindow::build_scene() {
               utf::utf8_to_utf16(r.value().value("path", std::string()));
           auto ir = update::ClientUpdater::instance().install_app_update(installer);
           if (!ir.is_ok()) {
+            CWLOG_ERROR("install_app_update failed: " + ir.error().message);
             events::NoticeService::instance().push(
                 "error", tr8("layout.notices.clientUpdateFailed", {{"message", ir.error().message}}));
             return;

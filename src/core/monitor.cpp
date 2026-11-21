@@ -277,6 +277,9 @@ void CoreMonitor::reset_runtime_loop_state() {
   last_tick_ms_.store(0);
   last_https_verify_ms_.store(-1);
   reset_flowing_traffic_state();
+  reset_kernel_log_observer();
+  last_summary_log_ms_.store(-1);
+  daemon_start_ms_.store(-1);
   manual_switch_epoch_.store(0, std::memory_order_release);
   last_node_change_ms_.store(0);
   has_node_change_.store(false);
@@ -326,6 +329,9 @@ void CoreMonitor::start() {
                 if (hooks_.api_alive && hooks_.api_alive()) break;
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
               }
+              if (hooks_.reconcile_running_mode) {
+                hooks_.reconcile_running_mode();
+              }
               // 若无窗口可见（托盘启动），先按过滤边界恢复 persisted selected，再执行 Continuity-First 探测/选点
               if (hooks_.is_headless && hooks_.is_headless()) {
                 std::string uid =
@@ -339,6 +345,19 @@ void CoreMonitor::start() {
                       hooks_.persisted_exit_usable();
                   if (keep_persisted && hooks_.auto_select_with_mode) {
                     hooks_.auto_select_with_mode(/*select=*/false);
+                    // BUG-417：纯测速发现持久节点超时且同组有健康候选 → 预置第 1 次失败，3s 快速复核
+                    if (hooks_.take_boot_probe_failure_seed &&
+                        hooks_.take_boot_probe_failure_seed()) {
+                      const std::string cur_active =
+                          hooks_.active_node_name ? hooks_.active_node_name() : std::string();
+                      {
+                        std::lock_guard<std::mutex> lock(last_node_m_);
+                        last_active_node_ = cur_active;
+                      }
+                      node_fail_count_.store(1);
+                      CWLOG_INFO("[后台监测] 启动纯测速发现持久节点 " + cur_active +
+                                 " 超时不可达且同组存在健康候选，计入第 1 次失败并进入 3s 快速复核");
+                    }
                   } else if (!keep_persisted && hooks_.auto_select_trigger) {
                     hooks_.auto_select_trigger();
                   }
@@ -383,6 +402,8 @@ void CoreMonitor::kick() {
 
 void CoreMonitor::notify_manual_node_switched() {
   manual_switch_epoch_.fetch_add(1, std::memory_order_acq_rel);
+  // BUG-415：手动切点重置建连失败追踪（从切换时刻起算，不回放旧告警）
+  reset_kernel_observer_for_manual_switch();
   int64_t now = 0;
   {
     std::lock_guard<std::mutex> lock(m_);
@@ -868,13 +889,20 @@ CoreMonitor::Action CoreMonitor::tick_once() {
     return Action::Idle;
   }
 
+  // BUG-417：服务内核实际在线但 running_mode 被瞬时超时回滚为 NotRunning 时自动对账
+  if (h.reconcile_running_mode) h.reconcile_running_mode();
+  // BUG-416：在线探针前同步 Service 模式内核增量日志（TUN 网卡丢失/切换 → 强制在线复核）
+  if (h.sync_kernel_logs) h.sync_kernel_logs();
+
   // 2. 物理网络离线：跳过检测并通知前端离线横幅（BUG-359）
   bool online = h.network_online ? h.network_online() : true;
   if (!online) {
     was_offline_.store(true);
     emit_network_health_notice("network_health::offline");
+    maybe_log_steady_state_summary(now_fn(), false);
     return Action::Idle;
   }
+  maybe_log_steady_state_summary(now_fn(), true);
   // 离线 → 在线转移（S3 统一裁决 NetworkRecovered = Wait）：
   // 复位计数并通知 ok，交由本周期后续正常体检路径重新测量，绝不直接切点
   if (was_offline_.exchange(false)) {
@@ -929,28 +957,38 @@ CoreMonitor::Action CoreMonitor::tick_once() {
   if (h.active_node_name) {
     observed_active = h.active_node_name();
     bool changed = false;
-    {
+    std::string prev_active;
+    if (!observed_active.empty()) {
       std::lock_guard<std::mutex> lock(last_node_m_);
       if (observed_active != last_active_node_) {
+        prev_active = last_active_node_;
         last_active_node_ = observed_active;
         changed = true;
       }
     }
     if (changed) {
+      // BUG-417：仅真实换节点（Some(old) -> Some(new)）且无手动预置宽限期时开启 20s 宽限期；
+      // 守护首次观测（None -> Some）严禁开启伪宽限期或清除冷启动预置的失败计数。
       const bool had_manual_grace =
           manual_grace_unmatched_.exchange(false) && in_switch_grace();
-      if (!had_manual_grace) {
+      const bool had_prev_node = !prev_active.empty();
+      const bool arm_grace = should_arm_switch_grace_on_node_change(
+          had_prev_node ? std::optional<std::string>(prev_active) : std::nullopt,
+          observed_active, had_manual_grace);
+      if (arm_grace) {
         last_node_change_ms_.store(now_fn());
         has_node_change_.store(true);
       }
-      node_fail_count_.store(0);
-      {
+      if (had_prev_node) {
+        node_fail_count_.store(0);
         std::lock_guard<std::mutex> lock(brownout_m_);
         recent_brownout_episodes_ms_.clear();
       }
       CWLOG_INFO(std::format(
-          "CoreMonitor: 活跃节点发生变化，起算 {}s 切换宽限期",
-          p.switch_grace_ms / 1000));
+          "CoreMonitor: 活跃节点变化 {} -> {}{}",
+          had_prev_node ? prev_active : std::string("None"), observed_active,
+          arm_grace ? std::format("，起算 {}s 切换宽限期", p.switch_grace_ms / 1000)
+                    : std::string("（首次观测或已在宽限期内，不重新起算）")));
     }
   }
 
@@ -1257,10 +1295,10 @@ void CoreMonitor::reset_flowing_traffic_state() {
 }
 
 bool CoreMonitor::ThrottledNetProbe::check(
-    int64_t now_ms, const std::function<bool()>& probe_fn) {
+    int64_t now_ms, const std::function<bool()>& probe_fn, bool force) {
   {
     std::lock_guard<std::mutex> lock(mu_);
-    if (has_checked_) {
+    if (!force && has_checked_) {
       const int64_t interval =
           was_online_ ? kOnlineProbeIntervalMs : kOfflineProbeIntervalMs;
       if ((now_ms - last_check_ms_) < interval) {
@@ -1414,9 +1452,12 @@ CoreMonitor::update_active_traffic_state(
 bool CoreMonitor::should_probe_active_node(const NodeStatus& status,
                                            std::optional<uint64_t> age_secs,
                                            ActiveTrafficState traffic,
-                                           bool stall_cooldown_active) {
+                                           bool stall_cooldown_active,
+                                           bool kernel_reprobe_ready) {
   if (status.kind != NodeStatusKind::Alive) return true;
   if (!age_secs.has_value()) return true;
+  // BUG-415 / BUG-416：建连失败突发或 TUN 默认网卡切换 → 冷却外立即破缓存实拨
+  if (kernel_reprobe_ready) return true;
   const int64_t age = static_cast<int64_t>(*age_secs);
   switch (traffic) {
     case ActiveTrafficState::Flowing:

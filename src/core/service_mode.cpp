@@ -7,6 +7,7 @@
 #include <ws2tcpip.h>
 
 #include "config/config.h"
+#include "core/core_manager.h"
 #include "util/dirs.h"
 #include "util/log.h"
 #include "util/utf.h"
@@ -385,6 +386,31 @@ bool is_port_free(uint16_t port) {
   return ok == 0;
 }
 
+int start_clash_retry_backoff_ms(int attempt) { return attempt == 0 ? 400 : 800; }
+
+namespace {
+std::mutex g_retry_sleep_mu;
+std::function<void(int)> g_retry_sleep;
+
+void retry_sleep(int ms) {
+  std::function<void(int)> fn;
+  {
+    std::lock_guard<std::mutex> lk(g_retry_sleep_mu);
+    fn = g_retry_sleep;
+  }
+  if (fn) {
+    fn(ms);
+  } else {
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+  }
+}
+}  // namespace
+
+void set_start_clash_retry_sleep(std::function<void(int ms)> fn) {
+  std::lock_guard<std::mutex> lk(g_retry_sleep_mu);
+  g_retry_sleep = std::move(fn);
+}
+
 Result<void> start_with_service(IServiceIpc& ipc, const nlohmann::json& payload, uint16_t mixed_port,
                                 int poll_ms, int max_wait_ms) {
   CWLOG_INFO("Trying to start core with existing service");
@@ -407,7 +433,16 @@ Result<void> start_with_service(IServiceIpc& ipc, const nlohmann::json& payload,
   }
 
   // ← service.rs:261-269：连接失败 / code>0 都判失败
-  auto resp = ipc.clash_start(payload);
+  // BUG-417：冷启动 / 升级重装期间服务管道可能短暂未就绪，IPC 失败按 400ms / 800ms 退避重试
+  Result<nlohmann::json> resp = ipc.clash_start(payload);
+  for (int attempt = 0; resp.is_err() && attempt + 1 < kStartClashMaxAttempts; ++attempt) {
+    if (CoreManager::instance().is_exiting()) break;
+    const int wait_ms = start_clash_retry_backoff_ms(attempt);
+    CWLOG_WARN("连接系统服务启动核心第 " + std::to_string(attempt + 1) + " 次失败，" +
+               std::to_string(wait_ms) + "ms 后重试: " + resp.error().message);
+    retry_sleep(wait_ms);
+    resp = ipc.clash_start(payload);
+  }
   if (resp.is_err()) {
     return Result<void>::err({2313, "Cannot connect to Clash Verge Service: " + resp.error().message});
   }

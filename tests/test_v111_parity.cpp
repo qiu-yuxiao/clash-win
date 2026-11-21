@@ -242,13 +242,15 @@ UT_TEST(v111_bug405_excluded_conn_and_monitor_migration) {
   bool migration_cleaned = false;
   bool probed = false;
   int64_t mock_now = 100000;
+  std::string active = "新加坡1";
+  bool should_migrate = false;
   CoreMonitor::Hooks hooks;
   hooks.api_alive = [] { return true; };
   hooks.core_alive = [] { return true; };
   hooks.network_online = [] { return true; };
   hooks.current_uid = [] { return std::string("p1"); };
-  hooks.active_node_name = [] { return std::string("香港1 (184629)"); };
-  hooks.should_migrate_filtered_out = [] { return true; };
+  hooks.active_node_name = [&] { return active; };
+  hooks.should_migrate_filtered_out = [&] { return should_migrate; };
   hooks.probe_metrics_with_fallback = [&] {
     probed = true;
     return true;
@@ -258,8 +260,16 @@ UT_TEST(v111_bug405_excluded_conn_and_monitor_migration) {
   hooks.now_ms = [&] { return mock_now; };
   mon.set_hooks(hooks);
 
-  // 首轮从空节点观测到活跃节点会起算 20s 切换宽限期（对齐 monitor.rs:2827）
+  // 首轮建立基线观测（None -> Some("新加坡1")），按 BUG-417 首次观测不开启伪 20s 宽限期
   UT_CHECK(mon.tick_once() == CoreMonitor::Action::Idle);
+  UT_CHECK(!mon.in_switch_grace());
+
+  // 真实切换到被排除节点后（Some -> Some）起算 20s 切换宽限期，宽限期内暂缓迁移
+  probed = false;
+  active = "香港1 (184629)";
+  should_migrate = true;
+  UT_CHECK(mon.tick_once() == CoreMonitor::Action::Idle);
+  UT_CHECK(mon.in_switch_grace());
   UT_CHECK(!migration_cleaned);
 
   // 跨过 20s 切换宽限期后，绕过测速拨测直接触发 NodeMigration 并清理越界连接

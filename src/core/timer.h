@@ -61,6 +61,13 @@ class ProfileTimer {
   int64_t now_ms() const;
   void reset_for_test();
 
+  // ← timer.rs compute_next_schedule_minutes（BUG-416）：成功沿用配置间隔；
+  //   失败快速重试 2 分钟（配置间隔 < 2 时沿用配置值）
+  static constexpr uint64_t compute_next_schedule_minutes(uint64_t configured_minutes,
+                                                          bool success) {
+    return (success || configured_minutes < 2) ? configured_minutes : 2;
+  }
+
  private:
   ProfileTimer();
 

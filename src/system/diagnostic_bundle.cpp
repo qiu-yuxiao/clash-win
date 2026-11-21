@@ -127,9 +127,9 @@ std::string DiagnosticBundle::redact_log_text(const std::string& text) {
   // Rule 1: URL user credentials user:pass@host
   static const std::regex rule_1(R"(((?:[a-z][a-z0-9+.-]*://)?)[^\s@/:]+:[^\s@/:]+@)",
                                  std::regex_constants::icase);
-  // Rule 2: Key-value secrets
+  // Rule 2: Key-value secrets（BUG-413：长词在前避免 alternation 短路）
   static const std::regex rule_2(
-      R"((["']?\b(?:obfs-password|auth-str|password|passwd|secret|token|uuid|auth|sign)\b["']?)(\s*[=:]\s*["']?)(?:(bearer\s+))?(?!(?:bearer\b|\*\*\*REDACTED\*\*\*))[^\s"&,;]+(["']?))",
+      R"((["']?\b(?:private-key-passphrase|pre-shared-key|preshared-key|obfs-password|private-key|obfs-param|protocol-param|short-id|auth-str|password|passwd|secret|token|uuid|auth|sign|psk)\b["']?)(\s*[=:]\s*["']?)(?:(bearer\s+))?(?!(?:bearer\b|\*\*\*REDACTED\*\*\*))[^\s"&,;]+(["']?))",
       std::regex_constants::icase);
 
   std::string no_auth = std::regex_replace(text, rule_0a, "$1***REDACTED***");
@@ -152,8 +152,10 @@ std::string DiagnosticBundle::redact_yaml_text(const std::string& yaml_text) {
           if (it->first.IsScalar()) {
             std::string k = to_lower(it->first.as<std::string>());
             static const std::unordered_set<std::string> sensitive = {
-                "password", "uuid", "psk", "auth", "auth-str", "authorization",
-                "obfs-password", "secret", "token", "url", "private-key", "public-key"};
+                "password", "uuid", "psk", "pre-shared-key", "preshared-key",
+                "auth", "auth-str", "authorization", "obfs-password", "obfs-param",
+                "protocol-param", "secret", "token", "url", "private-key",
+                "private-key-passphrase", "public-key", "short-id"};
             if (sensitive.count(k) > 0 && it->second.IsScalar()) {
               it->second = "***REDACTED***";
             } else {
@@ -180,6 +182,27 @@ std::string DiagnosticBundle::redact_yaml_text(const std::string& yaml_text) {
     return std::string("# 配置解析失败，为避免泄露原始内容，本文件不含配置正文: ") +
            e.what() + "\n";
   }
+}
+
+bool DiagnosticBundle::is_clash_wer_target(const std::string& lower) {
+  // ← diagnostics.rs is_clash_mini_wer_target（BUG-416），品牌/内核名按 Win 侧替换
+  return lower.find("clash-win") != std::string::npos ||
+         lower.find("clash win") != std::string::npos ||
+         lower.find("clashwin") != std::string::npos ||
+         lower.find("win-mihomo") != std::string::npos ||
+         lower.find("clash-verge-service") != std::string::npos ||
+         lower.find("clash_verge_service") != std::string::npos ||
+         lower.find("verge-mihomo") != std::string::npos;
+}
+
+bool DiagnosticBundle::is_clash_dump_target(const std::string& lower) {
+  // ← diagnostics.rs is_clash_mini_dump_target（BUG-416）
+  return lower.find("clash-win") != std::string::npos ||
+         lower.find("clashwin") != std::string::npos ||
+         lower.find("win-mihomo") != std::string::npos ||
+         lower.find("clash-verge-service") != std::string::npos ||
+         lower.find("clash_verge_service") != std::string::npos ||
+         lower.find("verge-mihomo") != std::string::npos;
 }
 
 std::string DiagnosticBundle::tail_truncate_log(const std::string& text, size_t max_bytes) {
@@ -309,9 +332,7 @@ std::string DiagnosticBundle::collect_system_info() {
         for (const auto& e : std::filesystem::directory_iterator(dump_dir, ec)) {
           if (ec) break;
           std::string fn = to_lower(utf16_to_utf8(e.path().filename().wstring()));
-          if (fn.find("clashwin") != std::string::npos ||
-              fn.find("clash-win") != std::string::npos ||
-              fn.find("win-mihomo") != std::string::npos) {
+          if (is_clash_dump_target(fn)) {
             ++dump_count;
           }
         }
@@ -437,9 +458,7 @@ std::string DiagnosticBundle::collect_wer_and_av_report() {
       for (const auto& e : std::filesystem::directory_iterator(dump_dir, ec)) {
         if (ec) break;
         std::string fn = to_lower(utf16_to_utf8(e.path().filename().wstring()));
-        if (fn.find("clashwin") != std::string::npos ||
-            fn.find("clash-win") != std::string::npos ||
-            fn.find("win-mihomo") != std::string::npos) {
+        if (is_clash_dump_target(fn)) {
           any_dump = true;
           auto sz = e.file_size(ec);
           ss << "  - " << utf16_to_utf8(e.path().filename().wstring()) << " (" << sz << " bytes)\n";
@@ -520,9 +539,7 @@ std::string DiagnosticBundle::collect_wer_and_av_report() {
                                 ? raw_out.substr(pos)
                                 : raw_out.substr(pos, next - pos);
         std::string low = to_lower(block);
-        if (low.find("clashwin") != std::string::npos ||
-            low.find("clash-win") != std::string::npos ||
-            low.find("win-mihomo") != std::string::npos) {
+        if (is_clash_wer_target(low)) {
           ss << redact_log_text(block) << "\n";
           ++matched;
         }

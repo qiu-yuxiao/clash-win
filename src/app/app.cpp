@@ -193,37 +193,59 @@ bool App::init() {
   }
 
   singleton_server_ = std::make_unique<app::SingletonServer>();
-  bool bound = singleton_server_->start(
-      singleton_port_,
-      [this] {
-        if (main_window_) {
-          PostMessageW(main_window_->hwnd(), kAppWakeupMsg, 0, 0);
-        }
-      },
-      [](const std::string& param) {
-        std::thread([param] {
-          (void)app::resolve_scheme(param);
-        }).detach();
-      });
+  auto start_singleton = [this]() -> bool {
+    return singleton_server_->start(
+        singleton_port_,
+        [this] {
+          if (main_window_) {
+            PostMessageW(main_window_->hwnd(), kAppWakeupMsg, 0, 0);
+          }
+        },
+        [](const std::string& param) {
+          std::thread([param] {
+            (void)app::resolve_scheme(param);
+          }).detach();
+        });
+  };
+  bool bound = start_singleton();
 
-  // ★ 单实例锁（1:1 对齐 Clash Mini utils/server.rs:check_singleton）：
-  // 33335 是 Clash 专用单实例端口。bind 失败 = 端口已被占用 = 已有 Clash Win
-  // （或 Mini 残留）实例持有。此时无论探测 /commands/visible 是否返回 200，
-  // 都尽力唤醒对方并退出，绝不启动第二个实例。
-  // 原实现在「探测非 200」（首实例重负载下 500ms 内未响应 / 端口被无响应进程占用）
-  // 时误判为「其它程序占用」而继续启动，导致可双开 Clash Win 自身——与 Mini 行为相悖。
-  // BUG-394：探测超时已对齐 Mini v3.5.2 的 1500ms（singleton.cpp:288）。
+  // ★ 单实例锁（1:1 对齐 Clash Mini utils/server.rs:check_singleton，BUG-414）：
+  // bind 失败后探测既有实例：--silent 走 /commands/ping（期望 clash-win-ok），深链走
+  // /commands/scheme，缺省走 /commands/visible（期望 ok）。
+  //   - 收到本方有效响应 → 已通知，当前进程静默退出；
+  //   - 连接被拒（前序实例退出瞬间端口释放延迟）→ 3 × 150ms 短退避重绑；
+  //   - 端口被其它程序占用且无有效响应 → 记录错误并退出，绝不启动第二个实例。
+  // BUG-394：探测超时已对齐 Mini v3.5.2 的 1500ms（singleton.cpp send_request）。
   if (!bound) {
     CWLOG_WARN(std::format(
-        "App::init：单实例端口 {} 已被占用，判定存在其它实例，尝试唤醒后退出",
-        singleton_port_));
+        "App::init：单实例端口 {} 已被占用，探测既有实例", singleton_port_));
     int argc = 0;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    // notify_or_exit 在端口可达时发送唤醒并 exit(0)；不可达时仅返回 false，
-    // 故其后以 return false 兜底，确保本进程绝不成为第二个实例。
-    app::SingletonClient::notify_or_exit(singleton_port_, argc, argv, /*do_exit=*/true);
+    std::string detail;
+    const auto outcome = app::SingletonClient::probe_or_notify_existing_instance(
+        singleton_port_, argc, argv, &detail);
     if (argv) LocalFree(argv);
-    return false;
+    using WakeOutcome = app::SingletonClient::WakeOutcome;
+    if (outcome == WakeOutcome::NotifiedExisting) {
+      CWLOG_INFO("App::init：已有实例已通知，当前进程静默退出");
+      exit(0);
+    }
+    if (outcome == WakeOutcome::TransientConnectRefused) {
+      for (int i = 0; i < 3 && !bound; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        bound = start_singleton();
+      }
+      if (!bound) {
+        CWLOG_ERROR(std::format(
+            "App::init：单实例端口 127.0.0.1:{} 绑定失败且既有实例无响应", singleton_port_));
+        return false;
+      }
+    } else {
+      CWLOG_ERROR(std::format(
+          "App::init：单实例端口 127.0.0.1:{} 已被占用且未收到有效 Clash Win 响应 ({})",
+          singleton_port_, detail));
+      return false;
+    }
   }
 
   if (!init_logger()) return false;
@@ -474,22 +496,27 @@ bool App::init() {
     };
     mh.network_online = [net_probe] {
       const int64_t now = static_cast<int64_t>(GetTickCount64());
-      return net_probe->check(now, [now, net_probe] {
-        if (net_probe->was_online() &&
-            core::CoreMonitor::is_recent_flowing_traffic_active(now)) {
-          return true;
-        }
-        std::string test_url = "https://cp.cloudflare.com/generate_204";
-        try {
-          const auto verge = config::Config::instance().verge().latest_arc();
-          if (verge && verge->default_latency_test &&
-              !verge->default_latency_test->empty()) {
-            test_url = *verge->default_latency_test;
-          }
-        } catch (...) {
-        }
-        return core::CoreMonitor::is_physical_network_online(2, test_url);
-      });
+      // BUG-416：收到 [TUN] default interface lost/changed 时强制跳过 60s 在线免测与流量免测
+      const bool force_recheck = core::CoreMonitor::take_force_online_recheck();
+      return net_probe->check(
+          now,
+          [now, net_probe, force_recheck] {
+            if (!force_recheck && net_probe->was_online() &&
+                core::CoreMonitor::is_recent_flowing_traffic_active(now)) {
+              return true;
+            }
+            std::string test_url = "https://cp.cloudflare.com/generate_204";
+            try {
+              const auto verge = config::Config::instance().verge().latest_arc();
+              if (verge && verge->default_latency_test &&
+                  !verge->default_latency_test->empty()) {
+                test_url = *verge->default_latency_test;
+              }
+            } catch (...) {
+            }
+            return core::CoreMonitor::is_physical_network_online(2, test_url);
+          },
+          force_recheck);
     };
     struct MonitorRuntimeState {
       std::optional<core::CoreMonitor::ActiveTrafficTracker> traffic_tracker;
@@ -498,6 +525,7 @@ bool App::init() {
           core::CoreMonitor::ActiveTrafficState::Idle;
       int64_t last_active_verify_ms = -1;
       int64_t last_https_all_failed_ms = -1;
+      std::atomic<bool> boot_probe_seed{false};
     };
     auto mstate = std::make_shared<MonitorRuntimeState>();
 
@@ -665,7 +693,7 @@ bool App::init() {
       return core::CoreMonitor::persisted_exit_is_usable(
           now, all_ptr, read_current_filter_text(), fake);
     };
-    mh.auto_select_with_mode = [](bool select) -> Result<bool> {
+    mh.auto_select_with_mode = [mstate](bool select) -> Result<bool> {
       auto latest = config::Config::instance().profiles().latest_arc();
       std::string uid = latest && latest->current ? *latest->current : "";
       if (uid.empty()) return Result<bool>::err(Error{1, "no active profile"});
@@ -675,7 +703,30 @@ bool App::init() {
       if (out.preempted) {
         return Result<bool>::err(Error{-3, "AUTO_SELECT_MANUAL_PREEMPTED"});
       }
+      if (!select) {
+        auto grp = cmd::mihomo_unchecked().get_group_by_name("PROXY");
+        const std::optional<std::string> cur_active =
+            (grp.is_ok() && grp.value().now) ? grp.value().now : std::nullopt;
+        const bool seed = core::CoreMonitor::should_seed_boot_probe_failure(
+            cur_active, out.selected,
+            out.source == core::DelayResultSource::LiveProbe, out.display);
+        mstate->boot_probe_seed.store(seed, std::memory_order_release);
+      }
       return Result<bool>::ok(out.selected);
+    };
+    mh.reconcile_running_mode = [] {
+      (void)core::CoreManager::instance().reconcile_running_mode_if_needed();
+    };
+    mh.sync_kernel_logs = [] {
+      if (core::CoreManager::instance().running_mode() ==
+          core::RunningMode::Service) {
+        const std::wstring path =
+            util::dirs::service_log_dir() + L"\\service_latest.log";
+        core::CoreMonitor::sync_service_kernel_logs(path);
+      }
+    };
+    mh.take_boot_probe_failure_seed = [mstate]() {
+      return mstate->boot_probe_seed.exchange(false, std::memory_order_acq_rel);
     };
     mh.confirm_dead_gate = [parse_proxy_delay_age](const std::string& dead_node) -> bool {
       auto px = cmd::mihomo_unchecked().get_proxy_by_name(dead_node);
@@ -831,10 +882,32 @@ bool App::init() {
       auto [delay, age] = parse_proxy_delay_age(active_it->second);
       const auto active_status = core::CoreMonitor::classify_node_status(
           active_it->second.alive, delay, age);
+      const std::wstring svc_log =
+          (core::CoreManager::instance().running_mode() ==
+           core::RunningMode::Service)
+              ? (util::dirs::service_log_dir() + L"\\service_latest.log")
+              : std::wstring();
+      const auto reprobe_sig =
+          core::CoreMonitor::poll_active_node_dial_failures(active, svc_log);
       const bool need_probe = core::CoreMonitor::should_probe_active_node(
-          active_status, age, traffic, stall_cd);
+          active_status, age, traffic, stall_cd, reprobe_sig.has_value());
+      if (need_probe && reprobe_sig.has_value()) {
+        core::CoreMonitor::consume_kernel_reprobe_signal();
+        if (reprobe_sig->reason ==
+            core::CoreMonitor::KernelReprobeReason::DialFailureBurst) {
+          CWLOG_INFO(std::format(
+              "[后台监测] 检测到活跃节点 {} 近期出现 {} 次代理建连失败告警，突破免测缓存立即触发体检复核",
+              active, reprobe_sig->dial_fail_count));
+        } else {
+          CWLOG_INFO(std::format(
+              "[后台监测] 检测到物理默认网卡切换，突破免测缓存立即复核当前节点 {}",
+              active));
+        }
+      }
 
       if (!need_probe) {
+        core::CoreMonitor::record_health_observation(
+            {active, active_status, traffic, age, false});
         if (active_status.kind == core::CoreMonitor::NodeStatusKind::Alive &&
             !events::EventBus::instance().lightweight_filter()) {
           const std::string hist_time = active_it->second.history.empty()
@@ -916,14 +989,19 @@ bool App::init() {
           CWLOG_WARN("CoreMonitor: 主测速地址整体失败，改用备用地址复核: " + main_url);
           auto r2 = client.delay_group("PROXY__METRICS", fallback_url,
                                        core::kNodeDelayMaxMs, 5000);
-          if (r2.is_ok()) {
-            CWLOG_INFO("CoreMonitor: 备用测速地址可用 → 判定为主测速地址失真，本轮不判死");
+          if (r2.is_ok() &&
+              core::CoreMonitor::has_any_valid_real_probe_delay(r2.value())) {
+            CWLOG_INFO(std::format(
+                "CoreMonitor: 备用测速地址有真实节点响应（响应节点={}），标记主测速地址失真并交裁决层核验当前节点",
+                r2.value().size()));
             probed_delays = std::move(r2.value());
             distorted = true;
             link_ok = true;
+          } else if (r2.is_ok()) {
+            CWLOG_WARN("CoreMonitor: 主/备测速地址均无有效真实节点响应 → 判定为测速链路不可用");
           }
         }
-        if (link_ok && !distorted && !probed_delays.empty()) {
+        if (link_ok && !probed_delays.empty()) {
           core::CoreMonitor::record_metrics_probe(
               static_cast<int64_t>(GetTickCount64()), probed_delays, false);
         } else {
@@ -944,10 +1022,22 @@ bool App::init() {
         return false;
       }
 
+      const bool active_excused =
+          core::CoreMonitor::is_active_excused_by_primary_distortion(
+              distorted, active, probed_delays);
+
       const std::vector<std::string> all_members =
           grp.value().all.value_or(std::vector<std::string>{});
       auto display = core::CoreMonitor::build_probe_ui_display(
           all_members, probed_delays, distorted);
+      // BUG-417：主地址失真但当前活跃节点在备用地址也超时无响应时，向 UI 显式推送 (active, 0) 清除假绿
+      if (distorted && !active_excused && !util::is_dummy_node(active) &&
+          !util::is_confirmed_fake_node(active)) {
+        const bool has_active = std::any_of(
+            display.begin(), display.end(),
+            [&](const auto& item) { return item.first == active; });
+        if (!has_active) display.emplace_back(active, 0);
+      }
       if (!display.empty() && !events::EventBus::instance().lightweight_filter()) {
         const bool already_reported =
             !probed_delays.empty() &&
@@ -965,7 +1055,26 @@ bool App::init() {
               mstate->ui_sync ? &(*mstate->ui_sync) : nullptr);
         }
       }
-      return !distorted;
+      if (auto post_proxies = client.get_proxies(); post_proxies.is_ok()) {
+        auto pit = post_proxies.value().proxies.find(active);
+        if (pit != post_proxies.value().proxies.end()) {
+          auto [pd, page] = parse_proxy_delay_age(pit->second);
+          core::CoreMonitor::record_health_observation(
+              {active,
+               core::CoreMonitor::classify_node_status(pit->second.alive, pd, page),
+               traffic, page, true});
+        }
+      }
+      if (active_excused) {
+        CWLOG_INFO("CoreMonitor: 备用测速地址已证明当前活跃节点 " + active +
+                   " 正常 → 本轮不累计失败");
+        return false;
+      }
+      if (distorted) {
+        CWLOG_INFO("CoreMonitor: 主测速地址失真，但当前活跃节点 " + active +
+                   " 在备用测速地址下仍超时无响应，继续执行故障裁决");
+      }
+      return true;
     };
     mh.auto_select_trigger = []() -> Result<bool> {
       auto latest = config::Config::instance().profiles().latest_arc();
@@ -991,9 +1100,12 @@ bool App::init() {
         return;
       }
       std::thread([title, text] {
+        // BUG-414：RAII 复位，确保异常 / 提前返回时弹窗互斥位也必然释放
+        struct AlertFlagReset {
+          ~AlertFlagReset() { s_alert_dialog_open.store(false); }
+        } reset_guard;
         MessageBoxW(nullptr, text.c_str(), title.c_str(),
                     MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
-        s_alert_dialog_open.store(false);
       }).detach();
     };
     mh.current_uid = [] {

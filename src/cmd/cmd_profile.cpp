@@ -16,6 +16,8 @@
 #include "util/node.h"
 #include "config/prfitem.h"
 #include "core/validate.h"
+#include "clashwin/system/diagnostic_bundle.h"
+#include "util/log.h"
 #include "enhance/enhance.h"
 #include "util/dirs.h"
 #include "util/utf.h"
@@ -126,7 +128,13 @@ void notify_invalid(const core::validate::ValidationOutcome& o) {
                                           "运行时配置");
 }
 
+// ← feat/profile.rs UPDATE_FAILED_EVEN_WITH_CLASH_PREFIX（BUG-416 / BUG-417）
+constexpr const char* kUpdateFailedEvenWithClashPrefix = "update_failed_even_with_clash:";
+
 }  // namespace
+
+// cmd_system.cpp
+bool is_in_lightweight_mode();
 
 // ← save_profile.rs:88-105 + BUG-409:
 //   current 自身、全局 "Merge"，或 current 的 merge/script/rules/proxies/groups 子项（缺省按默认名归一化）→ 影响运行时
@@ -214,7 +222,8 @@ void ensure_t16_hooks() {
     }
 
     auto r2 = c->delay_group("PROXY__METRICS", sec_url, core::kNodeDelayMaxMs);
-    if (!r2.is_ok()) {
+    if (!r2.is_ok() ||
+        !core::CoreMonitor::has_any_valid_real_probe_delay(r2.value())) {
       core::CoreMonitor::invalidate_metrics_probe();
       return std::nullopt;
     }
@@ -597,10 +606,21 @@ void install_cmd_profile(CommandService& svc) {
            if (is_manual_trigger && util::clear_unverified_https_failures() > 0) {
              events::EventBus::refresh_proxies();
            }
-           const std::string detail =
-               profile_name + " - " + (last_err.empty() ? "更新订阅失败（原文已保留）" : last_err);
-           events::EventBus::notice_message("update_failed_even_with_clash", detail);
-           return CmdResult::err({errs::kIo, "[notified] " + detail});
+           // ← feat/profile.rs perform_profile_update（BUG-416 / BUG-417）：
+           //   错误原文先脱敏；手动触发返回带前缀的 Err 交 UI 本地化提示（不重复通知），
+           //   自动触发非轻量模式才发通知，并统一返回 Err 让定时器按失败 2 分钟快速重试。
+           const std::string masked_err =
+               last_err.empty() ? std::string("更新订阅失败（原文已保留）")
+                                : system::DiagnosticBundle::redact_log_text(last_err);
+           const std::string detail = profile_name + " - " + masked_err;
+           if (is_manual_trigger) {
+             return CmdResult::err(
+                 {errs::kIo, std::string(kUpdateFailedEvenWithClashPrefix) + detail});
+           }
+           if (!is_in_lightweight_mode()) {
+             events::EventBus::notice_message("update_failed_even_with_clash", detail);
+           }
+           return CmdResult::err({errs::kIo, detail});
          }
          if (used_proxy_fallback) {
            events::EventBus::notice_message("update_with_clash_proxy", profile_name);
@@ -621,8 +641,13 @@ void install_cmd_profile(CommandService& svc) {
                events::EventBus::notify_profile_changed(*item_opt->uid);
            } else {
              if (cleared_quarantine > 0) events::EventBus::refresh_proxies();
-             notify_invalid(outcome);
-           }
+             CWLOG_ERROR("[订阅更新] 更新失败: " + outcome.message);
+             // BUG-416：仅自动触发且非轻量模式发通知；统一返回 Err（手动由 UI 提示）
+             if (!is_manual_trigger && !is_in_lightweight_mode()) {
+               notify_invalid(outcome);
+             }
+             return CmdResult::err({errs::kIo, outcome.message});
+             }
          }
          return CmdResult::ok(Json::object());
        },

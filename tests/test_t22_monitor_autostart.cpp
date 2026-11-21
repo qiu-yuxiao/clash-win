@@ -63,6 +63,8 @@ struct MockAutostartAccess : IAutostartAccess {
     return Result<bool>::ok(true);
   }
   std::wstring current_exe_path() override { return exe_path; }
+  // BUG-414：不读宿主 System32\Tasks，确保 delete_scheduled_task 总被调用
+  std::optional<std::filesystem::path> system_tasks_dir() override { return std::nullopt; }
 };
 
 // ---------- RAII 隔离卫士 ----------
@@ -159,11 +161,12 @@ UT_TEST(t22_autostart_legacy_schtasks_cleanup_and_marker) {
   UT_CHECK_EQ(mock.deleted_tasks[1], L"Clash Win (Admin)");
   UT_CHECK(std::filesystem::exists(marker));
 
-  // 验证标记内容为 "1"
+  // 验证标记内容为 "done"（BUG-414 两档标记；历史 "1" 视为未完成）
   std::ifstream f(marker, std::ios::binary);
   std::string content((std::istreambuf_iterator<char>(f)),
                       std::istreambuf_iterator<char>());
-  UT_CHECK_EQ(content, "1");
+  f.close();
+  UT_CHECK_EQ(content, "done");
 
   // 第二次运行清理：标记已存在，应直接跳过
   mock.deleted_tasks.clear();

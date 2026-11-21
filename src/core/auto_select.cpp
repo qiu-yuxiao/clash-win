@@ -318,14 +318,39 @@ AutoSelect::Outcome AutoSelect::trigger(
     }
   } else {
     // 仅测速模式（如前端闪电测速 / 唤醒静默测速）：存在任一有效延迟即解除断网/全死横幅（BUG-359）
+    size_t reachable = 0;
+    bool any_ok = false;
+    const auto active_node = hooks_.current_proxy_now
+                                 ? hooks_.current_proxy_now("PROXY")
+                                 : std::nullopt;
+    std::optional<uint32_t> active_delay;
     for (const auto& [name, d] : out.display) {
-      (void)name;
-      if (d > 0 && d < kNodeDelayMaxMs) {
+      if (CoreMonitor::is_valid_probe_delay(d)) {
+        ++reachable;
+      }
+      if (!any_ok && d > 0 && d < kNodeDelayMaxMs) {
+        any_ok = true;
         CoreMonitor::instance().emit_network_health_notice(
             "network_health::ok");
-        break;
+      }
+      if (active_node.has_value() && name == *active_node) {
+        active_delay = d;
       }
     }
+    const char* src_name =
+        (out.source == DelayResultSource::LiveProbe)
+            ? "LiveProbe"
+            : ((out.source == DelayResultSource::FreshMetricsCache)
+                   ? "FreshMetricsCache"
+                   : "NotExecuted");
+    CWLOG_INFO(std::string("[后台监测] 纯测速刷新完成（不切换节点）：待测 ") +
+               std::to_string(nodes.size()) + " 个，可达 " +
+               std::to_string(reachable) + " 个，source=" + src_name +
+               "，当前节点=" + active_node.value_or("None") + "（延迟=" +
+               (active_delay.has_value()
+                    ? (std::to_string(*active_delay) + "ms")
+                    : std::string("None")) +
+               "）");
   }
   return out;
 }

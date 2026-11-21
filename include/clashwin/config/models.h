@@ -125,6 +125,8 @@ struct IVerge {
   // ← verge.rs::VALID_CLASH_CORES / get_valid_clash_core
   static constexpr const char* kValidClashCores[] = {"win-mihomo"};
   std::string get_valid_clash_core() const;
+  // BUG-413：clash_core 白名单收敛（非白名单 / 空值一律回落 win-mihomo）
+  static std::string normalize_valid_clash_core(const std::optional<std::string>& raw);
 
   YAML::Node to_yaml() const;
   static IVerge from_yaml(const YAML::Node& node);

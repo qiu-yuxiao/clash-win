@@ -106,9 +106,27 @@ UT_TEST(service_start_flow) {
   UT_CHECK(r.error().message.find("code=3") != std::string::npos);
   UT_CHECK(r.error().message.find("spawn failed") != std::string::npos);
 
-  // 传输失败（连不上服务）→ 失败
-  ipc.start_script = {Result<nlohmann::json>::err(Error{1003, "pipe busy"})};
+  // 传输失败（连不上服务）→ BUG-417：400ms / 800ms 退避重试 3 次仍失败 → 失败
+  std::vector<int> slept;
+  set_start_clash_retry_sleep([&](int ms) { slept.push_back(ms); });
+  struct SleepReset {
+    ~SleepReset() { set_start_clash_retry_sleep(nullptr); }
+  } sleep_reset;
+  ipc.start_calls = 0;
+  ipc.start_script = {Result<nlohmann::json>::err(Error{1003, "pipe busy"}),
+                      Result<nlohmann::json>::err(Error{1003, "pipe busy"}),
+                      Result<nlohmann::json>::err(Error{1003, "pipe busy"})};
   UT_CHECK(start_with_service(ipc, payload, 20801, 5, 50).is_err());
+  UT_CHECK_EQ(ipc.start_calls, 3);
+  UT_CHECK(slept == std::vector<int>({400, 800}));
+
+  // 瞬时失败一次后重试成功 → 成功
+  slept.clear();
+  ipc.start_calls = 0;
+  ipc.start_script = {Result<nlohmann::json>::err(Error{1003, "pipe busy"})};
+  UT_CHECK(start_with_service(ipc, payload, 20801, 5, 50).is_ok());
+  UT_CHECK_EQ(ipc.start_calls, 2);
+  UT_CHECK(slept == std::vector<int>({400}));
 }
 
 UT_TEST(service_stop_flow) {

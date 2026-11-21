@@ -127,6 +127,8 @@ void log_consumer_thread(HANDLE read_end, const std::wstring& log_path,
       leftover.erase(0, pos + 1);
       if (!line.empty() && line.back() == '\r') line.pop_back();
       if (line.empty()) continue;
+      // BUG-415 / BUG-416：Sidecar 内核日志直喂 CoreMonitor 增量观测（零锁快路径过滤）
+      CoreMonitor::record_kernel_log_line(line);
       std::ofstream f(log_path, std::ios::binary | std::ios::app);
       if (f.is_open()) {
         f << line << "\n";
@@ -135,8 +137,12 @@ void log_consumer_thread(HANDLE read_end, const std::wstring& log_path,
     }
   }
   if (!leftover.empty()) {
-    std::ofstream f(log_path, std::ios::binary | std::ios::app);
-    if (f.is_open()) f << leftover << "\n";
+    if (leftover.back() == '\r') leftover.pop_back();
+    if (!leftover.empty()) {
+      CoreMonitor::record_kernel_log_line(leftover);
+      std::ofstream f(log_path, std::ios::binary | std::ios::app);
+      if (f.is_open()) f << leftover << "\n";
+    }
   }
 }
 
@@ -533,6 +539,7 @@ bool CoreManager::wait_for_win_cores_exit(uint32_t max_wait_ms) const {
 }
 
 void CoreManager::cleanup_local_state_after_service_stop() {
+  abort_pending_selection_ensure();  // BUG-414
   mode_.store(RunningMode::NotRunning, std::memory_order_release);
   log_run_.store(false, std::memory_order_release);
   if (lifecycle_owner_.load(std::memory_order_acquire) ==
@@ -666,6 +673,75 @@ bool CoreManager::should_expect_core_pipe_alive() const {
   }
   std::unique_lock<std::mutex> lk(lifecycle_, std::try_to_lock);
   return lk.owns_lock();
+}
+
+bool CoreManager::reconcile_running_mode_if_needed_with(
+    const ReconcileProbe& probe) {
+  if (is_exiting() ||
+      mode_.load(std::memory_order_acquire) != RunningMode::NotRunning ||
+      is_config_update_in_progress()) {
+    return false;
+  }
+  {
+    std::unique_lock<std::mutex> lk(lifecycle_, std::try_to_lock);
+    if (!lk.owns_lock()) return false;
+    if (sidecar_alive()) return false;
+    if (!probe.service_ipc_present || !probe.service_ipc_present()) return false;
+    if (!probe.mihomo_pipe_present || !probe.mihomo_pipe_present()) return false;
+  }
+  // 锁外执行 2s API 探活，避免持 lifecycle_ 跨阻塞 I/O（← lifecycle.rs:582-595）
+  if (!probe.api_alive || !probe.api_alive()) return false;
+
+  std::unique_lock<std::mutex> lk(lifecycle_, std::try_to_lock);
+  if (!lk.owns_lock()) return false;
+  if (is_exiting() ||
+      mode_.load(std::memory_order_acquire) != RunningMode::NotRunning ||
+      is_config_update_in_progress() || sidecar_alive()) {
+    return false;
+  }
+  mode_.store(RunningMode::Service, std::memory_order_release);
+  pid_ = 0;
+  CWLOG_INFO("检测到系统服务内核已在线就绪，自动对账恢复运行模式: NotRunning -> Service");
+  return true;
+}
+
+bool CoreManager::reconcile_running_mode_if_needed() {
+  if (is_exiting() ||
+      mode_.load(std::memory_order_acquire) != RunningMode::NotRunning ||
+      is_config_update_in_progress()) {
+    return false;
+  }
+  std::function<mihomo::MihomoClient*()> api_provider;
+  {
+    std::lock_guard<std::mutex> hlk(test_hooks_mu_);
+    api_provider = api_client_provider_;
+  }
+  ReconcileProbe probe;
+  probe.service_ipc_present = [] {
+    return mihomo::ServiceIpc::is_pipe_present();
+  };
+  probe.mihomo_pipe_present = [] {
+    return mihomo::ServiceIpc::is_pipe_present(util::dirs::ipc_path());
+  };
+  probe.api_alive = [api_provider = std::move(api_provider)] {
+    mihomo::MihomoClient* client_ptr = api_provider ? api_provider() : nullptr;
+    std::unique_ptr<mihomo::MihomoClient> local_client;
+    if (!client_ptr) {
+      std::string secret;
+      try {
+        auto info = config::Config::instance().clash().latest_arc()->mapping();
+        if (info["secret"] && info["secret"].IsScalar()) {
+          secret = info["secret"].Scalar();
+        }
+      } catch (...) {
+      }
+      local_client = std::make_unique<mihomo::MihomoClient>(
+          util::dirs::ipc_path(), secret);
+      client_ptr = local_client.get();
+    }
+    return client_ptr->get_base_config(2000).is_ok();
+  };
+  return reconcile_running_mode_if_needed_with(probe);
 }
 
 Result<void> CoreManager::start_sidecar(const std::wstring& config_file,
@@ -1191,12 +1267,22 @@ bool CoreManager::ensure_proxy_group_selection(
     std::optional<std::pair<std::optional<std::string>, std::string>>
         override_state,
     uint64_t expected_epoch,
-    bool* out_selection_changed) {
+    bool* out_selection_changed,
+    std::optional<uint64_t> start_manual_epoch) {
   if (out_selection_changed) *out_selection_changed = false;
+  auto manual_preempted = [&]() -> bool {
+    return start_manual_epoch.has_value() &&
+           CoreMonitor::instance().manual_switch_epoch() != *start_manual_epoch;
+  };
   auto should_abort = [&]() -> bool {
     if (is_exiting()) return true;
     if (expected_epoch != 0 &&
         selection_ensure_epoch_.load(std::memory_order_acquire) != expected_epoch) {
+      return true;
+    }
+    // BUG-414：用户手动切点抢占在途的启动选点恢复
+    if (manual_preempted()) {
+      CWLOG_INFO("PROXY ensure preempted by manual node switch, abort");
       return true;
     }
     return false;
@@ -1298,6 +1384,7 @@ bool CoreManager::ensure_proxy_group_selection(
       CWLOG_WARN("PROXY fallback select failed: " + sel.error().message);
       return false;
     }
+    if (manual_preempted()) return false;  // BUG-414：选点完成瞬间被手动切点抢占，不持久化
     CWLOG_INFO("PROXY fallback node selected: " + fb);
     if (out_selection_changed && (!current_now.has_value() || *current_now != fb)) {
       *out_selection_changed = true;
@@ -1368,11 +1455,16 @@ bool CoreManager::ensure_proxy_group_selection(
   return ok;
 }
 
+void CoreManager::abort_pending_selection_ensure() {
+  selection_ensure_epoch_.fetch_add(1, std::memory_order_acq_rel);
+}
+
 void CoreManager::spawn_ensure_proxy_group_selection(
     std::optional<std::string> preferred) {
   const uint64_t epoch =
       selection_ensure_epoch_.fetch_add(1, std::memory_order_acq_rel) + 1;
   if (is_exiting() || has_start_auto_test_hooks()) return;
+  const uint64_t start_manual_epoch = CoreMonitor::instance().manual_switch_epoch();
 
   std::function<mihomo::MihomoClient*()> api_provider;
   {
@@ -1380,12 +1472,13 @@ void CoreManager::spawn_ensure_proxy_group_selection(
     api_provider = api_client_provider_;
   }
   auto alive = alive_flag_;
-  std::thread([this, alive, epoch, preferred = std::move(preferred),
+  std::thread([this, alive, epoch, start_manual_epoch, preferred = std::move(preferred),
                api_provider = std::move(api_provider)]() mutable {
     std::this_thread::sleep_for(
         std::chrono::milliseconds(consts::kAsyncEnsureInitialSettleMs));
     if (!alive || !alive->load(std::memory_order_acquire) || is_exiting() ||
-        selection_ensure_epoch_.load(std::memory_order_acquire) != epoch) {
+        selection_ensure_epoch_.load(std::memory_order_acquire) != epoch ||
+        CoreMonitor::instance().manual_switch_epoch() != start_manual_epoch) {
       return;
     }
 
@@ -1416,7 +1509,8 @@ void CoreManager::spawn_ensure_proxy_group_selection(
     CoreApiClientAdapter api(client_ptr);
     bool selection_changed = false;
     (void)ensure_proxy_group_selection(api, std::move(preferred), async_timings,
-                                       std::nullopt, epoch, &selection_changed);
+                                       std::nullopt, epoch, &selection_changed,
+                                       start_manual_epoch);
     if (selection_changed && alive->load(std::memory_order_acquire) &&
         !is_exiting() &&
         selection_ensure_epoch_.load(std::memory_order_acquire) == epoch) {

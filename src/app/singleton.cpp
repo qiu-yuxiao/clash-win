@@ -176,6 +176,15 @@ std::string SingletonServer::handle_http_request(const std::string& raw_request)
            "Connection: close\r\n\r\n" + body;
   }
 
+  if (path == "/commands/ping") {
+    // ← server.rs embed_server ping（BUG-414），品牌位 clash-mini-ok → clash-win-ok
+    std::string body = "clash-win-ok";
+    return "HTTP/1.1 200 OK\r\n"
+           "Content-Type: text/plain\r\n"
+           "Content-Length: " + std::to_string(body.size()) + "\r\n"
+           "Connection: close\r\n\r\n" + body;
+  }
+
   std::string not_found = "Not Found";
   return "HTTP/1.1 404 Not Found\r\n"
          "Content-Type: text/plain\r\n"
@@ -222,68 +231,117 @@ std::string SingletonServer::generate_pac_script(uint16_t port_override) {
 
 // ---------- SingletonClient 实现 ----------
 
-bool SingletonClient::notify_or_exit(uint16_t port, int argc, wchar_t* argv[], bool do_exit) {
-  SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (s == INVALID_SOCKET) return false;
+namespace {
 
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(port);
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-
-  if (connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-    closesocket(s);
-    return false;
-  }
-  closesocket(s);
-
+struct ParsedArgs {
   bool has_silent = false;
   std::string scheme_url;
+};
 
+ParsedArgs parse_secondary_args(int argc, wchar_t* argv[]) {
+  ParsedArgs out;
   for (int i = 1; i < argc; ++i) {
-    if (!argv[i]) continue;
+    if (!argv || !argv[i]) continue;
     std::wstring arg_w = argv[i];
     std::string arg = utf::utf16_to_utf8(arg_w);
     std::string lower_arg = util::to_lower(arg);
     if (arg == "--silent") {
-      has_silent = true;
+      out.has_silent = true;
     } else if (lower_arg.starts_with("clash:") || lower_arg.starts_with("clash://") ||
                lower_arg.starts_with("clash-verge:") || lower_arg.starts_with("clash-verge://") ||
                lower_arg.starts_with("clash-mini:") || lower_arg.starts_with("clash-mini://") ||
                lower_arg.starts_with("clash-win:") || lower_arg.starts_with("clash-win://")) {
-      scheme_url = arg;
+      out.scheme_url = arg;
     }
   }
+  return out;
+}
 
-  if (has_silent) {
-    CWLOG_INFO("SingletonClient: --silent detected on secondary instance, exiting immediately");
-    if (do_exit) exit(0);
-    return true;
-  }
-
-  if (!scheme_url.empty()) {
-    std::string encoded_param;
-    for (char c : scheme_url) {
-      if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-          (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
-        encoded_param.push_back(c);
-      } else {
-        char hex[4];
-        snprintf(hex, sizeof(hex), "%%%02X", static_cast<unsigned char>(c));
-        encoded_param += hex;
-      }
+std::string percent_encode_param(const std::string& s) {
+  std::string encoded_param;
+  for (char c : s) {
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+        (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
+      encoded_param.push_back(c);
+    } else {
+      char hex[4];
+      snprintf(hex, sizeof(hex), "%%%02X", static_cast<unsigned char>(c));
+      encoded_param += hex;
     }
-    std::string path = "/commands/scheme?param=" + encoded_param;
-    send_request(port, path);
-  } else {
-    send_request(port, "/commands/visible");
   }
+  return encoded_param;
+}
 
+}  // namespace
+
+SingletonClient::ProbeTarget SingletonClient::resolve_singleton_probe_target(bool has_scheme,
+                                                                             bool has_silent) {
+  // ← server.rs resolve_singleton_probe_target（BUG-414）
+  if (has_scheme) return ProbeTarget::Scheme;
+  if (has_silent) return ProbeTarget::Ping;
+  return ProbeTarget::Visible;
+}
+
+bool SingletonClient::is_valid_singleton_reply(bool expected_ping, int status,
+                                               const std::string& body) {
+  // ← server.rs is_valid_singleton_reply（BUG-414）
+  if (status < 200 || status >= 300) return false;
+  const std::string trimmed = util::trim(body);
+  return expected_ping ? (trimmed == "clash-win-ok") : (trimmed == "ok");
+}
+
+std::string SingletonClient::extract_http_body(const std::string& raw_response) {
+  const size_t pos = raw_response.find("\r\n\r\n");
+  if (pos == std::string::npos) return {};
+  return raw_response.substr(pos + 4);
+}
+
+SingletonClient::WakeOutcome SingletonClient::probe_or_notify_existing_instance(
+    uint16_t port, int argc, wchar_t* argv[], std::string* detail_out) {
+  const ParsedArgs args = parse_secondary_args(argc, argv);
+  const ProbeTarget target =
+      resolve_singleton_probe_target(!args.scheme_url.empty(), args.has_silent);
+  std::string path;
+  bool expected_ping = false;
+  switch (target) {
+    case ProbeTarget::Scheme:
+      path = "/commands/scheme?param=" + percent_encode_param(args.scheme_url);
+      break;
+    case ProbeTarget::Ping:
+      path = "/commands/ping";
+      expected_ping = true;
+      break;
+    case ProbeTarget::Visible:
+      path = "/commands/visible";
+      break;
+  }
+  std::string raw;
+  bool refused = false;
+  const int status = send_request(port, path, &raw, &refused);
+  if (status < 0 && refused) {
+    return WakeOutcome::TransientConnectRefused;
+  }
+  const std::string body = extract_http_body(raw);
+  if (is_valid_singleton_reply(expected_ping, status, body)) {
+    return WakeOutcome::NotifiedExisting;
+  }
+  if (detail_out) {
+    *detail_out = "status=" + std::to_string(status) + ", body=" + util::trim(body);
+  }
+  return WakeOutcome::UnexpectedResponse;
+}
+
+bool SingletonClient::notify_or_exit(uint16_t port, int argc, wchar_t* argv[], bool do_exit) {
+  const WakeOutcome outcome = probe_or_notify_existing_instance(port, argc, argv);
+  if (outcome != WakeOutcome::NotifiedExisting) return false;
+  CWLOG_INFO("SingletonClient: existing instance notified, exiting");
   if (do_exit) exit(0);
   return true;
 }
 
-int SingletonClient::send_request(uint16_t port, const std::string& path_and_query, std::string* response_out) {
+int SingletonClient::send_request(uint16_t port, const std::string& path_and_query,
+                                  std::string* response_out, bool* connect_refused_out) {
+  if (connect_refused_out) *connect_refused_out = false;
   SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (s == INVALID_SOCKET) return -1;
 
@@ -299,6 +357,11 @@ int SingletonClient::send_request(uint16_t port, const std::string& path_and_que
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
   if (connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+    const int wsa_err = WSAGetLastError();
+    if (connect_refused_out) {
+      *connect_refused_out = (wsa_err == WSAECONNREFUSED || wsa_err == WSAECONNRESET ||
+                              wsa_err == WSAETIMEDOUT || wsa_err == WSAENETUNREACH);
+    }
     closesocket(s);
     return -1;
   }
@@ -308,14 +371,20 @@ int SingletonClient::send_request(uint16_t port, const std::string& path_and_que
                     "Connection: close\r\n\r\n";
   send(s, req.data(), static_cast<int>(req.size()), 0);
 
+  // 读到对端关闭（Connection: close）或上限 64 KiB，避免分段到达时只拿到响应头
+  std::string resp;
   char buf[4096];
-  int n = recv(s, buf, sizeof(buf) - 1, 0);
+  for (;;) {
+    int n = recv(s, buf, sizeof(buf), 0);
+    if (n <= 0) break;
+    resp.append(buf, static_cast<size_t>(n));
+    if (resp.size() >= 64 * 1024) break;
+  }
   int status_code = -1;
-  if (n > 0) {
-    buf[n] = '\0';
-    if (response_out) *response_out = std::string(buf, n);
-    if (n >= 12 && strncmp(buf, "HTTP/1.", 7) == 0) {
-      status_code = atoi(buf + 9);
+  if (!resp.empty()) {
+    if (response_out) *response_out = resp;
+    if (resp.size() >= 12 && resp.compare(0, 7, "HTTP/1.") == 0) {
+      status_code = atoi(resp.c_str() + 9);
     }
   }
 

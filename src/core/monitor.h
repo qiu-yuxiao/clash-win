@@ -28,6 +28,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -71,6 +72,15 @@ class CoreMonitor {
   static constexpr int kTcp53RaceTimeoutMs = 600;
   static constexpr uint64_t kMinProbeBudgetSecs = 2;
   static constexpr uint32_t kSupervisorRestartDelayMs = 2000;
+
+  // ← monitor/mod.rs BUG-415 / BUG-416 / BUG-417：内核日志观测常量
+  static constexpr int64_t kDialFailWindowSecs = 30;
+  static constexpr size_t kDialFailReprobeThreshold = 3;
+  static constexpr int64_t kDialFailReprobeCooldownSecs = 60;
+  static constexpr int64_t kTunEventMaxAgeSecs = 300;
+  static constexpr int64_t kTunInterfaceChangedTtlSecs = 60;
+  static constexpr uint64_t kMaxKernelLogIncrementalBytes = 128ULL * 1024;
+  static constexpr int64_t kMonitorSummaryIntervalSecs = 600;
 
   // 参数对照表（← census §70 / monitor.rs v3.2.4 + BUG-318，全 hooks 注入可测）
   struct Params {
@@ -160,6 +170,12 @@ class CoreMonitor {
     std::function<bool()> has_healthy_standby_in_subset;
     // ← v3.5.10 (BUG-412)：自愈切离确认故障/黑洞旧节点后精准断开其存量 PROXY 死链
     std::function<void(const std::string& dead_node)> on_dead_node_healed;
+    // ← v3.6.2 (BUG-417)：运行模式自动对账（NotRunning -> Service），每周期守护前调用
+    std::function<void()> reconcile_running_mode;
+    // ← v3.6.1 (BUG-416)：在线探针前同步 Service 模式内核增量日志（TUN 网卡事件）
+    std::function<void()> sync_kernel_logs;
+    // ← v3.6.2 (BUG-417)：冷启动纯测速后是否预置第 1 次失败（持久节点超时且同组有健康节点）
+    std::function<bool()> take_boot_probe_failure_seed;
   };
 
   static CoreMonitor& instance();
@@ -289,8 +305,99 @@ class CoreMonitor {
   static bool should_probe_active_node(const NodeStatus& status,
                                        std::optional<uint64_t> age_secs,
                                        ActiveTrafficState traffic,
-                                       bool stall_cooldown_active);
+                                       bool stall_cooldown_active,
+                                       bool kernel_reprobe_ready = false);
   static bool should_allow_https_migration(ActiveTrafficState traffic);
+
+  // ---- BUG-415 / BUG-416 / BUG-417：内核日志观测（← monitor/observer.rs） ----
+  enum class KernelLogEvent { ProxyDialFailure, TunInterfaceLost, TunInterfaceChanged };
+  enum class KernelReprobeReason { DialFailureBurst, TunInterfaceChanged };
+  struct KernelReprobeSignal {
+    KernelReprobeReason reason = KernelReprobeReason::DialFailureBurst;
+    size_t dial_fail_count = 0;
+    bool operator==(const KernelReprobeSignal&) const = default;
+  };
+  static bool is_proxy_dial_failure_log_line(std::string_view line);
+  static std::optional<KernelLogEvent> classify_kernel_log_event(std::string_view line);
+  // 提取 time="RFC3339" 并转 Unix 毫秒（UTC）；失败返回 nullopt
+  static std::optional<int64_t> parse_mihomo_log_timestamp_ms(std::string_view line);
+
+  struct IncrementalLogCursor {
+    std::optional<std::wstring> path;
+    uint64_t offset = 0;
+    bool reanchor_to_end = false;
+  };
+  // 按字节偏移增量读取完整新增行：首次挂载 / 切换路径 / reanchor 时锚定末尾不回放；
+  // 文件截断（轮转）从 0 读；末尾半行保留游标等待补全；单次最多 128 KiB
+  static std::vector<std::string> read_incremental_log_lines(const std::wstring& path,
+                                                             IncrementalLogCursor& cursor);
+
+  // 代理建连失败突发 + TUN 网卡变更追踪器（时钟均为毫秒：now_ms 单调，now_utc_ms 墙钟）
+  class ProxyDialFailureTracker {
+   public:
+    void on_node_checked(const std::string& active_node, int64_t now_utc_ms);
+    void reset_for_manual_switch(int64_t now_utc_ms);
+    void ingest_log_line(std::string_view line, int64_t now_ms, int64_t now_utc_ms);
+    std::pair<size_t, bool> evaluate_burst(int64_t now_ms);
+    std::optional<KernelReprobeSignal> evaluate_reprobe_signal(int64_t now_ms);
+    void consume_burst_for_probe(int64_t now_ms);
+    const std::optional<std::string>& active_node() const { return active_node_; }
+
+    IncrementalLogCursor cursor;
+
+   private:
+    void prune(int64_t now_ms);
+    std::optional<std::string> active_node_;
+    std::optional<int64_t> active_since_utc_ms_;
+    std::vector<int64_t> failure_ms_;
+    std::optional<int64_t> interface_changed_at_ms_;
+    std::optional<int64_t> last_probe_at_ms_;
+  };
+  // Sidecar stdout/stderr 直喂（无关键字零锁跳过）
+  static void record_kernel_log_line(std::string_view line);
+  // Service 模式增量读取 service_latest.log（expected_active 非空时仅在节点未变时消费）
+  static void sync_service_kernel_logs(const std::wstring& log_path,
+                                       const std::optional<std::string>& expected_active =
+                                           std::nullopt);
+  // 体检前：登记活跃节点 + 同步 Service 日志（log_path 为空 = 非服务模式）+ 评估复核信号
+  static std::optional<KernelReprobeSignal> poll_active_node_dial_failures(
+      const std::string& active_node, const std::wstring& service_log_path);
+  static void consume_kernel_reprobe_signal();
+  static void reset_kernel_log_observer();
+  static void reset_kernel_observer_for_manual_switch();
+  // TUN 网卡丢失/切换：强制下一周期跳过 60s 在线免测
+  static void request_force_online_recheck();
+  static bool take_force_online_recheck();
+  static bool peek_force_online_recheck();
+
+  // ---- BUG-417：失真豁免、首次观测宽限与冷启动预置失败（← probe.rs / verdict.rs / daemon.rs） ----
+  static bool is_valid_probe_delay(uint32_t delay);
+  static bool has_any_valid_real_probe_delay_with(
+      const std::map<std::string, uint32_t>& delays,
+      const std::function<bool(const std::string&)>& is_fake_node);
+  static bool has_any_valid_real_probe_delay(const std::map<std::string, uint32_t>& delays);
+  static bool is_active_excused_by_primary_distortion(
+      bool primary_url_distorted, const std::string& active_node,
+      const std::map<std::string, uint32_t>& probed_delays);
+  static bool should_arm_switch_grace_on_node_change(
+      const std::optional<std::string>& prev_active, const std::string& new_active,
+      bool existing_grace_active);
+  static bool should_seed_boot_probe_failure(
+      const std::optional<std::string>& active_node, bool selected, bool live_probe,
+      const std::vector<std::pair<std::string, uint32_t>>& display);
+
+  // ---- BUG-415：10 分钟稳态摘要（零额外 IPC，复用最近一轮观测） ----
+  struct ActiveHealthObservation {
+    std::string active_node;
+    NodeStatus status;
+    ActiveTrafficState traffic_state = ActiveTrafficState::Idle;
+    std::optional<uint64_t> history_age_secs;
+    bool probed_this_round = false;
+  };
+  static void record_health_observation(ActiveHealthObservation obs);
+  static std::optional<ActiveHealthObservation> last_health_observation();
+  static const char* node_status_name(NodeStatusKind k);
+  static const char* traffic_state_name(ActiveTrafficState s);
 
   // BUG-400：后台定期真 HTTPS 验真资格与“够用即止”（>=3 已验真 Alive 备用）门控
   static bool should_run_periodic_https_verify_with(
@@ -404,10 +511,11 @@ class CoreMonitor {
       const std::function<void()>& on_reset,
       const std::function<void()>& daemon_body);
 
-  // 双频探测节流器（← monitor.rs:1275-1293：在线 60s / 离线 5s，首次必探）
+  // 双频探测节流器（← monitor.rs:1275-1293：在线 60s / 离线 5s，首次必探；force 突破 60s 节流）
   class ThrottledNetProbe {
    public:
-    bool check(int64_t now_ms, const std::function<bool()>& probe_fn);
+    bool check(int64_t now_ms, const std::function<bool()>& probe_fn,
+               bool force = false);
     bool was_online() const;
     void reset();
 
@@ -489,6 +597,10 @@ class CoreMonitor {
   std::atomic<int64_t> last_tick_ms_{0};
   std::atomic<int64_t> last_https_verify_ms_{-1};
   std::atomic<uint64_t> manual_switch_epoch_{0};
+  // BUG-415：10 分钟稳态摘要节流（-1 = 尚未起算）与守护起算时刻
+  std::atomic<int64_t> last_summary_log_ms_{-1};
+  std::atomic<int64_t> daemon_start_ms_{-1};
+  void maybe_log_steady_state_summary(int64_t now_ms, bool online);
   mutable std::mutex brownout_m_;
   std::vector<int64_t> recent_brownout_episodes_ms_;
   // ★ §5.1 切换宽限期：最近一次「活跃节点发生变化」的时刻（ms）

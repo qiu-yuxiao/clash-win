@@ -7,12 +7,16 @@
 #pragma comment(lib, "bcrypt.lib")
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <sstream>
+#include <thread>
 #include <vector>
 
+#include "config/config.h"
 #include "config/update_keys.h"
 #include "events/event_bus.h"
 #include "system/net_http.h"
@@ -139,51 +143,124 @@ bool verify_with_pubkey(const std::vector<uint8_t>& file_bytes,
   return true;
 }
 
+// BUG-417：从 Verge / Clash 运行时配置解析本地 mixed-port（verge 优先，clash 兜底，默认 10801）
+uint16_t resolve_configured_mixed_port() {
+  std::optional<int> verge_port;
+  std::optional<int> clash_port;
+  try {
+    auto v = config::Config::instance().verge().latest_arc();
+    if (v && v->verge_mixed_port.has_value()) {
+      verge_port = static_cast<int>(*v->verge_mixed_port);
+    }
+  } catch (...) {
+  }
+  try {
+    auto c = config::Config::instance().clash().latest_arc();
+    if (c && c->mapping().IsMap() && c->mapping()["mixed-port"]) {
+      clash_port = c->mapping()["mixed-port"].as<int>();
+    }
+  } catch (...) {
+  }
+  return ClientUpdater::resolve_local_mixed_port(verge_port, clash_port);
+}
+
 class DefaultAppUpdateDownloader : public IAppUpdateDownloader {
  public:
-  Result<std::string> fetch_manifest(const std::string& endpoint_url) override {
-    const std::vector<system::ProxyType> proxy_types = {
-        system::ProxyType::Localhost, system::ProxyType::System, system::ProxyType::None};
+  explicit DefaultAppUpdateDownloader(std::function<void(uint32_t)> sleep_fn)
+      : sleep_fn_(std::move(sleep_fn)) {}
 
-    for (auto pt : proxy_types) {
+  Result<std::string> fetch_manifest(const std::string& endpoint_url) override {
+    const uint16_t local_port = resolve_configured_mixed_port();
+    const std::string proxy_url =
+        "http://127.0.0.1:" + std::to_string(local_port);
+    auto mixed_provider = [local_port]() -> std::optional<uint16_t> {
+      return local_port;
+    };
+
+    // 1. 优先走本地代理（15s 超时，← client-update.ts checkClientUpdateWithFallback）
+    {
+      system::HttpOptions opts;
+      opts.proxy_type = system::ProxyType::Localhost;
+      opts.timeout_seconds = ClientUpdater::kCheckProxyTimeoutSecs;
+      opts.user_agent = "ClashWin-ClientUpdater";
+      opts.localhost_mixed_port = mixed_provider;
+      auto res = system::http_get(endpoint_url, opts);
+      if (res.is_ok() && res.value().is_success()) {
+        return Result<std::string>::ok(res.value().body);
+      }
+      const std::string err_detail =
+          res.is_ok() ? ("HTTP " + std::to_string(res.value().status))
+                      : res.error().message;
+      CWLOG_ERROR("[ClientUpdate] 经本地代理 (" + proxy_url +
+                  ") 检查更新失败，回退系统/直连通道重试: " + err_detail);
+      if (sleep_fn_) {
+        sleep_fn_(ClientUpdater::kCheckRetryDelayMs);
+      } else {
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(ClientUpdater::kCheckRetryDelayMs));
+      }
+    }
+
+    // 2. 回退系统代理与直连（20s 超时）
+    std::string last_err = "unknown error";
+    for (auto pt : {system::ProxyType::System, system::ProxyType::None}) {
       system::HttpOptions opts;
       opts.proxy_type = pt;
-      opts.timeout_seconds = 15;
+      opts.timeout_seconds = ClientUpdater::kCheckDirectTimeoutSecs;
       opts.user_agent = "ClashWin-ClientUpdater";
       auto res = system::http_get(endpoint_url, opts);
       if (res.is_ok() && res.value().is_success()) {
         return Result<std::string>::ok(res.value().body);
       }
+      last_err = res.is_ok() ? ("HTTP " + std::to_string(res.value().status))
+                             : res.error().message;
     }
-    return Result<std::string>::err(make_err("failed to fetch client update manifest across all proxy modes"));
+    CWLOG_ERROR("[ClientUpdate] 检查客户端更新最终失败: " + last_err);
+    return Result<std::string>::err(make_err(
+        "failed to fetch client update manifest across all proxy modes: " +
+        last_err));
   }
 
   Result<void> download_installer(
       const std::string& url, const std::wstring& dest_path,
       std::function<void(size_t downloaded, size_t total)> on_progress) override {
+    const uint16_t local_port = resolve_configured_mixed_port();
+    auto mixed_provider = [local_port]() -> std::optional<uint16_t> {
+      return local_port;
+    };
     const std::vector<system::ProxyType> proxy_types = {
-        system::ProxyType::Localhost, system::ProxyType::System, system::ProxyType::None};
+        system::ProxyType::Localhost, system::ProxyType::System,
+        system::ProxyType::None};
 
+    std::string last_err = "unknown error";
     for (auto pt : proxy_types) {
       system::HttpOptions opts;
       opts.proxy_type = pt;
-      opts.timeout_seconds = 600;  // 安装包体积大：与 Mini downloadAndInstall 10 分钟超时同口径
+      opts.timeout_seconds = ClientUpdater::kDownloadAttemptTimeoutSecs;
       opts.user_agent = "ClashWin-ClientUpdater";
+      opts.localhost_mixed_port = mixed_provider;
       auto res = system::http_download_file(
           url, dest_path, opts,
           [&on_progress](uint64_t downloaded, uint64_t total) {
             if (on_progress) {
-              on_progress(static_cast<size_t>(downloaded), static_cast<size_t>(total));
+              on_progress(static_cast<size_t>(downloaded),
+                          static_cast<size_t>(total));
             }
           });
       if (res.is_ok()) {
         return Result<void>::ok();
       }
+      last_err = res.error().message;
       std::error_code ec;
       std::filesystem::remove(dest_path, ec);
     }
-    return Result<void>::err(make_err("failed to download client installer across all proxy modes"));
+    return Result<void>::err(make_err(
+        "failed to download client installer across all proxy modes: " +
+        last_err));
   }
+
+ private:
+  std::function<void(uint32_t)> sleep_fn_;
 };
 
 std::vector<int> parse_version_numbers(const std::string& ver_str) {
@@ -233,7 +310,8 @@ bool verify_installer_signature(const std::vector<uint8_t>& file_bytes,
 }
 
 ClientUpdater::ClientUpdater()
-    : downloader_(std::make_shared<DefaultAppUpdateDownloader>()) {}
+    : downloader_(std::make_shared<DefaultAppUpdateDownloader>(
+          [this](uint32_t ms) { sleep_for_retry(ms); })) {}
 
 std::string ClientUpdater::compute_sha256_hex(const std::wstring& file_path) {
   std::ifstream in(file_path, std::ios::binary);
@@ -292,6 +370,45 @@ ClientUpdater& ClientUpdater::instance() {
 
 void ClientUpdater::set_downloader(std::shared_ptr<IAppUpdateDownloader> downloader) {
   downloader_ = std::move(downloader);
+}
+
+void ClientUpdater::set_sleep_fn(std::function<void(uint32_t ms)> fn) {
+  sleep_fn_ = std::move(fn);
+}
+
+void ClientUpdater::sleep_for_retry(uint32_t ms) const {
+  if (ms == 0) return;
+  if (sleep_fn_) {
+    sleep_fn_(ms);
+  } else {
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+  }
+}
+
+uint16_t ClientUpdater::resolve_local_mixed_port(std::optional<int> verge_mixed_port,
+                                                 std::optional<int> clash_mixed_port) {
+  // ← client-update.ts resolveLocalMixedProxyUrl（BUG-417）
+  auto valid_port = [](std::optional<int> p) -> std::optional<uint16_t> {
+    if (p.has_value() && *p >= 1 && *p <= 65535) {
+      return static_cast<uint16_t>(*p);
+    }
+    return std::nullopt;
+  };
+  if (auto p = valid_port(verge_mixed_port)) return *p;
+  if (auto p = valid_port(clash_mixed_port)) return *p;
+  return kDefaultMixedPort;
+}
+
+std::string ClientUpdater::resolve_local_mixed_proxy_url(
+    std::optional<int> verge_mixed_port, std::optional<int> clash_mixed_port) {
+  return "http://127.0.0.1:" +
+         std::to_string(resolve_local_mixed_port(verge_mixed_port, clash_mixed_port));
+}
+
+uint32_t ClientUpdater::download_retry_delay_ms(int attempt) {
+  if (attempt == 1) return 1500;
+  if (attempt == 2) return 2500;
+  return 0;
 }
 
 void ClientUpdater::set_current_version(const std::string& version) {
@@ -413,38 +530,69 @@ Result<std::wstring> ClientUpdater::download_app_update(const std::string& downl
 
   int last_pct = -1;
   int last_mb_without_total = -1;
-  auto res = downloader_->download_installer(
-      download_url, dest_path,
-      [&last_pct, &last_mb_without_total](size_t downloaded, size_t total) {
-        if (total == 0) {
-          int mb = static_cast<int>(downloaded / (1024 * 1024));
-          if (mb != last_mb_without_total) {
-            last_mb_without_total = mb;
-            // src: locales/zh/layout.json:74 「已下载 {{downloaded}} MB」
-            emit_client_progress("downloading", 0, "已下载 " + format_mb(static_cast<double>(downloaded)) + " MB");
-          }
-          return;
-        }
-        // src: use-client-update.ts:82 Math.round（四舍五入，非截断）
-        int pct = static_cast<int>(std::lround(
-            (static_cast<double>(downloaded) / static_cast<double>(total)) * 100.0));
-        if (pct > 100) pct = 100;
-        if (pct != last_pct) {
-          last_pct = pct;
-          // src: locales/zh/layout.json:73 「已下载 {{percent}}% ({{downloaded}} MB / {{total}} MB)」
-          emit_client_progress("downloading", pct,
-                               "已下载 " + std::to_string(pct) + "% (" +
-                                   format_mb(static_cast<double>(downloaded)) + " MB / " +
-                                   format_mb(static_cast<double>(total)) + " MB)");
-        }
-      });
-  if (!res.is_ok()) {
+  auto on_dl_progress = [&last_pct, &last_mb_without_total](size_t downloaded,
+                                                           size_t total) {
+    if (total == 0) {
+      int mb = static_cast<int>(downloaded / (1024 * 1024));
+      if (mb != last_mb_without_total) {
+        last_mb_without_total = mb;
+        // src: locales/zh/layout.json:74 「已下载 {{downloaded}} MB」
+        emit_client_progress(
+            "downloading", 0,
+            "已下载 " + format_mb(static_cast<double>(downloaded)) + " MB");
+      }
+      return;
+    }
+    // src: use-client-update.ts:82 Math.round（四舍五入，非截断）
+    int pct = static_cast<int>(std::lround(
+        (static_cast<double>(downloaded) / static_cast<double>(total)) * 100.0));
+    if (pct > 100) pct = 100;
+    if (pct != last_pct) {
+      last_pct = pct;
+      // src: locales/zh/layout.json:73 「已下载 {{percent}}% ({{downloaded}} MB / {{total}} MB)」
+      emit_client_progress(
+          "downloading", pct,
+          "已下载 " + std::to_string(pct) + "% (" +
+              format_mb(static_cast<double>(downloaded)) + " MB / " +
+              format_mb(static_cast<double>(total)) + " MB)");
+    }
+  };
+
+  // BUG-417（← client-update.ts downloadAndInstallClientUpdateWithRetry）：
+  //   仅对「网络下载未完成」阶段自动重试（共 3 次，间隔 1500ms / 2500ms）；
+  //   下载完成后若 SHA-256 或 Minisign 验签失败，绝不自动重试。
+  Result<void> dl_res = Result<void>::err(make_err("not started"));
+  for (int attempt = 1; attempt <= kDownloadMaxAttempts; ++attempt) {
+    if (attempt > 1) {
+      last_pct = -1;
+      last_mb_without_total = -1;
+      emit_client_progress("downloading", 0, "开始下载软件更新包...");
+    }
+    dl_res = downloader_->download_installer(download_url, dest_path, on_dl_progress);
+    if (dl_res.is_ok()) break;
+
+    std::error_code rm_ec;
+    std::filesystem::remove(dest_path, rm_ec);
+    if (attempt < kDownloadMaxAttempts) {
+      const uint32_t wait_ms = download_retry_delay_ms(attempt);
+      CWLOG_ERROR("[ClientUpdate] 下载安装包中断 (第 " + std::to_string(attempt) + "/" +
+                  std::to_string(kDownloadMaxAttempts) + " 次): " +
+                  dl_res.error().message + "，" + std::to_string(wait_ms) +
+                  "ms 后自动重试");
+      sleep_for_retry(wait_ms);
+    } else {
+      CWLOG_ERROR("[ClientUpdate] 客户端升级下载连续 " +
+                  std::to_string(kDownloadMaxAttempts) + " 次失败: " +
+                  dl_res.error().message);
+    }
+  }
+  if (!dl_res.is_ok()) {
     // src: locales/zh/layout.json:126 「更新失败: {{message}}」
-    emit_client_progress("error", 0, "更新失败: " + res.error().message);
-    return Result<std::wstring>::err(res.error());
+    emit_client_progress("error", 0, "更新失败: " + dl_res.error().message);
+    return Result<std::wstring>::err(dl_res.error());
   }
 
-  // 完整性 + 验签（← plugin-updater：先验签后安装；失败可见报错，不静默放行）
+  // 完整性 + 验签（← plugin-updater：先验签后安装；失败可见报错，不静默放行，且不自动重试）
   // 验签输入为安装包原始字节（minisign 预哈希变体内部做 BLAKE2b-512）
   std::vector<uint8_t> file_bytes;
   {
@@ -463,6 +611,8 @@ Result<std::wstring> ClientUpdater::download_app_update(const std::string& downl
     std::filesystem::remove(dest_path, ec);
     const std::string reason =
         !hash_ok ? std::string("安装包校验失败（SHA-256 不匹配）") : sig_err;
+    CWLOG_ERROR("[ClientUpdate] 安装包已下载完成但校验失败（不自动重试）: " +
+                reason);
     emit_client_progress("error", 0, "更新失败: " + reason);
     return Result<std::wstring>::err(make_err(reason));
   }

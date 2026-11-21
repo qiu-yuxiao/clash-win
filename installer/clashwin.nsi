@@ -764,6 +764,11 @@ Section "Install"
   ; 「借用与归还」（总纲 §5.2.2）：不碰 Clash Mini 的自启注册表值——
   ;   旧 BUG-313③ 清洁设计的 4 行 DeleteRegValue 已按 2026-11-10 裁决删除。
 
+  ; 清理历史 schtasks 自启计划任务（含提权 Admin 任务）（← installer.nsi BUG-414，品牌位替换）
+  ; 「借用与归还」：仅删本方 Clash Win 任务，绝不触碰 Clash Mini 任务。
+  nsExec::Exec 'schtasks /Delete /TN "Clash Win" /F'
+  nsExec::Exec 'schtasks /Delete /TN "Clash Win (Admin)" /F'
+
   ; 旧版 v1.0.x (ClashWin / clashwin.exe) 平滑升级迁移清理
   Delete "$INSTDIR\clashwin.exe"
   RMDir /r "$INSTDIR\sidecar"
@@ -989,6 +994,11 @@ Section "Uninstall"
   ${EndIf}
   ; 「借用与归还」（总纲 §5.2.2）：不碰 Clash Mini 的自启注册表值——
   ;   旧 BUG-313③ 清洁设计的 4 行 DeleteRegValue 已按 2026-11-10 裁决删除。
+
+  ; 清理历史 schtasks 自启计划任务（含提权 Admin 任务）（← installer.nsi BUG-414，品牌位替换）
+  ; 「借用与归还」：仅删本方 Clash Win 任务，绝不触碰 Clash Mini 任务。
+  nsExec::Exec 'schtasks /Delete /TN "Clash Win" /F'
+  nsExec::Exec 'schtasks /Delete /TN "Clash Win (Admin)" /F'
   SetShellVarContext all
 
   ; 程序文件（← 模板 :1116-1129）

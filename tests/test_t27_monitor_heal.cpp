@@ -57,14 +57,17 @@ struct MonitorFixture {
 // ---------- ① §5.1 切换宽限期 20s（v3.2.4 BUG-315） ----------
 
 // 1) 切节点后 20s 内失败判定不计入连续失败次数（防乒乓震荡）
+//    BUG-417：首次观测（None -> Some）严禁开启伪宽限期；须从既有节点真实切换才起算 20s
 UT_TEST(t27_switch_grace_blocks_fail_count_within_20s) {
   MonitorFixture f;
   auto& m = f.m;
   int heals = 0;
+  std::string node = "Node-Init";
+  bool healthy = true;
   CoreMonitor::Hooks h = f.base();
   h.current_uid = [] { return std::string("U1"); };
-  h.node_healthy = [] { return false; };  // 活跃节点判定为死
-  h.active_node_name = [] { return std::string("Node-A"); };
+  h.node_healthy = [&] { return healthy; };
+  h.active_node_name = [&] { return node; };
   h.auto_select_trigger = [&]() -> Result<bool> {
     ++heals;
     return Result<bool>::ok(true);
@@ -72,7 +75,13 @@ UT_TEST(t27_switch_grace_blocks_fail_count_within_20s) {
   m.set_hooks(h);
   m.reset_state();
 
-  // 第 1 次 tick：检测到活跃节点（首次观测）→ 记为切换 → 起算宽限期
+  // 第 1 次 tick：守护首次观测（None -> Some("Node-Init")）→ 不开启伪宽限期（BUG-417）
+  m.tick_once();
+  UT_CHECK(!m.in_switch_grace());
+
+  // 发生真实节点切换（Node-Init -> Node-A）→ 起算 20s 宽限期，连续失败不计入计数
+  node = "Node-A";
+  healthy = false;
   m.tick_once();
   UT_CHECK(m.in_switch_grace());
   UT_CHECK_EQ(m.node_fail_count(), 0);
@@ -101,8 +110,9 @@ UT_TEST(t27_v324_bug315_timing_constants_and_bounds) {
   UT_CHECK_EQ(m.params().heal_cooldown_ms, 25000);
 
   int heals = 0;
+  std::string node = "Node-Init";
   CoreMonitor::Hooks h = f.base();
-  h.active_node_name = [] { return std::string("Node-A"); };
+  h.active_node_name = [&] { return node; };
   h.current_uid = [] { return std::string("U1"); };
   h.api_alive = [] { return false; };
   h.auto_select_trigger = [&]() -> Result<bool> {
@@ -112,9 +122,14 @@ UT_TEST(t27_v324_bug315_timing_constants_and_bounds) {
   m.set_hooks(h);
   m.reset_state();
 
-  // 先验证 20s 切换宽限期边界：19.999s 仍在宽限期，20.000s 宽限期结束
+  // 先建立初始观测，再切换节点验证 20s 切换宽限期边界：19.999s 仍在宽限期，20.000s 宽限期结束
   h.api_alive = [] { return true; };
   m.set_hooks(h);
+  f.clock = 500;
+  m.tick_once();
+  UT_CHECK(!m.in_switch_grace());
+
+  node = "Node-A";
   f.clock = 1000;
   m.tick_once();
   UT_CHECK(m.in_switch_grace());
@@ -143,18 +158,22 @@ UT_TEST(t27_v324_bug315_timing_constants_and_bounds) {
 }
 
 // 3) 活跃节点发生变化 → 重新起算宽限期并清零连续失败计数
-//    （← monitor.rs:1358-1370）
+//    （← monitor.rs:1358-1370；BUG-417：首次观测不计切换，须前有节点）
 UT_TEST(t27_switch_grace_restarts_on_node_change) {
   MonitorFixture f;
   auto& m = f.m;
-  std::string node = "Node-A";
+  std::string node = "Node-Init";
   CoreMonitor::Hooks h = f.base();
   h.active_node_name = [&] { return node; };
   h.node_healthy = [] { return false; };
   m.set_hooks(h);
   m.reset_state();
 
-  m.tick_once();
+  m.tick_once();  // None -> Some("Node-Init")：不开启宽限期
+  UT_CHECK(!m.in_switch_grace());
+
+  node = "Node-A";
+  m.tick_once();  // Some("Node-Init") -> Some("Node-A")：起算 20s 宽限期
   UT_CHECK(m.in_switch_grace());
   f.clock += 19000;
   UT_CHECK(m.in_switch_grace());
@@ -173,13 +192,19 @@ UT_TEST(t27_switch_grace_restarts_on_node_change) {
 UT_TEST(t27_switch_grace_not_restarted_without_node_change) {
   MonitorFixture f;
   auto& m = f.m;
+  std::string node = "Node-Init";
   CoreMonitor::Hooks h = f.base();
-  h.active_node_name = [] { return std::string("Node-A"); };
+  h.active_node_name = [&] { return node; };
   m.set_hooks(h);
   m.reset_state();
 
+  f.clock = 500;
+  m.tick_once();
+  node = "Node-A";
+  f.clock = 1000;
   m.tick_once();
   const int64_t first = m.last_node_change_ms();
+  UT_CHECK_EQ(first, 1000);
   f.clock += 10000;
   m.tick_once();
   UT_CHECK_EQ(m.last_node_change_ms(), first);  // 未变 → 不重新起算

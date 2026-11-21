@@ -14,6 +14,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <functional>
 #include <mutex>
 #include <string>
 
@@ -108,6 +109,12 @@ Result<void> start_with_service(IServiceIpc& ipc, const nlohmann::json& payload,
                                 int max_wait_ms = consts::kPortReleaseMaxWaitMs);
 // DELETE /clash/stop；code>0 判失败
 Result<void> stop_with_service(IServiceIpc& ipc);
+
+// BUG-417（← service.rs start_with_existing_service）：clash_start IPC 失败最多 3 次，
+// 间隔 400ms / 800ms。退避睡眠可注入（测试置为空操作；传 nullptr 恢复默认 Sleep）。
+inline constexpr int kStartClashMaxAttempts = 3;
+int start_clash_retry_backoff_ms(int attempt);  // attempt 从 0 起：0→400，其余→800
+void set_start_clash_retry_sleep(std::function<void(int ms)> fn);
 
 // 端口是否可绑定（已释放）；供测试与 start_with_service 内部轮询
 bool is_port_free(uint16_t port);

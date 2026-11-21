@@ -5,6 +5,7 @@
 #include <winhttp.h>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -79,6 +80,7 @@ class DefaultCoreUpdateDownloader : public ICoreUpdateDownloader {
       opts.proxy_type = pt;
       opts.timeout_seconds = 20;
       opts.user_agent = "ClashWin-CoreUpdater";
+      opts.max_response_bytes = 1024 * 1024;  // BUG-413：校验和文件上限 1 MiB
       opts.localhost_mixed_port = []() -> std::optional<uint16_t> {
         return resolve_verge_mixed_port();
       };
@@ -101,7 +103,7 @@ class DefaultCoreUpdateDownloader : public ICoreUpdateDownloader {
       opts.proxy_type = pt;
       opts.timeout_seconds = 300;
       opts.user_agent = "ClashWin-CoreUpdater";
-      opts.max_response_bytes = 256ULL * 1024 * 1024;
+      opts.max_response_bytes = kMaxCoreArchiveBytes;  // BUG-413
       opts.localhost_mixed_port = []() -> std::optional<uint16_t> {
         return resolve_verge_mixed_port();
       };
@@ -257,6 +259,67 @@ Result<std::string> CoreUpdater::compute_file_sha256(const std::wstring& file_pa
     sprintf_s(&hex[i * 2], 3, "%02x", hash[i]);
   }
   return Result<std::string>::ok(std::string(hex));
+}
+
+// ← core_updater/pe_verify.rs parse_asset_sha256_digest（BUG-413）
+std::optional<std::string> CoreUpdater::parse_asset_sha256_digest(
+    const std::optional<std::string>& digest) {
+  if (!digest.has_value()) return std::nullopt;
+  std::string raw = trim(*digest);
+  std::string hex_part = raw;
+  if (raw.size() > 7 && to_lower(raw.substr(0, 7)) == "sha256:") {
+    hex_part = trim(raw.substr(7));
+  }
+  if (hex_part.size() != 64) return std::nullopt;
+  for (char c : hex_part) {
+    if (!std::isxdigit(static_cast<unsigned char>(c))) return std::nullopt;
+  }
+  return to_lower(hex_part);
+}
+
+// ← core_updater/pe_verify.rs validate_official_mihomo_asset_url（BUG-413）
+Result<void> CoreUpdater::validate_official_mihomo_asset_url(const std::string& url) {
+  static const std::string kScheme = "https://";
+  if (url.size() <= kScheme.size() || to_lower(url.substr(0, kScheme.size())) != kScheme) {
+    return Result<void>::err(make_err("内核下载仅允许 HTTPS 协议: " + url));
+  }
+  for (char c : url) {
+    if (static_cast<unsigned char>(c) <= 0x20 || c == '\\') {
+      return Result<void>::err(make_err("内核下载 URL 含非法字符: " + url));
+    }
+  }
+  const std::string rest = url.substr(kScheme.size());
+  const size_t path_pos = rest.find_first_of("/?#");
+  const std::string authority = rest.substr(0, path_pos);
+  if (authority.find('@') != std::string::npos || authority.find(':') != std::string::npos) {
+    return Result<void>::err(make_err("内核下载 URL 禁止包含非标准端口或用户信息: " + url));
+  }
+  if (to_lower(authority) != "github.com") {
+    return Result<void>::err(make_err("内核下载来源域名非法（仅允许 github.com）: " + url));
+  }
+  if (path_pos == std::string::npos || rest[path_pos] != '/') {
+    return Result<void>::err(make_err("内核下载路径不在官方 MetaCubeX/mihomo Release 目录内: " + url));
+  }
+  std::string path = rest.substr(path_pos);
+  const size_t q = path.find_first_of("?#");
+  if (q != std::string::npos) path = path.substr(0, q);
+  static const std::string kPrefix = "/MetaCubeX/mihomo/releases/download/";
+  if (path.compare(0, kPrefix.size(), kPrefix) != 0 || path.size() == kPrefix.size()) {
+    return Result<void>::err(make_err("内核下载路径不在官方 MetaCubeX/mihomo Release 目录内: " + url));
+  }
+  size_t start = 0;
+  while (start <= path.size()) {
+    const size_t slash = path.find('/', start);
+    const std::string seg =
+        path.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
+    const std::string lseg = to_lower(seg);
+    if (seg == ".." || lseg == "%2e%2e" || lseg == ".%2e" || lseg == "%2e.") {
+      return Result<void>::err(make_err("内核下载 URL 路径非法: " + url));
+    }
+    if (slash == std::string::npos) break;
+    start = slash + 1;
+  }
+  return Result<void>::ok();
 }
 
 CoreBinaryValidation CoreUpdater::inspect_mihomo_pe_binary(const std::wstring& file_path) {
@@ -559,6 +622,13 @@ Result<void> CoreUpdater::extract_core_binary(const std::wstring& archive_path,
         std::string lower_fname = to_lower(fname);
         if (method == 0 && lower_fname.find("mihomo") != std::string::npos &&
             ends_with(lower_fname, ".exe")) {
+          // BUG-413：解压体积上限，超限或为空直接拒绝（不分配内存）
+          if (uncomp_size == 0 || static_cast<uint64_t>(uncomp_size) > kMaxCoreExtractedBytes) {
+            arch.close();
+            return Result<void>::err(make_err(
+                "解压后的内核文件体积异常或超过安全上限 (" + std::to_string(uncomp_size) +
+                " bytes > " + std::to_string(kMaxCoreExtractedBytes) + " bytes)，已中止"));
+          }
           // Extract directly to .staging, flush, validate PE64, then atomic MoveFileExW
           std::vector<char> data(uncomp_size);
           if (uncomp_size > 0) {
@@ -633,6 +703,18 @@ Result<void> CoreUpdater::extract_core_binary(const std::wstring& archive_path,
     return Result<void>::err(make_err("在压缩包内未找到 win-mihomo 程序二进制"));
   }
 
+  // BUG-413：解压产物体积上限
+  {
+    std::error_code sz_ec;
+    const uint64_t extracted_size = std::filesystem::file_size(found_exe, sz_ec);
+    if (sz_ec || extracted_size == 0 || extracted_size > kMaxCoreExtractedBytes) {
+      std::filesystem::remove_all(temp_extract_dir, ec);
+      return Result<void>::err(make_err(
+          "解压后的内核文件体积异常或超过安全上限 (" + std::to_string(extracted_size) +
+          " bytes > " + std::to_string(kMaxCoreExtractedBytes) + " bytes)，已中止"));
+    }
+  }
+
   // Stage to target.staging first, remove temp dir, then flush + PE validate + atomic replace
   std::filesystem::copy_file(found_exe, staging_path,
                              std::filesystem::copy_options::overwrite_existing, ec);
@@ -690,6 +772,22 @@ Result<void> CoreUpdater::start_core_upgrade(const GithubRelease& release) {
   }
 
   const GithubAsset asset = *asset_opt;
+
+  // BUG-413：下载地址白名单 + 声明体积上限（下载前拒绝）
+  {
+    auto url_ok = validate_official_mihomo_asset_url(asset.browser_download_url);
+    if (!url_ok.is_ok()) {
+      emit_progress("error", 0, url_ok.error().message);
+      return url_ok;
+    }
+    if (asset.size.has_value() && (*asset.size == 0 || *asset.size > kMaxCoreArchiveBytes)) {
+      const std::string err_msg = "内核压缩包声明体积异常或超过安全上限 (" +
+                                  std::to_string(*asset.size) + " bytes)，已拒绝下载";
+      emit_progress("error", 0, err_msg);
+      return Result<void>::err(make_err(err_msg));
+    }
+  }
+
   std::wstring cores_dir = util::dirs::cores_dir();
   std::filesystem::create_directories(cores_dir);
 
@@ -733,25 +831,56 @@ Result<void> CoreUpdater::start_core_upgrade(const GithubRelease& release) {
   // Stage 3: Verifying (85%)
   emit_progress("verifying", 85, "正在校验下载文件完整性...");
 
-  auto checksum_url_opt = find_checksum_url(release);
-  if (checksum_url_opt.has_value()) {
-    auto cs_content_res = downloader_->fetch_checksum_content(*checksum_url_opt);
-    if (cs_content_res.is_ok()) {
-      auto expected_sha_opt = parse_checksum_for_asset(cs_content_res.value(), asset.name);
-      if (expected_sha_opt.has_value()) {
-        auto actual_sha_res = compute_file_sha256(temp_download_path);
-        if (!actual_sha_res.is_ok() ||
-            to_lower(actual_sha_res.value()) != to_lower(*expected_sha_opt)) {
-          std::error_code ec;
-          std::filesystem::remove(temp_download_path, ec);
-          std::string err_msg = "完整性校验失败: sha256 mismatch (expected " +
-                                *expected_sha_opt + ", got " +
-                                (actual_sha_res.is_ok() ? actual_sha_res.value() : "error") + ")";
-          emit_progress("error", 0, err_msg);
-          return Result<void>::err(make_err(err_msg));
-        }
+  auto fail_verify = [&](const std::string& err_msg) -> Result<void> {
+    std::error_code ec;
+    std::filesystem::remove(temp_download_path, ec);
+    emit_progress("error", 0, err_msg);
+    return Result<void>::err(make_err(err_msg));
+  };
+
+  // BUG-413：实际下载体积上限 + 与声明体积严格一致
+  {
+    std::error_code sz_ec;
+    const uint64_t archive_size = std::filesystem::file_size(temp_download_path, sz_ec);
+    if (sz_ec || archive_size == 0 || archive_size > kMaxCoreArchiveBytes) {
+      return fail_verify("内核压缩包体积异常或超过安全上限 (" + std::to_string(archive_size) +
+                         " bytes)，已中止升级");
+    }
+    if (asset.size.has_value() && archive_size != *asset.size) {
+      return fail_verify("内核压缩包体积与官方声明不一致 (expected " +
+                         std::to_string(*asset.size) + ", got " +
+                         std::to_string(archive_size) + ")，已中止升级");
+    }
+  }
+
+  // BUG-413 Fail-Closed：优先 asset.digest，缺失时回退校验和文件；两者皆无一律拒绝
+  std::optional<std::string> expected_sha = parse_asset_sha256_digest(asset.digest);
+  if (!expected_sha.has_value()) {
+    auto checksum_url_opt = find_checksum_url(release);
+    if (checksum_url_opt.has_value()) {
+      auto cs_url_ok = validate_official_mihomo_asset_url(*checksum_url_opt);
+      if (!cs_url_ok.is_ok()) {
+        return fail_verify(cs_url_ok.error().message);
+      }
+      auto cs_content_res = downloader_->fetch_checksum_content(*checksum_url_opt);
+      if (cs_content_res.is_ok() && cs_content_res.value().size() <= 1024 * 1024) {
+        expected_sha = parse_asset_sha256_digest(
+            parse_checksum_for_asset(cs_content_res.value(), asset.name));
       }
     }
+  }
+  if (!expected_sha.has_value()) {
+    return fail_verify("缺少官方 SHA-256 校验摘要 (" + asset.name + ")，已拒绝未校验的内核升级");
+  }
+  {
+    auto actual_sha_res = compute_file_sha256(temp_download_path);
+    if (!actual_sha_res.is_ok() || to_lower(actual_sha_res.value()) != *expected_sha) {
+      return fail_verify("完整性校验失败: sha256 mismatch (expected " + *expected_sha +
+                         ", got " +
+                         (actual_sha_res.is_ok() ? actual_sha_res.value() : "error") + ")");
+    }
+    CWLOG_INFO("CoreUpdater: integrity check passed for " + asset.name + " (sha256=" +
+               *expected_sha + ")");
   }
   if (check_exiting("verify")) {
     std::error_code ec;
