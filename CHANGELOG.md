@@ -2,11 +2,23 @@
 
 All notable changes to **Clash Win** are documented here.
 
-Version format follows the project's **own** line starting at `0.1.0` (constitution §5.3): Clash Win versions increment independently and are **not** bound to Clash Mini's `3.x` numbering (`v3.2.2` was the initial port reference anchor, now synced 1:1 through **v3.5.10**).
+Version format follows the project's **own** line starting at `0.1.0` (constitution §5.3): Clash Win versions increment independently and are **not** bound to Clash Mini's `3.x` numbering (`v3.2.2` was the initial port reference anchor, now synced 1:1 through **v3.6.2**).
 
 Format reference: `Changelog.md` in the Clash Mini repository (newest first, `## vX.Y.Z` headings with grouped change bullets). Content here is Clash Win's own history, not a copy of Mini's entries.
 
 ---
+
+## v1.1.4 (2026-11-22)
+
+### Upstream v3.6.0 ~ v3.6.2 Sync (`BUG-413` ~ `BUG-417`)
+- **BUG-413 (Relaxed Health Verify Threshold, `TestOnly` Isolation & Download/Diagnostics Hardening)**: Relaxed the post-start/reload initial HTTPS verify latency threshold from `1500ms` to `3500ms` (`kVerifyInitialMaxDelayMs`) and isolated manual user delay tests (`CheckUsage::TestOnly`) from mutating `verified_nodes` or `soft_isolated_nodes`; enforced official Mihomo release URL allowlist + fail-closed SHA-256 digest verification (`parse_asset_sha256_digest` / `validate_official_mihomo_asset_url`), hardened `verge` config whitelist, and added WireGuard/Reality key/secret redaction in diagnostic bundles.
+- **BUG-414 (Kernel Log Failure Observer & Startup/Preempt Hardening)**: Added real-time core runtime log anomaly observer (`monitor_observer.cpp`, detecting EOF / TLS / proxy-dialer failures in log streams), hardened autostart marker reconciliation, single-instance loopback ping handshake timeout (`1500ms`), and preemptable asynchronous `ensure_proxy_group_selection` guards.
+- **BUG-415 & BUG-416 (Mihomo PE Binary/Architecture Verification & Stability Hardening)**: Added strict PE32+ DOS/NT header & `IMAGE_FILE_MACHINE_AMD64` validation (`inspect_mihomo_pe_binary` / `validate_mihomo_pe_binary`) before replacing or spawning `win-mihomo.exe`, suppressed redundant Windows Error Reporting local crash dumps during controlled subprocess termination, and tightened timer/observer lifecycle cleanup.
+- **BUG-417 (Distortion-Excuse / Boot-Grace Self-Heal Guards & 3-Stage Subscription Fallback Errors)**: Added distortion-excuse and boot-grace guards inside self-heal monitoring alongside `ClientUpdater` HTTPS/redirect validation, and mapped 3-stage subscription fallback failures (`update_failed_even_with_clash:`) to localized notification messages (`settings.feedback.notifications.updater.withClashProxyFailed`).
+
+### Codebase Modularization Aligned 1:1 with Clash Mini v3.6.2
+- **8 Oversized Backend & Direct2D UI Modules Split Along Domain Boundaries**: Split `src/core/monitor.cpp` (`monitor.cpp` / `monitor_probe.cpp` / `monitor_verdict.cpp` / `monitor_observer.cpp`), `src/util/node.cpp` (`node_filter.cpp` / `node_fingerprint.cpp` / `node_verify_store.cpp`), `src/core/core_updater.cpp` (+`pe_verify.cpp`), `src/ui/scenes/utility_modals.*` (`src/ui/scenes/dialogs/*` with umbrella `utility_modals.h`), `src/ui/scenes/settings_drawer.cpp` (`settings_drawer.cpp` / `settings_cards.cpp` / `settings_skin_prefs.cpp`), `src/ui/scenes/first_run_guide_dialog.cpp` (+`first_run_guide_steps.cpp`), `src/ui/main_window.cpp` (`main_window.cpp` / `main_window_scene.cpp` / `main_window_data.cpp`), and `src/ui/theme/theme.cpp` (+`theme_controls.cpp`, preserving `SkinId::Retro3d` 3D gold switch beads).
+- **Strict UI Source Citation Alignment (`ui_src_gate.ps1 -Strict`)**: Remapped all Direct2D UI `src:` / `←` source citations across `src/ui/` to upstream Clash Mini `v3.6.2` split modules with zero strict violations (`UNRESOLVED_FILE=0`, `UNRESOLVED_LINE=0`).
 
 ## v1.1.3 (2026-11-20)
 
